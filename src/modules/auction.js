@@ -352,7 +352,7 @@
                         const color = rarityColors[l.metaRarity] || '#fff';
                         const rarityBadge = l.metaRarity ? `<span style="color:${color}; font-size:10px; border:1px solid ${color}; border-radius:4px; padding:0 4px; margin-left:5px; text-transform:capitalize;">${Utils.escapeHtml(l.metaRarity)}</span>` : '';
 
-                        html += `<tr>
+                        html += `<tr data-lot-id="${Utils.escapeHtml(l.id || '')}" data-lot-name="${Utils.escapeHtml(l.name || '')}">
                             <td>${l.icon ? `<img src="${Utils.safeUrl(l.icon)}" style="width:20px;vertical-align:middle;margin-right:5px;">` : ''}<b>${Utils.escapeHtml(l.name)}</b>${rarityBadge}</td>
                             <td>${qtyStr}</td>
                             <td style="color:#ffcf6a; font-weight:bold;">${totalPriceStr}</td>
@@ -367,6 +367,10 @@
                         </tr>`;
                     });
                     tbody.innerHTML = html;
+                    // Обогащаем строки: арт + иконки монет (общий код для Ultimate и Personal)
+                    try {
+                        if (Utils && Utils.enhanceAuctionRows) Utils.enhanceAuctionRows(tbody, itemsMap);
+                    } catch (e) { dbg('enhanceAuctionRows error:', e); }
                 };
 
                 const tbody = document.getElementById('auction-body');

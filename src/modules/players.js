@@ -4,6 +4,7 @@
 const Players = {
         playersMap: new Map(),
         _lastLots: [],
+        _lastItemsMap: {},
         _lastAuctionScan: 0,
         _lastMineStateScan: 0,
         _badgeTimer: null,
@@ -372,6 +373,10 @@ const Players = {
                     const lots = res?.lots || res?.body?.lots;
                     if (Array.isArray(lots)) {
                         this._lastLots = lots;
+                        // items — карта id предмета -> {name, slot, look, rarity, ...}.
+                        // Нужна для арта в досье: без slot LGInventory.art падает
+                        // в <rect fill="#a0703a"> и isRealItemSvg() отбраковывает.
+                        this._lastItemsMap = res?.items || res?.body?.items || (res?.data && res.data.items) || {};
                         applyLots(lots);
                     }
                 } catch (e) {}
@@ -1104,6 +1109,11 @@ const Players = {
                 }
             });
             document.getElementById('dossier-trade-btn')?.addEventListener('click', () => this.openTradeWith(nick));
+
+            // Обогащаем лоты в досье: арт + иконки монет (общий код)
+            try {
+                if (Utils && Utils.enhanceDossierLots) Utils.enhanceDossierLots(dossierEl, this._lastItemsMap || {});
+            } catch (e) { dbg('enhanceDossierLots error:', e); }
 
             dossierEl.querySelectorAll('.dossier-buy-btn').forEach(btn => {
                 btn.addEventListener('click', async (e) => {

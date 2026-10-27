@@ -56,6 +56,21 @@
     // ============================================================
     // 1. УТИЛИТЫ
     // ============================================================
+    // Реальный SVG-арт предмета.
+    // Заглушка LGInventory.art / ctx.art = один <rect> с заливкой (коричневый
+    // квадрат в .b-lot-art), поэтому требуем:
+    //   1) длину ≥ 100 байт (реальные арты заметно больше);
+    //   2) <path> ИЛИ ≥ 2 фигуры circle/ellipse/polygon/polyline/line.
+    // <rect> без <path> и без других фигур не проходит никогда.
+    function isRealItemSvg(svg) {
+        if (!svg || typeof svg !== 'string') return false;
+        if (svg.length < 100) return false;
+        const hasPath = /<path[\s\/>]/i.test(svg);
+        const shapes = svg.match(/<(circle|ellipse|polygon|polyline|line)[\s\/>]/gi);
+        const shapeCount = shapes ? shapes.length : 0;
+        return hasPath || shapeCount >= 2;
+    }
+
     const Utils = {
         sleep: (ms) => new Promise(r => setTimeout(r, ms)),
         apiPath(p) {
@@ -119,6 +134,245 @@
             if (b || (!g && !s)) parts.push(`${b} б`);
             return parts.join(' ');
         },
+        // Разбор «12 з 34 с 56 б» → 123456
+        parseCoinsText(str) {
+            if (!str) return 0;
+            let total = 0, matched = false;
+            const g = String(str).match(/(\d+)\s*(?:з|зол)/i);
+            const s = String(str).match(/(\d+)\s*(?:с|сер)/i);
+            const b = String(str).match(/(\d+)\s*(?:б|мед)/i);
+            if (g) { total += parseInt(g[1], 10) * 10000; matched = true; }
+            if (s) { total += parseInt(s[1], 10) * 100; matched = true; }
+            if (b) { total += parseInt(b[1], 10); matched = true; }
+            return matched ? total : 0;
+        },
+        // Форматирование числа в HTML с иконками монет
+        formatCoinsHtml(n) {
+            n = Math.max(0, Math.floor(+n || 0));
+            const g = Math.floor(n / 10000), s = Math.floor(n / 100) % 100, b = n % 100;
+            const parts = [];
+            if (g) parts.push(`<span>${g}<i class="b-coin-ico g" title="золотые"></i></span>`);
+            if (s) parts.push(`<span>${s}<i class="b-coin-ico s" title="серебряные"></i></span>`);
+            if (b || (!g && !s)) parts.push(`<span>${b}<i class="b-coin-ico b" title="медные"></i></span>`);
+            const label = this.formatMoney(n);
+            return `<span class="b-coin-wrap" role="img" aria-label="${label}" title="${label}">${parts.join(' ')}</span>`;
+        },
+        // SVG арт предмета. Сначала контексты игры (в аукционе это самый
+        // надёжный источник), затем библиотека инвентаря. Заглушку-<rect>
+        // отсекает isRealItemSvg().
+        getItemArtSvg(lot, def) {
+            try {
+                lot = lot || {};
+                const it = { id: lot.i, ...(def || {}), en: +lot.en || 0 };
+
+                // 1. Контексты игры: аукцион / город / шахта.
+                // Вызов каждого контекста изолирован: упавший art() не должен
+                // обрывать цепочку и лишать предмет картинки.
+                const ctxs = [
+                    window.__lgAucContext,
+                    window.__lgCityContext,
+                    window.__lgMineContext,
+                    window.X,        // глобальный арт-резолвер игры
+                    window.LGtine,   // запасной глобальный резолвер
+                    { art: window.art, owner: window },     // глобальный метод игры
+                    { art: window.fig, owner: window },     // запасной
+                    { art: window.doodle, owner: window }   // запасной
+                ].filter(Boolean);
+                for (const ctx of ctxs) {
+                    if (!ctx || typeof ctx.art !== 'function') continue;
+                    let svg = '';
+                    // owner нужен, чтобы window.art() вызывался с this === window
+                    try { svg = ctx.art.call(ctx.owner || ctx, it); } catch (e) { svg = ''; }
+                    if (isRealItemSvg(svg)) return svg;
+                }
+
+                // 2. Фолбэк на библиотеку инвентаря
+                const inv = window.LGInventory;
+                if (inv && typeof inv.art === 'function') {
+                    let svg = '';
+                    try { svg = inv.art(it); } catch (e) { svg = ''; }
+                    if (isRealItemSvg(svg)) return svg;
+                }
+            } catch (e) {}
+            return '';
+        },
+        // Арт предмета: реальный SVG → официальная иконка игры → эмодзи.
+        // SVG идёт первым: именно так рисует нативный аукцион, и при полном
+        // def (slot/look/rarity) LGInventory.art даёт настоящую картинку.
+        // Заглушку-<rect> отсекает isRealItemSvg().
+        getItemArtHtml(lot, def) {
+            lot = lot || {};
+
+            // 1. Настоящий SVG через контексты игры / LGInventory.art.
+            // Приоритет над MDDoodle-иконкой: именно так рисует нативный
+            // аукцион, и при полном def (slot/look/rarity) SVG гарантирован.
+            const svg = this.getItemArtSvg(lot, def);
+            if (svg) return svg;
+
+            // 2. Официальная иконка из игры (MDDoodle) — если SVG не получился
+            const icon = this.getItemIcon(lot.i);
+            if (icon && icon.length > 5) {
+                return `<img src="${this.safeUrl(icon)}" alt="" style="max-width:100%;max-height:100%;object-fit:contain;display:block;" onerror="this.style.display='none'">`;
+            }
+
+            // 3. Эмодзи по слоту/имени
+            const slot = (def && def.slot) || '';
+            const name = String((def && def.name) || lot.name || lot.i || '').toLowerCase();
+            let ico = '📦';
+            if (slot === 'weapon') ico = '⚔️';
+            else if (slot === 'armor') ico = '🛡️';
+            else if (slot === 'shield') ico = '🛡️';
+            else if (slot === 'helmet') ico = '🪖';
+            else if (slot === 'trinket') ico = '📿';
+            else if (slot === 'food') ico = '🍖';
+            else if (slot === 'potion') ico = '🧪';
+            else if (slot === 'scroll') ico = '📜';
+            else if (slot === 'material') ico = '💎';
+            else if (/шлем|каск|колпак|шапк|тиар|корон/i.test(name)) ico = '🪖';
+            else if (/меч|кинжал|топор|молот|булав|посох|копьё|лук|арбалет|гладиус/i.test(name)) ico = '⚔️';
+            else if (/рогатк|снаряд|праща/i.test(name)) ico = '🏹';
+            else if (/брон|доспех|латы|мантия|роба|куртка/i.test(name)) ico = '🛡️';
+            else if (/щит/i.test(name)) ico = '🛡️';
+            else if (/амулет|кольцо|подвеск|оберег/i.test(name)) ico = '📿';
+            else if (/вобл|рыб|мясо|хлеб|яблоко|пирог|сыр|корм|еда/i.test(name)) ico = '🐟';
+            else if (/зелье|эликсир|напиток/i.test(name)) ico = '🧪';
+            else if (/свиток|печать|грамот/i.test(name)) ico = '📜';
+            else if (/звезд|сфер|кристалл|камень|руда|слиток/i.test(name)) ico = '💎';
+            return `<span style="font-size:22px;line-height:1;user-select:none;">${ico}</span>`;
+        },
+        // Заменить текст монет на иконки. Идём по текстовым узлам, чтобы
+        // не потерять вложенные значения (например, «(цена за штуку)»).
+        decorateMoneyText(el) {
+            if (!el || el.hasAttribute('data-lg-money')) return;
+            el.setAttribute('data-lg-money', '1');
+
+            const doc = el.ownerDocument || document;
+            const showText = (typeof NodeFilter !== 'undefined') ? NodeFilter.SHOW_TEXT : 4;
+            let walker = null;
+            try { walker = doc.createTreeWalker(el, showText, null); } catch (e) { walker = null; }
+
+            if (!walker) {
+                const total = this.parseCoinsText(el.textContent || '');
+                if (total > 0) el.innerHTML = this.formatCoinsHtml(total);
+                return;
+            }
+
+            const nodes = [];
+            while (walker.nextNode()) nodes.push(walker.currentNode);
+
+            for (const tn of nodes) {
+                const amount = this.parseCoinsText(tn.nodeValue);
+                if (amount <= 0) continue;
+                const holder = doc.createElement('span');
+                holder.innerHTML = this.formatCoinsHtml(amount);
+                const coinEl = holder.firstElementChild;
+                if (coinEl && tn.parentNode) tn.parentNode.replaceChild(coinEl, tn);
+            }
+        },
+        // Обогатить строки таблицы аукциона: арт + иконки монет.
+        // id/имя предмета приходят из data-атрибутов строки (auction.js),
+        // data-lg-lot — метка «уже обработано».
+        enhanceAuctionRows(container, itemsMap) {
+            if (!container) return;
+            const rows = container.querySelectorAll('tr:not([data-lg-lot])');
+            if (!rows || !rows.length) return;
+
+            rows.forEach(row => {
+                row.setAttribute('data-lg-lot', '1');
+                const cells = row.querySelectorAll('td');
+                if (cells.length < 4) return; // строка «Ничего не найдено»
+
+                const itemCell = cells[0];
+                if (itemCell.querySelector('.b-lot-art')) return;
+
+                const itemId = row.getAttribute('data-lot-id') || '';
+                const lotName = row.getAttribute('data-lot-name') || '';
+                // Полный предмет из itemsMap: {name, slot, look, rarity, ...}.
+                // Без slot LGInventory.art падает в <rect fill="#a0703a">, и
+                // isRealItemSvg отбрасывает заглушку -> эмодзи.
+                const def = (itemsMap && itemId && itemsMap[itemId]) ? { ...itemsMap[itemId] } : { name: lotName };
+
+                const artDiv = document.createElement('div');
+                artDiv.className = 'b-lot-art';
+
+                const existingImg = itemCell.querySelector('img');
+                if (existingImg && existingImg.src && !existingImg.src.endsWith('/')) {
+                    // Иконку игры переносим в арт-бокс (размеры задаёт CSS)
+                    const cloned = existingImg.cloneNode(true);
+                    try { cloned.removeAttribute('style'); } catch (e) {}
+                    artDiv.appendChild(cloned);
+                    existingImg.remove();
+                } else {
+                    if (existingImg) existingImg.remove();
+                    artDiv.innerHTML = this.getItemArtHtml({ i: itemId, name: lotName }, def);
+                }
+                artDiv.title = lotName;
+
+                itemCell.style.display = 'flex';
+                itemCell.style.alignItems = 'center';
+                itemCell.style.gap = '8px';
+                itemCell.insertBefore(artDiv, itemCell.firstChild);
+
+                // Декорируем цены
+                for (let i = 2; i <= 4 && i < cells.length; i++) {
+                    this.decorateMoneyText(cells[i]);
+                }
+            });
+        },
+        // Обогатить лоты в досье игрока (арт + иконки монет).
+        // id берём из data-lot кнопки «Купить», имя — из карточки.
+        enhanceDossierLots(container, itemsMap) {
+            if (!container) return;
+            container.querySelectorAll('.dossier-buy-btn').forEach(btn => {
+                if (btn.hasAttribute('data-lg-lot')) return;
+                btn.setAttribute('data-lg-lot', '1');
+
+                const card = btn.parentElement && btn.parentElement.parentElement;
+                if (!card) return;
+
+                const lotId = btn.getAttribute('data-lot') || '';
+                const lotName = ((card.querySelector('span[style*="font-weight:bold"], b') || {}).textContent || '').trim();
+                const price = +btn.getAttribute('data-price') || 0;
+
+                // data-lot — это id ЛОТА (напр. L2l28g), не id предмета.
+                // Находим лот в Players._lastLots, берём l.i (id предмета) и
+                // полный def из itemsMap. Без slot LGInventory.art вернёт
+                // <rect fill="#a0703a">, и isRealItemSvg() отбросит заглушку.
+                let itemId = lotId;
+                let def = { name: lotName };
+                try {
+                    const lots = (typeof Players !== 'undefined' && Array.isArray(Players._lastLots)) ? Players._lastLots : [];
+                    const lot = lots.find(x => x && x.id === lotId) || lots.find(x => x && x.i === lotId);
+                    if (lot && lot.i) itemId = lot.i;
+                    if (itemsMap && itemId && itemsMap[itemId]) def = { ...itemsMap[itemId] };
+                } catch (e) {}
+
+                const artSlot = card.querySelector('.b-lot-art');
+                if (!artSlot) {
+                    const artDiv = document.createElement('div');
+                    artDiv.className = 'b-lot-art';
+
+                    const existingImg = card.querySelector('img');
+                    if (existingImg && existingImg.src && !existingImg.src.endsWith('/')) {
+                        const cloned = existingImg.cloneNode(true);
+                        try { cloned.removeAttribute('style'); } catch (e) {}
+                        artDiv.appendChild(cloned);
+                        existingImg.remove();
+                    } else {
+                        if (existingImg) existingImg.remove();
+                        artDiv.innerHTML = this.getItemArtHtml({ i: itemId, name: lotName }, def);
+                    }
+                    artDiv.title = lotName;
+
+                    card.insertBefore(artDiv, card.firstChild);
+                }
+
+                if (price > 0) {
+                    const priceEl = card.querySelector('span[style*="color:#ffd700"]');
+                    if (priceEl) priceEl.innerHTML = this.formatCoinsHtml(price);
+                }
+            });
+        },
         formatTimeLeft(ms) {
             if (!ms) return '—';
             const diff = ms - Date.now();
@@ -165,8 +419,20 @@
             }
             return String(id);
         },
+        // Иконка предмета: официальные каталоги MDDoodle (icons + категории).
+        // В значениях каталогов встречаются и строки-URL, и объекты предметов,
+        // поэтому путь к картинке нормализуем.
         getItemIcon(id) {
-            try { return window.MDDoodle?.CATALOG?.icons?.[id] || ''; } catch { return ''; }
+            try {
+                if (!id) return '';
+                const C = window.MDDoodle?.CATALOG;
+                if (!C) return '';
+                const raw = C.icons?.[id] || C.weapons?.[id] || C.armors?.[id] ||
+                            C.shields?.[id] || C.hats?.[id] || C.acc?.[id] || '';
+                if (!raw) return '';
+                if (typeof raw === 'string') return raw;
+                return raw.icon || raw.img || raw.src || raw.url || '';
+            } catch (e) { return ''; }
         },
         chatHash(author, text) {
             const s = `${(author || '').trim().toLowerCase()}|${(text || '').trim()}`;
@@ -466,4 +732,30 @@
             }
         }
     };
+
+    // ===== fix: приоритет арта из шахты для обеих сборок =====
+    // Раньше патч жил в Personal-модуле miner.js, из-за чего в Ultimate
+    // __lgMineContext.art не использовался вовсе. Идемпотентен: повторный
+    // запуск (или запуск рядом с другим патчем) не плодит обёртки.
+    (function patchMineArtResolver() {
+        if (Utils.__mineCtxPatched || typeof Utils.getItemArtSvg !== 'function') return;
+        Utils.__mineCtxPatched = true;
+
+        const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+        const origGetSvg = Utils.getItemArtSvg.bind(Utils);
+
+        Utils.getItemArtSvg = function (lot, def) {
+            try {
+                const ctx = G.__lgMineContext;
+                if (ctx && typeof ctx.art === 'function') {
+                    const l = lot || {};
+                    const it = { id: l.i, ...(def || {}), en: +l.en || 0 };
+                    const svg = ctx.art(it);
+                    if (isRealItemSvg(svg)) return svg;
+                }
+            } catch (e) {}
+            return origGetSvg(lot, def);
+        };
+    })();
+
     const randomDelay = (min, max) => Utils.randomDelay(min, max);

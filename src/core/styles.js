@@ -118,6 +118,99 @@
         .auc-buy-btn { padding: 4px 8px; background: #28a745; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 11px; transition: background 0.2s, opacity 0.2s; }
         .auc-buy-btn:hover { background: #218838; }
         .auc-buy-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+        /* Фиксы котов в шахте (баг игры) */
+        .mn-fig.has-d:not(:has(> svg:not(.mna-dfig))) > svg.mna-dfig { display: block !important; }
+        .mn-h .mna-dfig { overflow: visible !important; }
+
+        /* UI-декоратор аукциона: иконки монет */
+        .b-coin-wrap {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            white-space: nowrap;
+            vertical-align: middle;
+        }
+        .b-coin-ico {
+            width: 11px;
+            height: 11px;
+            border-radius: 50%;
+            border: 1.5px solid rgba(0, 0, 0, 0.45);
+            display: inline-block;
+            vertical-align: middle;
+            margin-left: 2px;
+            margin-right: 1px;
+            flex-shrink: 0;
+            box-sizing: border-box;
+        }
+        .b-coin-ico.g {
+            background: radial-gradient(circle at 35% 35%, #fff176, #f2c94c);
+            box-shadow: 0 0 2px rgba(242, 201, 76, 0.45);
+        }
+        .b-coin-ico.s {
+            background: radial-gradient(circle at 35% 35%, #ffffff, #d7dde2);
+            box-shadow: 0 0 2px rgba(215, 221, 226, 0.45);
+        }
+        .b-coin-ico.b {
+            background: radial-gradient(circle at 35% 35%, #e0965a, #c47a3a);
+            box-shadow: 0 0 2px rgba(196, 122, 58, 0.45);
+        }
+
+        /* UI-декоратор аукциона: арт предмета */
+        .b-lot-art {
+            width: 40px;
+            height: 40px;
+            min-width: 40px;
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+            flex-shrink: 0;
+            box-sizing: border-box;
+        }
+        .b-lot-art svg {
+            width: 34px;
+            height: 34px;
+            max-width: 36px;
+            max-height: 36px;
+            display: block;
+            overflow: visible;
+        }
+        .b-lot-art img {
+            width: 32px;
+            height: 32px;
+            max-width: 32px;
+            max-height: 32px;
+            object-fit: contain;
+            display: block;
+        }
+        #auction-body .b-lot-art {
+            display: inline-flex;
+            vertical-align: middle;
+            margin-right: 5px;
+            width: 32px;
+            height: 32px;
+            min-width: 32px;
+        }
+        #auction-body .b-lot-art img,
+        #auction-body .b-lot-art svg {
+            width: 26px;
+            height: 26px;
+        }
+        #dossier-lots-container .b-lot-art {
+            width: 30px;
+            height: 30px;
+            min-width: 30px;
+        }
+        #dossier-lots-container .b-lot-art img,
+        #dossier-lots-container .b-lot-art svg {
+            width: 24px;
+            height: 24px;
+        }
         #${DOM_IDS.playerHud}, #legion-player-hud { position: fixed; top: 100px; right: 20px; width: 220px; background: #1d1620; border: 2px solid #caa55c; border-radius: 10px; z-index: 10001; box-shadow: 0 8px 24px rgba(0,0,0,0.85); display: flex; flex-direction: column; overflow: hidden; font-family: 'Nunito', sans-serif; }
         .player-hud-header { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: #2a2030; border-bottom: 1px solid #444; cursor: move; user-select: none; touch-action: none; }
         .player-hud-close { background: none; border: none; color: #ff8fa3; font-size: 14px; cursor: pointer; padding: 0 2px; line-height: 1; }

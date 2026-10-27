@@ -126,8 +126,11 @@
             val.__hooked = true;
             const orig = val.open;
             val.open = function (x, c) {
-                // Контекст с api() может быть в первом или во втором аргументе
-                const ctx = (x && typeof x.api === 'function') ? x : (c && typeof c.api === 'function') ? c : null;
+                // Контекст игры может содержать api() и/или art() — берём любой
+                // из аргументов (в Ultimate арт приходит именно через .art).
+                const ctx = (x && typeof x === 'object' && (typeof x.api === 'function' || typeof x.art === 'function')) ? x
+                          : (c && typeof c === 'object' && (typeof c.api === 'function' || typeof c.art === 'function')) ? c
+                          : null;
                 if (ctx) G.__lgMineContext = ctx;
                 return orig.apply(this, arguments);
             };
@@ -191,7 +194,9 @@
                 val.__hooked = true;
                 const orig = val.render;
                 val.render = function (el, cx, o) {
-                    if (cx) G.__lgAucContext = cx;
+                    // Контекст аукциона: принимаем и api(), и art()
+                    const ctx = (cx && typeof cx === 'object' && (typeof cx.api === 'function' || typeof cx.art === 'function')) ? cx : null;
+                    if (ctx) G.__lgAucContext = ctx;
                     return orig.apply(this, arguments);
                 };
             }
