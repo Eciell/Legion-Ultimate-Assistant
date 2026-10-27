@@ -1,0 +1,10 @@
+{
+  "name": "legion-addon",
+  "version": "11.2.0",
+  "scripts": {
+    "build": "node build.js --all",
+    "build:ultimate": "node build.js --ultimate",
+    "build:personal": "node build.js --personal",
+    "check": "node --check dist/LegionUltimate.user.js"
+  }
+}
