@@ -2,6 +2,7 @@
 
 QoL-аддон (UserScript) для браузерной игры **Legion** (play.multidonate.ru). 
 Добавляет удобный интерфейс, умный чат и помощников, не нарушая баланс игры. 
+**Внимание:** В этой версии отсутствует авто-копание (Майнер).
 
 ## ✨ Основные возможности
 
@@ -12,13 +13,37 @@ QoL-аддон (UserScript) для браузерной игры **Legion** (pla
 *   **🧮 Планировщик билдов:** Дерево навыков с симуляцией статов для всех классов.
 *   **🛡️ Стелс-режим:** Защита от определения фоновой вкладки при нахождении в шахте.
 
+---
+
 ## 🚀 Установка
 
-1. Установите расширение [Tampermonkey](https://www.tampermonkey.net/) для вашего браузера.
-2. Нажмите на ссылку ниже, чтобы установить скрипт:
-   **[Установить Legion Ultimate Assistant](https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js)**
-3. Подтвердите установку в Tampermonkey.
-4. Обновления будут приходить автоматически (через `@updateURL`).
+Для работы скрипта вам понадобится браузер на движке Chromium (Chrome, Edge, Opera, Яндекс.Браузер) или Firefox, а также установленное расширение **Tampermonkey**.
+
+### Шаг 1. Установите Tampermonkey
+*   [Tampermonkey для Chrome](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo)
+*   [Tampermonkey для Firefox](https://addons.mozilla.org/ru/firefox/addon/tampermonkey/)
+*   [Tampermonkey для Edge](https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd)
+
+### Шаг 2. Включите режим разработчика (ТОЛЬКО для Chrome / Яндекс / Edge / Opera)
+> ⚠️ **Важно!** Современные браузеры на движке Chromium блокируют работу пользовательских скриптов без специального разрешения. Если пропустить этот шаг, скрипт установится, но **не будет работать**.
+
+1. Откройте страницу управления расширениями (введите в адресную строку):
+   * Chrome/Яндекс: `chrome://extensions/`
+   * Edge: `edge://extensions/`
+   * Opera: `opera://extensions/`
+2. В правом верхнем углу включите тумблер **«Режим разработчика»** (Developer mode).
+   *(В Chrome и Яндексе, и возможно Edge нужно зайти в «Детали» расширения Tampermonkey и включить переключатель **«Разрешить пользовательские скрипты»**, **Для Firefox:** этот шаг делать не нужно, там скрипты работают из коробки.).*
+
+### Шаг 3. Установите скрипт
+Нажмите на ссылку ниже — Tampermonkey перехватит страницу и предложит установить аддон:
+👉 **[Установить Legion Ultimate Assistant](https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js)**
+
+Нажмите «Установить» (Install) во вкладке, которая откроется.
+
+### Шаг 4. Проверка
+Зайдите на `play.multidonate.ru`. В правом нижнем углу экрана должен появиться перетаскиваемый кружок с котиком 🐱 — это меню аддона. Обновления будут приходить автоматически.
+
+---
 
 ## 🛠️ Для разработчиков (Local Development)
 
