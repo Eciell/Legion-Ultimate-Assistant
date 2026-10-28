@@ -7,7 +7,7 @@
     //   core/styles.js -> STYLES
     //   core/hooks.js  -> G (перехватчики LGCity / LGAuction / LGQuest / LGMine)
     //   core/ui.js     -> UI
-    //   modules/*      -> BuildSim, Auction, Players, Miner, Chat
+    //   modules/*      -> BuildSim, HeroPlanner, Auction, Players, Miner, Chat
     // ============================================================
 
     // 5.3. Защита от повторного запуска (single-instance guard)
@@ -29,7 +29,7 @@
         fabWrap.innerHTML = `
             <div class="${DOM_IDS.fabMenu}" id="${DOM_IDS.fabMenu}">
                 <button class="fab-menu-item" id="${DOM_IDS.btnAutoMine}">⛏️ Умная Шахта (Выкл)</button>
-                <button class="fab-menu-item" id="${DOM_IDS.btnBuildSim}">🧮 Планировщик билдов</button>
+                <button class="fab-menu-item" id="${DOM_IDS.btnBuildSim}">⚙️ Планировщик Героя</button>
                 <button class="fab-menu-item" id="${DOM_IDS.btnAuctionScan}">🔍 Сканер Аукциона</button>
                 <button class="fab-menu-item" id="${DOM_IDS.btnPlayers}">👥 Игроки (Разведка)</button>
                 <button class="fab-menu-item" id="${DOM_IDS.btnFriends}">🤝 Друзья <span id="${DOM_IDS.friendsBadge}" style="display:none; background:#28a745; color:#fff; font-size:11px; padding:1px 6px; border-radius:10px; font-weight:bold; margin-left:auto;">0</span></button>
@@ -84,7 +84,8 @@
         }
 
         Miner.init();
-        BuildSim.init();
+        BuildSim.init();        // без кнопки — регистрирует только глобальный клик для .sim-card
+        HeroPlanner.init();     // кнопка FAB ведёт сюда
         Auction.init();
         Players.init();
         Chat.init();
@@ -105,6 +106,7 @@
             UI,
             Miner,
             BuildSim,
+            HeroPlanner,
             Auction,
             Players,
             Chat,

@@ -31,7 +31,8 @@
         isSkipFx(key) { return SKIP_FX_PREFIXES.some(p => key.startsWith(p)); },
 
         init() {
-            (document.getElementById(DOM_IDS.btnBuildSim) || document.getElementById('btn-build-sim'))?.addEventListener('click', () => this.open());
+            // Кнопка теперь принадлежит HeroPlanner — см. src/modules/hero-planner.js.
+            // BuildSim остаётся как модуль и открывается из таба «Билды».
             document.addEventListener('click', (e) => {
                 if (!e.target.closest('.sim-node') && !e.target.closest('.sim-card')) {
                     document.querySelectorAll('.sim-card').forEach(c => c.remove());
@@ -40,7 +41,14 @@
         },
 
         async open() {
-            UI.showModal(`<h2>🧮 Планировщик билдов <button class="custom-close" id="custom-close-btn">✖</button></h2><div class="loader">Загрузка данных...</div>`);
+            const modal = UI.showModal(`<h2>🧮 Планировщик билдов <button class="custom-close" id="custom-close-btn">✖</button></h2><div id="buildsim-modal-body" style="display:flex; flex-direction:column; flex:1; min-height:0;"></div>`);
+            const body = modal.querySelector('#buildsim-modal-body');
+            if (body) await this.mount(body);
+        },
+
+        async mount(container) {
+            if (!container) return;
+            container.innerHTML = `<div class="loader">Загрузка данных...</div>`;
             try {
                 const me = await Utils.fetchApi('/api/me');
                 if (!me || !me.ok || !me.hero) throw new Error('Нет героя');
@@ -105,29 +113,28 @@
                         </div>`;
                 });
 
-                UI.showModal(`
-                    <h2>🧮 Планировщик билдов (${h.name}) <button class="custom-close" id="custom-close-btn">✖</button></h2>
+                container.innerHTML = `
                     <div class="modal-tabs">${tabsHtml}</div>
                     ${contentHtml}
-                `);
+                `;
 
-                document.querySelectorAll('.modal-tab').forEach(tab => {
+                container.querySelectorAll('.modal-tab').forEach(tab => {
                     tab.addEventListener('click', () => {
-                        document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
-                        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                        container.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+                        container.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
                         tab.classList.add('active');
-                        const target = document.getElementById(`tab-${tab.dataset.tab}`);
+                        const target = container.querySelector(`#tab-${tab.dataset.tab}`);
                         if (target) target.classList.add('active');
                         if (tab.dataset.tab !== 'gear') this.renderTree(tab.dataset.tab);
                     });
                 });
 
-                document.querySelectorAll('[data-reset]').forEach(btn => {
+                container.querySelectorAll('[data-reset]').forEach(btn => {
                     btn.addEventListener('click', () => this.resetBuild(btn.dataset.reset));
                 });
             } catch (err) {
-                dbg('[BUILD SIM] Ошибка открытия:', err);
-                UI.showModal(`<h2>❌ Ошибка <button class="custom-close" id="custom-close-btn">✖</button></h2><p>${err.message}</p>`);
+                dbg('[BUILD SIM] Ошибка монтирования:', err);
+                container.innerHTML = `<div style="color:#ff5a7a; text-align:center; padding:20px;">Ошибка: ${err.message}</div>`;
             }
         },
 

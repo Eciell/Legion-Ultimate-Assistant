@@ -53,6 +53,7 @@ const CORE_ORDER = [
 // Модули, которые входят в обе сборки.
 const SHARED_MODULES = [
     'modules/build-sim.js',
+    'modules/hero-planner.js',
     'modules/auction.js',
     'modules/players.js'
 ];
