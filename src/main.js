@@ -37,6 +37,7 @@
                 <button class="fab-menu-item" id="${DOM_IDS.btnPopout}">📺 Вынести чат</button>
                 <button class="fab-menu-item" id="${DOM_IDS.btnPocketCity}">🏰 Карманный Город</button>
                 <button class="fab-menu-item" id="${DOM_IDS.btnProfile}">👤 Профиль</button>
+                <button class="fab-menu-item" id="btn-priest-panel">✨ Панель Жреца</button>
                 <label class="fab-menu-item" style="cursor:pointer; display:flex; align-items:center; justify-content:space-between; user-select:none; font-size:12px; gap:8px;">
                     <span>🚫 Отключить перехват чата</span>
                     <input type="checkbox" id="${DOM_IDS.chkChatDisable}" style="width:16px; height:16px; cursor:pointer; accent-color:#ff5a7a;">

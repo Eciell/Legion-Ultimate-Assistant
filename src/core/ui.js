@@ -56,6 +56,22 @@
             const handle = typeof handleSelector === 'string' ? element.querySelector(handleSelector) : handleSelector;
             if (!handle) return;
 
+            // Компактные окна (modal-compact) всегда открываются по центру:
+            // унаследованная из localStorage позиция от развёрнутых модалок
+            // могла оказаться за границами экрана. Сбрасываем её и не
+            // запоминаем координаты компактных окон.
+            const isCompact = !!(element.classList && element.classList.contains('modal-compact'));
+            if (isCompact) {
+                if (storageKey) {
+                    try { localStorage.removeItem(storageKey); } catch (err) {}
+                }
+                element.style.left = '50%';
+                element.style.top = '50%';
+                element.style.transform = 'translate(-50%, -50%)';
+                element.style.right = 'auto';
+                element.style.bottom = 'auto';
+            }
+
             handle.style.cursor = 'grab';
             handle.style.userSelect = 'none';
 
@@ -90,7 +106,8 @@
                 window.removeEventListener('pointerup', onPointerUp);
                 window.removeEventListener('pointercancel', onPointerUp);
 
-                if (storageKey) {
+                // Позицию компактных окон не сохраняем (см. isCompact выше).
+                if (storageKey && !isCompact) {
                     try {
                         localStorage.setItem(storageKey, JSON.stringify({
                             left: element.style.left,

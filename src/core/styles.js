@@ -221,10 +221,15 @@
         .player-hud-val { font-weight: bold; }
         /* ── Ассистент Жреца: плавающий HUD боя (Поход) ── */
         .priest-hud { position: fixed; top: 80px; right: 20px; background: #1e1724; border: 1px solid #caa55c; border-radius: 8px; padding: 10px; display: none; flex-direction: column; z-index: 10001; box-shadow: 0 4px 15px rgba(0,0,0,0.7); min-width: 150px; max-width: 240px; font-family: 'Nunito', sans-serif; color: #f7eadf; }
-        .priest-hud-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: bold; color: #caa55c; font-size: 12px; margin-bottom: 8px; cursor: grab; user-select: none; touch-action: none; }
-        .priest-hud-title:active { cursor: grabbing; }
+        .priest-hud-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: bold; color: #caa55c; font-size: 12px; margin-bottom: 8px; cursor: grab; user-select: none; touch-action: none; }
+        .priest-hud-header:active { cursor: grabbing; }
+        .priest-hud-watchlist { max-height: 100px; overflow-y: auto; }
+        .priest-hud-watch-item { font-size: 11px; color: #aaa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .priest-hud-settings { background: none; border: none; color: #caa55c; font-size: 13px; line-height: 1; cursor: pointer; padding: 0 2px; }
         .priest-hud-settings:hover { color: #ffcf6a; }
+        .priest-hud-actions { display: flex; align-items: center; gap: 6px; }
+        .priest-hud-close { color: #ff5a7a; font-size: 12px; line-height: 1; cursor: pointer; padding: 0 2px; }
+        .priest-hud-close:hover { color: #fff; }
         .priest-hud-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; background: rgba(0,0,0,0.3); padding: 4px; border-radius: 4px; }
         .priest-hud-nick { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .priest-heal-btn { background: #28a745; color: #fff; border: none; border-radius: 3px; padding: 2px 6px; font-size: 11px; cursor: pointer; flex-shrink: 0; }

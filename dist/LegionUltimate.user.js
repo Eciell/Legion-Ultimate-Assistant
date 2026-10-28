@@ -1001,10 +1001,15 @@
         .player-hud-val { font-weight: bold; }
         /* ── Ассистент Жреца: плавающий HUD боя (Поход) ── */
         .priest-hud { position: fixed; top: 80px; right: 20px; background: #1e1724; border: 1px solid #caa55c; border-radius: 8px; padding: 10px; display: none; flex-direction: column; z-index: 10001; box-shadow: 0 4px 15px rgba(0,0,0,0.7); min-width: 150px; max-width: 240px; font-family: 'Nunito', sans-serif; color: #f7eadf; }
-        .priest-hud-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: bold; color: #caa55c; font-size: 12px; margin-bottom: 8px; cursor: grab; user-select: none; touch-action: none; }
-        .priest-hud-title:active { cursor: grabbing; }
+        .priest-hud-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: bold; color: #caa55c; font-size: 12px; margin-bottom: 8px; cursor: grab; user-select: none; touch-action: none; }
+        .priest-hud-header:active { cursor: grabbing; }
+        .priest-hud-watchlist { max-height: 100px; overflow-y: auto; }
+        .priest-hud-watch-item { font-size: 11px; color: #aaa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .priest-hud-settings { background: none; border: none; color: #caa55c; font-size: 13px; line-height: 1; cursor: pointer; padding: 0 2px; }
         .priest-hud-settings:hover { color: #ffcf6a; }
+        .priest-hud-actions { display: flex; align-items: center; gap: 6px; }
+        .priest-hud-close { color: #ff5a7a; font-size: 12px; line-height: 1; cursor: pointer; padding: 0 2px; }
+        .priest-hud-close:hover { color: #fff; }
         .priest-hud-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; background: rgba(0,0,0,0.3); padding: 4px; border-radius: 4px; }
         .priest-hud-nick { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .priest-heal-btn { background: #28a745; color: #fff; border: none; border-radius: 3px; padding: 2px 6px; font-size: 11px; cursor: pointer; flex-shrink: 0; }
@@ -1313,6 +1318,22 @@
             const handle = typeof handleSelector === 'string' ? element.querySelector(handleSelector) : handleSelector;
             if (!handle) return;
 
+            // Компактные окна (modal-compact) всегда открываются по центру:
+            // унаследованная из localStorage позиция от развёрнутых модалок
+            // могла оказаться за границами экрана. Сбрасываем её и не
+            // запоминаем координаты компактных окон.
+            const isCompact = !!(element.classList && element.classList.contains('modal-compact'));
+            if (isCompact) {
+                if (storageKey) {
+                    try { localStorage.removeItem(storageKey); } catch (err) {}
+                }
+                element.style.left = '50%';
+                element.style.top = '50%';
+                element.style.transform = 'translate(-50%, -50%)';
+                element.style.right = 'auto';
+                element.style.bottom = 'auto';
+            }
+
             handle.style.cursor = 'grab';
             handle.style.userSelect = 'none';
 
@@ -1347,7 +1368,8 @@
                 window.removeEventListener('pointerup', onPointerUp);
                 window.removeEventListener('pointercancel', onPointerUp);
 
-                if (storageKey) {
+                // Позицию компактных окон не сохраняем (см. isCompact выше).
+                if (storageKey && !isCompact) {
                     try {
                         localStorage.setItem(storageKey, JSON.stringify({
                             left: element.style.left,
@@ -4231,20 +4253,23 @@ const Players = {
     // ============================================================
     const PriestAssistant = {
         hudEl: null,
-        watchedNicks: [],          // ники в нижнем регистре
+        watchedNicks: [],          // ники как ввёл пользователь (сравнение — без учёта регистра)
+        isVisible: false,          // HUD открывается/закрывается вручную из FAB-меню
+        _remindedThisCombat: false,
         _updateInterval: null,
-        _lastRenderKey: '',
-        _watchlistSaved: false,    // пользователь уже настраивал список (даже пустой)
         _menuBtn: null,
+        _ownsMenuBtn: false,       // true — кнопку создали сами (фолбэк), её же и удаляем
         _onQuestUpdate: null,
         _dragBound: false,
 
         STORAGE_KEY: 'LEGION_PRIEST_WATCHED',
         HUD_POS_KEY: 'LEGION_PRIEST_HUD_POS',
+        VISIBLE_KEY: 'LEGION_PRIEST_HUD_VISIBLE',
 
         init() {
+            this._loadVisibility();
             this._loadWatched();
-            this._addMenuButton();
+            this._bindMenuButton();
 
             // Игра отдельного события об изменениях боя не даёт, но если оно
             // появится — перерисуем сразу, не ожидая тика поллинга.
@@ -4270,57 +4295,122 @@ const Players = {
                 document.removeEventListener('lg-quest-update', this._onQuestUpdate);
                 this._onQuestUpdate = null;
             }
-            if (this._menuBtn) {
+            // Кнопку из разметки main.js не трогаем (живёт вместе с FAB),
+            // удаляем только аварийно созданный дубль.
+            if (this._menuBtn && this._ownsMenuBtn) {
                 this._menuBtn.remove();
-                this._menuBtn = null;
             }
+            this._menuBtn = null;
+            this._ownsMenuBtn = false;
             if (this.hudEl) {
                 this.hudEl.remove();
                 this.hudEl = null;
             }
             this._dragBound = false;
-            this._lastRenderKey = '';
+            this._remindedThisCombat = false;
         },
 
-        _addMenuButton() {
-            const fabMenu = document.getElementById(DOM_IDS.fabMenu);
-            if (!fabMenu || this._menuBtn) return;
+        _loadVisibility() {
+            try {
+                this.isVisible = localStorage.getItem(this.VISIBLE_KEY) === 'true';
+            } catch (e) {
+                this.isVisible = false;
+            }
+        },
 
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'fab-menu-item';
-            btn.textContent = '✨ Настройки Жреца';
-            btn.addEventListener('click', () => this.openSettings());
+        _saveVisibility() {
+            try {
+                localStorage.setItem(this.VISIBLE_KEY, String(this.isVisible));
+            } catch (e) {
+                dbg('PriestAssistant: не удалось сохранить видимость HUD', e);
+            }
+        },
+
+        _setVisible(visible) {
+            this.isVisible = !!visible;
+            this._saveVisibility();
+            this._syncMenuButton();
+            this.renderHud(true);
+        },
+
+        // Пункт FAB. Штатно кнопка объявлена в main.js (как «Профиль»);
+        // динамическое создание — фолбэк, если разметка старая.
+        _bindMenuButton() {
+            const btn = document.getElementById('btn-priest-panel');
+            if (btn) {
+                btn.addEventListener('click', () => {
+                    const fabMenu = document.getElementById(DOM_IDS.fabMenu);
+                    if (fabMenu) fabMenu.classList.remove('open');
+                    this._setVisible(!this.isVisible);
+                });
+                this._menuBtn = btn;
+                this._ownsMenuBtn = false;
+                this._syncMenuButton();
+                return;
+            }
+
+            if (this._menuBtn) return;
+            const fabMenu = document.getElementById(DOM_IDS.fabMenu);
+            if (!fabMenu) return;
+
+            const created = document.createElement('button');
+            created.type = 'button';
+            created.className = 'fab-menu-item';
+            created.textContent = '✨ Панель Жреца';
+            created.addEventListener('click', () => {
+                fabMenu.classList.remove('open');
+                this._setVisible(!this.isVisible);
+            });
 
             // Ставим сразу после «Профиля»: пункт остаётся в группе кнопок и не
             // задевает чекбокс «Отключить перехват чата» и индикатор стелса.
             const profileBtn = document.getElementById(DOM_IDS.btnProfile);
-            if (profileBtn) profileBtn.insertAdjacentElement('afterend', btn);
-            else fabMenu.appendChild(btn);
+            if (profileBtn) profileBtn.insertAdjacentElement('afterend', created);
+            else fabMenu.appendChild(created);
 
-            this._menuBtn = btn;
+            this._menuBtn = created;
+            this._ownsMenuBtn = true;
+            this._syncMenuButton();
+        },
+
+        // Подсветка активного пункта меню, пока панель открыта.
+        _syncMenuButton() {
+            if (!this._menuBtn || !this._menuBtn.classList) return;
+            this._menuBtn.classList.toggle('active', this.isVisible);
+            this._menuBtn.title = this.isVisible ? 'Скрыть панель Жреца' : 'Показать панель Жреца';
         },
 
         _loadWatched() {
             try {
-                const saved = localStorage.getItem(this.STORAGE_KEY);
-                this._watchlistSaved = saved !== null;
-                const arr = JSON.parse(saved);
-                this.watchedNicks = Array.isArray(arr)
-                    ? [...new Set(arr.map(n => String(n).trim().toLowerCase()).filter(Boolean))]
-                    : [];
+                const arr = JSON.parse(localStorage.getItem(this.STORAGE_KEY));
+                this.watchedNicks = Array.isArray(arr) ? this._normalizeNicks(arr) : [];
             } catch (e) {
                 dbg('PriestAssistant: не удалось прочитать список отслеживаемых', e);
-                this._watchlistSaved = false;
                 this.watchedNicks = [];
             }
         },
 
-        // Кого отслеживаем. Пока свой список не сохранён — берём список друзей,
-        // чтобы HUD работал сразу после установки аддона.
+        // Ники храним как ввёл пользователь (чтобы список читался нормально),
+        // дубликаты убираем без учёта регистра.
+        _normalizeNicks(list) {
+            const seen = new Set();
+            const out = [];
+            (Array.isArray(list) ? list : []).forEach(raw => {
+                const nick = String(raw).trim();
+                const key = nick.toLowerCase();
+                if (!nick || seen.has(key)) return;
+                seen.add(key);
+                out.push(nick);
+            });
+            return out;
+        },
+
+        // Кого отслеживаем. Пустой список = все друзья (как написано в настройках).
         _getWatchSet() {
-            if (this.watchedNicks.length) return new Set(this.watchedNicks);
-            if (!this._watchlistSaved && typeof Players !== 'undefined' && typeof Players.getFriendsList === 'function') {
+            if (this.watchedNicks.length) {
+                return new Set(this.watchedNicks.map(n => n.toLowerCase()));
+            }
+            if (typeof Players !== 'undefined' && typeof Players.getFriendsList === 'function') {
                 try {
                     return new Set(Players.getFriendsList().map(n => String(n).toLowerCase()));
                 } catch (e) {}
@@ -4343,6 +4433,24 @@ const Players = {
                 window.ME?.hero?.n,
                 window.ME?.hero?.name,
                 typeof Chat !== 'undefined' ? Chat.myNick : ''
+            ];
+            for (const c of candidates) {
+                if (c) return String(c).trim().toLowerCase();
+            }
+            return '';
+        },
+
+        // Роль героя. В игре встречаются оба поля: role и class
+        // (см. Chat.myRole = hero.class, BuildSim.classNames.priest).
+        _getMyRole() {
+            const hero = window.ME?.hero || window.ME?.me || window.__lgHero || null;
+            const candidates = [
+                hero && hero.role,
+                hero && hero.class,
+                hero && hero.cl,
+                hero && hero.sk && hero.sk.c,
+                window.ME?.user?.role,
+                typeof Chat !== 'undefined' ? Chat.myRole : ''
             ];
             for (const c of candidates) {
                 if (c) return String(c).trim().toLowerCase();
@@ -4402,39 +4510,53 @@ const Players = {
             return skills.find(sk => Array.isArray(sk) && sk[2] === 'heal' && (sk[1] === 0 || sk[1] === '0')) || null;
         },
 
-        renderHud() {
+        renderHud(force = false) {
             // После destroy() HUD не восстанавливаем.
             if (!this._updateInterval) return;
 
             const q = this._readQuest();
-            const wounded = q ? this._collectWounded(q) : [];
 
-            if (!wounded.length) {
-                this._lastRenderKey = '';
+            // Напоминание жрецу: бой идёт, панель закрыта — один раз за бой.
+            if (q && q.b && q.b.st === 'hit' && this._getMyRole() === 'priest') {
+                if (!this.isVisible && !this._remindedThisCombat) {
+                    UI.showToast('✨ Вы Жрец! Откройте Панель Жреца в меню для быстрого хила.', false);
+                    this._remindedThisCombat = true;
+                }
+            } else if (!q || !q.b || q.b.st !== 'hit') {
+                // Бой закончился (или мы не в походе) — напоминание снова разрешено.
+                this._remindedThisCombat = false;
+            }
+
+            // Панель закрыта пользователем — не создаём и не показываем HUD.
+            if (!this.isVisible) {
                 if (this.hudEl) this.hudEl.style.display = 'none';
                 return;
             }
 
-            const readyHeal = this._findReadyHeal(q);
-            const healId = readyHeal ? `sk${readyHeal[0]}` : '';
-            const renderKey = wounded.map(w => `${w.login}:${w.hp}`).join('|') + `|${healId}`;
+            this._ensureHud();
 
-            // Данные не изменились — не пересобираем innerHTML (иначе кнопки
-            // пересоздаются каждый тик и «мигают» под курсором).
-            if (this.hudEl && renderKey === this._lastRenderKey) {
-                this.hudEl.style.display = 'flex';
+            // Состояние 1: контекста похода нет — статус и список наблюдения.
+            if (!q) {
+                this._showHud(this._outsideQuestHtml(), force);
                 return;
             }
-            this._lastRenderKey = renderKey;
 
-            if (!this.hudEl) {
-                this.hudEl = document.createElement('div');
-                this.hudEl.className = 'priest-hud';
-                this.hudEl.addEventListener('click', (e) => this._onHudClick(e));
-                document.body.appendChild(this.hudEl);
+            // Состояние 2: в походе, но бой ещё не идёт (или уже закончился).
+            if (!q.b || q.b.st !== 'hit') {
+                this._showHud(this._hudHeader('✨ Жрец: Ожидание боя'), force);
+                return;
             }
-            this.hudEl.style.display = 'flex';
 
+            const wounded = this._collectWounded(q);
+
+            // Состояние 3: бой идёт, но из отслеживаемых никто не ранен.
+            if (!wounded.length) {
+                this._showHud(this._hudHeader('✨ Жрец: Все целы', '#4cc95a'), force);
+                return;
+            }
+
+            // Состояние 4: бой, есть раненые — строки с кнопками хила.
+            const readyHeal = this._findReadyHeal(q);
             const rows = wounded.map(w => {
                 const hpColor = w.hp < 40 ? '#ff5a7a' : '#fff';
                 const safeLogin = Utils.escapeHtml(w.login);
@@ -4448,34 +4570,74 @@ const Players = {
                 `;
             }).join('');
 
-            this.hudEl.innerHTML = `
-                <div class="priest-hud-title">
-                    <span>✨ Панель Жреца</span>
-                    <button type="button" class="priest-hud-settings" title="Настроить список отслеживаемых">⚙</button>
-                </div>
-                ${rows}
-            `;
+            this._showHud(this._hudHeader('✨ Панель Жреца') + rows, force);
+        },
 
-            // Перетаскивание вешаем один раз — после появления заголовка.
-            if (!this._dragBound) {
-                this._dragBound = true;
-                UI.makeDraggable(this.hudEl, '.priest-hud-title', this.HUD_POS_KEY);
-                // makeDraggable() только сохраняет позицию — восстанавливаем её сами.
-                try {
-                    const pos = JSON.parse(localStorage.getItem(this.HUD_POS_KEY) || 'null');
-                    if (pos && pos.left && pos.top) {
-                        this.hudEl.style.left = pos.left;
-                        this.hudEl.style.top = pos.top;
-                        this.hudEl.style.right = 'auto';
-                    }
-                } catch (e) {}
-            }
+        _ensureHud() {
+            if (this.hudEl) return;
+            this.hudEl = document.createElement('div');
+            this.hudEl.className = 'priest-hud';
+            // Клики обрабатываем делегированием: innerHTML меняется, а слушатель один.
+            this.hudEl.addEventListener('click', (e) => this._onHudClick(e));
+            document.body.appendChild(this.hudEl);
+        },
+
+        // Пишем innerHTML только при реальном изменении — кнопки не «мигают».
+        _showHud(html, force) {
+            if (!this.hudEl) return;
+            this.hudEl.style.display = 'flex';
+            if (!force && this.hudEl.innerHTML === html) return;
+            this.hudEl.innerHTML = html;
+            this._bindDragOnce();
+        },
+
+        // Шапка HUD: статус слева, настройки и закрытие справа.
+        _hudHeader(text, color) {
+            const colorStyle = color ? ` style="color:${color};"` : '';
+            return `
+                <div class="priest-hud-header">
+                    <span${colorStyle}>${text}</span>
+                    <div class="priest-hud-actions">
+                        <span class="priest-hud-settings" id="priest-settings-icon" title="Настройки">⚙️</span>
+                        <span class="priest-hud-close" id="priest-close-icon" title="Закрыть">✖</span>
+                    </div>
+                </div>
+            `;
+        },
+
+        _outsideQuestHtml() {
+            const listHtml = this.watchedNicks.length
+                ? this.watchedNicks.map(n => `<div class="priest-hud-watch-item">• ${Utils.escapeHtml(n)}</div>`).join('')
+                : '<div class="priest-hud-watch-item">• (Все друзья)</div>';
+
+            return this._hudHeader('✨ Жрец: Ожидание похода') +
+                `<div class="priest-hud-watchlist">${listHtml}</div>`;
+        },
+
+        // Перетаскивание вешаем один раз — когда в HUD уже есть .priest-hud-header.
+        _bindDragOnce() {
+            if (this._dragBound || !this.hudEl) return;
+            this._dragBound = true;
+            UI.makeDraggable(this.hudEl, '.priest-hud-header', this.HUD_POS_KEY);
+            // makeDraggable() только сохраняет позицию — восстанавливаем её сами.
+            try {
+                const pos = JSON.parse(localStorage.getItem(this.HUD_POS_KEY) || 'null');
+                if (pos && pos.left && pos.top) {
+                    this.hudEl.style.left = pos.left;
+                    this.hudEl.style.top = pos.top;
+                    this.hudEl.style.right = 'auto';
+                }
+            } catch (e) {}
         },
 
         _onHudClick(e) {
             const target = e.target;
             if (!target || !target.closest) return;
 
+            if (target.closest('.priest-hud-close')) {
+                this._setVisible(false);
+                return;
+            }
             if (target.closest('.priest-hud-settings')) {
                 this.openSettings();
                 return;
@@ -4497,8 +4659,7 @@ const Players = {
             const healSk = this._findReadyHeal(this._readQuest());
             if (!healSk) {
                 UI.showToast('Хилка ещё не готова', true);
-                this._lastRenderKey = '';
-                this.renderHud();
+                this.renderHud(true);
                 return;
             }
 
@@ -4515,39 +4676,42 @@ const Players = {
                 btn.textContent = '...';
             }
             UI.showToast(`✨ Хил на ${login}`);
-
-            // Перерисуем чуть позже — кулдаун на сервере уже начался.
-            setTimeout(() => {
-                this._lastRenderKey = '';
-                this.renderHud();
-            }, 300);
         },
 
         openSettings() {
             const current = this.watchedNicks.join(', ');
-            const input = window.prompt(
-                'Ники друзей для отслеживания ХП через запятую (пусто — очистить):',
-                current
-            );
-            if (input === null) return;
 
-            const list = [...new Set(
-                input.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
-            )];
+            const modal = UI.showModal(`
+                <h2>✨ Настройки Жреца <button class="custom-close" id="custom-close-btn">✖</button></h2>
+                <div style="padding: 10px;">
+                    <div style="font-size: 13px; color: #aaa; margin-bottom: 15px;">
+                        Введите ники через запятую или пробел. Если поле пустое, панель будет отслеживать всех ваших друзей.
+                    </div>
+                    <textarea id="priest-nicks-input" maxlength="500" style="width: 100%; height: 100px; background: #111; border: 1px solid #444; color: #fff; padding: 10px; border-radius: 6px; box-sizing: border-box; font-family: monospace; resize: vertical;" placeholder="ник1, ник2, ник3">${Utils.escapeHtml(current)}</textarea>
+                    <div style="display: flex; gap: 10px; margin-top: 15px;">
+                        <button id="priest-save-btn" style="flex: 1; padding: 10px; background: #caa55c; color: #1d1620; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">Сохранить</button>
+                    </div>
+                </div>
+            `, { compact: true });
 
-            this.watchedNicks = list;
-            this._watchlistSaved = true;
-            try {
-                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(list));
-            } catch (e) {
-                dbg('PriestAssistant: не удалось сохранить список', e);
-            }
+            const input = modal?.querySelector('#priest-nicks-input');
+            const saveBtn = modal?.querySelector('#priest-save-btn');
+            if (!input || !saveBtn) return;
 
-            UI.showToast(list.length
-                ? `✨ Отслеживаем игроков: ${list.length}`
-                : '✨ Список отслеживаемых очищен');
-            this._lastRenderKey = '';
-            this.renderHud();
+            saveBtn.addEventListener('click', () => {
+                // Разделители: запятая, пробел, перенос строки (и их сочетания).
+                this.watchedNicks = this._normalizeNicks(String(input.value || '').split(/[\s,]+/));
+
+                try {
+                    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.watchedNicks));
+                } catch (e) {
+                    dbg('PriestAssistant: не удалось сохранить список', e);
+                }
+
+                UI.showToast('Список отслеживаемых обновлен');
+                UI.closeModals();
+                this.renderHud(true); // Принудительный перерендер
+            });
         }
     };
 
@@ -6304,6 +6468,7 @@ const Players = {
                 <button class="fab-menu-item" id="${DOM_IDS.btnPopout}">📺 Вынести чат</button>
                 <button class="fab-menu-item" id="${DOM_IDS.btnPocketCity}">🏰 Карманный Город</button>
                 <button class="fab-menu-item" id="${DOM_IDS.btnProfile}">👤 Профиль</button>
+                <button class="fab-menu-item" id="btn-priest-panel">✨ Панель Жреца</button>
                 <label class="fab-menu-item" style="cursor:pointer; display:flex; align-items:center; justify-content:space-between; user-select:none; font-size:12px; gap:8px;">
                     <span>🚫 Отключить перехват чата</span>
                     <input type="checkbox" id="${DOM_IDS.chkChatDisable}" style="width:16px; height:16px; cursor:pointer; accent-color:#ff5a7a;">
