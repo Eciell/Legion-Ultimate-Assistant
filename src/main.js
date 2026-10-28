@@ -11,8 +11,11 @@
     // ============================================================
 
     // 5.3. Защита от повторного запуска (single-instance guard)
-    if (window.__LEGION__?._booted) {
-        try { window.__LEGION__.shutdown?.(); } catch (e) {}
+    // Page-context ссылка: при @grant window — песочница, а консоль и другие
+    // скрипты видят только unsafeWindow.
+    const LG_ROOT = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
+    if (LG_ROOT.__LEGION__?._booted) {
+        try { LG_ROOT.__LEGION__.shutdown?.(); } catch (e) {}
     }
 
     // ============================================================
@@ -38,6 +41,7 @@
                 <button class="fab-menu-item" id="${DOM_IDS.btnPocketCity}">🏰 Карманный Город</button>
                 <button class="fab-menu-item" id="${DOM_IDS.btnProfile}">👤 Профиль</button>
                 <button class="fab-menu-item" id="btn-priest-panel">✨ Панель Жреца</button>
+                <button class="fab-menu-item" id="btn-7tv-settings">🎭 Канал 7TV</button>
                 <label class="fab-menu-item" style="cursor:pointer; display:flex; align-items:center; justify-content:space-between; user-select:none; font-size:12px; gap:8px;">
                     <span>🚫 Отключить перехват чата</span>
                     <input type="checkbox" id="${DOM_IDS.chkChatDisable}" style="width:16px; height:16px; cursor:pointer; accent-color:#ff5a7a;">
@@ -103,7 +107,7 @@
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape') UI.closeModals(); });
 
         // 5.2. Экспорт API для отладки и single-instance guard
-        window.__LEGION__ = {
+        const legionApi = {
             Utils,
             UI,
             Miner,
@@ -137,9 +141,15 @@
                 }
                 Chat.stopBackgroundLiveListener();
                 document.querySelectorAll('.' + DOM_IDS.customModal + ', .sim-card, .' + DOM_IDS.chatWidget + ', .float-btns, .' + DOM_IDS.fabWrap + ', #' + DOM_IDS.playerHud + ', .' + DOM_IDS.hudLog + ', #' + DOM_IDS.hudLog + ', .hud-log, .custom-modal, .chat-widget, .legion-fab-wrap, #legion-player-hud').forEach(el => el.remove());
-                window.__LEGION__._booted = false;
+                legionApi._booted = false;
             }
         };
+
+        // Публикуем API в page-context: при @grant песочница скрывает window от
+        // консоли и других скриптов, unsafeWindow — нет. Дублируем в window, чтобы
+        // внутренние ссылки (hooks.js) работали в обоих режимах.
+        try { LG_ROOT.__LEGION__ = legionApi; } catch (e) {}
+        try { window.__LEGION__ = legionApi; } catch (e) {}
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

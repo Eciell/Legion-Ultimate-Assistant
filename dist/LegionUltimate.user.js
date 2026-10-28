@@ -3,10 +3,13 @@
 // @namespace    http://tampermonkey.net/
 // @version      11.5.0
 // @description  QoL-аддон для Легиона: Умный чат, Сканер аукциона, Разведка, Планировщик, Карманный город. Без авто-копания.
+// @connect      7tv.io
+// @connect      cdn.7tv.app
+// @connect      api.ivr.fi
 // @author       eciell
 // @match        https://play.multidonate.ru/*
 // @run-at       document-start
-// @grant        none
+// @grant        GM_xmlhttpRequest
 // @updateURL    https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js
 // @downloadURL  https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js
 // ==/UserScript==
@@ -858,7 +861,7 @@
         .fab-menu-item:hover { background: #caa55c; color: #1d1620; border-color: #caa55c; }
         .fab-menu-item.active { background: #4cc95a; color: #1d1620; border-color: #4cc95a; box-shadow: 0 0 15px rgba(76, 201, 90, 0.5); }
         .${DOM_IDS.chatBadge}, .chat-badge { position: absolute; top: -6px; right: -6px; background: #ff5a7a; color: #fff; border-radius: 50%; padding: 2px 7px; font-size: 12px; font-weight: 900; box-shadow: 0 2px 5px rgba(0,0,0,0.5); display: none; pointer-events: none; z-index: 2; }
-        .${DOM_IDS.chatWidget}, .chat-widget { position: fixed; bottom: 80px; right: 20px; width: 320px; height: 400px; background: #1d1620; border: 2px solid #caa55c; border-radius: 12px; display: flex; flex-direction: column; z-index: 10000; box-shadow: 0 10px 30px rgba(0,0,0,0.8); overflow: hidden; transition: transform 0.2s, opacity 0.2s; transform: translateY(20px); opacity: 0; pointer-events: none; }
+        .${DOM_IDS.chatWidget}, .chat-widget { position: fixed; bottom: 80px; right: 20px; width: 320px; height: 400px; min-width: 320px; min-height: 400px; max-width: 95vw; max-height: 95vh; resize: both; background: #1d1620; border: 2px solid #caa55c; border-radius: 12px; display: flex; flex-direction: column; z-index: 10000; box-shadow: 0 10px 30px rgba(0,0,0,0.8); overflow: hidden; transition: transform 0.2s, opacity 0.2s; transform: translateY(20px); opacity: 0; pointer-events: none; }
         .${DOM_IDS.chatWidget}.open, .chat-widget.open { transform: translateY(0); opacity: 1; pointer-events: auto; }
         .chat-top-bar, .chat-header { background: #2a2030; padding: 10px 12px; font-weight: bold; color: #ffcf6a; display: flex; justify-content: space-between; align-items: center; gap: 8px; overflow: hidden; border-bottom: 1px solid #444; cursor: move; user-select: none; touch-action: none; box-sizing: border-box; }
         .chat-main-tabs, .chat-tabs { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
@@ -1015,6 +1018,8 @@
         .priest-heal-btn { background: #28a745; color: #fff; border: none; border-radius: 3px; padding: 2px 6px; font-size: 11px; cursor: pointer; flex-shrink: 0; }
         .priest-heal-btn:hover:not(:disabled) { background: #34c759; }
         .priest-heal-btn:disabled { background: #555; color: #fff; cursor: not-allowed; opacity: 0.7; }
+        /* 7TV-смайлики: размер задаётся переменной --t7-h (S/M/L/XL из настроек чата) */
+        .t7-emote { height: var(--t7-h, 1.9em); vertical-align: middle; margin: 0 2px; }
     `;
 
     // ===== src/core/hooks.js =====
@@ -4728,6 +4733,250 @@ const Players = {
     // ============================================================
     // 7. МОДУЛЬ: ЧАТ
     // ============================================================
+    // ============================================================
+    // 7TV: глобальные смайлики в чате
+    //
+    // Сайт отдаёт CSP `connect-src 'self'` и `img-src 'self' data: blob:`,
+    // поэтому:
+    //   • JSON эмоутов тянем через GM_xmlhttpRequest (обходит CSP);
+    //   • картинки грузим блобом и подставляем blob:-URL (разрешён img-src).
+    // UI стороннего аддона не копируем — только рендер смайликов.
+    // ============================================================
+    const SevenTV = {
+        API_URL: 'https://7tv.io/v3/emote-sets/global',
+        IVR_URL: 'https://api.ivr.fi/v2/twitch/user?login=',
+        CHANNEL_API_URL: 'https://7tv.io/v3/users/twitch/',
+        DEFAULT_CHANNEL: 'zakvielchannel',
+        CHANNEL_KEY: 'LEGION_7TV_CHANNEL',
+        channel: 'zakvielchannel',   // текущий канал (переопределяется из localStorage)
+        _reloadQueued: false,
+        _cacheEpoch: 0,
+
+        // Размеры смайлов: применяются через CSS-переменную --t7-h.
+        SIZES: {
+            s: { h: '1.3em', label: 'S' },
+            m: { h: '1.9em', label: 'M' },
+            l: { h: '2.6em', label: 'L' },
+            x: { h: '3.4em', label: 'XL' }
+        },
+        size: 'm',
+        SIZE_KEY: 'LEGION_7TV_SIZE',
+
+        applySize() {
+            const conf = this.SIZES[this.size] || this.SIZES.m;
+            const docs = [document];
+            // Виджет может быть вынесен в PiP-окно — переменную нужно задать и там.
+            try {
+                if (typeof Chat !== 'undefined' && Chat._popoutWin && Chat._popoutWin.document) {
+                    docs.push(Chat._popoutWin.document);
+                }
+            } catch (e) {}
+            docs.forEach(doc => {
+                try {
+                    if (doc && doc.documentElement) {
+                        doc.documentElement.style.setProperty('--t7-h', conf.h);
+                    }
+                } catch (e) {}
+            });
+        },
+
+        loadSize() {
+            try {
+                const saved = localStorage.getItem(this.SIZE_KEY);
+                if (saved && this.SIZES[saved]) this.size = saved;
+            } catch (e) {}
+            this.applySize();
+        },
+        // 1×1 прозрачный GIF: заглушка до подгрузки блоба (data: разрешён CSP).
+        PLACEHOLDER: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+        emotes: new Map(),      // name -> { url }
+        blobUrls: new Map(),    // name -> blob: URL
+        pending: new Map(),     // name -> Promise<string|null>
+        loaded: false,
+        loading: false,
+
+        requestJson(url) {
+            return new Promise((resolve, reject) => {
+                if (typeof GM_xmlhttpRequest === 'function') {
+                    GM_xmlhttpRequest({
+                        method: 'GET', url, timeout: 15000,
+                        onload: (r) => {
+                            if (r.status < 200 || r.status >= 300) return reject(new Error('HTTP ' + r.status));
+                            try { resolve(JSON.parse(r.responseText)); } catch (e) { reject(e); }
+                        },
+                        onerror: () => reject(new Error('network error')),
+                        ontimeout: () => reject(new Error('timeout'))
+                    });
+                    return;
+                }
+                // Без @grant запрос, скорее всего, заблокирует CSP сайта;
+                // оставляем fetch как совместимый фолбэк для других менеджеров.
+                fetch(url).then(r => r.json()).then(resolve, reject);
+            });
+        },
+
+        requestBlob(url) {
+            return new Promise((resolve, reject) => {
+                if (typeof GM_xmlhttpRequest === 'function') {
+                    GM_xmlhttpRequest({
+                        method: 'GET', url, responseType: 'blob', timeout: 15000,
+                        onload: (r) => {
+                            if (r.status < 200 || r.status >= 300 || !r.response) {
+                                return reject(new Error('HTTP ' + r.status));
+                            }
+                            resolve(r.response);
+                        },
+                        onerror: () => reject(new Error('network error')),
+                        ontimeout: () => reject(new Error('timeout'))
+                    });
+                    return;
+                }
+                fetch(url, { mode: 'cors' })
+                    .then(r => r.ok ? r.blob() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(resolve, reject);
+            });
+        },
+
+        async load(force = false) {
+            if (this.loading) {
+                // Перезагрузка во время текущей загрузки — выполним после неё.
+                if (force) this._reloadQueued = true;
+                return;
+            }
+            if (this.loaded && !force) return;
+
+            this.loading = true;
+            this._resetCaches();
+
+            let count = 0;
+            try {
+                // 1. Глобальный набор 7TV.
+                const dataGlobal = await this.requestJson(this.API_URL);
+                count += this._addEmotes(dataGlobal && dataGlobal.emotes);
+
+                // 2. Набор канала: ник → Twitch ID (api.ivr.fi) → emote_set (7tv.io).
+                let saved = '';
+                try { saved = localStorage.getItem(this.CHANNEL_KEY) || ''; } catch (e) {}
+                this.channel = String(saved || this.channel || this.DEFAULT_CHANNEL).trim().toLowerCase();
+
+                if (this.channel) {
+                    try {
+                        const user = await this.requestJson(this.IVR_URL + encodeURIComponent(this.channel));
+                        const id = user && user[0] && user[0].id;
+                        if (id) {
+                            const dataChan = await this.requestJson(this.CHANNEL_API_URL + encodeURIComponent(id));
+                            const set = dataChan && dataChan.emote_set;
+                            count += this._addEmotes(set && set.emotes);
+                        }
+                    } catch (chanErr) {
+                        console.warn('[7TV] Не удалось загрузить канал', this.channel, chanErr);
+                    }
+                }
+
+                this.loaded = count > 0;
+                dbg(`[7TV] Загружено ${this.emotes.size} эмоутов (канал: ${this.channel}).`);
+            } catch (e) {
+                console.error('[7TV] Ошибка загрузки:', e);
+            } finally {
+                this.loading = false;
+                if (this.loaded) {
+                    // Смайлики пришли после первого рендера — обновим открытый чат.
+                    try {
+                        if (typeof Chat !== 'undefined' && Chat.widget) Chat.renderMessages();
+                    } catch (e) {}
+                }
+                if (this._reloadQueued) {
+                    this._reloadQueued = false;
+                    this.load(true);
+                }
+            }
+        },
+
+        // Сброс кэша эмоутов/картинок (смена канала или force-перезагрузка).
+        _resetCaches() {
+            this._cacheEpoch = (this._cacheEpoch || 0) + 1;
+            this.emotes.clear();
+            for (const url of this.blobUrls.values()) {
+                try { URL.revokeObjectURL(url); } catch (e) {}
+            }
+            this.blobUrls.clear();
+            this.pending.clear();
+        },
+
+        _addEmotes(emoteList) {
+            if (!Array.isArray(emoteList)) return 0;
+            let added = 0;
+            emoteList.forEach(e => {
+                const host = e && e.data && e.data.host;
+                if (!host || !host.url || !e.name || e.name === '__proto__') return;
+                const files = (host.files || []).filter(f => f && f.format === 'WEBP' && f.name);
+                const preferred = files.find(f => f.name === '2x.webp') || files[0];
+                this.emotes.set(e.name, { url: 'https:' + host.url + '/' + (preferred ? preferred.name : '2x.webp') });
+                added++;
+            });
+            return added;
+        },
+
+        replaceEmotes(rawText) {
+            if (!rawText) return '';
+            // replaceEmotes — единственная точка экранирования текста сообщения.
+            const text = String(rawText);
+            if (!this.emotes.size) return Utils.escapeHtml(text);
+
+            return text.split(/([^\p{L}\p{N}_]+)/u).map(part => {
+                if (!part) return '';
+                // Смайлом считается только целое слово; пунктуация/пробелы/эмодзи
+                // отделяются как разделители и экранируются как обычный текст.
+                if (!/^[\p{L}\p{N}_]+$/u.test(part) || !this.emotes.has(part)) return Utils.escapeHtml(part);
+                const name = Utils.escapeHtml(part);
+                return `<img class="t7-emote" data-t7="${name}" src="${this.PLACEHOLDER}" title="${name}" alt="${name}" loading="lazy">`;
+            }).join('');
+        },
+
+        // После вставки HTML: меняем заглушки на blob:-URL смайликов.
+        decorate(root) {
+            if (!root || typeof root.querySelectorAll !== 'function' || !this.emotes.size) return;
+            root.querySelectorAll('img.t7-emote[data-t7]').forEach(img => {
+                const name = img.getAttribute('data-t7');
+                if (!name) return;
+                const ready = this.blobUrls.get(name);
+                if (ready) { img.src = ready; return; }
+                if (img.getAttribute('data-t7-loading') === '1') return;
+                img.setAttribute('data-t7-loading', '1');
+                this.getBlobUrl(name).then(url => {
+                    img.removeAttribute('data-t7-loading');
+                    if (url) img.src = url;
+                    else if (img.parentNode) img.replaceWith((img.ownerDocument || document).createTextNode(name));
+                });
+            });
+        },
+
+        getBlobUrl(name) {
+            if (this.blobUrls.has(name)) return Promise.resolve(this.blobUrls.get(name));
+            if (this.pending.has(name)) return this.pending.get(name);
+            const emote = this.emotes.get(name);
+            if (!emote || !emote.url) return Promise.resolve(null);
+
+            const epoch = this._cacheEpoch;
+            const task = this.requestBlob(emote.url).then(blob => {
+                const url = URL.createObjectURL(blob);
+                // Пока грузили, канал/набор могли перезагрузить — старый блоб не кэшируем.
+                if (epoch !== this._cacheEpoch) {
+                    try { URL.revokeObjectURL(url); } catch (e) {}
+                    return null;
+                }
+                this.blobUrls.set(name, url);
+                return url;
+            }).catch(e => {
+                dbg('[7TV] Не удалось загрузить эмоут', name, e);
+                return null;
+            }).finally(() => this.pending.delete(name));
+
+            this.pending.set(name, task);
+            return task;
+        }
+    };
+
     const Chat = {
         widget: null,
         badge: null,
@@ -4816,6 +5065,8 @@ const Players = {
         _liveES: null,
         _livePollTimer: null,
         _liveRunning: false,
+        _liveConnecting: false,
+        _livePollDelay: 2500,
 
         getMineId() {
             return this.currentMineId 
@@ -5055,6 +5306,87 @@ const Players = {
             };
             handle.addEventListener('pointerup', stopDrag);
             handle.addEventListener('pointercancel', stopDrag);
+
+            // 7TV: размер смайлов + глобальные/канальные эмоуты.
+            SevenTV.loadSize();
+            SevenTV.load();
+
+            // Настройка Twitch-канала для эмоутов 7TV.
+            const btn7tv = document.getElementById('btn-7tv-settings');
+            if (btn7tv) {
+                btn7tv.addEventListener('click', () => this.open7tvSettings());
+            }
+        },
+
+        open7tvSettings() {
+            const modal = UI.showModal(`
+                <h2>🎭 Настройки 7TV <button class="custom-close" id="custom-close-btn">✖</button></h2>
+                <div style="padding: 10px;">
+                    <div style="font-size: 13px; color: #aaa; margin-bottom: 15px;">
+                        Введите Twitch-ник канала, эмоуты которого хотите видеть (например, zakvielchannel).
+                    </div>
+                    <input type="text" id="t7-channel-input" class="search-bar" style="width: 100%; margin-bottom: 15px;" value="${Utils.escapeHtml(SevenTV.channel)}" placeholder="Ник на Twitch">
+                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px; border-top:1px solid #333; padding-top:15px;">
+                        <span style="font-size:13px; color:#aaa;">Размер:</span>
+                        <div style="display:flex; gap:5px;">
+                            ${Object.entries(SevenTV.SIZES).map(([key, conf]) => `
+                                <button class="t7-size-btn" data-size="${key}" style="padding:5px 12px; border-radius:6px; border:1px solid ${SevenTV.size === key ? '#9146ff' : '#444'}; background:${SevenTV.size === key ? '#9146ff' : '#111'}; color:#fff; cursor:pointer; font-weight:bold;">
+                                    ${conf.label}
+                                </button>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <button id="t7-save-btn" style="width: 100%; padding: 10px; background: #caa55c; color: #1d1620; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">Сохранить и загрузить</button>
+                </div>
+            `, { compact: true });
+
+            const input = modal?.querySelector('#t7-channel-input');
+            const saveBtn = modal?.querySelector('#t7-save-btn');
+            if (!input || !saveBtn) return;
+
+            // Мгновенная смена размера смайлов + сохранение в localStorage.
+            modal.querySelectorAll('.t7-size-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    SevenTV.size = btn.dataset.size;
+                    try {
+                        localStorage.setItem(SevenTV.SIZE_KEY, SevenTV.size);
+                    } catch (e) {
+                        dbg('[7TV] Не удалось сохранить размер', e);
+                    }
+                    SevenTV.applySize();
+
+                    // Обновляем визуал кнопок
+                    modal.querySelectorAll('.t7-size-btn').forEach(b => {
+                        const isActive = b.dataset.size === SevenTV.size;
+                        b.style.border = isActive ? '1px solid #9146ff' : '1px solid #444';
+                        b.style.background = isActive ? '#9146ff' : '#111';
+                    });
+                });
+            });
+
+            saveBtn.addEventListener('click', async () => {
+                const nick = String(input.value || '').trim().toLowerCase();
+                const nextChannel = nick || SevenTV.DEFAULT_CHANNEL;
+
+                // Канал не изменился — просто закрываем окно, без запросов к API.
+                if (nextChannel === SevenTV.channel) {
+                    UI.closeModals();
+                    return;
+                }
+
+                // Канал изменился — сохраняем и принудительно перезагружаем набор.
+                try {
+                    localStorage.setItem(SevenTV.CHANNEL_KEY, nick);
+                } catch (e) {
+                    dbg('[7TV] Не удалось сохранить канал', e);
+                }
+                SevenTV.channel = nextChannel;
+                UI.closeModals();
+                UI.showToast('Загрузка эмоутов канала...');
+                await SevenTV.load(true); // Принудительная перезагрузка
+                this.renderMessages();    // Перерисовать чат (если открыт)
+                UI.showToast(`Эмоуты обновлены (${SevenTV.emotes.size} шт)`);
+            });
         },
 
         toggle() {
@@ -5153,6 +5485,7 @@ const Players = {
                     if (window.documentPictureInPicture.window) {
                         try { window.documentPictureInPicture.window.focus(); } catch (e) {}
                         this._popoutWin = window.documentPictureInPicture.window;
+                        SevenTV.applySize();
                         return;
                     }
                     try {
@@ -5250,6 +5583,9 @@ const Players = {
                 } catch (e) {
                     dbg('Error copying styles to popout window:', e);
                 }
+
+                // Размер смайлов 7TV задаётся CSS-переменной — переносим её в PiP.
+                SevenTV.applySize();
 
                 // 4. Запоминаем родной парент и позицию — вернуть нужно туда, а не в body.
                 this._origWidgetParent = this.widget.parentNode;
@@ -5458,10 +5794,9 @@ const Players = {
             // Обновляем UI
             if (!isHistory) {
                 this.renderMessages();
-                const box = this.widget?.querySelector('#chat-messages') || document.getElementById('chat-messages');
-                if (this.isOpen()) {
-                    if (box) box.scrollTop = box.scrollHeight;
-                } else if (!isMine && !isSelf) {
+                // Скролл вниз выполняет renderMessages() и только если пользователь
+                // уже был внизу — иначе чтение истории не прерывается.
+                if (!this.isOpen() && !isMine && !isSelf) {
                     this.unreadCount++;
                     this.updateBadge();
                 }
@@ -5560,6 +5895,15 @@ const Players = {
         renderMessages() {
             const box = this.widget?.querySelector('#chat-messages') || document.getElementById('chat-messages');
             if (!box) return;
+
+            // Запоминаем позицию ДО очистки: если пользователь читает историю,
+            // новый рендер не должен утаскивать его вниз.
+            const wasAtBottom = (box.scrollHeight - box.scrollTop - box.clientHeight) < 50;
+            const prevScrollTop = box.scrollTop;
+            const prevDmBox = box.querySelector('.chat-dm-messages');
+            const dmWasAtBottom = prevDmBox ? (prevDmBox.scrollHeight - prevDmBox.scrollTop - prevDmBox.clientHeight) < 50 : true;
+            const dmPrevScrollTop = prevDmBox ? prevDmBox.scrollTop : 0;
+
             box.innerHTML = '';
 
             // Вкладка «✉️ ЛС»: либо открытый диалог, либо список всех диалогов
@@ -5575,6 +5919,7 @@ const Players = {
 
                     // Контейнер для сообщений
                     const msgContainer = ownerDoc.createElement('div');
+                    msgContainer.className = 'chat-dm-messages';
                     msgContainer.style.cssText = 'display: flex; flex-direction: column; gap: 8px; padding: 10px; overflow-y: auto; flex: 1;';
                     box.appendChild(msgContainer);
 
@@ -5589,10 +5934,13 @@ const Players = {
                             const isMe = (m.from || '').toLowerCase() === myNick || m.from === 'Я';
                             const div = ownerDoc.createElement('div');
                             div.style.cssText = `align-self: ${isMe ? 'flex-end' : 'flex-start'}; max-width: 80%; background: ${isMe ? '#1d3827' : '#282030'}; border: 1px solid ${isMe ? '#2e5d3e' : '#4d3a5a'}; border-radius: 8px; padding: 6px 10px; color: #fff; word-break: break-word;`;
-                            div.innerHTML = `<div style="font-size:13px; line-height:1.4;">${Utils.escapeHtml(m.text)}</div><div style="font-size:10px; color:#aaa; text-align:right; margin-top:2px;">${Utils.escapeHtml(m.time || '')}</div>`;
+                            div.innerHTML = `<div style="font-size:13px; line-height:1.4;">${SevenTV.replaceEmotes(m.text)}</div><div style="font-size:10px; color:#aaa; text-align:right; margin-top:2px;">${Utils.escapeHtml(m.time || '')}</div>`;
                             msgContainer.appendChild(div);
                         });
-                        msgContainer.scrollTop = msgContainer.scrollHeight;
+                        SevenTV.decorate(msgContainer);
+                        // Вниз — только если пользователь и так был внизу.
+                        if (dmWasAtBottom) msgContainer.scrollTop = msgContainer.scrollHeight;
+                        else msgContainer.scrollTop = dmPrevScrollTop;
                     }
 
                     // Обработчик кнопки "Назад"
@@ -5666,11 +6014,16 @@ const Players = {
                     ? `<span style="background:#f7768e; color:#fff; font-size:10px; font-weight:bold; padding:1px 5px; border-radius:4px; margin-right:4px;">🔔 Упоминание</span>` 
                     : '';
 
-                let formattedText = Utils.escapeHtml(m.text);
+                let formattedText = (typeof SevenTV !== 'undefined' && SevenTV.replaceEmotes)
+                    ? SevenTV.replaceEmotes(m.text)
+                    : Utils.escapeHtml(m.text);
                 if (isMention && this.myNick) {
                     const escNick = Utils.escapeRegex(Utils.escapeHtml(this.myNick));
                     const reg = new RegExp(`(@?${escNick})`, 'gi');
-                    formattedText = formattedText.replace(reg, '<mark style="background:rgba(247,118,142,0.35);color:#ff757f;padding:1px 3px;border-radius:3px;">$1</mark>');
+                    // Подсвечиваем ник только в текстовых узлах, не задевая атрибуты img эмоутов.
+                    formattedText = formattedText.split(/(<[^>]*>)/).map(part =>
+                        part.startsWith('<') ? part : part.replace(reg, '<mark style="background:rgba(247,118,142,0.35);color:#ff757f;padding:1px 3px;border-radius:3px;">$1</mark>')
+                    ).join('');
                 }
 
                 const authorNick = m.author || '';
@@ -5716,11 +6069,17 @@ const Players = {
                 box.appendChild(div);
             });
 
+            // 7TV-смайлики: подгружаем blob:-картинки для вставленных img.t7-emote.
+            SevenTV.decorate(box);
+
             if (filtered.length === 0) {
                 box.innerHTML = `<div style="color:#888; text-align:center; padding:20px; font-style:italic;">(Здесь пока пусто...)</div>`;
             }
 
-            box.scrollTop = box.scrollHeight;
+            // Автоскролл только когда пользователь уже был внизу; иначе
+            // возвращаем прежнюю позицию, чтобы не мешать чтению истории.
+            if (wasAtBottom) box.scrollTop = box.scrollHeight;
+            else box.scrollTop = prevScrollTop;
         },
 
         async send() {
@@ -6007,8 +6366,20 @@ const Players = {
         },
 
         async startBackgroundLiveListener() {
-            if (this.disabled || this._liveRunning) return;
+            if (this.disabled || this._liveConnecting) return;
+
+            // Защита от дублирования: живой поток уже открыт или подключается.
+            if (this._liveES && (this._liveES.readyState === 0 || this._liveES.readyState === 1)) return;
+            // Уже идёт fetch-поллинг — второй цикл не запускаем.
+            if (this._liveRunning && !this._liveES && this._livePollTimer) return;
+
+            // Старое закрытое соединение закрываем перед созданием нового.
+            if (this._liveES) {
+                try { this._liveES.close(); } catch (e) {}
+                this._liveES = null;
+            }
             this._liveRunning = true;
+            this._liveConnecting = true;
 
             const sid = new URL(location.href).searchParams.get('sid');
             const livePath = '/api/live' + (sid ? `?sid=${encodeURIComponent(sid)}` : '');
@@ -6018,11 +6389,13 @@ const Players = {
 
             const startPollingFallback = () => {
                 if (!this._liveRunning || this._livePollTimer) return;
+                this._liveConnecting = false; // EventSource не создаётся — уходим в поллинг
                 dbg('Starting live fetch polling fallback...');
                 const poll = async () => {
                     if (!this._liveRunning) return;
                     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
                     const timeoutId = controller ? setTimeout(() => controller.abort(), 3000) : null;
+                    let hasPayload = false;
                     try {
                         const curSid = new URL(location.href).searchParams.get('sid');
                         // Поллинг идёт на тот же чистый /api/live, что и EventSource (без /c/<канал>/)
@@ -6038,6 +6411,7 @@ const Players = {
 
                         // Если пришел поток SSE строками "data: {...}"
                         if (!data && text && text.includes('data:')) {
+                            hasPayload = true;
                             const lines = text.split('\n');
                             for (const line of lines) {
                                 if (line.startsWith('data:')) {
@@ -6057,6 +6431,7 @@ const Players = {
                                 }
                             }
                         } else if (data) {
+                            hasPayload = true;
                             const pollLoc = this.resolveLiveChannel(data);
                             Utils.updateOnlinePlayers(data, pollLoc);
                             Utils.processIncomingDMs(data);
@@ -6074,10 +6449,14 @@ const Players = {
                     } catch (e) {
                         dbg('Live poll error / abort:', e);
                     } finally {
+                        // Бэкофф: пустые ответы не должны долбить /api/live каждые 2.5 с.
+                        this._livePollDelay = hasPayload
+                            ? 2500
+                            : Math.min(30000, Math.max(2500, (this._livePollDelay || 2500) * 2));
                         if (timeoutId) clearTimeout(timeoutId);
                     }
                     if (this._liveRunning) {
-                        this._livePollTimer = setTimeout(poll, 2500);
+                        this._livePollTimer = setTimeout(poll, this._livePollDelay);
                     }
                 };
                 poll();
@@ -6087,6 +6466,7 @@ const Players = {
                 if (typeof EventSource !== 'undefined') {
                     const es = new EventSource(url, { withCredentials: true, _customLive: true });
                     this._liveES = es;
+                    this._liveConnecting = false;
 
                     es.onopen = () => console.log('Live Connected!');
 
@@ -6147,12 +6527,15 @@ const Players = {
                 }
             } catch (e) {
                 dbg('Live EventSource init failed:', e);
+                this._liveConnecting = false;
                 startPollingFallback();
             }
         },
 
         stopBackgroundLiveListener() {
             this._liveRunning = false;
+            this._liveConnecting = false;
+            this._livePollDelay = 2500;
             if (this._liveES) {
                 try { this._liveES.close(); } catch(e) {}
                 this._liveES = null;
@@ -6164,8 +6547,13 @@ const Players = {
         },
 
         interceptEventSource() {
-            const OrigES = window.EventSource;
-            if (!OrigES) return;
+            if (this._esIntercepted) return;
+            // @grant переводит Tampermonkey в sandbox: window — это прокси,
+            // поэтому конструктор на странице патчим через unsafeWindow (G).
+            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
+            const OrigES = pageWin.EventSource || window.EventSource;
+            if (!OrigES || OrigES.__lgChatProxied) return;
+            this._esIntercepted = true;
             const self = this;
             class ESProxy extends OrigES {
                 constructor(...args) {
@@ -6218,12 +6606,18 @@ const Players = {
                     });
                 }
             }
-            window.EventSource = ESProxy;
+            try { ESProxy.__lgChatProxied = true; } catch (e) {}
+            try { pageWin.EventSource = ESProxy; } catch (e) {}
+            if (pageWin !== window) { try { window.EventSource = ESProxy; } catch (e) {} }
         },
 
         interceptWebSocket() {
-            const OrigWS = window.WebSocket;
-            if (!OrigWS) return;
+            if (this._wsIntercepted) return;
+            // См. interceptEventSource: патчим конструктор страницы (unsafeWindow).
+            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
+            const OrigWS = pageWin.WebSocket || window.WebSocket;
+            if (!OrigWS || OrigWS.__lgChatProxied) return;
+            this._wsIntercepted = true;
             const self = this;
             class WSProxy extends OrigWS {
                 constructor(...args) {
@@ -6294,13 +6688,20 @@ const Players = {
                     });
                 }
             }
-            window.WebSocket = WSProxy;
+            try { WSProxy.__lgChatProxied = true; } catch (e) {}
+            try { pageWin.WebSocket = WSProxy; } catch (e) {}
+            if (pageWin !== window) { try { window.WebSocket = WSProxy; } catch (e) {} }
         },
 
         interceptFetch() {
-            const origFetch = window.fetch;
+            if (this._fetchIntercepted) return;
+            // См. interceptEventSource: в sandbox патчим fetch страницы (unsafeWindow).
+            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
+            const origFetch = pageWin.fetch || window.fetch;
+            if (!origFetch || origFetch.__lgChatProxied) return;
+            this._fetchIntercepted = true;
             const self = this;
-            window.fetch = async function(...args) {
+            const wrappedFetch = async function(...args) {
                 const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
                 const res = await origFetch.apply(this, args);
 
@@ -6425,8 +6826,14 @@ const Players = {
 
                 return res;
             };
+            try { wrappedFetch.__lgChatProxied = true; } catch (e) {}
+            try { pageWin.fetch = wrappedFetch; } catch (e) {}
+            if (pageWin !== window) { try { window.fetch = wrappedFetch; } catch (e) {} }
         }
     };
+
+    // Экспорт 7TV для отладки: window.__LEGION__.Chat.SevenTV
+    Chat.SevenTV = SevenTV;
 
     // ===== src/main.js =====
     // ============================================================
@@ -6442,8 +6849,11 @@ const Players = {
     // ============================================================
 
     // 5.3. Защита от повторного запуска (single-instance guard)
-    if (window.__LEGION__?._booted) {
-        try { window.__LEGION__.shutdown?.(); } catch (e) {}
+    // Page-context ссылка: при @grant window — песочница, а консоль и другие
+    // скрипты видят только unsafeWindow.
+    const LG_ROOT = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
+    if (LG_ROOT.__LEGION__?._booted) {
+        try { LG_ROOT.__LEGION__.shutdown?.(); } catch (e) {}
     }
 
     // ============================================================
@@ -6469,6 +6879,7 @@ const Players = {
                 <button class="fab-menu-item" id="${DOM_IDS.btnPocketCity}">🏰 Карманный Город</button>
                 <button class="fab-menu-item" id="${DOM_IDS.btnProfile}">👤 Профиль</button>
                 <button class="fab-menu-item" id="btn-priest-panel">✨ Панель Жреца</button>
+                <button class="fab-menu-item" id="btn-7tv-settings">🎭 Канал 7TV</button>
                 <label class="fab-menu-item" style="cursor:pointer; display:flex; align-items:center; justify-content:space-between; user-select:none; font-size:12px; gap:8px;">
                     <span>🚫 Отключить перехват чата</span>
                     <input type="checkbox" id="${DOM_IDS.chkChatDisable}" style="width:16px; height:16px; cursor:pointer; accent-color:#ff5a7a;">
@@ -6534,7 +6945,7 @@ const Players = {
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape') UI.closeModals(); });
 
         // 5.2. Экспорт API для отладки и single-instance guard
-        window.__LEGION__ = {
+        const legionApi = {
             Utils,
             UI,
             Miner,
@@ -6568,9 +6979,15 @@ const Players = {
                 }
                 Chat.stopBackgroundLiveListener();
                 document.querySelectorAll('.' + DOM_IDS.customModal + ', .sim-card, .' + DOM_IDS.chatWidget + ', .float-btns, .' + DOM_IDS.fabWrap + ', #' + DOM_IDS.playerHud + ', .' + DOM_IDS.hudLog + ', #' + DOM_IDS.hudLog + ', .hud-log, .custom-modal, .chat-widget, .legion-fab-wrap, #legion-player-hud').forEach(el => el.remove());
-                window.__LEGION__._booted = false;
+                legionApi._booted = false;
             }
         };
+
+        // Публикуем API в page-context: при @grant песочница скрывает window от
+        // консоли и других скриптов, unsafeWindow — нет. Дублируем в window, чтобы
+        // внутренние ссылки (hooks.js) работали в обоих режимах.
+        try { LG_ROOT.__LEGION__ = legionApi; } catch (e) {}
+        try { window.__LEGION__ = legionApi; } catch (e) {}
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
