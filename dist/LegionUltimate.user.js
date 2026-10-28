@@ -4869,10 +4869,10 @@ const Players = {
             });
         },
 
-        saveToStorage(author, text, role, isSystem, channel = null, k = null) {
+        saveToStorage(author, text, role, isSystem, channel = null, k = null, aw = null) {
             try {
                 const history = this.loadFromStorage();
-                history.push({ author, text, role, isSystem, channel, k, ts: Date.now() });
+                history.push({ author, text, role, isSystem, channel, k, aw, ts: Date.now() });
                 const trimmed = history.length > 200 ? history.slice(-200) : history;
                 localStorage.setItem(this.STORAGE_KEY, JSON.stringify(trimmed));
             } catch (e) { /* quota */ }
@@ -4947,6 +4947,7 @@ const Players = {
                     if (id && !pendingMsg.id) pendingMsg.id = id;
                     if (seq && !pendingMsg.seq) pendingMsg.seq = seq;
                     if (role && !pendingMsg.role) pendingMsg.role = role;
+                    if (aw && !pendingMsg.aw) pendingMsg.aw = aw;
                     if (channel && !pendingMsg.channel) pendingMsg.channel = channel;
                     this.renderMessages();
                     return;
@@ -4962,7 +4963,7 @@ const Players = {
             this.messages.push(msgObj);
 
             // Сохраняем в кэш только живые сообщения
-            if (!isHistory) this.saveToStorage(author, text, role, isSystem, channel, k);
+            if (!isHistory) this.saveToStorage(author, text, role, isSystem, channel, k, aw);
 
             // Обновляем UI
             if (!isHistory) {
@@ -5183,12 +5184,21 @@ const Players = {
                 }
 
                 const authorNick = m.author || '';
+
+                // Бейдж титула (aw) перед ником автора
+                let awardBadge = '';
+                const aw = m.aw;
+                if (Array.isArray(aw) && aw.length > 0 && aw[0] && typeof aw[0] === 'object') {
+                    const award = aw[0];
+                    awardBadge = `<span class="chat-award-badge" title="${Utils.escapeHtml(award.d || '')}" style="display:inline-block; background:rgba(202,165,92,0.15); border:1px solid #caa55c; color:#ffcf6a; font-size:10px; font-weight:bold; padding:1px 6px; border-radius:10px; margin-right:6px; vertical-align:middle;">${Utils.escapeHtml(award.i || '')} ${Utils.escapeHtml(award.n || '')}</span>`;
+                }
+
                 const authorHtml = `<span class="chat-author nick-clickable" data-nick="${Utils.escapeHtml(authorNick)}" title="Кликните, чтобы упомянуть" style="color: ${meta.color || '#ffcf6a'} !important; cursor: pointer;">${Utils.escapeHtml(authorNick)}</span>`;
 
                 if (m.k === 'dm') {
                     div.innerHTML = `
                         <span style="background:#007bff; color:#fff; font-size:10px; font-weight:bold; padding:1px 5px; border-radius:4px; margin-right:4px;">✉️ ЛС для ${Utils.escapeHtml(m.to || '')}</span>
-                        ${authorHtml}
+                        ${awardBadge}${authorHtml}
                         <span class="chat-text" style="color: #6edff6 !important;">${formattedText}</span>
                     `;
                 } else if (m.isSystem) {
@@ -5199,7 +5209,7 @@ const Players = {
                     `;
                 } else {
                     div.innerHTML = `
-                        ${streamerBadge}${mentionBadge}<span class="chat-role-icon">${meta.icon}</span>
+                        ${streamerBadge}${mentionBadge}${awardBadge}<span class="chat-role-icon">${meta.icon}</span>
                         ${authorHtml}
                         <span class="chat-envelope">✉️</span>
                         <span class="chat-text" style="color: #f7eadf !important;">${formattedText}</span>
@@ -5427,7 +5437,7 @@ const Players = {
             if (cached.length > 0) {
                 cached.forEach(m => {
                     if (!this.messages.some(cur => (cur.id && cur.id === m.id) || (cur.author === m.author && cur.text === m.text && cur.channel === m.channel))) {
-                        this.messages.push({ author: m.author, text: m.text, role: m.role, isSystem: m.isSystem, channel: m.channel, k: m.k, ts: m.ts });
+                        this.messages.push({ author: m.author, text: m.text, role: m.role, isSystem: m.isSystem, channel: m.channel, k: m.k, aw: m.aw, ts: m.ts });
                     }
                 });
             }
@@ -5451,12 +5461,16 @@ const Players = {
                         if (!parsed.text) return;
                         const ch = parsed.channel || 'city';
                         // Не дублируем то, что уже есть в this.messages: по id ИЛИ по автору+тексту
-                        const alreadyExists = this.messages.some(cur =>
+                        const existing = this.messages.find(cur =>
                             (parsed.id && cur.id && cur.id === parsed.id) ||
                             (!cur._pending && cur.author === parsed.author && cur.text === parsed.text &&
                                 (cur.channel || 'city') === ch)
                         );
-                        if (alreadyExists) return;
+                        if (existing) {
+                            // Кэш мог быть сохранён без титула — дополняем его из истории сервера
+                            if (parsed.aw && !existing.aw) existing.aw = parsed.aw;
+                            return;
+                        }
                         this.handleIncoming(parsed.author, parsed.text, false, true, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to);
                     });
                 }
