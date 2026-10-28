@@ -96,25 +96,6 @@
                 || 'home';
         },
 
-        async getCurrentSid() {
-            // 1. Сначала пробуем взять sid из URL
-            try {
-                const urlSid = new URL(location.href).searchParams.get('sid');
-                if (urlSid) return urlSid;
-            } catch (e) {}
-
-            // 2. Если в URL пусто (игрок в городе), пробуем получить sid через enter
-            const mineId = this.getMineId() || 'home';
-            try {
-                const res = await Utils.fetchApi(`/api/mine/enter?c=${encodeURIComponent(mineId)}`, {});
-                const data = res?.body || res;
-                return data?.sid || res?.sid || null;
-            } catch (e) {
-                dbg('Не удалось получить sid шахты', e);
-            }
-            return null;
-        },
-
         async syncMe() {
             try {
                 const res = await Utils.fetchApi('/api/me');
@@ -1587,25 +1568,12 @@
                     return res;
                 }
 
-                // 0. Перехват игроков онлайн и входящих ЛС (работает всегда)
-                if (url.includes('/api/city/') || url.includes('/api/mine/') || url.includes('/api/live')) {
+                // 0. Перехват живого потока, игроков онлайн и входящих ЛС (работает всегда)
+                const isLive = url.includes('/api/live');
+                if (url.includes('/api/city/') || url.includes('/api/mine/') || isLive) {
                     res.clone().json().then(data => {
                         if (data) {
-                            let loc = 'city';
-                            if (url.includes('/api/mine/')) {
-                                loc = 'mine';
-                            } else if (url.includes('/api/city/')) {
-                                loc = 'city';
-                            } else if (url.includes('/api/live')) {
-                                const d = data.body || data.data || data;
-                                if (d && (d.town || d.chatRoom === 'city')) {
-                                    loc = 'city';
-                                } else if (d && (d.chatRoom === 'mine' || (Array.isArray(d.m) && d.m.length > 0 && !d.town))) {
-                                    loc = 'mine';
-                                } else {
-                                    loc = 'city';
-                                }
-                            }
+                            const loc = url.includes('/api/mine/') ? 'mine' : (isLive ? self.resolveLiveChannel(data) : 'city');
 
                             // Задача 2 & Задача 4: общее количество и топ-игроки шахты из /api/mine/state
                             if (url.includes('/api/mine/state')) {
@@ -1633,6 +1601,18 @@
 
                             Utils.updateOnlinePlayers(data, loc);
                             Utils.processIncomingDMs(data);
+
+                            // Чат живого потока разбираем только при включённом перехвате.
+                            if (isLive && !self.disabled) {
+                                if (data.c) self.currentMineId = data.c;
+                                const chats = Utils.extractChatDeep(data);
+                                chats.forEach(m => {
+                                    const parsed = Utils.extractChatFields(m);
+                                    if (parsed.text) {
+                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, loc, parsed.k, parsed.to);
+                                    }
+                                });
+                            }
                         }
                     }).catch(() => {});
                 }
@@ -1666,25 +1646,6 @@
                     // Закрытый виджет не помеха: сообщения нужны для счётчика непрочитанных.
                     if (self.disabled) {
                         return res;
-                    }
-
-                    const isLive = url.includes('/api/live');
-
-                    // 3. /api/live (Long-Polling / Fetch) — канал определяем по данным
-                    if (isLive) {
-                        res.clone().json().then(data => {
-                            if (!data) return;
-                            if (data.c) self.currentMineId = data.c;
-                            const chats = Utils.extractChatDeep(data);
-                            if (chats.length > 0) {
-                                chats.forEach(m => {
-                                    const parsed = Utils.extractChatFields(m);
-                                    if (parsed.text) {
-                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, self.resolveLiveChannel(data), parsed.k, parsed.to);
-                                    }
-                                });
-                            }
-                        }).catch(() => {});
                     }
 
                     // 4. Состояние шахты и вход в шахту (сообщения чата шахты в data.chat.chat или data.m)
