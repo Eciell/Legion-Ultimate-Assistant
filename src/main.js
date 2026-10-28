@@ -7,7 +7,7 @@
     //   core/styles.js -> STYLES
     //   core/hooks.js  -> G (перехватчики LGCity / LGAuction / LGQuest / LGMine)
     //   core/ui.js     -> UI
-    //   modules/*      -> BuildSim, HeroPlanner, Auction, Players, Miner, Chat
+    //   modules/*      -> BuildSim, HeroPlanner, Auction, Players, PriestAssistant, Miner, Chat
     // ============================================================
 
     // 5.3. Защита от повторного запуска (single-instance guard)
@@ -86,6 +86,7 @@
         Miner.init();
         BuildSim.init();        // без кнопки — регистрирует только глобальный клик для .sim-card
         HeroPlanner.init();     // кнопка FAB ведёт сюда
+        PriestAssistant.init(); // HUD Жреца в Походе (window.__lgQuestContext)
         Auction.init();
         Players.init();
         Chat.init();
@@ -109,11 +110,13 @@
             HeroPlanner,
             Auction,
             Players,
+            PriestAssistant,
             Chat,
             DOM_IDS,
             RAND_ID,
             _booted: true,
             shutdown: () => {
+                PriestAssistant.destroy();
                 if (Players._badgeTimer) {
                     clearInterval(Players._badgeTimer);
                     Players._badgeTimer = null;

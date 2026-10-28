@@ -55,7 +55,8 @@ const SHARED_MODULES = [
     'modules/build-sim.js',
     'modules/hero-planner.js',
     'modules/auction.js',
-    'modules/players.js'
+    'modules/players.js',
+    'modules/priest-assistant.js'
 ];
 
 /**
