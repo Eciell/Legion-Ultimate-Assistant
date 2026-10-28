@@ -184,59 +184,33 @@
                     const isExpected = this.strategyMode === 'expected';
                     const isExpanded = this.ENCH.max;
 
-                    // Массивы для расчета
-                    let probs = [], costs = [];
                     let starsUsed = 0, spheresUsed = 0;
 
+                    let rows = '';
+                    let cumulativeIdeal = 0;
+                    let cumulativeStrat = 0;
                     for (let lv = 1; lv <= isExpanded; lv++) {
                         let chance = this.enchantChance(lv);
                         let cost = this.enchantCost(item.v, lv);
+                        const isCur = lv === curEn;
+
+                        // Сохраняем идеальную сумму (без ресурсов)
+                        cumulativeIdeal += cost;
 
                         const useStar = isExpected && this.allocatedStars[lv];
                         const useSphere = isExpected && this.allocatedSpheres[lv];
 
+                        // Применяем ресурсы
                         if (useStar) { chance += 25; cost += this.COST_STAR; starsUsed++; }
                         if (useSphere) { cost += this.COST_SPHERE; spheresUsed++; }
 
-                        probs[lv] = Math.min(100, chance) / 100;
-                        costs[lv] = cost;
-                    }
+                        // Сумма с учетом выбранных стратегий
+                        cumulativeStrat += cost;
 
-                    // Расчет Expected Cost через DP
-                    // V[i] = ожидаемая стоимость дойти до уровня i
-                    let V = new Array(isExpanded + 1).fill(0);
-                    for (let i = 1; i <= isExpanded; i++) {
-                        const p = probs[i];
-                        const c = costs[i];
-                        if (p === 0) { V[i] = Infinity; continue; }
-
-                        const useSphere = isExpected && this.allocatedSpheres[i];
-                        if (useSphere) {
-                            // При сфере: провал откатывает на 1 шаг, но предыдущие уровни уже пройдены.
-                            // Формула: V[i] = V[i-1] + c/p.
-                            V[i] = V[i-1] + (c / p);
-                        } else {
-                            // Без сферы: провал ломает предмет (откат на 0).
-                            // Формула: V[i] = V[i-1] + (c + (1-p)*V[i-1]) / p
-                            V[i] = V[i-1] + (c + (1 - p) * V[i-1]) / p;
-                        }
-                    }
-
-                    let rows = '';
-                    let cumulativeIdeal = 0;
-                    for (let lv = 1; lv <= isExpanded; lv++) {
-
-                        const cost = costs[lv];
-                        const chance = Math.round(probs[lv] * 100);
-                        const isCur = lv === curEn;
-                        cumulativeIdeal += this.enchantCost(item.v, lv);
-
-                        let totalCostStr = '';
-                        if (isExpected) {
-                            totalCostStr = V[lv] === Infinity ? '<span style="color:#ff5a7a;">∞</span>' : Utils.formatMoney(Math.round(V[lv]));
-                        } else {
-                            totalCostStr = Utils.formatMoney(cumulativeIdeal);
-                        }
+                        // Выбираем, какую сумму показывать
+                        const totalCostStr = isExpected
+                            ? Utils.formatMoney(cumulativeStrat)
+                            : Utils.formatMoney(cumulativeIdeal);
 
                         const statsLine = Object.entries(baseStats).map(([k, base]) => {
                             const final = this.enchantStat(base, lv);
@@ -256,7 +230,7 @@
 
                         rows += `<tr style="${isCur ? 'background:rgba(202,165,92,0.12);' : ''}">
                             <td><b>+${lv}</b>${isCur ? ' <small style="color:#ffcf6a;">(текущая)</small>' : ''}</td>
-                            <td>${chance}%</td>
+                            <td>${Math.min(100, chance)}%</td>
                             <td>${Utils.formatMoney(cost)}</td>
                             ${stratCells}
                             <td style="color:#ffcf6a; font-weight:bold;">${totalCostStr}</td>
@@ -277,14 +251,15 @@
                                 <th>Шанс</th>
                                 <th>Стоимость</th>
                                 ${stratHeaders}
-                                <th>${isExpected ? 'Ожидаемая стоимость' : 'Суммарно до +N'}</th>
+                                <th>${isExpected ? 'Суммарно (с ресурсами)' : 'Суммарно до +N'}</th>
                                 <th>Статы после</th>
                             </tr></thead>
                             <tbody>${rows}</tbody>
                         </table>
                         ${isExpected
-                            ? `<div style="margin-top:10px; font-size:11px; color:#ff5a7a; line-height:1.5;">
-                            ⚠️ Внимание! Расчет «Без сферы» учитывает, что при провале предмет ломается (возврат на 0). Если вы не готовы потерять вещь, используйте сферы.
+                            ? `<div style="margin-top:10px; font-size:11px; color:#888; line-height:1.5;">
+                            ⭐ Звезда: +25% к шансу, +300 к цене. 🌐 Сфера: защита от поломки, +900 к цене.<br>
+                            «Суммарно» = стоимость всех попыток с +1 до +N с учетом выбранных вами ресурсов.
                         </div>`
                             : `<div style="margin-top:10px; font-size:11px; color:#888; line-height:1.5;">
                             Стоимость = <code>max(10, round(v × price% / 100))</code>. Округление статов — <code>Math.round</code> (подтверждено игрой).<br>
