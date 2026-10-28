@@ -30,6 +30,21 @@
         },
         isSkipFx(key) { return SKIP_FX_PREFIXES.some(p => key.startsWith(p)); },
 
+        // Текст навыка с подстановкой значений из node.fx (там прибавка за 1 ранг).
+        // Для неизученного навыка (rank 0) показываем значения 1-го ранга.
+        formatNodeText(node, rank) {
+            if (!node.text) return '';
+            const r = Math.max(1, rank); // Если ранг 0, показываем значение для 1-го ранга
+            return node.text.replace(/\{(\w+)\}/g, (match, key) => {
+                if (node.fx && node.fx[key] !== undefined) {
+                    const val = node.fx[key] * r;
+                    // Красивое форматирование: 1.2 -> "1.2", 3.0 -> "3"
+                    return Number.isInteger(val) ? val.toString() : val.toFixed(1).replace('.0', '');
+                }
+                return match; // Если ключа нет в fx, оставляем как есть (или можно '?')
+            });
+        },
+
         init() {
             // Кнопка теперь принадлежит HeroPlanner — см. src/modules/hero-planner.js.
             // BuildSim остаётся как модуль и открывается из таба «Билды».
@@ -315,7 +330,7 @@
             card.innerHTML = `
                 <div class="sim-card-close">✖</div>
                 <h4>${node.name} <span>${rank}/${node.max}</span></h4>
-                <div class="desc">${(node.text || '').replace(/\{\w+\}/g, '...')}</div>
+                <div class="desc">${this.formatNodeText(node, rank)}</div>
                 ${reqText ? `<div class="req">${reqText}</div>` : ''}
                 <div class="controls">
                     <button data-action="minus" ${rank === 0 ? 'disabled' : ''}>- Убрать</button>
