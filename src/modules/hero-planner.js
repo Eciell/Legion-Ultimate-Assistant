@@ -14,6 +14,17 @@
             slots: ['weapon', 'shield', 'armor', 'helmet', 'trinket']
         },
 
+        // ── Режим «С учётом шансов» (стратегии) ──────────────────
+        strategyMode: 'ideal', // 'ideal' | 'expected'
+        userStars: 0,
+        userSpheres: 0,
+        allocatedStars: {},   // { lv: true }
+        allocatedSpheres: {}, // { lv: true }
+
+        // Стоимость ресурсов (из 05_Mechanics.md)
+        COST_STAR: 300,
+        COST_SPHERE: 900,
+
         // Округление подтверждено живой игрой: и статы, и цена считаются через
         // Math.round. Все вызовы идут сюда — если поведение изменится, правим здесь.
         enchantStat(base, en) {
@@ -81,6 +92,22 @@
                         <div id="hp-buildsim-container" style="display:flex; flex-direction:column; flex:1; min-height:0; overflow:auto; padding-bottom:20px;"></div>
                     </div>
                     <div class="tab-content" id="tab-hero-ench" style="flex-direction:column; gap:10px;">
+                        <!-- Переключатель режимов (Стилизованный) -->
+                        <div style="display:flex; background:#1e1724; border:1px solid #3d2f44; border-radius:8px; padding:4px; margin-bottom:10px;">
+                            <button class="hp-mode-btn ${this.strategyMode === 'ideal' ? 'active' : ''}" data-mode="ideal" style="flex:1; padding:8px; border:none; border-radius:6px; font-weight:bold; cursor:pointer; transition:all 0.2s; background:${this.strategyMode === 'ideal' ? '#caa55c' : 'transparent'}; color:${this.strategyMode === 'ideal' ? '#1d1620' : '#aaa'};">📊 Идеально</button>
+                            <button class="hp-mode-btn ${this.strategyMode === 'expected' ? 'active' : ''}" data-mode="expected" style="flex:1; padding:8px; border:none; border-radius:6px; font-weight:bold; cursor:pointer; transition:all 0.2s; background:${this.strategyMode === 'expected' ? '#caa55c' : 'transparent'}; color:${this.strategyMode === 'expected' ? '#1d1620' : '#aaa'};">🧠 С учётом шансов</button>
+                        </div>
+
+                        <!-- Панель ресурсов (скрыта в режиме ideal) -->
+                        <div id="hp-resources-panel" style="display:${this.strategyMode === 'expected' ? 'flex' : 'none'}; gap:15px; align-items:center; justify-content:center; margin-bottom:10px; background:#1e1724; border:1px solid #3d2f44; border-radius:6px; padding:8px 12px;">
+                            <label style="display:flex; align-items:center; gap:8px; color:#ffcf6a; font-weight:bold; font-size:14px;">
+                                ⭐ Звёзды: <input type="number" id="hp-input-stars" min="0" max="15" value="${this.userStars}" style="width:45px; background:#111; border:1px solid #555; color:#fff; padding:4px; border-radius:4px; text-align:center; font-weight:bold;">
+                            </label>
+                            <label style="display:flex; align-items:center; gap:8px; color:#ffcf6a; font-weight:bold; font-size:14px;">
+                                🌐 Сферы: <input type="number" id="hp-input-spheres" min="0" max="15" value="${this.userSpheres}" style="width:45px; background:#111; border:1px solid #555; color:#fff; padding:4px; border-radius:4px; text-align:center; font-weight:bold;">
+                            </label>
+                        </div>
+
                         <!-- Суб-табы локаций -->
                         <div style="display:flex; gap:6px; border-bottom:1px solid #44374a; padding-bottom:8px;">
                             <button class="hp-loc-btn active" data-loc="equipped" style="background:#caa55c; color:#1d1620; border:none; padding:6px 12px; border-radius:4px; font-weight:bold; cursor:pointer;">🛡️ Надето</button>
@@ -144,7 +171,6 @@
                     // ПРИОРИТЕТ: stats0 (точные базы из игры). Если нет — вычисляем обратным вычетом.
                     let baseStats = {};
                     const hasStats0 = item.stats0 && Object.keys(item.stats0).length > 0;
-
                     if (hasStats0) {
                         baseStats = item.stats0;
                     } else {
@@ -155,62 +181,144 @@
                         }
                     }
 
+                    const isExpected = this.strategyMode === 'expected';
+                    const isExpanded = this.ENCH.max;
+
+                    // Массивы для расчета
+                    let probs = [], costs = [];
+                    let starsUsed = 0, spheresUsed = 0;
+
+                    for (let lv = 1; lv <= isExpanded; lv++) {
+                        let chance = this.enchantChance(lv);
+                        let cost = this.enchantCost(item.v, lv);
+
+                        const useStar = isExpected && this.allocatedStars[lv];
+                        const useSphere = isExpected && this.allocatedSpheres[lv];
+
+                        if (useStar) { chance += 25; cost += this.COST_STAR; starsUsed++; }
+                        if (useSphere) { cost += this.COST_SPHERE; spheresUsed++; }
+
+                        probs[lv] = Math.min(100, chance) / 100;
+                        costs[lv] = cost;
+                    }
+
+                    // Расчет Expected Cost через DP
+                    // V[i] = ожидаемая стоимость дойти до уровня i
+                    let V = new Array(isExpanded + 1).fill(0);
+                    for (let i = 1; i <= isExpanded; i++) {
+                        const p = probs[i];
+                        const c = costs[i];
+                        if (p === 0) { V[i] = Infinity; continue; }
+
+                        const useSphere = isExpected && this.allocatedSpheres[i];
+                        if (useSphere) {
+                            // При сфере: провал откатывает на 1 шаг, но предыдущие уровни уже пройдены.
+                            // Формула: V[i] = V[i-1] + c/p.
+                            V[i] = V[i-1] + (c / p);
+                        } else {
+                            // Без сферы: провал ломает предмет (откат на 0).
+                            // Формула: V[i] = V[i-1] + (c + (1-p)*V[i-1]) / p
+                            V[i] = V[i-1] + (c + (1 - p) * V[i-1]) / p;
+                        }
+                    }
+
                     let rows = '';
-                    let cumulativeCost = 0; // Сумма цен всех уровней до текущего
-                    for (let lv = 1; lv <= this.ENCH.max; lv++) {
-                        const cost = this.enchantCost(item.v, lv);
-                        const chance = this.enchantChance(lv);
+                    let cumulativeIdeal = 0;
+                    for (let lv = 1; lv <= isExpanded; lv++) {
+
+                        const cost = costs[lv];
+                        const chance = Math.round(probs[lv] * 100);
                         const isCur = lv === curEn;
+                        cumulativeIdeal += this.enchantCost(item.v, lv);
 
-                        // Просто суммируем базовую цену попытки, без учета шансов
-                        cumulativeCost += cost;
-                        const totalCostStr = Utils.formatMoney(cumulativeCost);
+                        let totalCostStr = '';
+                        if (isExpected) {
+                            totalCostStr = V[lv] === Infinity ? '<span style="color:#ff5a7a;">∞</span>' : Utils.formatMoney(Math.round(V[lv]));
+                        } else {
+                            totalCostStr = Utils.formatMoney(cumulativeIdeal);
+                        }
 
-                        // Считаем статы от базы (stats0)
                         const statsLine = Object.entries(baseStats).map(([k, base]) => {
                             const final = this.enchantStat(base, lv);
                             return `${BuildSim.statNames[k] || k}: ${final}`;
                         }).join(' · ') || '—';
 
-                        // Цвет редкости/предупреждения
-                        let warning = '';
-                        if (chance === 0) warning = `<span style="color:#ff5a7a; font-size:11px;">только Seal 15</span>`;
-                        else if (chance <= 2) warning = `<span style="color:#ff9900; font-size:11px;">только с печатью</span>`;
+                        // Чекбоксы для стратегий
+                        let stratCells = '';
+                        if (isExpected) {
+                            const sChecked = this.allocatedStars[lv] ? 'checked' : '';
+                            const spChecked = this.allocatedSpheres[lv] ? 'checked' : '';
+                            stratCells = `
+                                <td style="text-align:center;"><input type="checkbox" class="hp-alloc-star" data-lv="${lv}" ${sChecked}></td>
+                                <td style="text-align:center;"><input type="checkbox" class="hp-alloc-sphere" data-lv="${lv}" ${spChecked}></td>
+                            `;
+                        }
 
                         rows += `<tr style="${isCur ? 'background:rgba(202,165,92,0.12);' : ''}">
                             <td><b>+${lv}</b>${isCur ? ' <small style="color:#ffcf6a;">(текущая)</small>' : ''}</td>
                             <td>${chance}%</td>
                             <td>${Utils.formatMoney(cost)}</td>
+                            ${stratCells}
                             <td style="color:#ffcf6a; font-weight:bold;">${totalCostStr}</td>
                             <td style="font-size:12px; color:#ccc;">${statsLine}</td>
-                            <td>${warning}</td>
                         </tr>`;
                     }
 
+                    const stratHeaders = isExpected ? `<th>⭐</th><th>🌐</th>` : '';
+
                     outEl.innerHTML = `
-                        <div style="background:#26202e; border:1px solid #44374a; border-radius:6px; padding:8px 12px; margin-bottom:10px; font-size:12px;">
-                            <b style="color:#ffcf6a;">${Utils.escapeHtml(item.name)}</b>
-                            · слот: <b>${Utils.escapeHtml(item.slot)}</b>
-                            · редкость: <b>${Utils.escapeHtml(item.rarity || '—')}</b>
-                            · v: <b>${item.v}</b>
-                            · текущая заточка: <b>+${curEn}</b>
+                        <div style="background:#26202e; border:1px solid #44374a; border-radius:6px; padding:8px 12px; margin-bottom:10px; font-size:12px; display:flex; justify-content:space-between;">
+                            <div><b style="color:#ffcf6a;">${Utils.escapeHtml(item.name)}</b> (v: ${item.v}, тек: +${curEn})</div>
+                            ${isExpected ? `<div>Использовано: ⭐ ${starsUsed}/${this.userStars} | 🌐 ${spheresUsed}/${this.userSpheres}</div>` : ''}
                         </div>
                         <table>
                             <thead><tr>
                                 <th>Уровень</th>
                                 <th>Шанс</th>
-                                <th>Стоимость попытки</th>
-                                <th>Суммарно до +N</th>
+                                <th>Стоимость</th>
+                                ${stratHeaders}
+                                <th>${isExpected ? 'Ожидаемая стоимость' : 'Суммарно до +N'}</th>
                                 <th>Статы после</th>
-                                <th>Примечание</th>
                             </tr></thead>
                             <tbody>${rows}</tbody>
                         </table>
-                        <div style="margin-top:10px; font-size:11px; color:#888; line-height:1.5;">
+                        ${isExpected
+                            ? `<div style="margin-top:10px; font-size:11px; color:#ff5a7a; line-height:1.5;">
+                            ⚠️ Внимание! Расчет «Без сферы» учитывает, что при провале предмет ломается (возврат на 0). Если вы не готовы потерять вещь, используйте сферы.
+                        </div>`
+                            : `<div style="margin-top:10px; font-size:11px; color:#888; line-height:1.5;">
                             Стоимость = <code>max(10, round(v × price% / 100))</code>. Округление статов — <code>Math.round</code> (подтверждено игрой).<br>
                             <b>«Суммарно до +N»</b> = сумма всех базовых стоимостей с +1 до +N (без учета шансов и поломок, «идеальная» стоимость).
-                        </div>
+                        </div>`}
                     `;
+
+                    // Обработчики чекбоксов
+                    if (isExpected) {
+                        outEl.querySelectorAll('.hp-alloc-star').forEach(cb => {
+                            cb.addEventListener('change', (e) => {
+                                const lv = +e.target.dataset.lv;
+                                if (e.target.checked) {
+                                    if (starsUsed >= this.userStars) { e.target.checked = false; UI.showToast('Звёзды закончились', true); return; }
+                                    this.allocatedStars[lv] = true;
+                                } else {
+                                    delete this.allocatedStars[lv];
+                                }
+                                renderTable();
+                            });
+                        });
+                        outEl.querySelectorAll('.hp-alloc-sphere').forEach(cb => {
+                            cb.addEventListener('change', (e) => {
+                                const lv = +e.target.dataset.lv;
+                                if (e.target.checked) {
+                                    if (spheresUsed >= this.userSpheres) { e.target.checked = false; UI.showToast('Сферы закончились', true); return; }
+                                    this.allocatedSpheres[lv] = true;
+                                } else {
+                                    delete this.allocatedSpheres[lv];
+                                }
+                                renderTable();
+                            });
+                        });
+                    }
                 };
 
                 // Рендер плитки предметов
@@ -275,6 +383,53 @@
                         renderGrid();
                         renderTable();
                     });
+                });
+
+                // Обработка переключателя режимов
+                modal?.querySelectorAll('.hp-mode-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        this.strategyMode = e.currentTarget.dataset.mode;
+
+                        // Обновляем визуал кнопок
+                        modal.querySelectorAll('.hp-mode-btn').forEach(b => {
+                            b.classList.remove('active');
+                            b.style.background = 'transparent';
+                            b.style.color = '#aaa';
+                        });
+                        e.currentTarget.classList.add('active');
+                        e.currentTarget.style.background = '#caa55c';
+                        e.currentTarget.style.color = '#1d1620';
+
+                        const resPanel = document.getElementById('hp-resources-panel');
+                        if (resPanel) resPanel.style.display = this.strategyMode === 'expected' ? 'flex' : 'none';
+                        renderTable();
+                    });
+                });
+
+                document.getElementById('hp-input-stars')?.addEventListener('input', (e) => {
+                    this.userStars = Math.max(0, Math.min(15, +e.target.value || 0));
+                    // Очищаем лишние галочки, если количество уменьшилось
+                    let count = 0;
+                    for (let lv = 15; lv >= 1; lv--) {
+                        if (this.allocatedStars[lv]) {
+                            count++;
+                            if (count > this.userStars) delete this.allocatedStars[lv];
+                        }
+                    }
+                    renderTable();
+                });
+
+                document.getElementById('hp-input-spheres')?.addEventListener('input', (e) => {
+                    this.userSpheres = Math.max(0, Math.min(15, +e.target.value || 0));
+                    // Очищаем лишние галочки, если количество уменьшилось
+                    let count = 0;
+                    for (let lv = 15; lv >= 1; lv--) {
+                        if (this.allocatedSpheres[lv]) {
+                            count++;
+                            if (count > this.userSpheres) delete this.allocatedSpheres[lv];
+                        }
+                    }
+                    renderTable();
                 });
 
                 renderGrid();
