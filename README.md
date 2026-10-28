@@ -1,4 +1,4 @@
-# Legion: Ultimate Assistant (v11.3.0)
+# Legion: Ultimate Assistant (v11.4.1)
 
 QoL-аддон (UserScript) для браузерной игры **Legion** (play.multidonate.ru). 
 Добавляет удобный интерфейс, умный чат и помощников, не нарушая баланс игры. 
