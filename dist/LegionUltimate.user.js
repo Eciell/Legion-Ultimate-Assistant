@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Legion: Ultimate Assistant (Chat, Auction, Pocket City)
 // @namespace    http://tampermonkey.net/
-// @version      11.5.0
+// @version      11.5.1
 // @description  QoL-аддон для Легиона: Умный чат, Сканер аукциона, Разведка, Планировщик, Карманный город. Без авто-копания.
 // @connect      7tv.io
 // @connect      cdn.7tv.app
@@ -4875,16 +4875,20 @@ const Players = {
 
                 this.loaded = count > 0;
                 dbg(`[7TV] Загружено ${this.emotes.size} эмоутов (канал: ${this.channel}).`);
+
+                // Гонка: в городе чат успевает отрисоваться раньше, чем придут эмоуты,
+                // поэтому текст оставался текстом. Перерисовываем чат принудительно.
+                try {
+                    if (typeof Chat !== 'undefined' && typeof Chat.renderMessages === 'function') {
+                        Chat.renderMessages();
+                    }
+                } catch (renderErr) {
+                    console.warn('[7TV] Не удалось перерисовать чат:', renderErr);
+                }
             } catch (e) {
                 console.error('[7TV] Ошибка загрузки:', e);
             } finally {
                 this.loading = false;
-                if (this.loaded) {
-                    // Смайлики пришли после первого рендера — обновим открытый чат.
-                    try {
-                        if (typeof Chat !== 'undefined' && Chat.widget) Chat.renderMessages();
-                    } catch (e) {}
-                }
                 if (this._reloadQueued) {
                     this._reloadQueued = false;
                     this.load(true);
@@ -5055,7 +5059,9 @@ const Players = {
         messages: [], // Массив всех сообщений
         myNick: window.LG_CH?.name || 'eciell',
         myRole: 'legionary',
-        currentMineId: 'home',
+        // ID шахты известен только после сетевых ответов (/api/mine/*).
+        // По умолчанию null — строку 'home' подставляет getMineId().
+        currentMineId: null,
         cooldownUntil: 0,
         // Статусы из /api/city/enter
         muted: false,
@@ -5086,12 +5092,22 @@ const Players = {
         },
 
         showError(msg) {
-            let toast = document.getElementById('chat-toast');
+            // Виджет может жить в PiP-окне: тост обязан создаваться и искаться
+            // в документе виджета, иначе в вынесенном чате ошибка не видна.
+            const widget = this.widget;
+            const doc = (widget && widget.ownerDocument) || document;
+            let toast = doc.getElementById('chat-toast');
             if (!toast) {
-                toast = document.createElement('div');
+                toast = doc.createElement('div');
                 toast.id = 'chat-toast';
                 toast.style.cssText = 'position:absolute;top:45px;left:10px;right:10px;background:#ff5a7a;color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;text-align:center;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,0.5);transition:opacity 0.3s;';
-                this.widget.appendChild(toast);
+            }
+            // Тост всегда должен висеть внутри актуального виджета
+            // (после переноса в PiP и обратно родитель меняется).
+            if (widget) {
+                if (toast.parentNode !== widget) widget.appendChild(toast);
+            } else if (!toast.parentNode && doc.body) {
+                doc.body.appendChild(toast);
             }
             toast.textContent = msg;
             toast.style.opacity = '1';
@@ -5106,10 +5122,17 @@ const Players = {
         },
 
         isInMine() {
-            return !!document.querySelector('.mn-world') ||
-                   !!document.querySelector('.mn-screen') ||
-                   !!document.querySelector('.mn-heroes') ||
-                   (location.pathname.includes('/mine') && location.search.includes('sid='));
+            // 1. Приоритет: сетевые данные. currentMineId/__lgMineState/__lgMineContext
+            //    появляются только когда игра реально открыла шахту и сходила в /api/mine/*,
+            //    поэтому перестройка DOM (открытое меню шахты) на них не влияет.
+            if (this.currentMineId || window.__lgMineState || window.__lgMineContext) return true;
+
+            // 2. Проверка по DOM. Родительский .mn не исчезает при открытии меню,
+            //    в отличие от .mn-heroes/.mn-world/.mn-screen, которые пересоздаются.
+            if (document.querySelector('.mn') || document.querySelector('.mn-world') || document.querySelector('.mn-screen')) return true;
+
+            // 3. Проверка URL: страница шахты или sid в query-строке.
+            return location.pathname.includes('/mine') || location.search.includes('sid=');
         },
 
         updateInputState() {
@@ -6026,7 +6049,17 @@ const Players = {
                     ).join('');
                 }
 
-                const authorNick = m.author || '';
+                let authorNick = m.author || '';
+                let sysTitle = '';
+                // Системные сообщения иногда приходят склеенными: «Титул Ник».
+                // Отделяем последнее слово как ник, остальное — как титул.
+                if (m.isSystem && authorNick.includes(' ')) {
+                    const parts = authorNick.split(' ');
+                    if (parts.length >= 2) {
+                        authorNick = parts.pop(); // Последнее слово — это ник
+                        sysTitle = parts.join(' '); // Остальное — титул
+                    }
+                }
 
                 // Бейдж титула (aw) перед ником автора
                 let awardBadge = '';
@@ -6045,9 +6078,13 @@ const Players = {
                         <span class="chat-text" style="color: #6edff6 !important;">${formattedText}</span>
                     `;
                 } else if (m.isSystem) {
+                    // Приоритет: титул, вырезанный из author, иначе — серверный бейдж aw
+                    const titleHtml = sysTitle
+                        ? `<span class="chat-award-badge" title="${Utils.escapeHtml(sysTitle)}" style="display:inline-block; background:rgba(202,165,92,0.15); border:1px solid #caa55c; color:#ffcf6a; font-size:10px; font-weight:bold; padding:1px 6px; border-radius:10px; margin-right:6px; vertical-align:middle;">${Utils.escapeHtml(sysTitle)}</span>`
+                        : awardBadge;
                     div.innerHTML = `
-                        <span class="chat-role-icon">${meta.icon}</span>
-                        <span class="chat-author" style="color: ${meta.color || '#ffcf6a'} !important;">${Utils.escapeHtml(m.author)}</span>
+                        ${titleHtml}<span class="chat-role-icon">${meta.icon}</span>
+                        <span class="chat-author" style="color: ${meta.color || '#ffcf6a'} !important;">${Utils.escapeHtml(authorNick)}</span>
                         <span class="chat-text" style="color: #aaa !important; font-style: italic;">${formattedText}</span>
                     `;
                 } else {
@@ -6133,7 +6170,8 @@ const Players = {
                     this.showError('Формат: /w Ник сообщение');
                     return;
                 }
-            } else if (this.activeMainTab === 'mine') {
+            } else if (this.activeMainTab === 'mine' || this.isInMine()) {
+                // Если открыт таб шахты ИЛИ мы физически в шахте — принудительно шлем в шахту
                 if (!this.isInMine()) {
                     this.showError('Чат шахты доступен только в шахте');
                     return;
@@ -6435,7 +6473,9 @@ const Players = {
                             const pollLoc = this.resolveLiveChannel(data);
                             Utils.updateOnlinePlayers(data, pollLoc);
                             Utils.processIncomingDMs(data);
-                            if (data.c) this.currentMineId = data.c;
+                            // ID шахты запоминаем только если поток явно из шахты,
+                            // иначе городской live «отравит» isInMine().
+                            if (data.c && pollLoc === 'mine') this.currentMineId = data.c;
                             const chats = Utils.extractChatDeep(data);
                             if (chats.length > 0) {
                                 chats.forEach(m => {
@@ -6479,7 +6519,8 @@ const Players = {
                             const esLoc = this.resolveLiveChannel(data);
                             Utils.updateOnlinePlayers(data, esLoc);
                             Utils.processIncomingDMs(data);
-                            if (data && data.c) this.currentMineId = data.c;
+                            // См. выше: id шахты берём только при loc = 'mine'.
+                            if (data && data.c && esLoc === 'mine') this.currentMineId = data.c;
                             const chats = Utils.extractChatDeep(data);
                             if (chats.length > 0) {
                                 chats.forEach(m => {
@@ -6746,7 +6787,8 @@ const Players = {
 
                             // Чат живого потока разбираем только при включённом перехвате.
                             if (isLive && !self.disabled) {
-                                if (data.c) self.currentMineId = data.c;
+                                // См. выше: id шахты берём только при loc = 'mine'.
+                                if (data.c && loc === 'mine') self.currentMineId = data.c;
                                 const chats = Utils.extractChatDeep(data);
                                 chats.forEach(m => {
                                     const parsed = Utils.extractChatFields(m);
