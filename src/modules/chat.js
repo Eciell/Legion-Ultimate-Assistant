@@ -9,6 +9,11 @@
         disabled: localStorage.getItem('LEGION_CHAT_DISABLED') === 'true',
         _popoutWin: null,
         _origWidgetStyles: null,
+        // Куда вернуть виджет после закрытия PiP: родной парент, сосед и исходные классы.
+        _origWidgetParent: null,
+        _origWidgetNextSibling: null,
+        _origWidgetClasses: null,
+        _origWidgetHadOpen: false,
         isOpen() {
             return !!(this._popoutWin || (this.widget && this.widget.classList.contains('open')));
         },
@@ -422,11 +427,13 @@
                 return;
             }
 
-            if (this._popoutWin && !this._popoutWin.closed) {
-                try {
-                    this._popoutWin.focus();
+            if (this._popoutWin) {
+                if (!this._popoutWin.closed) {
+                    try { this._popoutWin.focus(); } catch (e) {}
                     return;
-                } catch (e) {}
+                }
+                // Окно закрылось без pagehide (kill процесса) — сбрасываем ссылку
+                this._popoutWin = null;
             }
 
             try {
@@ -434,20 +441,31 @@
 
                 // 1. Проверяем API documentPictureInPicture
                 if (window.documentPictureInPicture && typeof window.documentPictureInPicture.requestWindow === 'function') {
+                    // Не открывать второй PiP, если первый уже висит
+                    if (window.documentPictureInPicture.window) {
+                        try { window.documentPictureInPicture.window.focus(); } catch (e) {}
+                        this._popoutWin = window.documentPictureInPicture.window;
+                        return;
+                    }
                     try {
                         win = await window.documentPictureInPicture.requestWindow({ width: 350, height: 500 });
                     } catch (pipErr) {
-                        dbg('documentPictureInPicture error, fallback to window.open:', pipErr);
+                        dbg('documentPictureInPicture error:', pipErr);
+                        // Не падаем в window.open молча — это источник about:blank.
+                        UI.showToast('PiP недоступен: ' + (pipErr.message || 'unknown'), true);
+                        return;
                     }
                 }
 
-                // 2. Фолбэк на window.open
+                // 2. Резервный путь только если PiP API вообще нет (не Chrome)
                 if (!win) {
-                    win = window.open('', 'LegionChatPopout', 'width=350,height=500,resizable=yes,scrollbars=no');
+                    try {
+                        win = window.open('', 'LegionChatPopout', 'width=350,height=500,resizable=yes,scrollbars=no');
+                    } catch (e) {}
                 }
 
                 if (!win) {
-                    UI.showToast('Всплывающее окно заблокировано браузером', true);
+                    UI.showToast('Не удалось открыть окно чата', true);
                     return;
                 }
 
@@ -525,7 +543,13 @@
                     dbg('Error copying styles to popout window:', e);
                 }
 
-                // 4. Сохраняем исходные стили виджета (все свойства, которые меняем в PiP-режиме)
+                // 4. Запоминаем родной парент и позицию — вернуть нужно туда, а не в body.
+                this._origWidgetParent = this.widget.parentNode;
+                this._origWidgetNextSibling = this.widget.nextSibling;
+                this._origWidgetClasses = this.widget.className;
+                this._origWidgetHadOpen = this.widget.classList.contains('open');
+
+                // Сохраняем исходные стили виджета (все свойства, которые меняем в PiP-режиме)
                 this._origWidgetStyles = {
                     position: this.widget.style.position || '',
                     top: this.widget.style.top || '',
@@ -573,14 +597,31 @@
                     if (!this._popoutWin) return;
                     this._popoutWin = null;
                     const orig = this._origWidgetStyles || {};
-                    if (document.body && this.widget) {
-                        document.body.appendChild(this.widget);
+                    const parent = this._origWidgetParent;
+                    const nextSibling = this._origWidgetNextSibling;
+                    if (this.widget) {
+                        // Возврат строго в родной парент (не в body). Иначе виджет теряет
+                        // контекст позиционирования и растягивает страницу.
+                        if (parent && parent.isConnected) {
+                            if (nextSibling && nextSibling.parentNode === parent) {
+                                parent.insertBefore(this.widget, nextSibling);
+                            } else {
+                                parent.appendChild(this.widget);
+                            }
+                        } else if (document.body) {
+                            document.body.appendChild(this.widget);
+                        }
+                        // Снимаем все inline-стили, затем накатываем сохранённые
+                        this.widget.removeAttribute('style');
                         Object.assign(this.widget.style, orig);
-                        // min-width/min-height из PiP-режима в главное окно не переносим
-                        this.widget.style.minWidth = orig.minWidth || '';
-                        this.widget.style.minHeight = orig.minHeight || '';
+                        // Восстанавливаем классы: убираем .open, если его не было
+                        if (!this._origWidgetHadOpen) this.widget.classList.remove('open');
+                        // Если он был .open — оставляем; иначе класс .open не должен появиться
                     }
                     this._origWidgetStyles = null;
+                    this._origWidgetParent = null;
+                    this._origWidgetNextSibling = null;
+                    this._origWidgetClasses = null;
                     this.renderMessages();
                     this.updateInputState();
                 };

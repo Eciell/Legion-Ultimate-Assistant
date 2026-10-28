@@ -234,8 +234,12 @@
                 for (const key in groups) {
                     const group = groups[key];
                     const median = Utils.calculateMedian(group.prices);
-                    // Сначала пробуем редкость из ответа сервера (l.rarity), потом эвристику
-                    const serverRarity = group.lots.map(l => l.rarity).find(r => r) || '';
+                    // Редкость по приоритету: лот сервера (l.rarity) → itemsMap (def.rarity) → эвристика по ID.
+                    // itemsMap уже приходит в ответе аукциона и используется ниже для арта строк,
+                    // поэтому берём редкость оттуда раньше, чем regex-эвристику getItemMeta.
+                    const serverRarity = group.lots.map(l => l.rarity).find(r => r)
+                        || (itemsMap && itemsMap[group.id] && itemsMap[group.id].rarity)
+                        || '';
                     const meta = this.getItemMeta(group.id, serverRarity); // Получаем слот, редкость, класс
 
                     group.lots.forEach(l => {
