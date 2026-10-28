@@ -443,8 +443,14 @@
         extractChatFields(m) {
             if (!m || typeof m !== 'object') return { author: null, text: null, k: null, to: null };
 
-            const author = m.l || m.n || m.author || m.nick || m.name || m.login || m.from;
-            const text = m.t || m.text || m.msg || m.m || m.message;
+            // Приоритет реальных полей автора над общим полем имени `n`
+            let author = m.author || m.from || m.nick || m.login || m.l || m.n || m.name || null;
+            // Приоритет реальных полей текста над тегом типа `t`
+            let text = m.text || m.message || m.msg || m.t || (typeof m.m === 'string' ? m.m : null);
+
+            if (typeof author !== 'string') author = null;
+            if (typeof text !== 'string') text = null;
+
             const role = m.c || m.role || null;
 
             // Определяем, системное ли это сообщение (§2.7, SDK §7)
@@ -497,10 +503,17 @@
             }
             return unique;
         },
+        // Ключи служебных объектов, в которые рекурсивный обход заходить не должен:
+        // массивы титулов (aw) и инвентарь парсятся как «сообщения» и ломают author/text.
+        NON_CHAT_KEYS: new Set(['aw', 'awards', 'items', 'hero', 'me', 'stats', 'st', 'inv', 'inventory', 'sk', 'skills', 'ign', 'top', 'players']),
+
         looksLikeChat(o) {
             if (!o || typeof o !== 'object' || Array.isArray(o)) return false;
-            const text = o.t ?? o.text ?? o.msg ?? o.m ?? o.message;
-            const author = o.l ?? o.n ?? o.author ?? o.name ?? o.nick ?? o.login ?? o.from;
+            // Исключаем объекты титулов: у наград нет поля author/l/msg/text
+            if (o.n && o.id && !o.text && !o.author && !o.msg && !o.message && !o.l) return false;
+
+            const text = o.text ?? o.message ?? o.msg ?? o.t ?? (typeof o.m === 'string' ? o.m : null);
+            const author = o.author ?? o.from ?? o.nick ?? o.login ?? o.l ?? o.n ?? o.name;
             return typeof text === 'string' && text.trim().length > 0 && typeof author === 'string' && author.trim().length > 0;
         },
         extractChatDeep(m, depth = 0) {
@@ -548,6 +561,7 @@
                                 at: item.at || item.time || Date.now(),
                                 c: item.c || item.role || null,
                                 cn: item.cn || null,
+                                aw: Array.isArray(item.aw) ? item.aw : null,
                                 channel: roomChannel || item.channel || item.room || null,
                                 k: item.k || item.kind || null,
                                 to: item.to || item.target || null
@@ -583,6 +597,7 @@
 
                 // Рекурсивный обход свойств объекта (до 4 уровней глубины)
                 for (const k of Object.keys(m)) {
+                    if (this.NON_CHAT_KEYS.has(k)) continue; // Блокируем вход в aw, items и т.д.
                     const v = m[k];
                     if (!v) continue;
                     if (this.looksLikeChat(v)) {

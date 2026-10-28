@@ -46,6 +46,9 @@
                     <span>🚫 Отключить перехват чата</span>
                     <input type="checkbox" id="${DOM_IDS.chkChatDisable}" style="width:16px; height:16px; cursor:pointer; accent-color:#ff5a7a;">
                 </label>
+                <div style="text-align:center; font-size:10px; color:#888; margin-top:8px; padding-top:8px; border-top:1px solid #333; user-select:none;">
+                    Version: ${typeof GM_info !== 'undefined' && GM_info.script ? GM_info.script.version : '11.5.1'}
+                </div>
             </div>
             <div class="${DOM_IDS.fabBtn}" id="${DOM_IDS.fabBtn}" title="Меню Legion">
                 <span id="${DOM_IDS.fabIcon}">🐱</span>

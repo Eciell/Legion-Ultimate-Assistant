@@ -545,6 +545,9 @@
 
             this.setupDrag();
             this.syncMe();
+
+            // Загружаем историю при старте, чтобы она была в памяти независимо от того, открыт виджет или нет
+            this.loadHistory();
         },
 
         setupDrag() {
@@ -697,11 +700,9 @@
                     const box = this.widget?.querySelector('#chat-messages') || document.getElementById('chat-messages');
                     if (box) box.scrollTop = box.scrollHeight;
                 } else {
-                    if (!this.historyLoaded) this.loadHistory();
-                    else {
-                        const box = this.widget?.querySelector('#chat-messages') || document.getElementById('chat-messages');
-                        if (box) box.scrollTop = box.scrollHeight;
-                    }
+                    // История уже грузится в init(), здесь просто скроллим вниз
+                    const box = this.widget?.querySelector('#chat-messages') || document.getElementById('chat-messages');
+                    if (box) box.scrollTop = box.scrollHeight;
                 }
             } else {
                 this.stopBackgroundLiveListener();
@@ -1066,14 +1067,30 @@
                     if (role && !pendingMsg.role) pendingMsg.role = role;
                     if (aw && !pendingMsg.aw) pendingMsg.aw = aw;
                     if (channel && !pendingMsg.channel) pendingMsg.channel = channel;
+
+                    // Добавляем сохранение перед return.
+                    // Флаг _saved выставляет send(): своё сообщение уже в кэше,
+                    // повторная запись из echo-сообщения дала бы дубли в истории.
+                    if (!pendingMsg._saved) {
+                        this.saveToStorage(pendingMsg.author, pendingMsg.text, pendingMsg.role, pendingMsg.isSystem, pendingMsg.channel, pendingMsg.k, pendingMsg.aw);
+                        pendingMsg._saved = true;
+                    }
+
                     this.renderMessages();
                     return;
                 }
             }
 
-            // 3. Дедупликация сообщений без ID (по автору и тексту за последние 8 секунд)
-            if (!isHistory && !isMine && !id) {
-                if (this.messages.slice(-25).some(m => m.author === author && m.text === text && (m.channel === channel || !m.channel || !channel) && Date.now() - m.ts < 8000)) return;
+            // 3. Дедупликация сообщений без ID (по автору и тексту).
+            // Для истории проверяем и при наличии id и без окна по времени: записи из кэша
+            // сохраняются без id, поэтому повторная серверная история (с id) не отсекается
+            // проверкой п.1 и без этого давала дубли и «мигание» ленты.
+            if (!isMine && (isHistory || !id)) {
+                const pool = isHistory ? this.messages : this.messages.slice(-25);
+                const isDup = pool.some(m => m.author === author && m.text === text &&
+                    (m.channel === channel || !m.channel || !channel) &&
+                    (isHistory || Date.now() - m.ts < 8000));
+                if (isDup) return;
             }
 
             const msgObj = { author, text, role, isSystem, id, seq, aw, channel, k, to, ts: Date.now() };
@@ -1393,7 +1410,7 @@
             const rawText = input.value.trim();
             if (!rawText) return;
 
-            // Открыт диалог во вкладке «✉️ ЛС» — отправляем ЛС прямо из виджета
+            // 1. Открыт диалог в отдельной вкладке «✉️ ЛС»
             if (this.activeMainTab === 'dm' && this.dmTarget) {
                 if (typeof Players === 'undefined' || typeof Players.sendDM !== 'function') {
                     this.showError('Отправка ЛС недоступна');
@@ -1401,12 +1418,9 @@
                 }
                 input.value = '';
                 const ok = await Players.sendDM(this.dmTarget, rawText);
-                if (ok) {
-                    this.renderMessages(); // Перерисовываем историю с новым сообщением
-                } else {
-                    input.value = rawText; // Возвращаем текст, если ошибка
-                }
-                return; // Выходим, чтобы не отправлять в общий чат
+                if (ok) this.renderMessages();
+                else input.value = rawText;
+                return;
             }
 
             if (this.activeTab === 'ach') {
@@ -1422,10 +1436,8 @@
                 return;
             }
 
-            // ЛС: /w nick text, /dm nick text, /whisper nick text.
-            // «@nick текст» — это НЕ ЛС, а обычное сообщение в общий чат (упоминание).
+            // 2. Распознавание команды ЛС: /w, /dm, /whisper
             const dmMatch = rawText.match(/^\/(?:w|dm|whisper)\s+(?:"([^"]+)"|'([^']+)'|(\S+))(?:\s+(.*))?$/i);
-
             let isMine = false;
             let mineId = null;
             let toUser = null;
@@ -1438,8 +1450,8 @@
                     this.showError('Формат: /w Ник сообщение');
                     return;
                 }
-            } else if (this.activeMainTab === 'mine' || this.isInMine()) {
-                // Если открыт таб шахты ИЛИ мы физически в шахте — принудительно шлем в шахту
+            } else if (this.activeMainTab === 'mine') {
+                // Шлем в шахту ТОЛЬКО если выбрана вкладка «Шахта»
                 if (!this.isInMine()) {
                     this.showError('Чат шахты доступен только в шахте');
                     return;
@@ -1447,6 +1459,7 @@
                 isMine = true;
                 mineId = this.getMineId() || 'home';
             }
+            // Если activeMainTab === 'city', isMine остается false (даже если физически в шахте)
 
             input.value = '';
             const channel = dmMatch ? 'city' : (isMine ? 'mine' : 'city');
@@ -1468,12 +1481,23 @@
             this.renderMessages();
 
             try {
+                // 3. ПРОГРЕВ СЕССИИ: если отправляем в город (или ЛС), находясь в шахте
+                if (!isMine && this.isInMine()) {
+                    try {
+                        await Utils.fetchApi('/api/city/enter', {});
+                    } catch (warmErr) {
+                        dbg('City session warmup failed:', warmErr);
+                    }
+                }
+
                 let res;
                 let data = null;
                 let nativeOk = null;
                 let lastError = null;
+
+                // 4. МАРШРУТИЗАЦИЯ ОТПРАВКИ
                 if (dmMatch) {
-                    const payload = { text: cleanText, to: toUser, k: 'dm' }; // k: 'dm' обязателен!
+                    const payload = { text: cleanText, to: toUser, k: 'dm' };
 
                     // 1. Пытаемся использовать нативный контекст города (как в прошлой версии)
                     const nativeCtx = window.__lgCityContext || window.LGCity;
@@ -1503,24 +1527,25 @@
                         }
                     }
                 } else if (isMine) {
-                    // Чат шахты — только c=, без apiPath / location.origin / credentials / cache
+                    // Чат шахты — только c=, БЕЗ credentials! (как было раньше)
                     res = await fetch(`/api/mine/chat/say?c=${encodeURIComponent(mineId)}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ text: rawText })
                     });
                 } else if (this.activeSubTab === 'trade') {
-                    // Торговля
                     res = await fetch('/api/city/say', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
                         body: JSON.stringify({ text: rawText, k: 'tr' })
                     });
                 } else {
-                    // Общий чат
+                    // Общий чат города
                     res = await fetch('/api/city/say', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
                         body: JSON.stringify({ text: rawText })
                     });
                 }
@@ -1531,7 +1556,6 @@
 
                 const httpOk = nativeOk !== null ? nativeOk : !!(res && res.ok);
                 if (!httpOk || (data && data.ok === false)) {
-                    // откат
                     this.messages = this.messages.filter(m => m !== local);
                     input.value = rawText;
                     this.renderMessages();
@@ -1543,7 +1567,7 @@
                     return;
                 }
 
-                // Успешная отправка
+                // Успех
                 local._pending = false;
                 if (data) {
                     const msg = data.msg || data;
@@ -1557,19 +1581,23 @@
                         this.processMineMessages(data.m);
                     }
                 }
+
+                // СОХРАНЯЕМ В ИСТОРИЮ при успешной отправке (для города и торговли)
+                if (!dmMatch && !isMine && !local._saved) {
+                    this.saveToStorage(local.author, local.text, local.role, false, channel, local.k, local.aw);
+                    // Помечаем, что запись уже сделана: echo этого же сообщения из
+                    // /api/live придёт в handleIncoming и не должно дублировать кэш.
+                    local._saved = true;
+                }
+
                 this.renderMessages();
 
-                // Если это было ЛС, сохраняем в историю диалогов игрока
                 if (dmMatch && toUser) {
                     if (typeof Players !== 'undefined' && typeof Players.saveDMMessage === 'function') {
                         const myNick = this.myNick || 'Я';
                         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                         Players.saveDMMessage(toUser, {
-                            from: myNick,
-                            to: toUser,
-                            text: cleanText,
-                            time: timeStr,
-                            ts: Date.now()
+                            from: myNick, to: toUser, text: cleanText, time: timeStr, ts: Date.now()
                         });
                         if (Players.currentDMPeer && Players.currentDMPeer.toLowerCase() === toUser.toLowerCase()) {
                             Players.renderDMMessages(toUser);
@@ -1618,8 +1646,8 @@
                         // Не дублируем то, что уже есть в this.messages: по id ИЛИ по автору+тексту
                         const existing = this.messages.find(cur =>
                             (parsed.id && cur.id && cur.id === parsed.id) ||
-                            (!cur._pending && cur.author === parsed.author && cur.text === parsed.text &&
-                                (cur.channel || 'city') === ch)
+                            (cur.author === parsed.author && cur.text === parsed.text &&
+                                (cur.channel === ch || !cur.channel)) // Игнорируем несовпадение канала из кэша
                         );
                         if (existing) {
                             // Кэш мог быть сохранён без титула — дополняем его из истории сервера
@@ -1663,11 +1691,17 @@
         resolveLiveChannel(data) {
             try {
                 const d = (data && (data.body || data.data || data)) || null;
-                if (d) {
-                    if (d.chatRoom === 'city' || d.town) return 'city';
-                    if (d.chatRoom === 'mine' || d.mine) return 'mine';
-                }
+                // Сначала верим серверу: явные маркеры города важнее физической локации,
+                // иначе эхо сообщения, отправленного в город из шахты, помечалось как mine
+                // и пропадало из городских вкладок.
+                const mineMarkers = !!(d && (d.chatRoom === 'mine' || d.mine || d.c));
+                if (d && (d.town || d.chatRoom === 'city')) return 'city';
+                // История города из /api/city/enter приходит как data.chat, поэтому массив
+                // чата без mine-маркеров — это город (иначе история помечалась как mine).
+                if (d && Array.isArray(d.chat) && !mineMarkers) return 'city';
+                if (mineMarkers) return 'mine';
             } catch (e) {}
+            // Если сервер не прислал явный канал, опираемся на физическую локацию
             return this.isInMine() ? 'mine' : 'city';
         },
 
@@ -1869,8 +1903,9 @@
                     super(...args);
                     if (args[1]?._customLive) return;
                     const url = String(args[0] || '');
-                    const isLive = url.includes('/api/live');
-                    const isMine = isLive || url.includes('/api/mine/');
+                    // Не-live потоки (например, /api/mine/...) жёстко относятся к своему каналу.
+                    const forcedLoc = url.includes('/api/live') ? null
+                        : (url.includes('/api/mine/') ? 'mine' : 'city');
 
                     const handler = (e) => {
                         try {
@@ -1878,15 +1913,11 @@
                             if (typeof data === 'string') {
                                 try { data = JSON.parse(data); } catch(err) {}
                             }
-                            let loc = isMine ? 'mine' : 'city';
-                            if (isLive && data) {
-                                const d = data.body || data.data || data;
-                                if (d && (d.chatRoom === 'mine' || (Array.isArray(d.m) && d.m.length > 0 && !d.town))) {
-                                    loc = 'mine';
-                                } else if (d && (d.town || d.chatRoom === 'city' || d.chatRoom === '' || !d.chatRoom)) {
-                                    loc = 'city';
-                                }
-                            }
+                            // Канал определяем общим методом (как в polling/fetch-перехватчике),
+                            // иначе эхо городского сообщения помечалось как mine.
+                            const loc = forcedLoc || (data && typeof data === 'object'
+                                ? self.resolveLiveChannel(data)
+                                : 'city');
                             // Перехват игроков для модуля «Друзья» (работает всегда)
                             Utils.updateOnlinePlayers(data, loc);
                             Utils.processIncomingDMs(data);
@@ -1932,8 +1963,9 @@
                 constructor(...args) {
                     super(...args);
                     const url = String(args[0] || '');
-                    const isLive = url.includes('/api/live');
-                    const isMine = isLive || url.includes('/api/mine/');
+                    // Не-live потоки (например, /api/mine/...) жёстко относятся к своему каналу.
+                    const forcedLoc = url.includes('/api/live') ? null
+                        : (url.includes('/api/mine/') ? 'mine' : 'city');
 
                     this.addEventListener('message', async (e) => {
                         try {
@@ -1952,15 +1984,11 @@
                                 try { data = JSON.parse(data); } catch(err) {}
                             }
 
-                            let loc = isMine ? 'mine' : 'city';
-                            if (isLive && data) {
-                                const d = data.body || data.data || data;
-                                if (d && (d.chatRoom === 'mine' || (Array.isArray(d.m) && d.m.length > 0 && !d.town))) {
-                                    loc = 'mine';
-                                } else if (d && (d.town || d.chatRoom === 'city' || d.chatRoom === '' || !d.chatRoom)) {
-                                    loc = 'city';
-                                }
-                            }
+                            // Канал определяем общим методом (как в polling/fetch-перехватчике),
+                            // иначе эхо городского сообщения помечалось как mine.
+                            const loc = forcedLoc || (data && typeof data === 'object'
+                                ? self.resolveLiveChannel(data)
+                                : 'city');
                             // Перехват игроков для модуля «Друзья» (работает всегда)
                             Utils.updateOnlinePlayers(data, loc);
                             Utils.processIncomingDMs(data);
@@ -2021,7 +2049,8 @@
 
                 // 0. Перехват живого потока, игроков онлайн и входящих ЛС (работает всегда)
                 const isLive = url.includes('/api/live');
-                if (url.includes('/api/city/') || url.includes('/api/mine/') || isLive) {
+                // Исключаем /api/city/enter, так как его историю мы обрабатываем в loadHistory (isHistory=true)
+                if ((url.includes('/api/city/') && !url.includes('/api/city/enter')) || url.includes('/api/mine/') || isLive) {
                     res.clone().json().then(data => {
                         if (data) {
                             const loc = url.includes('/api/mine/') ? 'mine' : (isLive ? self.resolveLiveChannel(data) : 'city');
@@ -2117,7 +2146,9 @@
                         }).catch(() => {});
                     }
 
-                    // 5. Вход в город (история чата города)
+                    // 5. Вход в город (история чата города).
+                    // isHistory=true: это не живые сообщения — не рендерим, не считаем
+                    // непрочитанные и не пишем в кэш (иначе история «мигала» в ленте).
                     if (url.includes('/api/city/enter')) {
                         res.clone().json().then(data => {
                             if (data && data.ok && data.chat && Array.isArray(data.chat)) {
@@ -2125,7 +2156,7 @@
                                     data.chat.forEach(m => {
                                         const parsed = Utils.extractChatFields(m);
                                         if (parsed.text) {
-                                            self.handleIncoming(parsed.author, parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, parsed.channel || 'city', parsed.k, parsed.to);
+                                            self.handleIncoming(parsed.author, parsed.text, false, true, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, parsed.channel || 'city', parsed.k, parsed.to);
                                         }
                                     });
                                 }, 100);
