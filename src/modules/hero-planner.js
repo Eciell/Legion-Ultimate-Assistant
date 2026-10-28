@@ -228,9 +228,12 @@
                             `;
                         }
 
+                        // Бонус заточки на этом уровне (ENCH.bonus, %), для новых уровней — 0
+                        const bonusPct = this.ENCH.bonus[lv] || 0;
                         rows += `<tr style="${isCur ? 'background:rgba(202,165,92,0.12);' : ''}">
                             <td><b>+${lv}</b>${isCur ? ' <small style="color:#ffcf6a;">(текущая)</small>' : ''}</td>
                             <td>${Math.min(100, chance)}%</td>
+                            <td style="color:#4cc95a; font-weight:bold;">+${bonusPct}%</td>
                             <td>${Utils.formatMoney(cost)}</td>
                             ${stratCells}
                             <td style="color:#ffcf6a; font-weight:bold;">${totalCostStr}</td>
@@ -249,6 +252,7 @@
                             <thead><tr>
                                 <th>Уровень</th>
                                 <th>Шанс</th>
+                                <th>Бонус</th>
                                 <th>Стоимость</th>
                                 ${stratHeaders}
                                 <th>${isExpected ? 'Суммарно (с ресурсами)' : 'Суммарно до +N'}</th>

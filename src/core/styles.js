@@ -78,7 +78,7 @@
         .fab-menu-item:hover { background: #caa55c; color: #1d1620; border-color: #caa55c; }
         .fab-menu-item.active { background: #4cc95a; color: #1d1620; border-color: #4cc95a; box-shadow: 0 0 15px rgba(76, 201, 90, 0.5); }
         .${DOM_IDS.chatBadge}, .chat-badge { position: absolute; top: -6px; right: -6px; background: #ff5a7a; color: #fff; border-radius: 50%; padding: 2px 7px; font-size: 12px; font-weight: 900; box-shadow: 0 2px 5px rgba(0,0,0,0.5); display: none; pointer-events: none; z-index: 2; }
-        .${DOM_IDS.chatWidget}, .chat-widget { position: fixed; bottom: 80px; right: 20px; width: 320px; height: 400px; background: #1d1620; border: 2px solid #caa55c; border-radius: 12px; display: flex; flex-direction: column; z-index: 10000; box-shadow: 0 10px 30px rgba(0,0,0,0.8); overflow: hidden; transition: transform 0.2s, opacity 0.2s; transform: translateY(20px); opacity: 0; pointer-events: none; }
+        .${DOM_IDS.chatWidget}, .chat-widget { position: fixed; bottom: 80px; right: 20px; width: 320px; height: 400px; min-width: 320px; min-height: 400px; max-width: 95vw; max-height: 95vh; resize: both; background: #1d1620; border: 2px solid #caa55c; border-radius: 12px; display: flex; flex-direction: column; z-index: 10000; box-shadow: 0 10px 30px rgba(0,0,0,0.8); overflow: hidden; transition: transform 0.2s, opacity 0.2s; transform: translateY(20px); opacity: 0; pointer-events: none; }
         .${DOM_IDS.chatWidget}.open, .chat-widget.open { transform: translateY(0); opacity: 1; pointer-events: auto; }
         .chat-top-bar, .chat-header { background: #2a2030; padding: 10px 12px; font-weight: bold; color: #ffcf6a; display: flex; justify-content: space-between; align-items: center; gap: 8px; overflow: hidden; border-bottom: 1px solid #444; cursor: move; user-select: none; touch-action: none; box-sizing: border-box; }
         .chat-main-tabs, .chat-tabs { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
@@ -219,4 +219,22 @@
         .player-hud-row { display: flex; justify-content: space-between; align-items: center; }
         .player-hud-label { color: #aaa; }
         .player-hud-val { font-weight: bold; }
+        /* ── Ассистент Жреца: плавающий HUD боя (Поход) ── */
+        .priest-hud { position: fixed; top: 80px; right: 20px; background: #1e1724; border: 1px solid #caa55c; border-radius: 8px; padding: 10px; display: none; flex-direction: column; z-index: 10001; box-shadow: 0 4px 15px rgba(0,0,0,0.7); min-width: 150px; max-width: 240px; font-family: 'Nunito', sans-serif; color: #f7eadf; }
+        .priest-hud-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: bold; color: #caa55c; font-size: 12px; margin-bottom: 8px; cursor: grab; user-select: none; touch-action: none; }
+        .priest-hud-header:active { cursor: grabbing; }
+        .priest-hud-watchlist { max-height: 100px; overflow-y: auto; }
+        .priest-hud-watch-item { font-size: 11px; color: #aaa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .priest-hud-settings { background: none; border: none; color: #caa55c; font-size: 13px; line-height: 1; cursor: pointer; padding: 0 2px; }
+        .priest-hud-settings:hover { color: #ffcf6a; }
+        .priest-hud-actions { display: flex; align-items: center; gap: 6px; }
+        .priest-hud-close { color: #ff5a7a; font-size: 12px; line-height: 1; cursor: pointer; padding: 0 2px; }
+        .priest-hud-close:hover { color: #fff; }
+        .priest-hud-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; background: rgba(0,0,0,0.3); padding: 4px; border-radius: 4px; }
+        .priest-hud-nick { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .priest-heal-btn { background: #28a745; color: #fff; border: none; border-radius: 3px; padding: 2px 6px; font-size: 11px; cursor: pointer; flex-shrink: 0; }
+        .priest-heal-btn:hover:not(:disabled) { background: #34c759; }
+        .priest-heal-btn:disabled { background: #555; color: #fff; cursor: not-allowed; opacity: 0.7; }
+        /* 7TV-смайлики: размер задаётся переменной --t7-h (S/M/L/XL из настроек чата) */
+        .t7-emote { height: var(--t7-h, 1.9em); vertical-align: middle; margin: 0 2px; }
     `;

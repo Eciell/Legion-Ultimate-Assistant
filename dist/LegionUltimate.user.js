@@ -1,12 +1,15 @@
 // ==UserScript==
 // @name         Legion: Ultimate Assistant (Chat, Auction, Pocket City)
 // @namespace    http://tampermonkey.net/
-// @version      11.4.1
+// @version      11.5.0
 // @description  QoL-аддон для Легиона: Умный чат, Сканер аукциона, Разведка, Планировщик, Карманный город. Без авто-копания.
+// @connect      7tv.io
+// @connect      cdn.7tv.app
+// @connect      api.ivr.fi
 // @author       eciell
 // @match        https://play.multidonate.ru/*
 // @run-at       document-start
-// @grant        none
+// @grant        GM_xmlhttpRequest
 // @updateURL    https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js
 // @downloadURL  https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js
 // ==/UserScript==
@@ -858,7 +861,7 @@
         .fab-menu-item:hover { background: #caa55c; color: #1d1620; border-color: #caa55c; }
         .fab-menu-item.active { background: #4cc95a; color: #1d1620; border-color: #4cc95a; box-shadow: 0 0 15px rgba(76, 201, 90, 0.5); }
         .${DOM_IDS.chatBadge}, .chat-badge { position: absolute; top: -6px; right: -6px; background: #ff5a7a; color: #fff; border-radius: 50%; padding: 2px 7px; font-size: 12px; font-weight: 900; box-shadow: 0 2px 5px rgba(0,0,0,0.5); display: none; pointer-events: none; z-index: 2; }
-        .${DOM_IDS.chatWidget}, .chat-widget { position: fixed; bottom: 80px; right: 20px; width: 320px; height: 400px; background: #1d1620; border: 2px solid #caa55c; border-radius: 12px; display: flex; flex-direction: column; z-index: 10000; box-shadow: 0 10px 30px rgba(0,0,0,0.8); overflow: hidden; transition: transform 0.2s, opacity 0.2s; transform: translateY(20px); opacity: 0; pointer-events: none; }
+        .${DOM_IDS.chatWidget}, .chat-widget { position: fixed; bottom: 80px; right: 20px; width: 320px; height: 400px; min-width: 320px; min-height: 400px; max-width: 95vw; max-height: 95vh; resize: both; background: #1d1620; border: 2px solid #caa55c; border-radius: 12px; display: flex; flex-direction: column; z-index: 10000; box-shadow: 0 10px 30px rgba(0,0,0,0.8); overflow: hidden; transition: transform 0.2s, opacity 0.2s; transform: translateY(20px); opacity: 0; pointer-events: none; }
         .${DOM_IDS.chatWidget}.open, .chat-widget.open { transform: translateY(0); opacity: 1; pointer-events: auto; }
         .chat-top-bar, .chat-header { background: #2a2030; padding: 10px 12px; font-weight: bold; color: #ffcf6a; display: flex; justify-content: space-between; align-items: center; gap: 8px; overflow: hidden; border-bottom: 1px solid #444; cursor: move; user-select: none; touch-action: none; box-sizing: border-box; }
         .chat-main-tabs, .chat-tabs { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
@@ -999,6 +1002,24 @@
         .player-hud-row { display: flex; justify-content: space-between; align-items: center; }
         .player-hud-label { color: #aaa; }
         .player-hud-val { font-weight: bold; }
+        /* ── Ассистент Жреца: плавающий HUD боя (Поход) ── */
+        .priest-hud { position: fixed; top: 80px; right: 20px; background: #1e1724; border: 1px solid #caa55c; border-radius: 8px; padding: 10px; display: none; flex-direction: column; z-index: 10001; box-shadow: 0 4px 15px rgba(0,0,0,0.7); min-width: 150px; max-width: 240px; font-family: 'Nunito', sans-serif; color: #f7eadf; }
+        .priest-hud-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: bold; color: #caa55c; font-size: 12px; margin-bottom: 8px; cursor: grab; user-select: none; touch-action: none; }
+        .priest-hud-header:active { cursor: grabbing; }
+        .priest-hud-watchlist { max-height: 100px; overflow-y: auto; }
+        .priest-hud-watch-item { font-size: 11px; color: #aaa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .priest-hud-settings { background: none; border: none; color: #caa55c; font-size: 13px; line-height: 1; cursor: pointer; padding: 0 2px; }
+        .priest-hud-settings:hover { color: #ffcf6a; }
+        .priest-hud-actions { display: flex; align-items: center; gap: 6px; }
+        .priest-hud-close { color: #ff5a7a; font-size: 12px; line-height: 1; cursor: pointer; padding: 0 2px; }
+        .priest-hud-close:hover { color: #fff; }
+        .priest-hud-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; background: rgba(0,0,0,0.3); padding: 4px; border-radius: 4px; }
+        .priest-hud-nick { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .priest-heal-btn { background: #28a745; color: #fff; border: none; border-radius: 3px; padding: 2px 6px; font-size: 11px; cursor: pointer; flex-shrink: 0; }
+        .priest-heal-btn:hover:not(:disabled) { background: #34c759; }
+        .priest-heal-btn:disabled { background: #555; color: #fff; cursor: not-allowed; opacity: 0.7; }
+        /* 7TV-смайлики: размер задаётся переменной --t7-h (S/M/L/XL из настроек чата) */
+        .t7-emote { height: var(--t7-h, 1.9em); vertical-align: middle; margin: 0 2px; }
     `;
 
     // ===== src/core/hooks.js =====
@@ -1302,6 +1323,22 @@
             const handle = typeof handleSelector === 'string' ? element.querySelector(handleSelector) : handleSelector;
             if (!handle) return;
 
+            // Компактные окна (modal-compact) всегда открываются по центру:
+            // унаследованная из localStorage позиция от развёрнутых модалок
+            // могла оказаться за границами экрана. Сбрасываем её и не
+            // запоминаем координаты компактных окон.
+            const isCompact = !!(element.classList && element.classList.contains('modal-compact'));
+            if (isCompact) {
+                if (storageKey) {
+                    try { localStorage.removeItem(storageKey); } catch (err) {}
+                }
+                element.style.left = '50%';
+                element.style.top = '50%';
+                element.style.transform = 'translate(-50%, -50%)';
+                element.style.right = 'auto';
+                element.style.bottom = 'auto';
+            }
+
             handle.style.cursor = 'grab';
             handle.style.userSelect = 'none';
 
@@ -1336,7 +1373,8 @@
                 window.removeEventListener('pointerup', onPointerUp);
                 window.removeEventListener('pointercancel', onPointerUp);
 
-                if (storageKey) {
+                // Позицию компактных окон не сохраняем (см. isCompact выше).
+                if (storageKey && !isCompact) {
                     try {
                         localStorage.setItem(storageKey, JSON.stringify({
                             left: element.style.left,
@@ -2381,9 +2419,12 @@
                             `;
                         }
 
+                        // Бонус заточки на этом уровне (ENCH.bonus, %), для новых уровней — 0
+                        const bonusPct = this.ENCH.bonus[lv] || 0;
                         rows += `<tr style="${isCur ? 'background:rgba(202,165,92,0.12);' : ''}">
                             <td><b>+${lv}</b>${isCur ? ' <small style="color:#ffcf6a;">(текущая)</small>' : ''}</td>
                             <td>${Math.min(100, chance)}%</td>
+                            <td style="color:#4cc95a; font-weight:bold;">+${bonusPct}%</td>
                             <td>${Utils.formatMoney(cost)}</td>
                             ${stratCells}
                             <td style="color:#ffcf6a; font-weight:bold;">${totalCostStr}</td>
@@ -2402,6 +2443,7 @@
                             <thead><tr>
                                 <th>Уровень</th>
                                 <th>Шанс</th>
+                                <th>Бонус</th>
                                 <th>Стоимость</th>
                                 ${stratHeaders}
                                 <th>${isExpected ? 'Суммарно (с ресурсами)' : 'Суммарно до +N'}</th>
@@ -4200,6 +4242,484 @@ const Players = {
         }
     };
 
+    // ===== src/modules/priest-assistant.js =====
+    // ============================================================
+    // 4.2. МОДУЛЬ: АССИСТЕНТ ЖРЕЦА (HUD для Похода)
+    //
+    // Данные боя берём из нативного контекста похода, который перехватывает
+    // hooks.js (window.__lgQuestContext):
+    //   q.b.st   — состояние боя ('hit' = бой идёт)
+    //   q.b.low  — массив [login, name, hp] по раненым участникам
+    //   q.b.sk   — умения героя в бою [id, кулдаун, тип] ('heal' = хилка)
+    //
+    // HUD показывает только отслеживаемых игроков (по умолчанию — друзей из
+    // Players) и даёт кнопку быстрого хила. Рендер дешёвый: тяжёлая часть
+    // (innerHTML) пересобирается только при изменении данных боя.
+    // ============================================================
+    const PriestAssistant = {
+        hudEl: null,
+        watchedNicks: [],          // ники как ввёл пользователь (сравнение — без учёта регистра)
+        isVisible: false,          // HUD открывается/закрывается вручную из FAB-меню
+        _remindedThisCombat: false,
+        _updateInterval: null,
+        _menuBtn: null,
+        _ownsMenuBtn: false,       // true — кнопку создали сами (фолбэк), её же и удаляем
+        _onQuestUpdate: null,
+        _dragBound: false,
+
+        STORAGE_KEY: 'LEGION_PRIEST_WATCHED',
+        HUD_POS_KEY: 'LEGION_PRIEST_HUD_POS',
+        VISIBLE_KEY: 'LEGION_PRIEST_HUD_VISIBLE',
+
+        init() {
+            this._loadVisibility();
+            this._loadWatched();
+            this._bindMenuButton();
+
+            // Игра отдельного события об изменениях боя не даёт, но если оно
+            // появится — перерисуем сразу, не ожидая тика поллинга.
+            if (!this._onQuestUpdate) {
+                this._onQuestUpdate = () => this.renderHud();
+                document.addEventListener('lg-quest-update', this._onQuestUpdate);
+            }
+
+            // Поллинг: контекст похода обновляет q.b в реальном времени.
+            if (this._updateInterval) clearInterval(this._updateInterval);
+            this._updateInterval = setInterval(() => this.renderHud(), 1000);
+
+            this.renderHud();
+        },
+
+        // Снятие таймеров/слушателей при повторном запуске аддона (single-instance guard).
+        destroy() {
+            if (this._updateInterval) {
+                clearInterval(this._updateInterval);
+                this._updateInterval = null;
+            }
+            if (this._onQuestUpdate) {
+                document.removeEventListener('lg-quest-update', this._onQuestUpdate);
+                this._onQuestUpdate = null;
+            }
+            // Кнопку из разметки main.js не трогаем (живёт вместе с FAB),
+            // удаляем только аварийно созданный дубль.
+            if (this._menuBtn && this._ownsMenuBtn) {
+                this._menuBtn.remove();
+            }
+            this._menuBtn = null;
+            this._ownsMenuBtn = false;
+            if (this.hudEl) {
+                this.hudEl.remove();
+                this.hudEl = null;
+            }
+            this._dragBound = false;
+            this._remindedThisCombat = false;
+        },
+
+        _loadVisibility() {
+            try {
+                this.isVisible = localStorage.getItem(this.VISIBLE_KEY) === 'true';
+            } catch (e) {
+                this.isVisible = false;
+            }
+        },
+
+        _saveVisibility() {
+            try {
+                localStorage.setItem(this.VISIBLE_KEY, String(this.isVisible));
+            } catch (e) {
+                dbg('PriestAssistant: не удалось сохранить видимость HUD', e);
+            }
+        },
+
+        _setVisible(visible) {
+            this.isVisible = !!visible;
+            this._saveVisibility();
+            this._syncMenuButton();
+            this.renderHud(true);
+        },
+
+        // Пункт FAB. Штатно кнопка объявлена в main.js (как «Профиль»);
+        // динамическое создание — фолбэк, если разметка старая.
+        _bindMenuButton() {
+            const btn = document.getElementById('btn-priest-panel');
+            if (btn) {
+                btn.addEventListener('click', () => {
+                    const fabMenu = document.getElementById(DOM_IDS.fabMenu);
+                    if (fabMenu) fabMenu.classList.remove('open');
+                    this._setVisible(!this.isVisible);
+                });
+                this._menuBtn = btn;
+                this._ownsMenuBtn = false;
+                this._syncMenuButton();
+                return;
+            }
+
+            if (this._menuBtn) return;
+            const fabMenu = document.getElementById(DOM_IDS.fabMenu);
+            if (!fabMenu) return;
+
+            const created = document.createElement('button');
+            created.type = 'button';
+            created.className = 'fab-menu-item';
+            created.textContent = '✨ Панель Жреца';
+            created.addEventListener('click', () => {
+                fabMenu.classList.remove('open');
+                this._setVisible(!this.isVisible);
+            });
+
+            // Ставим сразу после «Профиля»: пункт остаётся в группе кнопок и не
+            // задевает чекбокс «Отключить перехват чата» и индикатор стелса.
+            const profileBtn = document.getElementById(DOM_IDS.btnProfile);
+            if (profileBtn) profileBtn.insertAdjacentElement('afterend', created);
+            else fabMenu.appendChild(created);
+
+            this._menuBtn = created;
+            this._ownsMenuBtn = true;
+            this._syncMenuButton();
+        },
+
+        // Подсветка активного пункта меню, пока панель открыта.
+        _syncMenuButton() {
+            if (!this._menuBtn || !this._menuBtn.classList) return;
+            this._menuBtn.classList.toggle('active', this.isVisible);
+            this._menuBtn.title = this.isVisible ? 'Скрыть панель Жреца' : 'Показать панель Жреца';
+        },
+
+        _loadWatched() {
+            try {
+                const arr = JSON.parse(localStorage.getItem(this.STORAGE_KEY));
+                this.watchedNicks = Array.isArray(arr) ? this._normalizeNicks(arr) : [];
+            } catch (e) {
+                dbg('PriestAssistant: не удалось прочитать список отслеживаемых', e);
+                this.watchedNicks = [];
+            }
+        },
+
+        // Ники храним как ввёл пользователь (чтобы список читался нормально),
+        // дубликаты убираем без учёта регистра.
+        _normalizeNicks(list) {
+            const seen = new Set();
+            const out = [];
+            (Array.isArray(list) ? list : []).forEach(raw => {
+                const nick = String(raw).trim();
+                const key = nick.toLowerCase();
+                if (!nick || seen.has(key)) return;
+                seen.add(key);
+                out.push(nick);
+            });
+            return out;
+        },
+
+        // Кого отслеживаем. Пустой список = все друзья (как написано в настройках).
+        _getWatchSet() {
+            if (this.watchedNicks.length) {
+                return new Set(this.watchedNicks.map(n => n.toLowerCase()));
+            }
+            if (typeof Players !== 'undefined' && typeof Players.getFriendsList === 'function') {
+                try {
+                    return new Set(Players.getFriendsList().map(n => String(n).toLowerCase()));
+                } catch (e) {}
+            }
+            return new Set();
+        },
+
+        _getMyNick() {
+            let playerNick = '';
+            try {
+                if (typeof Players !== 'undefined' && typeof Players.getMyNick === 'function') {
+                    playerNick = Players.getMyNick();
+                }
+            } catch (e) {}
+
+            const candidates = [
+                playerNick,
+                window.ME?.user?.login,
+                window.ME?.user?.name,
+                window.ME?.hero?.n,
+                window.ME?.hero?.name,
+                typeof Chat !== 'undefined' ? Chat.myNick : ''
+            ];
+            for (const c of candidates) {
+                if (c) return String(c).trim().toLowerCase();
+            }
+            return '';
+        },
+
+        // Роль героя. В игре встречаются оба поля: role и class
+        // (см. Chat.myRole = hero.class, BuildSim.classNames.priest).
+        _getMyRole() {
+            const hero = window.ME?.hero || window.ME?.me || window.__lgHero || null;
+            const candidates = [
+                hero && hero.role,
+                hero && hero.class,
+                hero && hero.cl,
+                hero && hero.sk && hero.sk.c,
+                window.ME?.user?.role,
+                typeof Chat !== 'undefined' ? Chat.myRole : ''
+            ];
+            for (const c of candidates) {
+                if (c) return String(c).trim().toLowerCase();
+            }
+            return '';
+        },
+
+        // ctx.data() — снимок состояния похода (тот же объект, что игра гоняет
+        // в своём рендере). ctx.act() — отправка действия в бой.
+        _readQuest() {
+            const ctx = window.__lgQuestContext;
+            if (!ctx || typeof ctx.data !== 'function') return null;
+            try {
+                const q = ctx.data();
+                return (q && typeof q === 'object') ? q : null;
+            } catch (e) {
+                dbg('PriestAssistant: не удалось прочитать данные похода', e);
+                return null;
+            }
+        },
+
+        _collectWounded(q) {
+            const battle = q && q.b;
+            if (!battle || battle.st !== 'hit' || !Array.isArray(battle.low)) return [];
+
+            const myNick = this._getMyNick();
+            const watch = this._getWatchSet();
+            if (!watch.size) return [];
+
+            const seen = new Set();
+            return battle.low
+                .filter(row => Array.isArray(row) && row[0] != null)
+                .map(row => {
+                    const login = String(row[0]).trim();
+                    const name = row[1] ? String(row[1]) : login;
+                    const rawHp = Number(row[2]);
+                    // HP приходит долей (0..1); на всякий случай принимаем и
+                    // уже посчитанные проценты.
+                    const hp = Number.isFinite(rawHp)
+                        ? Math.min(100, Math.max(0, Math.round(rawHp <= 1 ? rawHp * 100 : rawHp)))
+                        : 0;
+                    return { login, name, hp };
+                })
+                .filter(w => {
+                    const key = w.login.toLowerCase();
+                    if (!key || key === myNick || seen.has(key) || !watch.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                })
+                .sort((a, b) => a.hp - b.hp);
+        },
+
+        _findReadyHeal(q) {
+            const skills = q && q.b && Array.isArray(q.b.sk) ? q.b.sk : null;
+            if (!skills) return null;
+            // Формат умения: [id, кулдаун, тип]. Готова та, у которой кулдаун 0.
+            return skills.find(sk => Array.isArray(sk) && sk[2] === 'heal' && (sk[1] === 0 || sk[1] === '0')) || null;
+        },
+
+        renderHud(force = false) {
+            // После destroy() HUD не восстанавливаем.
+            if (!this._updateInterval) return;
+
+            const q = this._readQuest();
+
+            // Напоминание жрецу: бой идёт, панель закрыта — один раз за бой.
+            if (q && q.b && q.b.st === 'hit' && this._getMyRole() === 'priest') {
+                if (!this.isVisible && !this._remindedThisCombat) {
+                    UI.showToast('✨ Вы Жрец! Откройте Панель Жреца в меню для быстрого хила.', false);
+                    this._remindedThisCombat = true;
+                }
+            } else if (!q || !q.b || q.b.st !== 'hit') {
+                // Бой закончился (или мы не в походе) — напоминание снова разрешено.
+                this._remindedThisCombat = false;
+            }
+
+            // Панель закрыта пользователем — не создаём и не показываем HUD.
+            if (!this.isVisible) {
+                if (this.hudEl) this.hudEl.style.display = 'none';
+                return;
+            }
+
+            this._ensureHud();
+
+            // Состояние 1: контекста похода нет — статус и список наблюдения.
+            if (!q) {
+                this._showHud(this._outsideQuestHtml(), force);
+                return;
+            }
+
+            // Состояние 2: в походе, но бой ещё не идёт (или уже закончился).
+            if (!q.b || q.b.st !== 'hit') {
+                this._showHud(this._hudHeader('✨ Жрец: Ожидание боя'), force);
+                return;
+            }
+
+            const wounded = this._collectWounded(q);
+
+            // Состояние 3: бой идёт, но из отслеживаемых никто не ранен.
+            if (!wounded.length) {
+                this._showHud(this._hudHeader('✨ Жрец: Все целы', '#4cc95a'), force);
+                return;
+            }
+
+            // Состояние 4: бой, есть раненые — строки с кнопками хила.
+            const readyHeal = this._findReadyHeal(q);
+            const rows = wounded.map(w => {
+                const hpColor = w.hp < 40 ? '#ff5a7a' : '#fff';
+                const safeLogin = Utils.escapeHtml(w.login);
+                const safeName = Utils.escapeHtml(w.name);
+                const btnTitle = readyHeal ? `Хил на ${safeName}` : 'Хилка ещё не готова';
+                return `
+                    <div class="priest-hud-row">
+                        <span class="priest-hud-nick" style="color:${hpColor};">${safeName} (${w.hp}%)</span>
+                        <button type="button" class="priest-heal-btn" data-nick="${safeLogin}" title="${btnTitle}"${readyHeal ? '' : ' disabled'}>Хил</button>
+                    </div>
+                `;
+            }).join('');
+
+            this._showHud(this._hudHeader('✨ Панель Жреца') + rows, force);
+        },
+
+        _ensureHud() {
+            if (this.hudEl) return;
+            this.hudEl = document.createElement('div');
+            this.hudEl.className = 'priest-hud';
+            // Клики обрабатываем делегированием: innerHTML меняется, а слушатель один.
+            this.hudEl.addEventListener('click', (e) => this._onHudClick(e));
+            document.body.appendChild(this.hudEl);
+        },
+
+        // Пишем innerHTML только при реальном изменении — кнопки не «мигают».
+        _showHud(html, force) {
+            if (!this.hudEl) return;
+            this.hudEl.style.display = 'flex';
+            if (!force && this.hudEl.innerHTML === html) return;
+            this.hudEl.innerHTML = html;
+            this._bindDragOnce();
+        },
+
+        // Шапка HUD: статус слева, настройки и закрытие справа.
+        _hudHeader(text, color) {
+            const colorStyle = color ? ` style="color:${color};"` : '';
+            return `
+                <div class="priest-hud-header">
+                    <span${colorStyle}>${text}</span>
+                    <div class="priest-hud-actions">
+                        <span class="priest-hud-settings" id="priest-settings-icon" title="Настройки">⚙️</span>
+                        <span class="priest-hud-close" id="priest-close-icon" title="Закрыть">✖</span>
+                    </div>
+                </div>
+            `;
+        },
+
+        _outsideQuestHtml() {
+            const listHtml = this.watchedNicks.length
+                ? this.watchedNicks.map(n => `<div class="priest-hud-watch-item">• ${Utils.escapeHtml(n)}</div>`).join('')
+                : '<div class="priest-hud-watch-item">• (Все друзья)</div>';
+
+            return this._hudHeader('✨ Жрец: Ожидание похода') +
+                `<div class="priest-hud-watchlist">${listHtml}</div>`;
+        },
+
+        // Перетаскивание вешаем один раз — когда в HUD уже есть .priest-hud-header.
+        _bindDragOnce() {
+            if (this._dragBound || !this.hudEl) return;
+            this._dragBound = true;
+            UI.makeDraggable(this.hudEl, '.priest-hud-header', this.HUD_POS_KEY);
+            // makeDraggable() только сохраняет позицию — восстанавливаем её сами.
+            try {
+                const pos = JSON.parse(localStorage.getItem(this.HUD_POS_KEY) || 'null');
+                if (pos && pos.left && pos.top) {
+                    this.hudEl.style.left = pos.left;
+                    this.hudEl.style.top = pos.top;
+                    this.hudEl.style.right = 'auto';
+                }
+            } catch (e) {}
+        },
+
+        _onHudClick(e) {
+            const target = e.target;
+            if (!target || !target.closest) return;
+
+            if (target.closest('.priest-hud-close')) {
+                this._setVisible(false);
+                return;
+            }
+            if (target.closest('.priest-hud-settings')) {
+                this.openSettings();
+                return;
+            }
+            const btn = target.closest('.priest-heal-btn');
+            if (btn && !btn.disabled) this.heal(btn.dataset.nick, btn);
+        },
+
+        heal(login, btn) {
+            if (!login) return;
+
+            const ctx = window.__lgQuestContext;
+            if (!ctx || typeof ctx.act !== 'function') {
+                UI.showToast('Поход: нет доступа к контексту боя', true);
+                return;
+            }
+
+            // Данные читаем в момент клика: между тиками кулдаун мог измениться.
+            const healSk = this._findReadyHeal(this._readQuest());
+            if (!healSk) {
+                UI.showToast('Хилка ещё не готова', true);
+                this.renderHud(true);
+                return;
+            }
+
+            try {
+                ctx.act({ k: 'b', a: 'sk', w: healSk[0], t: login });
+            } catch (e) {
+                dbg('PriestAssistant: ошибка отправки хила', e);
+                UI.showToast('Хил: сбой отправки', true);
+                return;
+            }
+
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = '...';
+            }
+            UI.showToast(`✨ Хил на ${login}`);
+        },
+
+        openSettings() {
+            const current = this.watchedNicks.join(', ');
+
+            const modal = UI.showModal(`
+                <h2>✨ Настройки Жреца <button class="custom-close" id="custom-close-btn">✖</button></h2>
+                <div style="padding: 10px;">
+                    <div style="font-size: 13px; color: #aaa; margin-bottom: 15px;">
+                        Введите ники через запятую или пробел. Если поле пустое, панель будет отслеживать всех ваших друзей.
+                    </div>
+                    <textarea id="priest-nicks-input" maxlength="500" style="width: 100%; height: 100px; background: #111; border: 1px solid #444; color: #fff; padding: 10px; border-radius: 6px; box-sizing: border-box; font-family: monospace; resize: vertical;" placeholder="ник1, ник2, ник3">${Utils.escapeHtml(current)}</textarea>
+                    <div style="display: flex; gap: 10px; margin-top: 15px;">
+                        <button id="priest-save-btn" style="flex: 1; padding: 10px; background: #caa55c; color: #1d1620; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">Сохранить</button>
+                    </div>
+                </div>
+            `, { compact: true });
+
+            const input = modal?.querySelector('#priest-nicks-input');
+            const saveBtn = modal?.querySelector('#priest-save-btn');
+            if (!input || !saveBtn) return;
+
+            saveBtn.addEventListener('click', () => {
+                // Разделители: запятая, пробел, перенос строки (и их сочетания).
+                this.watchedNicks = this._normalizeNicks(String(input.value || '').split(/[\s,]+/));
+
+                try {
+                    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.watchedNicks));
+                } catch (e) {
+                    dbg('PriestAssistant: не удалось сохранить список', e);
+                }
+
+                UI.showToast('Список отслеживаемых обновлен');
+                UI.closeModals();
+                this.renderHud(true); // Принудительный перерендер
+            });
+        }
+    };
+
     // ===== src/modules/miner.js (исключён из этой сборки, используется заглушка) =====
     const Miner = {
         abortController: null,
@@ -4213,6 +4733,250 @@ const Players = {
     // ============================================================
     // 7. МОДУЛЬ: ЧАТ
     // ============================================================
+    // ============================================================
+    // 7TV: глобальные смайлики в чате
+    //
+    // Сайт отдаёт CSP `connect-src 'self'` и `img-src 'self' data: blob:`,
+    // поэтому:
+    //   • JSON эмоутов тянем через GM_xmlhttpRequest (обходит CSP);
+    //   • картинки грузим блобом и подставляем blob:-URL (разрешён img-src).
+    // UI стороннего аддона не копируем — только рендер смайликов.
+    // ============================================================
+    const SevenTV = {
+        API_URL: 'https://7tv.io/v3/emote-sets/global',
+        IVR_URL: 'https://api.ivr.fi/v2/twitch/user?login=',
+        CHANNEL_API_URL: 'https://7tv.io/v3/users/twitch/',
+        DEFAULT_CHANNEL: 'zakvielchannel',
+        CHANNEL_KEY: 'LEGION_7TV_CHANNEL',
+        channel: 'zakvielchannel',   // текущий канал (переопределяется из localStorage)
+        _reloadQueued: false,
+        _cacheEpoch: 0,
+
+        // Размеры смайлов: применяются через CSS-переменную --t7-h.
+        SIZES: {
+            s: { h: '1.3em', label: 'S' },
+            m: { h: '1.9em', label: 'M' },
+            l: { h: '2.6em', label: 'L' },
+            x: { h: '3.4em', label: 'XL' }
+        },
+        size: 'm',
+        SIZE_KEY: 'LEGION_7TV_SIZE',
+
+        applySize() {
+            const conf = this.SIZES[this.size] || this.SIZES.m;
+            const docs = [document];
+            // Виджет может быть вынесен в PiP-окно — переменную нужно задать и там.
+            try {
+                if (typeof Chat !== 'undefined' && Chat._popoutWin && Chat._popoutWin.document) {
+                    docs.push(Chat._popoutWin.document);
+                }
+            } catch (e) {}
+            docs.forEach(doc => {
+                try {
+                    if (doc && doc.documentElement) {
+                        doc.documentElement.style.setProperty('--t7-h', conf.h);
+                    }
+                } catch (e) {}
+            });
+        },
+
+        loadSize() {
+            try {
+                const saved = localStorage.getItem(this.SIZE_KEY);
+                if (saved && this.SIZES[saved]) this.size = saved;
+            } catch (e) {}
+            this.applySize();
+        },
+        // 1×1 прозрачный GIF: заглушка до подгрузки блоба (data: разрешён CSP).
+        PLACEHOLDER: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+        emotes: new Map(),      // name -> { url }
+        blobUrls: new Map(),    // name -> blob: URL
+        pending: new Map(),     // name -> Promise<string|null>
+        loaded: false,
+        loading: false,
+
+        requestJson(url) {
+            return new Promise((resolve, reject) => {
+                if (typeof GM_xmlhttpRequest === 'function') {
+                    GM_xmlhttpRequest({
+                        method: 'GET', url, timeout: 15000,
+                        onload: (r) => {
+                            if (r.status < 200 || r.status >= 300) return reject(new Error('HTTP ' + r.status));
+                            try { resolve(JSON.parse(r.responseText)); } catch (e) { reject(e); }
+                        },
+                        onerror: () => reject(new Error('network error')),
+                        ontimeout: () => reject(new Error('timeout'))
+                    });
+                    return;
+                }
+                // Без @grant запрос, скорее всего, заблокирует CSP сайта;
+                // оставляем fetch как совместимый фолбэк для других менеджеров.
+                fetch(url).then(r => r.json()).then(resolve, reject);
+            });
+        },
+
+        requestBlob(url) {
+            return new Promise((resolve, reject) => {
+                if (typeof GM_xmlhttpRequest === 'function') {
+                    GM_xmlhttpRequest({
+                        method: 'GET', url, responseType: 'blob', timeout: 15000,
+                        onload: (r) => {
+                            if (r.status < 200 || r.status >= 300 || !r.response) {
+                                return reject(new Error('HTTP ' + r.status));
+                            }
+                            resolve(r.response);
+                        },
+                        onerror: () => reject(new Error('network error')),
+                        ontimeout: () => reject(new Error('timeout'))
+                    });
+                    return;
+                }
+                fetch(url, { mode: 'cors' })
+                    .then(r => r.ok ? r.blob() : Promise.reject(new Error('HTTP ' + r.status)))
+                    .then(resolve, reject);
+            });
+        },
+
+        async load(force = false) {
+            if (this.loading) {
+                // Перезагрузка во время текущей загрузки — выполним после неё.
+                if (force) this._reloadQueued = true;
+                return;
+            }
+            if (this.loaded && !force) return;
+
+            this.loading = true;
+            this._resetCaches();
+
+            let count = 0;
+            try {
+                // 1. Глобальный набор 7TV.
+                const dataGlobal = await this.requestJson(this.API_URL);
+                count += this._addEmotes(dataGlobal && dataGlobal.emotes);
+
+                // 2. Набор канала: ник → Twitch ID (api.ivr.fi) → emote_set (7tv.io).
+                let saved = '';
+                try { saved = localStorage.getItem(this.CHANNEL_KEY) || ''; } catch (e) {}
+                this.channel = String(saved || this.channel || this.DEFAULT_CHANNEL).trim().toLowerCase();
+
+                if (this.channel) {
+                    try {
+                        const user = await this.requestJson(this.IVR_URL + encodeURIComponent(this.channel));
+                        const id = user && user[0] && user[0].id;
+                        if (id) {
+                            const dataChan = await this.requestJson(this.CHANNEL_API_URL + encodeURIComponent(id));
+                            const set = dataChan && dataChan.emote_set;
+                            count += this._addEmotes(set && set.emotes);
+                        }
+                    } catch (chanErr) {
+                        console.warn('[7TV] Не удалось загрузить канал', this.channel, chanErr);
+                    }
+                }
+
+                this.loaded = count > 0;
+                dbg(`[7TV] Загружено ${this.emotes.size} эмоутов (канал: ${this.channel}).`);
+            } catch (e) {
+                console.error('[7TV] Ошибка загрузки:', e);
+            } finally {
+                this.loading = false;
+                if (this.loaded) {
+                    // Смайлики пришли после первого рендера — обновим открытый чат.
+                    try {
+                        if (typeof Chat !== 'undefined' && Chat.widget) Chat.renderMessages();
+                    } catch (e) {}
+                }
+                if (this._reloadQueued) {
+                    this._reloadQueued = false;
+                    this.load(true);
+                }
+            }
+        },
+
+        // Сброс кэша эмоутов/картинок (смена канала или force-перезагрузка).
+        _resetCaches() {
+            this._cacheEpoch = (this._cacheEpoch || 0) + 1;
+            this.emotes.clear();
+            for (const url of this.blobUrls.values()) {
+                try { URL.revokeObjectURL(url); } catch (e) {}
+            }
+            this.blobUrls.clear();
+            this.pending.clear();
+        },
+
+        _addEmotes(emoteList) {
+            if (!Array.isArray(emoteList)) return 0;
+            let added = 0;
+            emoteList.forEach(e => {
+                const host = e && e.data && e.data.host;
+                if (!host || !host.url || !e.name || e.name === '__proto__') return;
+                const files = (host.files || []).filter(f => f && f.format === 'WEBP' && f.name);
+                const preferred = files.find(f => f.name === '2x.webp') || files[0];
+                this.emotes.set(e.name, { url: 'https:' + host.url + '/' + (preferred ? preferred.name : '2x.webp') });
+                added++;
+            });
+            return added;
+        },
+
+        replaceEmotes(rawText) {
+            if (!rawText) return '';
+            // replaceEmotes — единственная точка экранирования текста сообщения.
+            const text = String(rawText);
+            if (!this.emotes.size) return Utils.escapeHtml(text);
+
+            return text.split(/([^\p{L}\p{N}_]+)/u).map(part => {
+                if (!part) return '';
+                // Смайлом считается только целое слово; пунктуация/пробелы/эмодзи
+                // отделяются как разделители и экранируются как обычный текст.
+                if (!/^[\p{L}\p{N}_]+$/u.test(part) || !this.emotes.has(part)) return Utils.escapeHtml(part);
+                const name = Utils.escapeHtml(part);
+                return `<img class="t7-emote" data-t7="${name}" src="${this.PLACEHOLDER}" title="${name}" alt="${name}" loading="lazy">`;
+            }).join('');
+        },
+
+        // После вставки HTML: меняем заглушки на blob:-URL смайликов.
+        decorate(root) {
+            if (!root || typeof root.querySelectorAll !== 'function' || !this.emotes.size) return;
+            root.querySelectorAll('img.t7-emote[data-t7]').forEach(img => {
+                const name = img.getAttribute('data-t7');
+                if (!name) return;
+                const ready = this.blobUrls.get(name);
+                if (ready) { img.src = ready; return; }
+                if (img.getAttribute('data-t7-loading') === '1') return;
+                img.setAttribute('data-t7-loading', '1');
+                this.getBlobUrl(name).then(url => {
+                    img.removeAttribute('data-t7-loading');
+                    if (url) img.src = url;
+                    else if (img.parentNode) img.replaceWith((img.ownerDocument || document).createTextNode(name));
+                });
+            });
+        },
+
+        getBlobUrl(name) {
+            if (this.blobUrls.has(name)) return Promise.resolve(this.blobUrls.get(name));
+            if (this.pending.has(name)) return this.pending.get(name);
+            const emote = this.emotes.get(name);
+            if (!emote || !emote.url) return Promise.resolve(null);
+
+            const epoch = this._cacheEpoch;
+            const task = this.requestBlob(emote.url).then(blob => {
+                const url = URL.createObjectURL(blob);
+                // Пока грузили, канал/набор могли перезагрузить — старый блоб не кэшируем.
+                if (epoch !== this._cacheEpoch) {
+                    try { URL.revokeObjectURL(url); } catch (e) {}
+                    return null;
+                }
+                this.blobUrls.set(name, url);
+                return url;
+            }).catch(e => {
+                dbg('[7TV] Не удалось загрузить эмоут', name, e);
+                return null;
+            }).finally(() => this.pending.delete(name));
+
+            this.pending.set(name, task);
+            return task;
+        }
+    };
+
     const Chat = {
         widget: null,
         badge: null,
@@ -4301,6 +5065,8 @@ const Players = {
         _liveES: null,
         _livePollTimer: null,
         _liveRunning: false,
+        _liveConnecting: false,
+        _livePollDelay: 2500,
 
         getMineId() {
             return this.currentMineId 
@@ -4540,6 +5306,87 @@ const Players = {
             };
             handle.addEventListener('pointerup', stopDrag);
             handle.addEventListener('pointercancel', stopDrag);
+
+            // 7TV: размер смайлов + глобальные/канальные эмоуты.
+            SevenTV.loadSize();
+            SevenTV.load();
+
+            // Настройка Twitch-канала для эмоутов 7TV.
+            const btn7tv = document.getElementById('btn-7tv-settings');
+            if (btn7tv) {
+                btn7tv.addEventListener('click', () => this.open7tvSettings());
+            }
+        },
+
+        open7tvSettings() {
+            const modal = UI.showModal(`
+                <h2>🎭 Настройки 7TV <button class="custom-close" id="custom-close-btn">✖</button></h2>
+                <div style="padding: 10px;">
+                    <div style="font-size: 13px; color: #aaa; margin-bottom: 15px;">
+                        Введите Twitch-ник канала, эмоуты которого хотите видеть (например, zakvielchannel).
+                    </div>
+                    <input type="text" id="t7-channel-input" class="search-bar" style="width: 100%; margin-bottom: 15px;" value="${Utils.escapeHtml(SevenTV.channel)}" placeholder="Ник на Twitch">
+                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px; border-top:1px solid #333; padding-top:15px;">
+                        <span style="font-size:13px; color:#aaa;">Размер:</span>
+                        <div style="display:flex; gap:5px;">
+                            ${Object.entries(SevenTV.SIZES).map(([key, conf]) => `
+                                <button class="t7-size-btn" data-size="${key}" style="padding:5px 12px; border-radius:6px; border:1px solid ${SevenTV.size === key ? '#9146ff' : '#444'}; background:${SevenTV.size === key ? '#9146ff' : '#111'}; color:#fff; cursor:pointer; font-weight:bold;">
+                                    ${conf.label}
+                                </button>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <button id="t7-save-btn" style="width: 100%; padding: 10px; background: #caa55c; color: #1d1620; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">Сохранить и загрузить</button>
+                </div>
+            `, { compact: true });
+
+            const input = modal?.querySelector('#t7-channel-input');
+            const saveBtn = modal?.querySelector('#t7-save-btn');
+            if (!input || !saveBtn) return;
+
+            // Мгновенная смена размера смайлов + сохранение в localStorage.
+            modal.querySelectorAll('.t7-size-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    SevenTV.size = btn.dataset.size;
+                    try {
+                        localStorage.setItem(SevenTV.SIZE_KEY, SevenTV.size);
+                    } catch (e) {
+                        dbg('[7TV] Не удалось сохранить размер', e);
+                    }
+                    SevenTV.applySize();
+
+                    // Обновляем визуал кнопок
+                    modal.querySelectorAll('.t7-size-btn').forEach(b => {
+                        const isActive = b.dataset.size === SevenTV.size;
+                        b.style.border = isActive ? '1px solid #9146ff' : '1px solid #444';
+                        b.style.background = isActive ? '#9146ff' : '#111';
+                    });
+                });
+            });
+
+            saveBtn.addEventListener('click', async () => {
+                const nick = String(input.value || '').trim().toLowerCase();
+                const nextChannel = nick || SevenTV.DEFAULT_CHANNEL;
+
+                // Канал не изменился — просто закрываем окно, без запросов к API.
+                if (nextChannel === SevenTV.channel) {
+                    UI.closeModals();
+                    return;
+                }
+
+                // Канал изменился — сохраняем и принудительно перезагружаем набор.
+                try {
+                    localStorage.setItem(SevenTV.CHANNEL_KEY, nick);
+                } catch (e) {
+                    dbg('[7TV] Не удалось сохранить канал', e);
+                }
+                SevenTV.channel = nextChannel;
+                UI.closeModals();
+                UI.showToast('Загрузка эмоутов канала...');
+                await SevenTV.load(true); // Принудительная перезагрузка
+                this.renderMessages();    // Перерисовать чат (если открыт)
+                UI.showToast(`Эмоуты обновлены (${SevenTV.emotes.size} шт)`);
+            });
         },
 
         toggle() {
@@ -4638,6 +5485,7 @@ const Players = {
                     if (window.documentPictureInPicture.window) {
                         try { window.documentPictureInPicture.window.focus(); } catch (e) {}
                         this._popoutWin = window.documentPictureInPicture.window;
+                        SevenTV.applySize();
                         return;
                     }
                     try {
@@ -4735,6 +5583,9 @@ const Players = {
                 } catch (e) {
                     dbg('Error copying styles to popout window:', e);
                 }
+
+                // Размер смайлов 7TV задаётся CSS-переменной — переносим её в PiP.
+                SevenTV.applySize();
 
                 // 4. Запоминаем родной парент и позицию — вернуть нужно туда, а не в body.
                 this._origWidgetParent = this.widget.parentNode;
@@ -4943,10 +5794,9 @@ const Players = {
             // Обновляем UI
             if (!isHistory) {
                 this.renderMessages();
-                const box = this.widget?.querySelector('#chat-messages') || document.getElementById('chat-messages');
-                if (this.isOpen()) {
-                    if (box) box.scrollTop = box.scrollHeight;
-                } else if (!isMine && !isSelf) {
+                // Скролл вниз выполняет renderMessages() и только если пользователь
+                // уже был внизу — иначе чтение истории не прерывается.
+                if (!this.isOpen() && !isMine && !isSelf) {
                     this.unreadCount++;
                     this.updateBadge();
                 }
@@ -5045,6 +5895,15 @@ const Players = {
         renderMessages() {
             const box = this.widget?.querySelector('#chat-messages') || document.getElementById('chat-messages');
             if (!box) return;
+
+            // Запоминаем позицию ДО очистки: если пользователь читает историю,
+            // новый рендер не должен утаскивать его вниз.
+            const wasAtBottom = (box.scrollHeight - box.scrollTop - box.clientHeight) < 50;
+            const prevScrollTop = box.scrollTop;
+            const prevDmBox = box.querySelector('.chat-dm-messages');
+            const dmWasAtBottom = prevDmBox ? (prevDmBox.scrollHeight - prevDmBox.scrollTop - prevDmBox.clientHeight) < 50 : true;
+            const dmPrevScrollTop = prevDmBox ? prevDmBox.scrollTop : 0;
+
             box.innerHTML = '';
 
             // Вкладка «✉️ ЛС»: либо открытый диалог, либо список всех диалогов
@@ -5060,6 +5919,7 @@ const Players = {
 
                     // Контейнер для сообщений
                     const msgContainer = ownerDoc.createElement('div');
+                    msgContainer.className = 'chat-dm-messages';
                     msgContainer.style.cssText = 'display: flex; flex-direction: column; gap: 8px; padding: 10px; overflow-y: auto; flex: 1;';
                     box.appendChild(msgContainer);
 
@@ -5074,10 +5934,13 @@ const Players = {
                             const isMe = (m.from || '').toLowerCase() === myNick || m.from === 'Я';
                             const div = ownerDoc.createElement('div');
                             div.style.cssText = `align-self: ${isMe ? 'flex-end' : 'flex-start'}; max-width: 80%; background: ${isMe ? '#1d3827' : '#282030'}; border: 1px solid ${isMe ? '#2e5d3e' : '#4d3a5a'}; border-radius: 8px; padding: 6px 10px; color: #fff; word-break: break-word;`;
-                            div.innerHTML = `<div style="font-size:13px; line-height:1.4;">${Utils.escapeHtml(m.text)}</div><div style="font-size:10px; color:#aaa; text-align:right; margin-top:2px;">${Utils.escapeHtml(m.time || '')}</div>`;
+                            div.innerHTML = `<div style="font-size:13px; line-height:1.4;">${SevenTV.replaceEmotes(m.text)}</div><div style="font-size:10px; color:#aaa; text-align:right; margin-top:2px;">${Utils.escapeHtml(m.time || '')}</div>`;
                             msgContainer.appendChild(div);
                         });
-                        msgContainer.scrollTop = msgContainer.scrollHeight;
+                        SevenTV.decorate(msgContainer);
+                        // Вниз — только если пользователь и так был внизу.
+                        if (dmWasAtBottom) msgContainer.scrollTop = msgContainer.scrollHeight;
+                        else msgContainer.scrollTop = dmPrevScrollTop;
                     }
 
                     // Обработчик кнопки "Назад"
@@ -5151,11 +6014,16 @@ const Players = {
                     ? `<span style="background:#f7768e; color:#fff; font-size:10px; font-weight:bold; padding:1px 5px; border-radius:4px; margin-right:4px;">🔔 Упоминание</span>` 
                     : '';
 
-                let formattedText = Utils.escapeHtml(m.text);
+                let formattedText = (typeof SevenTV !== 'undefined' && SevenTV.replaceEmotes)
+                    ? SevenTV.replaceEmotes(m.text)
+                    : Utils.escapeHtml(m.text);
                 if (isMention && this.myNick) {
                     const escNick = Utils.escapeRegex(Utils.escapeHtml(this.myNick));
                     const reg = new RegExp(`(@?${escNick})`, 'gi');
-                    formattedText = formattedText.replace(reg, '<mark style="background:rgba(247,118,142,0.35);color:#ff757f;padding:1px 3px;border-radius:3px;">$1</mark>');
+                    // Подсвечиваем ник только в текстовых узлах, не задевая атрибуты img эмоутов.
+                    formattedText = formattedText.split(/(<[^>]*>)/).map(part =>
+                        part.startsWith('<') ? part : part.replace(reg, '<mark style="background:rgba(247,118,142,0.35);color:#ff757f;padding:1px 3px;border-radius:3px;">$1</mark>')
+                    ).join('');
                 }
 
                 const authorNick = m.author || '';
@@ -5201,11 +6069,17 @@ const Players = {
                 box.appendChild(div);
             });
 
+            // 7TV-смайлики: подгружаем blob:-картинки для вставленных img.t7-emote.
+            SevenTV.decorate(box);
+
             if (filtered.length === 0) {
                 box.innerHTML = `<div style="color:#888; text-align:center; padding:20px; font-style:italic;">(Здесь пока пусто...)</div>`;
             }
 
-            box.scrollTop = box.scrollHeight;
+            // Автоскролл только когда пользователь уже был внизу; иначе
+            // возвращаем прежнюю позицию, чтобы не мешать чтению истории.
+            if (wasAtBottom) box.scrollTop = box.scrollHeight;
+            else box.scrollTop = prevScrollTop;
         },
 
         async send() {
@@ -5492,8 +6366,20 @@ const Players = {
         },
 
         async startBackgroundLiveListener() {
-            if (this.disabled || this._liveRunning) return;
+            if (this.disabled || this._liveConnecting) return;
+
+            // Защита от дублирования: живой поток уже открыт или подключается.
+            if (this._liveES && (this._liveES.readyState === 0 || this._liveES.readyState === 1)) return;
+            // Уже идёт fetch-поллинг — второй цикл не запускаем.
+            if (this._liveRunning && !this._liveES && this._livePollTimer) return;
+
+            // Старое закрытое соединение закрываем перед созданием нового.
+            if (this._liveES) {
+                try { this._liveES.close(); } catch (e) {}
+                this._liveES = null;
+            }
             this._liveRunning = true;
+            this._liveConnecting = true;
 
             const sid = new URL(location.href).searchParams.get('sid');
             const livePath = '/api/live' + (sid ? `?sid=${encodeURIComponent(sid)}` : '');
@@ -5503,11 +6389,13 @@ const Players = {
 
             const startPollingFallback = () => {
                 if (!this._liveRunning || this._livePollTimer) return;
+                this._liveConnecting = false; // EventSource не создаётся — уходим в поллинг
                 dbg('Starting live fetch polling fallback...');
                 const poll = async () => {
                     if (!this._liveRunning) return;
                     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
                     const timeoutId = controller ? setTimeout(() => controller.abort(), 3000) : null;
+                    let hasPayload = false;
                     try {
                         const curSid = new URL(location.href).searchParams.get('sid');
                         // Поллинг идёт на тот же чистый /api/live, что и EventSource (без /c/<канал>/)
@@ -5523,6 +6411,7 @@ const Players = {
 
                         // Если пришел поток SSE строками "data: {...}"
                         if (!data && text && text.includes('data:')) {
+                            hasPayload = true;
                             const lines = text.split('\n');
                             for (const line of lines) {
                                 if (line.startsWith('data:')) {
@@ -5542,6 +6431,7 @@ const Players = {
                                 }
                             }
                         } else if (data) {
+                            hasPayload = true;
                             const pollLoc = this.resolveLiveChannel(data);
                             Utils.updateOnlinePlayers(data, pollLoc);
                             Utils.processIncomingDMs(data);
@@ -5559,10 +6449,14 @@ const Players = {
                     } catch (e) {
                         dbg('Live poll error / abort:', e);
                     } finally {
+                        // Бэкофф: пустые ответы не должны долбить /api/live каждые 2.5 с.
+                        this._livePollDelay = hasPayload
+                            ? 2500
+                            : Math.min(30000, Math.max(2500, (this._livePollDelay || 2500) * 2));
                         if (timeoutId) clearTimeout(timeoutId);
                     }
                     if (this._liveRunning) {
-                        this._livePollTimer = setTimeout(poll, 2500);
+                        this._livePollTimer = setTimeout(poll, this._livePollDelay);
                     }
                 };
                 poll();
@@ -5572,6 +6466,7 @@ const Players = {
                 if (typeof EventSource !== 'undefined') {
                     const es = new EventSource(url, { withCredentials: true, _customLive: true });
                     this._liveES = es;
+                    this._liveConnecting = false;
 
                     es.onopen = () => console.log('Live Connected!');
 
@@ -5632,12 +6527,15 @@ const Players = {
                 }
             } catch (e) {
                 dbg('Live EventSource init failed:', e);
+                this._liveConnecting = false;
                 startPollingFallback();
             }
         },
 
         stopBackgroundLiveListener() {
             this._liveRunning = false;
+            this._liveConnecting = false;
+            this._livePollDelay = 2500;
             if (this._liveES) {
                 try { this._liveES.close(); } catch(e) {}
                 this._liveES = null;
@@ -5649,8 +6547,13 @@ const Players = {
         },
 
         interceptEventSource() {
-            const OrigES = window.EventSource;
-            if (!OrigES) return;
+            if (this._esIntercepted) return;
+            // @grant переводит Tampermonkey в sandbox: window — это прокси,
+            // поэтому конструктор на странице патчим через unsafeWindow (G).
+            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
+            const OrigES = pageWin.EventSource || window.EventSource;
+            if (!OrigES || OrigES.__lgChatProxied) return;
+            this._esIntercepted = true;
             const self = this;
             class ESProxy extends OrigES {
                 constructor(...args) {
@@ -5703,12 +6606,18 @@ const Players = {
                     });
                 }
             }
-            window.EventSource = ESProxy;
+            try { ESProxy.__lgChatProxied = true; } catch (e) {}
+            try { pageWin.EventSource = ESProxy; } catch (e) {}
+            if (pageWin !== window) { try { window.EventSource = ESProxy; } catch (e) {} }
         },
 
         interceptWebSocket() {
-            const OrigWS = window.WebSocket;
-            if (!OrigWS) return;
+            if (this._wsIntercepted) return;
+            // См. interceptEventSource: патчим конструктор страницы (unsafeWindow).
+            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
+            const OrigWS = pageWin.WebSocket || window.WebSocket;
+            if (!OrigWS || OrigWS.__lgChatProxied) return;
+            this._wsIntercepted = true;
             const self = this;
             class WSProxy extends OrigWS {
                 constructor(...args) {
@@ -5779,13 +6688,20 @@ const Players = {
                     });
                 }
             }
-            window.WebSocket = WSProxy;
+            try { WSProxy.__lgChatProxied = true; } catch (e) {}
+            try { pageWin.WebSocket = WSProxy; } catch (e) {}
+            if (pageWin !== window) { try { window.WebSocket = WSProxy; } catch (e) {} }
         },
 
         interceptFetch() {
-            const origFetch = window.fetch;
+            if (this._fetchIntercepted) return;
+            // См. interceptEventSource: в sandbox патчим fetch страницы (unsafeWindow).
+            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
+            const origFetch = pageWin.fetch || window.fetch;
+            if (!origFetch || origFetch.__lgChatProxied) return;
+            this._fetchIntercepted = true;
             const self = this;
-            window.fetch = async function(...args) {
+            const wrappedFetch = async function(...args) {
                 const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
                 const res = await origFetch.apply(this, args);
 
@@ -5910,8 +6826,14 @@ const Players = {
 
                 return res;
             };
+            try { wrappedFetch.__lgChatProxied = true; } catch (e) {}
+            try { pageWin.fetch = wrappedFetch; } catch (e) {}
+            if (pageWin !== window) { try { window.fetch = wrappedFetch; } catch (e) {} }
         }
     };
+
+    // Экспорт 7TV для отладки: window.__LEGION__.Chat.SevenTV
+    Chat.SevenTV = SevenTV;
 
     // ===== src/main.js =====
     // ============================================================
@@ -5923,12 +6845,15 @@ const Players = {
     //   core/styles.js -> STYLES
     //   core/hooks.js  -> G (перехватчики LGCity / LGAuction / LGQuest / LGMine)
     //   core/ui.js     -> UI
-    //   modules/*      -> BuildSim, HeroPlanner, Auction, Players, Miner, Chat
+    //   modules/*      -> BuildSim, HeroPlanner, Auction, Players, PriestAssistant, Miner, Chat
     // ============================================================
 
     // 5.3. Защита от повторного запуска (single-instance guard)
-    if (window.__LEGION__?._booted) {
-        try { window.__LEGION__.shutdown?.(); } catch (e) {}
+    // Page-context ссылка: при @grant window — песочница, а консоль и другие
+    // скрипты видят только unsafeWindow.
+    const LG_ROOT = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
+    if (LG_ROOT.__LEGION__?._booted) {
+        try { LG_ROOT.__LEGION__.shutdown?.(); } catch (e) {}
     }
 
     // ============================================================
@@ -5953,6 +6878,8 @@ const Players = {
                 <button class="fab-menu-item" id="${DOM_IDS.btnPopout}">📺 Вынести чат</button>
                 <button class="fab-menu-item" id="${DOM_IDS.btnPocketCity}">🏰 Карманный Город</button>
                 <button class="fab-menu-item" id="${DOM_IDS.btnProfile}">👤 Профиль</button>
+                <button class="fab-menu-item" id="btn-priest-panel">✨ Панель Жреца</button>
+                <button class="fab-menu-item" id="btn-7tv-settings">🎭 Канал 7TV</button>
                 <label class="fab-menu-item" style="cursor:pointer; display:flex; align-items:center; justify-content:space-between; user-select:none; font-size:12px; gap:8px;">
                     <span>🚫 Отключить перехват чата</span>
                     <input type="checkbox" id="${DOM_IDS.chkChatDisable}" style="width:16px; height:16px; cursor:pointer; accent-color:#ff5a7a;">
@@ -6002,6 +6929,7 @@ const Players = {
         Miner.init();
         BuildSim.init();        // без кнопки — регистрирует только глобальный клик для .sim-card
         HeroPlanner.init();     // кнопка FAB ведёт сюда
+        PriestAssistant.init(); // HUD Жреца в Походе (window.__lgQuestContext)
         Auction.init();
         Players.init();
         Chat.init();
@@ -6017,7 +6945,7 @@ const Players = {
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape') UI.closeModals(); });
 
         // 5.2. Экспорт API для отладки и single-instance guard
-        window.__LEGION__ = {
+        const legionApi = {
             Utils,
             UI,
             Miner,
@@ -6025,11 +6953,13 @@ const Players = {
             HeroPlanner,
             Auction,
             Players,
+            PriestAssistant,
             Chat,
             DOM_IDS,
             RAND_ID,
             _booted: true,
             shutdown: () => {
+                PriestAssistant.destroy();
                 if (Players._badgeTimer) {
                     clearInterval(Players._badgeTimer);
                     Players._badgeTimer = null;
@@ -6049,9 +6979,15 @@ const Players = {
                 }
                 Chat.stopBackgroundLiveListener();
                 document.querySelectorAll('.' + DOM_IDS.customModal + ', .sim-card, .' + DOM_IDS.chatWidget + ', .float-btns, .' + DOM_IDS.fabWrap + ', #' + DOM_IDS.playerHud + ', .' + DOM_IDS.hudLog + ', #' + DOM_IDS.hudLog + ', .hud-log, .custom-modal, .chat-widget, .legion-fab-wrap, #legion-player-hud').forEach(el => el.remove());
-                window.__LEGION__._booted = false;
+                legionApi._booted = false;
             }
         };
+
+        // Публикуем API в page-context: при @grant песочница скрывает window от
+        // консоли и других скриптов, unsafeWindow — нет. Дублируем в window, чтобы
+        // внутренние ссылки (hooks.js) работали в обоих режимах.
+        try { LG_ROOT.__LEGION__ = legionApi; } catch (e) {}
+        try { window.__LEGION__ = legionApi; } catch (e) {}
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
