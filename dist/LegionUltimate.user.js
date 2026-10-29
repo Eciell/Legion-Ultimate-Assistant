@@ -17,10 +17,18 @@
 (function() {
     'use strict';
 
-    // ===== src/core/utils.js =====
+    // ===== src/core/constants.js =====
     // ============================================================
-    // 0. КОНСТАНТЫ И ОТЛАДКА
+    // 0. КОНСТАНТЫ, КЭШИ И БАЗОВЫЕ УТИЛИТЫ (core/constants.js)
+    //
+    // Подключается ПЕРВЫМ (см. CORE_ORDER в build.js): здесь объявляются
+    // G, DEBUG/dbg, RAND_ID, DOM_IDS, API_BASE, общие константы, глобальные
+    // кэши и пустой объект Utils. Методы в него добавляют utils-format /
+    // utils-api / utils-art / utils-chat через Object.assign — порядок
+    // подключения критичен для TDZ (const/let).
     // ============================================================
+    const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+
     const DEBUG = false;
     const dbg = (...a) => DEBUG && console.log('[LEGION]', ...a);
 
@@ -74,26 +82,101 @@
     const Y_MAP = { 30: 80, 20: 230, 10: 380, 5: 530, 0: 680 };
     const SKIP_FX_PREFIXES = ['ctl_', 'act_', 'cd_'];
 
-    // ============================================================
-    // 1. УТИЛИТЫ
-    // ============================================================
-    // Реальный SVG-арт предмета.
-    // Заглушка LGInventory.art / ctx.art = один <rect> с заливкой (коричневый
-    // квадрат в .b-lot-art), поэтому требуем:
-    //   1) длину ≥ 100 байт (реальные арты заметно больше);
-    //   2) <path> ИЛИ ≥ 2 фигуры circle/ellipse/polygon/polyline/line.
-    // <rect> без <path> и без других фигур не проходит никогда.
-    function isRealItemSvg(svg) {
-        if (!svg || typeof svg !== 'string') return false;
-        if (svg.length < 100) return false;
-        const hasPath = /<path[\s\/>]/i.test(svg);
-        const shapes = svg.match(/<(circle|ellipse|polygon|polyline|line)[\s\/>]/gi);
-        const shapeCount = shapes ? shapes.length : 0;
-        return hasPath || shapeCount >= 2;
-    }
+    // Единый объект утилит: наполняется модулями utils-* сразу после
+    // объявления, поэтому к вызову кода из main.js он содержит всё нужное.
+    const Utils = {};
 
-    const Utils = {
+    // --- Базовые утилиты (строки, промисы, задержки) ---
+    const UtilsBase = {
         sleep: (ms) => new Promise(r => setTimeout(r, ms)),
+        escapeHtml(s) {
+            return String(s || '')
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        },
+        escapeRegex(s) {
+            return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        },
+        safeUrl(s) {
+            if (!s) return '';
+            try {
+                return encodeURI(String(s)).replace(/"/g, '%22').replace(/'/g, '%27');
+            } catch { return ''; }
+        },
+        randomDelay(min, max) {
+            return Math.floor(Math.random() * (max - min + 1)) + min;
+        },
+    };
+    Object.assign(Utils, UtilsBase);
+
+    const randomDelay = (min, max) => Utils.randomDelay(min, max);
+
+    // ===== src/core/utils-format.js =====
+    // ============================================================
+    // 0.2. УТИЛИТЫ ФОРМАТИРОВАНИЯ (core/utils-format.js)
+    // Деньги/монеты, статистика и время. Методы обращаются друг к другу
+    // через this.* (после Object.assign this === Utils), как и раньше.
+    // ============================================================
+    const UtilsFormat = {
+        calculateMedian(arr) {
+            if (!arr.length) return 0;
+            const s = [...arr].sort((a, b) => a - b);
+            const m = Math.floor(s.length / 2);
+            return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+        },
+        formatMoney(n) {
+            n = Math.max(0, Math.floor(+n || 0));
+            const g = Math.floor(n / 10000);
+            const s = Math.floor(n / 100) % 100;
+            const b = n % 100;
+            const parts = [];
+            if (g) parts.push(`${g} з`);
+            if (s) parts.push(`${s} с`);
+            if (b || (!g && !s)) parts.push(`${b} б`);
+            return parts.join(' ');
+        },
+        // Разбор «12 з 34 с 56 б» → 123456
+        parseCoinsText(str) {
+            if (!str) return 0;
+            let total = 0, matched = false;
+            const g = String(str).match(/(\d+)\s*(?:з|зол)/i);
+            const s = String(str).match(/(\d+)\s*(?:с|сер)/i);
+            const b = String(str).match(/(\d+)\s*(?:б|мед)/i);
+            if (g) { total += parseInt(g[1], 10) * 10000; matched = true; }
+            if (s) { total += parseInt(s[1], 10) * 100; matched = true; }
+            if (b) { total += parseInt(b[1], 10); matched = true; }
+            return matched ? total : 0;
+        },
+        // Форматирование числа в HTML с иконками монет
+        formatCoinsHtml(n) {
+            n = Math.max(0, Math.floor(+n || 0));
+            const g = Math.floor(n / 10000), s = Math.floor(n / 100) % 100, b = n % 100;
+            const parts = [];
+            if (g) parts.push(`<span>${g}<i class="b-coin-ico g" title="золотые"></i></span>`);
+            if (s) parts.push(`<span>${s}<i class="b-coin-ico s" title="серебряные"></i></span>`);
+            if (b || (!g && !s)) parts.push(`<span>${b}<i class="b-coin-ico b" title="медные"></i></span>`);
+            const label = this.formatMoney(n);
+            return `<span class="b-coin-wrap" role="img" aria-label="${label}" title="${label}">${parts.join(' ')}</span>`;
+        },
+        formatTimeLeft(ms) {
+            if (!ms) return '—';
+            const diff = ms - Date.now();
+            if (diff <= 0) return 'Истек';
+            const h = Math.floor(diff / 3600000);
+            const m = Math.floor((diff % 3600000) / 60000);
+            return `${h}ч ${m}м`;
+        },
+    };
+    Object.assign(Utils, UtilsFormat);
+
+    // ===== src/core/utils-api.js =====
+    // ============================================================
+    // 0.3. СЕТЕВОЙ СЛОЙ (core/utils-api.js)
+    // apiPath добавляет префикс /c/<канал>/ (см. docs/API.md),
+    // fetchApi ходит через нативные контексты игры с фолбэком на fetch.
+    // ============================================================
+    const UtilsApi = {
         apiPath(p) {
             if (!p) return API_BASE;
             if (p.startsWith('/c/')) return p;
@@ -141,46 +224,32 @@
                 return { status: 0, ok: false, body: null, error: err.message };
             }
         },
-        calculateMedian(arr) {
-            if (!arr.length) return 0;
-            const s = [...arr].sort((a, b) => a - b);
-            const m = Math.floor(s.length / 2);
-            return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-        },
-        formatMoney(n) {
-            n = Math.max(0, Math.floor(+n || 0));
-            const g = Math.floor(n / 10000);
-            const s = Math.floor(n / 100) % 100;
-            const b = n % 100;
-            const parts = [];
-            if (g) parts.push(`${g} з`);
-            if (s) parts.push(`${s} с`);
-            if (b || (!g && !s)) parts.push(`${b} б`);
-            return parts.join(' ');
-        },
-        // Разбор «12 з 34 с 56 б» → 123456
-        parseCoinsText(str) {
-            if (!str) return 0;
-            let total = 0, matched = false;
-            const g = String(str).match(/(\d+)\s*(?:з|зол)/i);
-            const s = String(str).match(/(\d+)\s*(?:с|сер)/i);
-            const b = String(str).match(/(\d+)\s*(?:б|мед)/i);
-            if (g) { total += parseInt(g[1], 10) * 10000; matched = true; }
-            if (s) { total += parseInt(s[1], 10) * 100; matched = true; }
-            if (b) { total += parseInt(b[1], 10); matched = true; }
-            return matched ? total : 0;
-        },
-        // Форматирование числа в HTML с иконками монет
-        formatCoinsHtml(n) {
-            n = Math.max(0, Math.floor(+n || 0));
-            const g = Math.floor(n / 10000), s = Math.floor(n / 100) % 100, b = n % 100;
-            const parts = [];
-            if (g) parts.push(`<span>${g}<i class="b-coin-ico g" title="золотые"></i></span>`);
-            if (s) parts.push(`<span>${s}<i class="b-coin-ico s" title="серебряные"></i></span>`);
-            if (b || (!g && !s)) parts.push(`<span>${b}<i class="b-coin-ico b" title="медные"></i></span>`);
-            const label = this.formatMoney(n);
-            return `<span class="b-coin-wrap" role="img" aria-label="${label}" title="${label}">${parts.join(' ')}</span>`;
-        },
+    };
+    Object.assign(Utils, UtilsApi);
+
+    // ===== src/core/utils-art.js =====
+    // ============================================================
+    // 0.4. АРТ ПРЕДМЕТОВ И ДЕКОРАЦИЯ UI (core/utils-art.js)
+    // isRealItemSvg остаётся отдельной функцией: она нужна и как метод
+    // Utils.isRealItemSvg, и как локальный хелпер внутри модуля.
+    // ============================================================
+    // Реальный SVG-арт предмета.
+    // Заглушка LGInventory.art / ctx.art = один <rect> с заливкой (коричневый
+    // квадрат в .b-lot-art), поэтому требуем:
+    //   1) длину ≥ 100 байт (реальные арты заметно больше);
+    //   2) <path> ИЛИ ≥ 2 фигуры circle/ellipse/polygon/polyline/line.
+    // <rect> без <path> и без других фигур не проходит никогда.
+    function isRealItemSvg(svg) {
+        if (!svg || typeof svg !== 'string') return false;
+        if (svg.length < 100) return false;
+        const hasPath = /<path[\s\/>]/i.test(svg);
+        const shapes = svg.match(/<(circle|ellipse|polygon|polyline|line)[\s\/>]/gi);
+        const shapeCount = shapes ? shapes.length : 0;
+        return hasPath || shapeCount >= 2;
+    }
+
+    const UtilsArt = {
+        isRealItemSvg,
         // SVG арт предмета. Сначала контексты игры (в аукционе это самый
         // надёжный источник), затем библиотека инвентаря. Заглушку-<rect>
         // отсекает isRealItemSvg().
@@ -401,14 +470,6 @@
                 }
             });
         },
-        formatTimeLeft(ms) {
-            if (!ms) return '—';
-            const diff = ms - Date.now();
-            if (diff <= 0) return 'Истек';
-            const h = Math.floor(diff / 3600000);
-            const m = Math.floor((diff % 3600000) / 60000);
-            return `${h}ч ${m}м`;
-        },
         getItemName(id, itemsMap = null) {
             if (typeof Auction !== 'undefined' && Auction.getItemName) {
                 return Auction.getItemName(id, itemsMap);
@@ -464,6 +525,41 @@
                 return raw.icon || raw.img || raw.src || raw.url || '';
             } catch (e) { return ''; }
         },
+    };
+    Object.assign(Utils, UtilsArt);
+
+    // ===== fix: приоритет арта из шахты для обеих сборок =====
+    // Раньше патч жил в Personal-модуле miner.js, из-за чего в Ultimate
+    // __lgMineContext.art не использовался вовсе. Идемпотентен: повторный
+    // запуск (или запуск рядом с другим патчем) не плодит обёртки.
+    (function patchMineArtResolver() {
+        if (Utils.__mineCtxPatched || typeof Utils.getItemArtSvg !== 'function') return;
+        Utils.__mineCtxPatched = true;
+
+        const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+        const origGetSvg = Utils.getItemArtSvg.bind(Utils);
+
+        Utils.getItemArtSvg = function (lot, def) {
+            try {
+                const ctx = G.__lgMineContext;
+                if (ctx && typeof ctx.art === 'function') {
+                    const l = lot || {};
+                    const it = { id: l.i, ...(def || {}), en: +l.en || 0 };
+                    const svg = ctx.art(it);
+                    if (isRealItemSvg(svg)) return svg;
+                }
+            } catch (e) {}
+            return origGetSvg(lot, def);
+        };
+    })();
+
+    // ===== src/core/utils-chat.js =====
+    // ============================================================
+    // 0.5. РАЗБОР ЧАТА И СЕТЕВЫХ ДАННЫХ (core/utils-chat.js)
+    // Извлечение сообщений из ответов API/SSE, дедуп, кэш онлайна
+    // и обработка входящих ЛС.
+    // ============================================================
+    const UtilsChat = {
         chatHash(author, text) {
             const s = `${(author || '').trim().toLowerCase()}|${(text || '').trim()}`;
             let h = 5381;
@@ -492,44 +588,6 @@
             const to = m.to || m.target || null;
 
             return { author, text, id: m.id, seq: m.s, role, rank, isSystem, aw, channel, k, to };
-        },
-        extractMessages(data) {
-            if (!data) return [];
-            let result = [];
-
-            const parse = (node) => {
-                if (!node) return;
-                if (Array.isArray(node)) {
-                    // Распознаем упакованный массив сообщения: [id, seq, login, name, text, time]
-                    if (node.length >= 5 && typeof node[0] === 'string' && typeof node[2] === 'string' && typeof node[4] === 'string') {
-                        result.push({ id: node[0], s: node[1], l: node[2], n: node[3], t: node[4], at: node[5] });
-                    } else {
-                        node.forEach(parse);
-                    }
-                } else if (typeof node === 'object') {
-                    if (node.m && Array.isArray(node.m)) {
-                        node.m.forEach(parse);
-                    } else if (node.chat && Array.isArray(node.chat)) {
-                        node.chat.forEach(parse);
-                    } else if (node.t || node.text || node.msg) {
-                        result.push(node);
-                    }
-                }
-            };
-
-            parse(data);
-
-            // Дедупликация
-            const unique = [];
-            const seen = new Set();
-            for (const m of result) {
-                const key = m.id || (m.l + m.t + m.s) || Math.random();
-                if (!seen.has(key)) {
-                    seen.add(key);
-                    unique.push(m);
-                }
-            }
-            return unique;
         },
         // Служебные ветки payload'а, в которые extractChatDeep не должен
         // спускаться: там лежат награды/титулы/предметы (у них бывают поля
@@ -670,23 +728,60 @@
             }
             return unique;
         },
-        escapeHtml(s) {
-            return String(s || '')
-                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
+        extractMessages(data) {
+            if (!data) return [];
+            let result = [];
+
+            const parse = (node) => {
+                if (!node) return;
+                if (Array.isArray(node)) {
+                    // Распознаем упакованный массив сообщения: [id, seq, login, name, text, time]
+                    if (node.length >= 5 && typeof node[0] === 'string' && typeof node[2] === 'string' && typeof node[4] === 'string') {
+                        result.push({ id: node[0], s: node[1], l: node[2], n: node[3], t: node[4], at: node[5] });
+                    } else {
+                        node.forEach(parse);
+                    }
+                } else if (typeof node === 'object') {
+                    if (node.m && Array.isArray(node.m)) {
+                        node.m.forEach(parse);
+                    } else if (node.chat && Array.isArray(node.chat)) {
+                        node.chat.forEach(parse);
+                    } else if (node.t || node.text || node.msg) {
+                        result.push(node);
+                    }
+                }
+            };
+
+            parse(data);
+
+            // Дедупликация
+            const unique = [];
+            const seen = new Set();
+            for (const m of result) {
+                const key = m.id || (m.l + m.t + m.s) || Math.random();
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    unique.push(m);
+                }
+            }
+            return unique;
         },
-        escapeRegex(s) {
-            return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        },
-        safeUrl(s) {
-            if (!s) return '';
+        processIncomingDMs(raw) {
+            if (!raw) return;
             try {
-                return encodeURI(String(s)).replace(/"/g, '%22').replace(/'/g, '%27');
-            } catch { return ''; }
-        },
-        randomDelay(min, max) {
-            return Math.floor(Math.random() * (max - min + 1)) + min;
+                if (typeof Players === 'undefined' || !Players.handleIncomingDM) return;
+                const chats = this.extractChatDeep(raw);
+                if (!chats || !chats.length) return;
+                chats.forEach(m => {
+                    const parsed = this.extractChatFields(m);
+                    const isDM = parsed.k === 'dm' || parsed.channel === 'dm' || m.k === 'dm' || m.kind === 'dm' || m.channel === 'dm';
+                    if (isDM && parsed.text) {
+                        Players.handleIncomingDM(parsed.author, parsed.text, parsed.to);
+                    }
+                });
+            } catch (err) {
+                dbg('Error processing incoming DMs:', err);
+            }
         },
         updateOnlinePlayers(raw, defaultLoc = null, src = 'sse') {
             if (!raw) return false;
@@ -779,51 +874,8 @@
             }
             return updated;
         },
-        processIncomingDMs(raw) {
-            if (!raw) return;
-            try {
-                if (typeof Players === 'undefined' || !Players.handleIncomingDM) return;
-                const chats = this.extractChatDeep(raw);
-                if (!chats || !chats.length) return;
-                chats.forEach(m => {
-                    const parsed = this.extractChatFields(m);
-                    const isDM = parsed.k === 'dm' || parsed.channel === 'dm' || m.k === 'dm' || m.kind === 'dm' || m.channel === 'dm';
-                    if (isDM && parsed.text) {
-                        Players.handleIncomingDM(parsed.author, parsed.text, parsed.to);
-                    }
-                });
-            } catch (err) {
-                dbg('Error processing incoming DMs:', err);
-            }
-        }
     };
-
-    // ===== fix: приоритет арта из шахты для обеих сборок =====
-    // Раньше патч жил в Personal-модуле miner.js, из-за чего в Ultimate
-    // __lgMineContext.art не использовался вовсе. Идемпотентен: повторный
-    // запуск (или запуск рядом с другим патчем) не плодит обёртки.
-    (function patchMineArtResolver() {
-        if (Utils.__mineCtxPatched || typeof Utils.getItemArtSvg !== 'function') return;
-        Utils.__mineCtxPatched = true;
-
-        const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-        const origGetSvg = Utils.getItemArtSvg.bind(Utils);
-
-        Utils.getItemArtSvg = function (lot, def) {
-            try {
-                const ctx = G.__lgMineContext;
-                if (ctx && typeof ctx.art === 'function') {
-                    const l = lot || {};
-                    const it = { id: l.i, ...(def || {}), en: +l.en || 0 };
-                    const svg = ctx.art(it);
-                    if (isRealItemSvg(svg)) return svg;
-                }
-            } catch (e) {}
-            return origGetSvg(lot, def);
-        };
-    })();
-
-    const randomDelay = (min, max) => Utils.randomDelay(min, max);
+    Object.assign(Utils, UtilsChat);
 
     // ===== src/core/styles.js =====
     // ============================================================
@@ -1091,8 +1143,8 @@
     // ===== src/core/hooks.js =====
     // ============================================================
     // 0.1. ПЕРЕХВАТ НАРИВНЫХ КОНТЕКСТОВ ИГРЫ (Обход 429/409 ошибок)
+    // G объявлен в core/constants.js (подключается первым) — здесь не дублируем.
     // ============================================================
-    const G = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
     // ============================================================
     // 0.1.0. 🛡️ СТЕЛС-РЕЖИМ (Анти-детект вкладки)
@@ -7203,9 +7255,13 @@ const Players = {
     //
     // Все зависимости лежат в общем IIFE-скоупе сборки, импортов нет
     // (build.js просто конкатенирует файлы в описанном ниже порядке):
-    //   core/utils.js  -> DEBUG, dbg, RAND_ID, DOM_IDS, API_BASE, Utils, randomDelay
+    //   core/constants.js    -> G, DEBUG, dbg, RAND_ID, DOM_IDS, API_BASE, Utils={}, randomDelay
+    //   core/utils-format.js -> Utils.calculateMedian / formatMoney / parseCoinsText / formatCoinsHtml / formatTimeLeft
+    //   core/utils-api.js    -> Utils.apiPath / fetchApi
+    //   core/utils-art.js    -> Utils.getItemArtSvg / getItemArtHtml / getItemName / getItemIcon + декор UI
+    //   core/utils-chat.js   -> Utils.chatHash / extractChatFields / extractChatDeep / updateOnlinePlayers / processIncomingDMs
     //   core/styles.js -> STYLES
-    //   core/hooks.js  -> G (перехватчики LGCity / LGAuction / LGQuest / LGMine)
+    //   core/hooks.js  -> перехватчики LGCity / LGAuction / LGQuest / LGMine
     //   core/ui.js     -> UI
     //   modules/*      -> BuildSim, HeroPlanner, Auction, Players, PriestAssistant, Miner, Chat
     // ============================================================

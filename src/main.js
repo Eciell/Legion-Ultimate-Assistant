@@ -3,9 +3,13 @@
     //
     // Все зависимости лежат в общем IIFE-скоупе сборки, импортов нет
     // (build.js просто конкатенирует файлы в описанном ниже порядке):
-    //   core/utils.js  -> DEBUG, dbg, RAND_ID, DOM_IDS, API_BASE, Utils, randomDelay
+    //   core/constants.js    -> G, DEBUG, dbg, RAND_ID, DOM_IDS, API_BASE, Utils={}, randomDelay
+    //   core/utils-format.js -> Utils.calculateMedian / formatMoney / parseCoinsText / formatCoinsHtml / formatTimeLeft
+    //   core/utils-api.js    -> Utils.apiPath / fetchApi
+    //   core/utils-art.js    -> Utils.getItemArtSvg / getItemArtHtml / getItemName / getItemIcon + декор UI
+    //   core/utils-chat.js   -> Utils.chatHash / extractChatFields / extractChatDeep / updateOnlinePlayers / processIncomingDMs
     //   core/styles.js -> STYLES
-    //   core/hooks.js  -> G (перехватчики LGCity / LGAuction / LGQuest / LGMine)
+    //   core/hooks.js  -> перехватчики LGCity / LGAuction / LGQuest / LGMine
     //   core/ui.js     -> UI
     //   modules/*      -> BuildSim, HeroPlanner, Auction, Players, PriestAssistant, Miner, Chat
     // ============================================================

@@ -44,7 +44,14 @@ const QUEST_FILE = 'modules/quest.js';
  * используют (const попадает в temporal dead zone до инициализации).
  */
 const CORE_ORDER = [
-    'core/utils.js',
+    // v11.6.0: utils.js разбит на модули. Порядок критичен (TDZ):
+    // constants.js объявляет G/DOM_IDS/API_BASE/Utils={}, остальные модули
+    // дополняют Utils через Object.assign, поэтому идут строго после него.
+    'core/constants.js',
+    'core/utils-format.js',
+    'core/utils-api.js',
+    'core/utils-art.js',
+    'core/utils-chat.js',
     'core/styles.js',
     'core/hooks.js',
     'core/ui.js'
