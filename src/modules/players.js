@@ -453,7 +453,14 @@ const Players = {
 
             // ПРОГРЕВ СЕССИИ: без этого сервер считает, что мы в городе, и выдает 409
             try {
-                await Utils.fetchApi('/api/city/enter', {});
+                // ВАЖНО: чистый fetch, а не Utils.fetchApi: тот возьмёт контекст ШАХТЫ
+                // (__lgMineContext), прогрев уйдёт не туда, и отправка в город даст 409.
+                await fetch('/api/city/enter', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({})
+                });
             } catch (e) {
                 dbg('Session warmup failed', e);
             }

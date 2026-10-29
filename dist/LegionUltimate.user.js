@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Legion: Ultimate Assistant (Chat, Auction, Pocket City)
 // @namespace    http://tampermonkey.net/
-// @version      11.5.0
+// @version      11.5.2
 // @description  QoL-аддон для Легиона: Умный чат, Сканер аукциона, Разведка, Планировщик, Карманный город. Без авто-копания.
 // @connect      7tv.io
 // @connect      cdn.7tv.app
@@ -99,7 +99,10 @@
             return API_BASE + (p.startsWith('/') ? p : '/' + p);
         },
         async fetchApi(path, body, signal) {
-            const nativeCtx = window.__lgAucContext || window.__lgCityContext || window.__lgMineContext;
+            // Те же правила, что и в getItemArtSvg: после @grant объекты игры
+            // живут только в unsafeWindow.
+            const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+            const nativeCtx = G.__lgAucContext || G.__lgCityContext || G.__lgMineContext;
             if (nativeCtx && typeof nativeCtx.api === 'function') {
                 try {
                     const bodyObj = body ? (typeof body === 'string' ? JSON.parse(body) : body) : undefined;
@@ -185,29 +188,33 @@
                 lot = lot || {};
                 const it = { id: lot.i, ...(def || {}), en: +lot.en || 0 };
 
+                // ВАЖНО: в песочнице Tampermonkey (после @grant) window не видит
+                // объекты страницы. Используем unsafeWindow (или G), если он доступен.
+                const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+
                 // 1. Контексты игры: аукцион / город / шахта.
                 // Вызов каждого контекста изолирован: упавший art() не должен
                 // обрывать цепочку и лишать предмет картинки.
                 const ctxs = [
-                    window.__lgAucContext,
-                    window.__lgCityContext,
-                    window.__lgMineContext,
-                    window.X,        // глобальный арт-резолвер игры
-                    window.LGtine,   // запасной глобальный резолвер
-                    { art: window.art, owner: window },     // глобальный метод игры
-                    { art: window.fig, owner: window },     // запасной
-                    { art: window.doodle, owner: window }   // запасной
+                    G.__lgAucContext,
+                    G.__lgCityContext,
+                    G.__lgMineContext,
+                    G.X,        // глобальный арт-резолвер игры
+                    G.LGtine,   // запасной глобальный резолвер
+                    { art: G.art, owner: G },     // глобальный метод игры
+                    { art: G.fig, owner: G },     // запасной
+                    { art: G.doodle, owner: G }   // запасной
                 ].filter(Boolean);
                 for (const ctx of ctxs) {
                     if (!ctx || typeof ctx.art !== 'function') continue;
                     let svg = '';
-                    // owner нужен, чтобы window.art() вызывался с this === window
+                    // owner нужен, чтобы G.art() вызывался с this === G
                     try { svg = ctx.art.call(ctx.owner || ctx, it); } catch (e) { svg = ''; }
                     if (isRealItemSvg(svg)) return svg;
                 }
 
                 // 2. Фолбэк на библиотеку инвентаря
-                const inv = window.LGInventory;
+                const inv = G.LGInventory || G.LGItems || window.LGInventory;
                 if (inv && typeof inv.art === 'function') {
                     let svg = '';
                     try { svg = inv.art(it); } catch (e) { svg = ''; }
@@ -408,7 +415,8 @@
             if (!id) return '—';
             try {
                 if (itemsMap && itemsMap[id]?.name) return itemsMap[id].name;
-                const mdName = window.MDDoodle?.names?.[id] || window.MDDoodle?.names?.cats?.items?.[id]?.name;
+                const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+                const mdName = G.MDDoodle?.names?.[id] || G.MDDoodle?.names?.cats?.items?.[id]?.name;
                 if (mdName) return mdName;
             } catch (e) {}
 
@@ -445,7 +453,8 @@
         getItemIcon(id) {
             try {
                 if (!id) return '';
-                const C = window.MDDoodle?.CATALOG;
+                const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+                const C = G.MDDoodle?.CATALOG;
                 if (!C) return '';
                 const raw = C.icons?.[id] || C.weapons?.[id] || C.armors?.[id] ||
                             C.shields?.[id] || C.hats?.[id] || C.acc?.[id] || '';
@@ -461,11 +470,15 @@
             return h;
         },
         extractChatFields(m) {
-            if (!m || typeof m !== 'object') return { author: null, text: null, k: null, to: null };
+            if (!m || typeof m !== 'object') return { author: null, text: null, k: null, to: null, rank: null };
 
             const author = m.l || m.n || m.author || m.nick || m.name || m.login || m.from;
             const text = m.t || m.text || m.msg || m.m || m.message;
             const role = m.c || m.role || null;
+            // Статус модератора сервер присылает отдельно от класса:
+            // r: "mod" (щиток), c: "legionary" (иконка класса).
+            const rawRank = m.r || m.rank || null;
+            const rank = rawRank ? String(rawRank).toLowerCase() : null;
 
             // Определяем, системное ли это сообщение (§2.7, SDK §7)
             const isSystem = author === 'Летопись' || author === 'Система'
@@ -477,7 +490,7 @@
             const k = m.k || m.kind || (channel === 'dm' ? 'dm' : null);
             const to = m.to || m.target || null;
 
-            return { author, text, id: m.id, seq: m.s, role, isSystem, aw, channel, k, to };
+            return { author, text, id: m.id, seq: m.s, role, rank, isSystem, aw, channel, k, to };
         },
         extractMessages(data) {
             if (!data) return [];
@@ -517,11 +530,29 @@
             }
             return unique;
         },
+        // Служебные ветки payload'а, в которые extractChatDeep не должен
+        // спускаться: там лежат награды/титулы/предметы (у них бывают поля
+        // t/l/n), и они не должны превращаться в «сообщения» чата.
+        NON_CHAT_KEYS: new Set([
+            'aw', 'awards', 'award', 'items', 'item', 'hero', 'me', 'stats',
+            'st', 'inv', 'inventory', 'sk', 'skills', 'ign', 'top', 'players',
+            'title', 'titles', 'ach', 'achievements', 'achievement', 'reward', 'rewards'
+        ]),
         looksLikeChat(o) {
             if (!o || typeof o !== 'object' || Array.isArray(o)) return false;
-            const text = o.t ?? o.text ?? o.msg ?? o.m ?? o.message;
-            const author = o.l ?? o.n ?? o.author ?? o.name ?? o.nick ?? o.login ?? o.from;
-            return typeof text === 'string' && text.trim().length > 0 && typeof author === 'string' && author.trim().length > 0;
+
+            // 1. Отсекаем объекты наград/титулов/предметов по характерным служебным полям
+            if (o.i !== undefined || o.d !== undefined || o.en !== undefined || o.price !== undefined) return false;
+            if (o.id && o.t && o.id === o.t) return false; // id совпадает с типом награды (pioneer === pioneer)
+
+            // 2. В настоящем сообщении ВСЕГДА есть логин/автор (строка от 2 символов).
+            // Поле 'n' (name) НЕ используется как автор, так как у наград n — это название.
+            const author = o.author ?? o.from ?? o.login ?? o.l ?? (typeof o.nick === 'string' ? o.nick : null);
+            if (typeof author !== 'string' || author.trim().length < 2) return false;
+
+            // 3. Текст сообщения: поля text/msg/message либо t (только при наличии валидного автора)
+            const text = o.text ?? o.message ?? o.msg ?? o.t ?? (typeof o.m === 'string' ? o.m : null);
+            return typeof text === 'string' && text.trim().length > 0;
         },
         extractChatDeep(m, depth = 0) {
             if (!m || depth > 4) return [];
@@ -531,21 +562,25 @@
             if (Array.isArray(m)) {
                 // Если сам m — кортеж сообщения со строковым логином row[2] и текстом row[4]
                 if (m.length >= 5 && typeof m[2] === 'string' && typeof m[4] === 'string' && m[4].trim()) {
-                    return [{ id: m[0], s: m[1], l: m[2], n: m[3] || m[2], t: m[4], at: m[5], c: m[6] }];
+                    return [{ id: m[0], s: m[1], l: m[2], n: m[3] || m[2], t: m[4], at: m[5], c: m[6], r: m[7] || null, aw: Array.isArray(m[8]) ? m[8] : null }];
                 }
 
                 // Или это массив сообщений/строк
                 for (const item of m) {
                     if (Array.isArray(item)) {
                         if (item.length >= 5 && typeof item[2] === 'string' && typeof item[4] === 'string' && item[4].trim()) {
-                            result.push({ id: item[0], s: item[1], l: item[2], n: item[3] || item[2], t: item[4], at: item[5], c: item[6] });
+                            result.push({ id: item[0], s: item[1], l: item[2], n: item[3] || item[2], t: item[4], at: item[5], c: item[6], r: item[7] || null, aw: Array.isArray(item[8]) ? item[8] : null });
                         } else {
                             result.push(...this.extractChatDeep(item, depth + 1));
                         }
-                    } else if (this.looksLikeChat(item)) {
-                        result.push(item);
                     } else if (item && typeof item === 'object') {
-                        result.push(...this.extractChatDeep(item, depth + 1));
+                        // Отсекаем награды/титулы в массивах (у них есть i или d, и нет l/author)
+                        if (item.i !== undefined || item.d !== undefined) continue;
+                        if (this.looksLikeChat(item)) {
+                            result.push(item);
+                        } else {
+                            result.push(...this.extractChatDeep(item, depth + 1));
+                        }
                     }
                 }
                 if (result.length) return result;
@@ -568,6 +603,8 @@
                                 at: item.at || item.time || Date.now(),
                                 c: item.c || item.role || null,
                                 cn: item.cn || null,
+                                r: item.r || item.rank || null,
+                                aw: Array.isArray(item.aw) ? item.aw : null,
                                 channel: roomChannel || item.channel || item.room || null,
                                 k: item.k || item.kind || null,
                                 to: item.to || item.target || null
@@ -576,7 +613,9 @@
                             if (item.length >= 5 && typeof item[2] === 'string' && typeof item[4] === 'string' && item[4].trim()) {
                                 result.push({
                                     id: item[0], s: item[1], l: item[2], n: item[3] || item[2],
-                                    t: item[4], at: item[5], c: item[6], channel: roomChannel || null
+                                    t: item[4], at: item[5], c: item[6],
+                                    r: item[7] || null, aw: Array.isArray(item[8]) ? item[8] : null,
+                                    channel: roomChannel || null
                                 });
                             }
                         }
@@ -590,7 +629,9 @@
                         if (Array.isArray(row) && row.length >= 5 && typeof row[2] === 'string' && typeof row[4] === 'string' && row[4].trim()) {
                             result.push({
                                 id: row[0], s: row[1], l: row[2], n: row[3] || row[2],
-                                t: row[4], at: row[5], c: row[6], channel: roomChannel || null
+                                t: row[4], at: row[5], c: row[6],
+                                r: row[7] || null, aw: Array.isArray(row[8]) ? row[8] : null,
+                                channel: roomChannel || null
                             });
                         }
                     }
@@ -601,8 +642,11 @@
                     return [m];
                 }
 
-                // Рекурсивный обход свойств объекта (до 4 уровней глубины)
+                // Рекурсивный обход свойств объекта (до 4 уровней глубины).
+                // Служебные ветки (награды, предметы, герой, статы) не трогаем:
+                // оттуда и приходят фейковые «сообщения» вроде pioneer.
                 for (const k of Object.keys(m)) {
+                    if (this.NON_CHAT_KEYS.has(k)) continue;
                     const v = m[k];
                     if (!v) continue;
                     if (this.looksLikeChat(v)) {
@@ -863,25 +907,25 @@
         .${DOM_IDS.chatBadge}, .chat-badge { position: absolute; top: -6px; right: -6px; background: #ff5a7a; color: #fff; border-radius: 50%; padding: 2px 7px; font-size: 12px; font-weight: 900; box-shadow: 0 2px 5px rgba(0,0,0,0.5); display: none; pointer-events: none; z-index: 2; }
         .${DOM_IDS.chatWidget}, .chat-widget { position: fixed; bottom: 80px; right: 20px; width: 320px; height: 400px; min-width: 320px; min-height: 400px; max-width: 95vw; max-height: 95vh; resize: both; background: #1d1620; border: 2px solid #caa55c; border-radius: 12px; display: flex; flex-direction: column; z-index: 10000; box-shadow: 0 10px 30px rgba(0,0,0,0.8); overflow: hidden; transition: transform 0.2s, opacity 0.2s; transform: translateY(20px); opacity: 0; pointer-events: none; }
         .${DOM_IDS.chatWidget}.open, .chat-widget.open { transform: translateY(0); opacity: 1; pointer-events: auto; }
-        .chat-top-bar, .chat-header { background: #2a2030; padding: 10px 12px; font-weight: bold; color: #ffcf6a; display: flex; justify-content: space-between; align-items: center; gap: 8px; overflow: hidden; border-bottom: 1px solid #444; cursor: move; user-select: none; touch-action: none; box-sizing: border-box; }
+        .chat-top-bar, .chat-header { background: #2a2030; padding: 10px 12px; font-weight: bold; color: #ffcf6a; display: flex; justify-content: space-between; align-items: center; gap: 8px; overflow: hidden; border-bottom: 1px solid #444; cursor: move; user-select: none; touch-action: none; box-sizing: border-box; flex-shrink: 0; }
         .chat-main-tabs, .chat-tabs { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
         .chat-main-tab, .chat-tab { background: #1d1620; border: 1px solid #444; color: #aaa; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 11px; white-space: nowrap; font-weight: bold; user-select: none; pointer-events: auto; }
         .chat-main-tab.active, .chat-tab.active { background: #caa55c; color: #1d1620; border-color: #caa55c; font-weight: bold; }
-        .chat-sub-tabs { display: flex; gap: 6px; padding: 6px 12px; background: #231929; border-bottom: 1px solid #3a2b42; }
+        .chat-sub-tabs { display: flex; gap: 6px; padding: 6px 12px; background: #231929; border-bottom: 1px solid #3a2b42; flex-shrink: 0; }
         .chat-sub-tab { background: #1d1620; border: 1px solid #444; color: #bbb; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; white-space: nowrap; user-select: none; pointer-events: auto; }
         .chat-sub-tab.active { background: #caa55c; color: #1d1620; border-color: #caa55c; font-weight: bold; }
         .chat-role-icon { margin-right: 4px; }
         .chat-envelope { display: none; }
         .chat-close { cursor: pointer; color: #ff8fa3; padding: 4px 6px; flex-shrink: 0; font-size: 16px; line-height: 1; user-select: none; pointer-events: auto; }
         .chat-close:hover { color: #fff; }
-        .chat-messages { flex: 1; padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: #f7eadf !important; }
+        .chat-messages { flex: 1 1 0%; min-height: 0; padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: #f7eadf !important; }
         .chat-msg { background: rgba(255,255,255,0.05); padding: 6px 10px; border-radius: 8px; line-height: 1.3; word-wrap: break-word; color: #f7eadf !important; }
         .chat-msg.pending { opacity: 0.6; font-style: italic; }
         .chat-msg.streamer-msg { border-left: 3px solid #ffd700; background: rgba(255, 215, 0, 0.08); }
         .chat-msg.mention-msg { border-left: 3px solid #f7768e; background: rgba(247, 118, 142, 0.12); }
         .chat-text { color: #f7eadf !important; word-break: break-word; }
         .chat-author { font-weight: bold; color: #f7eadf !important; margin-right: 5px; }
-        .chat-input-area { display: flex; padding: 10px; background: #111; border-top: 1px solid #333; gap: 5px; }
+        .chat-input-area { display: flex; padding: 10px; background: #111; border-top: 1px solid #333; gap: 5px; flex-shrink: 0; }
         .chat-input { flex: 1; background: #222; border: 1px solid #444; color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 13px; outline: none; }
         .chat-input:focus { border-color: #caa55c; }
         .chat-send { background: #caa55c; color: #1d1620; border: none; padding: 0 15px; border-radius: 6px; font-weight: bold; cursor: pointer; user-select: none; pointer-events: auto; }
@@ -1314,6 +1358,9 @@
             }, 2500);
         },
         closeModals() {
+            // Снимаем удержание вкладки «Город»: MutationObserver в
+            // openNativeBuilding больше не должен возвращать её на экран.
+            window.__POCKET_CITY_OPEN__ = false;
             if (typeof Players !== 'undefined') Players.currentDMPeer = null;
             document.querySelectorAll('.' + DOM_IDS.customModal + ', .custom-modal').forEach(el => el.remove());
             document.querySelectorAll('.sim-card').forEach(el => el.remove());
@@ -1506,34 +1553,42 @@
         async openNativeBuilding(roomId) {
             dbg(`Открытие нативного здания «${roomId}»...`);
 
-            // 0. Нативно закрываем шахту, если она открыта (иначе игра выкинет на карту)
+            // Игровые объекты (LGCity / LGMine / __lgQuestContext / cityFiles)
+            // живут в page-context: после @grant window — песочница, поэтому
+            // берём unsafeWindow (G), как это уже делается в chat.js.
+            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
+
+            // 1. Безопасно закрываем шахту, если она открыта
             const mnExitBtn = document.querySelector('[data-mn-exit]');
             if (mnExitBtn) {
                 try { mnExitBtn.click(); } catch(e) {}
-                // Даем игре 150мс, чтобы обработать выход, снять классы и перерисовать вкладки
+                // Ждём анимацию, чтобы игра успела снять классы и перерисовать вкладки
                 await new Promise(r => setTimeout(r, 150));
             }
-
-            // 0.1. «Режим призрака» (на всякий случай, если шахта закрылась не до конца)
-            const mn = document.querySelector('.mn');
-            if (mn) {
-                mn.style.setProperty('opacity', '0', 'important');
-                mn.style.setProperty('pointer-events', 'none', 'important');
-                mn.style.setProperty('z-index', '-9999', 'important');
-                document.body.classList.remove('mn-on');
+            if (pageWin.LGMine && typeof pageWin.LGMine.close === 'function') {
+                try { pageWin.LGMine.close(); } catch(e) {}
             }
 
-            // 1. Снимаем блокировку похода (quest lockout / cityLocked)
-            if (window.__lgQuestContext && typeof window.__lgQuestContext.openTown === 'function') {
-                try { window.__lgQuestContext.openTown('fair'); } catch (e) {}
+            // Убираем классы шахты, если они застряли
+            document.body.classList.remove('mn-on');
+            const mnEl = document.querySelector('.mn');
+            if (mnEl) {
+                mnEl.style.setProperty('opacity', '0', 'important');
+                mnEl.style.setProperty('pointer-events', 'none', 'important');
+                mnEl.style.setProperty('z-index', '-9999', 'important');
             }
 
-            // 2. Гарантируем загрузку скриптов города
-            if (!window.LGCity && typeof window.cityFiles === 'function') {
-                try { await window.cityFiles(); } catch (e) {}
+            // 2. Обходим cityLocked (блокировку похода)
+            if (pageWin.__lgQuestContext && typeof pageWin.__lgQuestContext.openTown === 'function') {
+                try { pageWin.__lgQuestContext.openTown('fair'); } catch (e) {}
             }
 
-            // 3. Разблокируем кнопку Города в шапке игры и переключаем вкладку
+            // 3. Гарантируем загрузку скриптов города
+            if (!pageWin.LGCity && typeof pageWin.cityFiles === 'function') {
+                try { await pageWin.cityFiles(); } catch (e) {}
+            }
+
+            // 4. Принудительно переключаем вкладку на Город
             const cityTabBtn = document.querySelector('.tabs button[data-tab="city"]');
             if (cityTabBtn) {
                 cityTabBtn.hidden = false;
@@ -1549,24 +1604,64 @@
                 else b.removeAttribute('aria-current');
             });
 
-            // 4. Ожидаем инициализации LGCity и открываем официальное окно игры
+            // 5. Защита от выкидывания на карту похода (cityVis).
+            // Игра перерисовывает шапку и может заменить узел вкладки, поэтому
+            // наблюдение переносим на актуальный #tab-city, когда он меняется.
+            const ensureCityObserver = () => {
+                const cityTab = document.getElementById('tab-city');
+                if (!cityTab) return;
+
+                if (!window.__pocketCityObserver) {
+                    window.__pocketCityObserver = new MutationObserver(() => {
+                        if (!window.__POCKET_CITY_OPEN__) return;
+                        const tab = document.getElementById('tab-city');
+                        if (tab && !tab.classList.contains('on')) {
+                            tab.classList.add('on');
+                            const questTab = document.getElementById('tab-quest');
+                            if (questTab) questTab.classList.remove('on');
+                        }
+                    });
+                }
+                if (window.__pocketCityObserverTarget !== cityTab) {
+                    try { window.__pocketCityObserver.disconnect(); } catch (e) {}
+                    window.__pocketCityObserver.observe(cityTab, { attributes: true, attributeFilter: ['class'] });
+                    window.__pocketCityObserverTarget = cityTab;
+                }
+            };
+            ensureCityObserver();
+            window.__POCKET_CITY_OPEN__ = true;
+
+            // 6. Будим город и вызываем панель
             let attempts = 0;
+            let finished = false;
             const interval = setInterval(() => {
+                if (finished) return;
                 attempts++;
-                if (window.LGCity && typeof window.LGCity.panel === 'function') {
+                ensureCityObserver();
+
+                if (pageWin.LGCity && typeof pageWin.LGCity.panel === 'function') {
                     try {
-                        window.LGCity.panel(roomId);
-                        clearInterval(interval);
+                        if (typeof pageWin.LGCity.wake === 'function') {
+                            pageWin.LGCity.wake(); // Будим, если S === null (город уснул)
+                        }
+                        // Ждём один кадр на сборку DOM
+                        requestAnimationFrame(() => {
+                            try {
+                                pageWin.LGCity.panel(roomId);
+                                finished = true;
+                                clearInterval(interval);
+                            } catch(e) { dbg('panel error:', e); }
+                        });
                     } catch (err) {
                         dbg('LGCity.panel attempt failed:', err);
                     }
                 }
+
                 if (attempts > 30) {
                     clearInterval(interval);
+                    window.__POCKET_CITY_OPEN__ = false;
                     dbg('Город не загрузился вовремя.');
-                    if (typeof UI !== 'undefined' && typeof UI.showToast === 'function') {
-                        UI.showToast('Город не загрузился вовремя', true);
-                    }
+                    UI.showToast('Город не загрузился вовремя', true);
                 }
             }, 100);
         },
@@ -3548,7 +3643,14 @@ const Players = {
 
             // ПРОГРЕВ СЕССИИ: без этого сервер считает, что мы в городе, и выдает 409
             try {
-                await Utils.fetchApi('/api/city/enter', {});
+                // ВАЖНО: чистый fetch, а не Utils.fetchApi: тот возьмёт контекст ШАХТЫ
+                // (__lgMineContext), прогрев уйдёт не туда, и отправка в город даст 409.
+                await fetch('/api/city/enter', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({})
+                });
             } catch (e) {
                 dbg('Session warmup failed', e);
             }
@@ -5695,10 +5797,10 @@ const Players = {
             });
         },
 
-        saveToStorage(author, text, role, isSystem, channel = null, k = null, aw = null) {
+        saveToStorage(author, text, role, isSystem, channel = null, k = null, aw = null, rank = null, id = null) {
             try {
                 const history = this.loadFromStorage();
-                history.push({ author, text, role, isSystem, channel, k, aw, ts: Date.now() });
+                history.push({ author, text, role, isSystem, channel, k, aw, rank, id, ts: Date.now() });
                 const trimmed = history.length > 200 ? history.slice(-200) : history;
                 localStorage.setItem(this.STORAGE_KEY, JSON.stringify(trimmed));
             } catch (e) { /* quota */ }
@@ -5711,6 +5813,34 @@ const Players = {
                 const arr = JSON.parse(raw);
                 return Array.isArray(arr) ? arr : [];
             } catch (e) { return []; }
+        },
+
+        // Своё сообщение кэшируем/обновляем. Ответ на отправку и эхо из потока —
+        // это один и тот же объект (общий ts), поэтому запись ищется по нему:
+        // эхо дописывает в localStorage id, aw и rank, не плодя дублей.
+        cacheOwnMessage(msg) {
+            if (!msg || !msg.text) return;
+            try {
+                const channel = msg.channel || 'city';
+                const ts = msg.ts || Date.now();
+                const entry = {
+                    author: msg.author, text: msg.text, role: msg.role, isSystem: !!msg.isSystem,
+                    channel: msg.channel, k: msg.k, aw: msg.aw, rank: msg.rank,
+                    id: msg.id || null, ts
+                };
+                const history = this.loadFromStorage();
+                const idx = history.findIndex(h => h && h.ts === ts && h.text === msg.text
+                    && (h.author || '') === (msg.author || '')
+                    && (h.channel || 'city') === channel);
+                if (idx >= 0) {
+                    history[idx] = { ...history[idx], ...entry };
+                    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(history));
+                    return;
+                }
+                history.push(entry);
+                const trimmed = history.length > 200 ? history.slice(-200) : history;
+                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(trimmed));
+            } catch (e) {}
         },
 
         getRoleMeta(role, isSystem) {
@@ -5728,7 +5858,7 @@ const Players = {
         },
 
         // Главная функция приема сообщений (§2.3 дедуп по id + дедуп своих исходящих)
-        handleIncoming(author, text, isMine = false, isHistory = false, id = null, seq = null, role = null, isSystem = false, aw = null, channel = null, k = null, to = null) {
+        handleIncoming(author, text, isMine = false, isHistory = false, id = null, seq = null, role = null, isSystem = false, aw = null, channel = null, k = null, to = null, rank = null) {
             if (!text) return;
 
             // Перехват и фильтрация ЛС (не добавлять в общий чат)
@@ -5762,7 +5892,10 @@ const Players = {
                     const m = this.messages[i];
                     const authorMatch = m.author === author || m.author === this.myNick;
                     const textMatch = m.text === text;
-                    const channelMatch = !channel || !m.channel || m.channel === channel;
+                    // Pending-сообщение наше собственное: канал эха может отличаться
+                    // (мы в шахте, а отправили в город), поэтому для _pending канал
+                    // не проверяем — он останется тем, куда мы реально отправили.
+                    const channelMatch = !channel || !m.channel || m.channel === channel || m._pending;
                     if (authorMatch && textMatch && channelMatch && (m._pending || (id && m.id === id))) {
                         pendingMsg = m;
                         break;
@@ -5773,8 +5906,14 @@ const Players = {
                     if (id && !pendingMsg.id) pendingMsg.id = id;
                     if (seq && !pendingMsg.seq) pendingMsg.seq = seq;
                     if (role && !pendingMsg.role) pendingMsg.role = role;
+                    if (rank && !pendingMsg.rank) pendingMsg.rank = rank;
                     if (aw && !pendingMsg.aw) pendingMsg.aw = aw;
-                    if (channel && !pendingMsg.channel) pendingMsg.channel = channel;
+                    // НЕ ПЕРЕЗАПИСЫВАЕМ КАНАЛ, если он уже задан (например, 'city')
+                    // Эхо может прийти как 'mine', если мы в шахте, но мы знаем, куда отправили.
+                    if (!pendingMsg.channel && channel) pendingMsg.channel = channel;
+                    // Своё сообщение тоже должно попасть в кэш: сюда мы приходим
+                    // на эхо сервера, а основная ветка ниже уже пропускается.
+                    if (!isHistory) this.cacheOwnMessage(pendingMsg);
                     this.renderMessages();
                     return;
                 }
@@ -5785,11 +5924,11 @@ const Players = {
                 if (this.messages.slice(-25).some(m => m.author === author && m.text === text && (m.channel === channel || !m.channel || !channel) && Date.now() - m.ts < 8000)) return;
             }
 
-            const msgObj = { author, text, role, isSystem, id, seq, aw, channel, k, to, ts: Date.now() };
+            const msgObj = { author, text, role, rank, isSystem, id, seq, aw, channel, k, to, ts: Date.now() };
             this.messages.push(msgObj);
 
             // Сохраняем в кэш только живые сообщения
-            if (!isHistory) this.saveToStorage(author, text, role, isSystem, channel, k, aw);
+            if (!isHistory) this.saveToStorage(author, text, role, isSystem, channel, k, aw, rank, id);
 
             // Обновляем UI
             if (!isHistory) {
@@ -6036,23 +6175,29 @@ const Players = {
                     awardBadge = `<span class="chat-award-badge" title="${Utils.escapeHtml(award.d || '')}" style="display:inline-block; background:rgba(202,165,92,0.15); border:1px solid #caa55c; color:#ffcf6a; font-size:10px; font-weight:bold; padding:1px 6px; border-radius:10px; margin-right:6px; vertical-align:middle;">${Utils.escapeHtml(award.i || '')} ${Utils.escapeHtml(award.n || '')}</span>`;
                 }
 
+                // Щиток модератора: сервер отдаёт статус отдельно от класса
+                // (r: "mod"), поэтому рисуем его перед иконкой класса.
+                const modBadge = m.rank === 'mod'
+                    ? `<span class="chat-mod-badge" title="Модератор" style="display:inline-block; background:rgba(255, 207, 106, 0.15); border:1px solid #caa55c; color:#ffcf6a; font-size:10px; font-weight:bold; padding:1px 5px; border-radius:4px; margin-right:4px; vertical-align:middle;">⚖️ Модер</span>`
+                    : '';
+
                 const authorHtml = `<span class="chat-author nick-clickable" data-nick="${Utils.escapeHtml(authorNick)}" title="Кликните, чтобы упомянуть" style="color: ${meta.color || '#ffcf6a'} !important; cursor: pointer;">${Utils.escapeHtml(authorNick)}</span>`;
 
                 if (m.k === 'dm') {
                     div.innerHTML = `
                         <span style="background:#007bff; color:#fff; font-size:10px; font-weight:bold; padding:1px 5px; border-radius:4px; margin-right:4px;">✉️ ЛС для ${Utils.escapeHtml(m.to || '')}</span>
-                        ${awardBadge}${authorHtml}
+                        ${modBadge}${awardBadge}${authorHtml}
                         <span class="chat-text" style="color: #6edff6 !important;">${formattedText}</span>
                     `;
                 } else if (m.isSystem) {
                     div.innerHTML = `
-                        <span class="chat-role-icon">${meta.icon}</span>
+                        ${modBadge}<span class="chat-role-icon">${meta.icon}</span>
                         <span class="chat-author" style="color: ${meta.color || '#ffcf6a'} !important;">${Utils.escapeHtml(m.author)}</span>
                         <span class="chat-text" style="color: #aaa !important; font-style: italic;">${formattedText}</span>
                     `;
                 } else {
                     div.innerHTML = `
-                        ${streamerBadge}${mentionBadge}${awardBadge}<span class="chat-role-icon">${meta.icon}</span>
+                        ${streamerBadge}${mentionBadge}${awardBadge}${modBadge}<span class="chat-role-icon">${meta.icon}</span>
                         ${authorHtml}
                         <span class="chat-envelope">✉️</span>
                         <span class="chat-text" style="color: #f7eadf !important;">${formattedText}</span>
@@ -6076,10 +6221,16 @@ const Players = {
                 box.innerHTML = `<div style="color:#888; text-align:center; padding:20px; font-style:italic;">(Здесь пока пусто...)</div>`;
             }
 
-            // Автоскролл только когда пользователь уже был внизу; иначе
-            // возвращаем прежнюю позицию, чтобы не мешать чтению истории.
-            if (wasAtBottom) box.scrollTop = box.scrollHeight;
-            else box.scrollTop = prevScrollTop;
+            // Автоскролл: если пользователь был внизу ИЛИ последнее сообщение наше
+            // (своё только что отправленное не должно «пропадать» под краем).
+            const lastMsg = filtered[filtered.length - 1];
+            const lastIsMine = lastMsg && (lastMsg._pending || lastMsg.author === this.myNick || (this.myNick && String(lastMsg.author || '').toLowerCase() === this.myNick.toLowerCase()));
+
+            if (wasAtBottom || lastIsMine) {
+                box.scrollTop = box.scrollHeight;
+            } else {
+                box.scrollTop = prevScrollTop;
+            }
         },
 
         async send() {
@@ -6160,6 +6311,22 @@ const Players = {
             };
             this.messages.push(local);
             this.renderMessages();
+
+            // 3. ПРОГРЕВ СЕССИИ: если отправляем в город (или ЛС), находясь в шахте
+            if (!isMine && this.isInMine()) {
+                try {
+                    // ВАЖНО: используем чистый fetch, так как Utils.fetchApi возьмет контекст ШАХТЫ,
+                    // и прогрев улетит не туда, дав 409 при отправке в город.
+                    await fetch('/api/city/enter', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({})
+                    });
+                } catch (warmErr) {
+                    dbg('City session warmup failed:', warmErr);
+                }
+            }
 
             try {
                 let res;
@@ -6243,14 +6410,20 @@ const Players = {
                     const msg = data.msg || data;
                     if (msg.id) local.id = msg.id;
                     if (msg.s) local.seq = msg.s;
-                    if (msg.n || msg.l) {
-                        this.myNick = msg.n || msg.l;
+
+                    // ЗАЩИТА: обновляем ник только если пришло поле l (login).
+                    // Поле n (name/титул) игнорируем, иначе можно стать "Первопроходцем".
+                    if (msg.l && typeof msg.l === 'string' && msg.l.length >= 2) {
+                        this.myNick = msg.l;
                         local.author = this.myNick;
                     }
                     if (Array.isArray(data.m) && data.m.length > 0) {
                         this.processMineMessages(data.m);
                     }
                 }
+                // Гарантируем сохранение своего сообщения в кэш: эхо из потока
+                // может не прийти вовсе либо прийти с чужим каналом.
+                this.cacheOwnMessage(local);
                 this.renderMessages();
 
                 // Если это было ЛС, сохраняем в историю диалогов игрока
@@ -6286,7 +6459,7 @@ const Players = {
             if (cached.length > 0) {
                 cached.forEach(m => {
                     if (!this.messages.some(cur => (cur.id && cur.id === m.id) || (cur.author === m.author && cur.text === m.text && cur.channel === m.channel))) {
-                        this.messages.push({ author: m.author, text: m.text, role: m.role, isSystem: m.isSystem, channel: m.channel, k: m.k, aw: m.aw, ts: m.ts });
+                        this.messages.push({ author: m.author, text: m.text, role: m.role, rank: m.rank, isSystem: m.isSystem, channel: m.channel, k: m.k, aw: m.aw, id: m.id || null, ts: m.ts });
                     }
                 });
             }
@@ -6316,11 +6489,12 @@ const Players = {
                                 (cur.channel || 'city') === ch)
                         );
                         if (existing) {
-                            // Кэш мог быть сохранён без титула — дополняем его из истории сервера
+                            // Кэш мог быть сохранён без титула/статуса — дополняем из истории сервера
                             if (parsed.aw && !existing.aw) existing.aw = parsed.aw;
+                            if (parsed.rank && !existing.rank) existing.rank = parsed.rank;
                             return;
                         }
-                        this.handleIncoming(parsed.author, parsed.text, false, true, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to);
+                        this.handleIncoming(parsed.author, parsed.text, false, true, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
                     });
                 }
             } catch (e) {
@@ -6337,7 +6511,7 @@ const Players = {
             chats.forEach(m => {
                 const parsed = Utils.extractChatFields(m);
                 if (parsed.text) {
-                    this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, 'mine');
+                    this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, 'mine', parsed.k, parsed.to, parsed.rank);
                     added = true;
                 }
             });
@@ -6347,9 +6521,9 @@ const Players = {
         processRawMessages(msgs) {
             if (!msgs || !Array.isArray(msgs)) return;
             msgs.forEach(m => {
-                const { author, text, id, seq, role, isSystem, aw, channel } = Utils.extractChatFields(m);
+                const { author, text, id, seq, role, rank, isSystem, aw, channel } = Utils.extractChatFields(m);
                 if (!text) return;
-                this.handleIncoming(author || 'Игрок', text, false, false, id, seq, role, isSystem, aw, channel);
+                this.handleIncoming(author || 'Игрок', text, false, false, id, seq, role, isSystem, aw, channel, null, null, rank);
             });
         },
 
@@ -6424,7 +6598,7 @@ const Players = {
                                         chats.forEach(m => {
                                             const parsed = Utils.extractChatFields(m);
                                             if (parsed.text) {
-                                                this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, lineLoc, parsed.k, parsed.to);
+                                                this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, lineLoc, parsed.k, parsed.to, parsed.rank);
                                             }
                                         });
                                     } catch (err) {}
@@ -6441,7 +6615,7 @@ const Players = {
                                 chats.forEach(m => {
                                     const parsed = Utils.extractChatFields(m);
                                     if (parsed.text) {
-                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, pollLoc, parsed.k, parsed.to);
+                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, pollLoc, parsed.k, parsed.to, parsed.rank);
                                     }
                                 });
                             }
@@ -6485,7 +6659,7 @@ const Players = {
                                 chats.forEach(m => {
                                     const parsed = Utils.extractChatFields(m);
                                     if (parsed.text) {
-                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, esLoc, parsed.k, parsed.to);
+                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, esLoc, parsed.k, parsed.to, parsed.rank);
                                     }
                                 });
                             }
@@ -6495,7 +6669,8 @@ const Players = {
                     };
 
                     es.onmessage = (e) => handleData(e.data);
-                    ['message', 'chat', 'mine', 'live', 'event', 'update'].forEach(ev => {
+                    // 'message' обрабатывается onmessage выше — второй раз не вешаем
+                    ['chat', 'mine', 'live', 'event', 'update'].forEach(ev => {
                         try { es.addEventListener(ev, (e) => handleData(e.data)); } catch(e) {}
                     });
 
@@ -6569,14 +6744,13 @@ const Players = {
                             if (typeof data === 'string') {
                                 try { data = JSON.parse(data); } catch(err) {}
                             }
-                            let loc = isMine ? 'mine' : 'city';
+                            let loc = 'city';
                             if (isLive && data) {
                                 const d = data.body || data.data || data;
-                                if (d && (d.chatRoom === 'mine' || (Array.isArray(d.m) && d.m.length > 0 && !d.town))) {
-                                    loc = 'mine';
-                                } else if (d && (d.town || d.chatRoom === 'city' || d.chatRoom === '' || !d.chatRoom)) {
-                                    loc = 'city';
-                                }
+                                // Используем общий метод, который понимает контекст
+                                loc = self.resolveLiveChannel(d);
+                            } else {
+                                loc = isMine ? 'mine' : 'city';
                             }
                             // Перехват игроков для модуля «Друзья» (работает всегда)
                             Utils.updateOnlinePlayers(data, loc);
@@ -6591,7 +6765,7 @@ const Players = {
                                     const parsed = Utils.extractChatFields(m);
                                     if (parsed.text) {
                                         const ch = parsed.channel || (loc === 'mine' ? 'mine' : 'city');
-                                        Chat.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to);
+                                        Chat.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
                                     }
                                 });
                             }
@@ -6601,7 +6775,8 @@ const Players = {
                     };
 
                     this.addEventListener('message', handler);
-                    ['message', 'city', 'chat', 'say', 'init', 'mine', 'live', 'event', 'update'].forEach(ev => {
+                    // 'message' обрабатывается строкой выше — второй раз не вешаем
+                    ['city', 'chat', 'say', 'init', 'mine', 'live', 'event', 'update'].forEach(ev => {
                         try { this.addEventListener(ev, handler); } catch(e) {}
                     });
                 }
@@ -6643,14 +6818,13 @@ const Players = {
                                 try { data = JSON.parse(data); } catch(err) {}
                             }
 
-                            let loc = isMine ? 'mine' : 'city';
+                            let loc = 'city';
                             if (isLive && data) {
                                 const d = data.body || data.data || data;
-                                if (d && (d.chatRoom === 'mine' || (Array.isArray(d.m) && d.m.length > 0 && !d.town))) {
-                                    loc = 'mine';
-                                } else if (d && (d.town || d.chatRoom === 'city' || d.chatRoom === '' || !d.chatRoom)) {
-                                    loc = 'city';
-                                }
+                                // Используем общий метод, который понимает контекст
+                                loc = self.resolveLiveChannel(d);
+                            } else {
+                                loc = isMine ? 'mine' : 'city';
                             }
                             // Перехват игроков для модуля «Друзья» (работает всегда)
                             Utils.updateOnlinePlayers(data, loc);
@@ -6667,7 +6841,7 @@ const Players = {
                                     const parsed = Utils.extractChatFields(m);
                                     if (parsed.text) {
                                         const ch = parsed.channel || (loc === 'mine' ? 'mine' : 'city');
-                                        Chat.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to);
+                                        Chat.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
                                     }
                                 });
                                 return;
@@ -6751,7 +6925,7 @@ const Players = {
                                 chats.forEach(m => {
                                     const parsed = Utils.extractChatFields(m);
                                     if (parsed.text) {
-                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, loc, parsed.k, parsed.to);
+                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, loc, parsed.k, parsed.to, parsed.rank);
                                     }
                                 });
                             }
@@ -6800,7 +6974,7 @@ const Players = {
                                 chats.forEach(m => {
                                     const parsed = Utils.extractChatFields(m);
                                     if (parsed.text) {
-                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, 'mine', parsed.k, parsed.to);
+                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, 'mine', parsed.k, parsed.to, parsed.rank);
                                     }
                                 });
                             }
@@ -6815,7 +6989,7 @@ const Players = {
                                     data.chat.forEach(m => {
                                         const parsed = Utils.extractChatFields(m);
                                         if (parsed.text) {
-                                            self.handleIncoming(parsed.author, parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, parsed.channel || 'city', parsed.k, parsed.to);
+                                            self.handleIncoming(parsed.author, parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, parsed.channel || 'city', parsed.k, parsed.to, parsed.rank);
                                         }
                                     });
                                 }, 100);

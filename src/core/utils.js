@@ -79,7 +79,10 @@
             return API_BASE + (p.startsWith('/') ? p : '/' + p);
         },
         async fetchApi(path, body, signal) {
-            const nativeCtx = window.__lgAucContext || window.__lgCityContext || window.__lgMineContext;
+            // Те же правила, что и в getItemArtSvg: после @grant объекты игры
+            // живут только в unsafeWindow.
+            const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+            const nativeCtx = G.__lgAucContext || G.__lgCityContext || G.__lgMineContext;
             if (nativeCtx && typeof nativeCtx.api === 'function') {
                 try {
                     const bodyObj = body ? (typeof body === 'string' ? JSON.parse(body) : body) : undefined;
@@ -165,29 +168,33 @@
                 lot = lot || {};
                 const it = { id: lot.i, ...(def || {}), en: +lot.en || 0 };
 
+                // ВАЖНО: в песочнице Tampermonkey (после @grant) window не видит
+                // объекты страницы. Используем unsafeWindow (или G), если он доступен.
+                const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+
                 // 1. Контексты игры: аукцион / город / шахта.
                 // Вызов каждого контекста изолирован: упавший art() не должен
                 // обрывать цепочку и лишать предмет картинки.
                 const ctxs = [
-                    window.__lgAucContext,
-                    window.__lgCityContext,
-                    window.__lgMineContext,
-                    window.X,        // глобальный арт-резолвер игры
-                    window.LGtine,   // запасной глобальный резолвер
-                    { art: window.art, owner: window },     // глобальный метод игры
-                    { art: window.fig, owner: window },     // запасной
-                    { art: window.doodle, owner: window }   // запасной
+                    G.__lgAucContext,
+                    G.__lgCityContext,
+                    G.__lgMineContext,
+                    G.X,        // глобальный арт-резолвер игры
+                    G.LGtine,   // запасной глобальный резолвер
+                    { art: G.art, owner: G },     // глобальный метод игры
+                    { art: G.fig, owner: G },     // запасной
+                    { art: G.doodle, owner: G }   // запасной
                 ].filter(Boolean);
                 for (const ctx of ctxs) {
                     if (!ctx || typeof ctx.art !== 'function') continue;
                     let svg = '';
-                    // owner нужен, чтобы window.art() вызывался с this === window
+                    // owner нужен, чтобы G.art() вызывался с this === G
                     try { svg = ctx.art.call(ctx.owner || ctx, it); } catch (e) { svg = ''; }
                     if (isRealItemSvg(svg)) return svg;
                 }
 
                 // 2. Фолбэк на библиотеку инвентаря
-                const inv = window.LGInventory;
+                const inv = G.LGInventory || G.LGItems || window.LGInventory;
                 if (inv && typeof inv.art === 'function') {
                     let svg = '';
                     try { svg = inv.art(it); } catch (e) { svg = ''; }
@@ -388,7 +395,8 @@
             if (!id) return '—';
             try {
                 if (itemsMap && itemsMap[id]?.name) return itemsMap[id].name;
-                const mdName = window.MDDoodle?.names?.[id] || window.MDDoodle?.names?.cats?.items?.[id]?.name;
+                const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+                const mdName = G.MDDoodle?.names?.[id] || G.MDDoodle?.names?.cats?.items?.[id]?.name;
                 if (mdName) return mdName;
             } catch (e) {}
 
@@ -425,7 +433,8 @@
         getItemIcon(id) {
             try {
                 if (!id) return '';
-                const C = window.MDDoodle?.CATALOG;
+                const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+                const C = G.MDDoodle?.CATALOG;
                 if (!C) return '';
                 const raw = C.icons?.[id] || C.weapons?.[id] || C.armors?.[id] ||
                             C.shields?.[id] || C.hats?.[id] || C.acc?.[id] || '';
@@ -441,11 +450,15 @@
             return h;
         },
         extractChatFields(m) {
-            if (!m || typeof m !== 'object') return { author: null, text: null, k: null, to: null };
+            if (!m || typeof m !== 'object') return { author: null, text: null, k: null, to: null, rank: null };
 
             const author = m.l || m.n || m.author || m.nick || m.name || m.login || m.from;
             const text = m.t || m.text || m.msg || m.m || m.message;
             const role = m.c || m.role || null;
+            // Статус модератора сервер присылает отдельно от класса:
+            // r: "mod" (щиток), c: "legionary" (иконка класса).
+            const rawRank = m.r || m.rank || null;
+            const rank = rawRank ? String(rawRank).toLowerCase() : null;
 
             // Определяем, системное ли это сообщение (§2.7, SDK §7)
             const isSystem = author === 'Летопись' || author === 'Система'
@@ -457,7 +470,7 @@
             const k = m.k || m.kind || (channel === 'dm' ? 'dm' : null);
             const to = m.to || m.target || null;
 
-            return { author, text, id: m.id, seq: m.s, role, isSystem, aw, channel, k, to };
+            return { author, text, id: m.id, seq: m.s, role, rank, isSystem, aw, channel, k, to };
         },
         extractMessages(data) {
             if (!data) return [];
@@ -497,11 +510,29 @@
             }
             return unique;
         },
+        // Служебные ветки payload'а, в которые extractChatDeep не должен
+        // спускаться: там лежат награды/титулы/предметы (у них бывают поля
+        // t/l/n), и они не должны превращаться в «сообщения» чата.
+        NON_CHAT_KEYS: new Set([
+            'aw', 'awards', 'award', 'items', 'item', 'hero', 'me', 'stats',
+            'st', 'inv', 'inventory', 'sk', 'skills', 'ign', 'top', 'players',
+            'title', 'titles', 'ach', 'achievements', 'achievement', 'reward', 'rewards'
+        ]),
         looksLikeChat(o) {
             if (!o || typeof o !== 'object' || Array.isArray(o)) return false;
-            const text = o.t ?? o.text ?? o.msg ?? o.m ?? o.message;
-            const author = o.l ?? o.n ?? o.author ?? o.name ?? o.nick ?? o.login ?? o.from;
-            return typeof text === 'string' && text.trim().length > 0 && typeof author === 'string' && author.trim().length > 0;
+
+            // 1. Отсекаем объекты наград/титулов/предметов по характерным служебным полям
+            if (o.i !== undefined || o.d !== undefined || o.en !== undefined || o.price !== undefined) return false;
+            if (o.id && o.t && o.id === o.t) return false; // id совпадает с типом награды (pioneer === pioneer)
+
+            // 2. В настоящем сообщении ВСЕГДА есть логин/автор (строка от 2 символов).
+            // Поле 'n' (name) НЕ используется как автор, так как у наград n — это название.
+            const author = o.author ?? o.from ?? o.login ?? o.l ?? (typeof o.nick === 'string' ? o.nick : null);
+            if (typeof author !== 'string' || author.trim().length < 2) return false;
+
+            // 3. Текст сообщения: поля text/msg/message либо t (только при наличии валидного автора)
+            const text = o.text ?? o.message ?? o.msg ?? o.t ?? (typeof o.m === 'string' ? o.m : null);
+            return typeof text === 'string' && text.trim().length > 0;
         },
         extractChatDeep(m, depth = 0) {
             if (!m || depth > 4) return [];
@@ -511,21 +542,25 @@
             if (Array.isArray(m)) {
                 // Если сам m — кортеж сообщения со строковым логином row[2] и текстом row[4]
                 if (m.length >= 5 && typeof m[2] === 'string' && typeof m[4] === 'string' && m[4].trim()) {
-                    return [{ id: m[0], s: m[1], l: m[2], n: m[3] || m[2], t: m[4], at: m[5], c: m[6] }];
+                    return [{ id: m[0], s: m[1], l: m[2], n: m[3] || m[2], t: m[4], at: m[5], c: m[6], r: m[7] || null, aw: Array.isArray(m[8]) ? m[8] : null }];
                 }
 
                 // Или это массив сообщений/строк
                 for (const item of m) {
                     if (Array.isArray(item)) {
                         if (item.length >= 5 && typeof item[2] === 'string' && typeof item[4] === 'string' && item[4].trim()) {
-                            result.push({ id: item[0], s: item[1], l: item[2], n: item[3] || item[2], t: item[4], at: item[5], c: item[6] });
+                            result.push({ id: item[0], s: item[1], l: item[2], n: item[3] || item[2], t: item[4], at: item[5], c: item[6], r: item[7] || null, aw: Array.isArray(item[8]) ? item[8] : null });
                         } else {
                             result.push(...this.extractChatDeep(item, depth + 1));
                         }
-                    } else if (this.looksLikeChat(item)) {
-                        result.push(item);
                     } else if (item && typeof item === 'object') {
-                        result.push(...this.extractChatDeep(item, depth + 1));
+                        // Отсекаем награды/титулы в массивах (у них есть i или d, и нет l/author)
+                        if (item.i !== undefined || item.d !== undefined) continue;
+                        if (this.looksLikeChat(item)) {
+                            result.push(item);
+                        } else {
+                            result.push(...this.extractChatDeep(item, depth + 1));
+                        }
                     }
                 }
                 if (result.length) return result;
@@ -548,6 +583,8 @@
                                 at: item.at || item.time || Date.now(),
                                 c: item.c || item.role || null,
                                 cn: item.cn || null,
+                                r: item.r || item.rank || null,
+                                aw: Array.isArray(item.aw) ? item.aw : null,
                                 channel: roomChannel || item.channel || item.room || null,
                                 k: item.k || item.kind || null,
                                 to: item.to || item.target || null
@@ -556,7 +593,9 @@
                             if (item.length >= 5 && typeof item[2] === 'string' && typeof item[4] === 'string' && item[4].trim()) {
                                 result.push({
                                     id: item[0], s: item[1], l: item[2], n: item[3] || item[2],
-                                    t: item[4], at: item[5], c: item[6], channel: roomChannel || null
+                                    t: item[4], at: item[5], c: item[6],
+                                    r: item[7] || null, aw: Array.isArray(item[8]) ? item[8] : null,
+                                    channel: roomChannel || null
                                 });
                             }
                         }
@@ -570,7 +609,9 @@
                         if (Array.isArray(row) && row.length >= 5 && typeof row[2] === 'string' && typeof row[4] === 'string' && row[4].trim()) {
                             result.push({
                                 id: row[0], s: row[1], l: row[2], n: row[3] || row[2],
-                                t: row[4], at: row[5], c: row[6], channel: roomChannel || null
+                                t: row[4], at: row[5], c: row[6],
+                                r: row[7] || null, aw: Array.isArray(row[8]) ? row[8] : null,
+                                channel: roomChannel || null
                             });
                         }
                     }
@@ -581,8 +622,11 @@
                     return [m];
                 }
 
-                // Рекурсивный обход свойств объекта (до 4 уровней глубины)
+                // Рекурсивный обход свойств объекта (до 4 уровней глубины).
+                // Служебные ветки (награды, предметы, герой, статы) не трогаем:
+                // оттуда и приходят фейковые «сообщения» вроде pioneer.
                 for (const k of Object.keys(m)) {
+                    if (this.NON_CHAT_KEYS.has(k)) continue;
                     const v = m[k];
                     if (!v) continue;
                     if (this.looksLikeChat(v)) {

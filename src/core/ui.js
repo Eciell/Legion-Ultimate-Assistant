@@ -47,6 +47,9 @@
             }, 2500);
         },
         closeModals() {
+            // Снимаем удержание вкладки «Город»: MutationObserver в
+            // openNativeBuilding больше не должен возвращать её на экран.
+            window.__POCKET_CITY_OPEN__ = false;
             if (typeof Players !== 'undefined') Players.currentDMPeer = null;
             document.querySelectorAll('.' + DOM_IDS.customModal + ', .custom-modal').forEach(el => el.remove());
             document.querySelectorAll('.sim-card').forEach(el => el.remove());
@@ -239,34 +242,42 @@
         async openNativeBuilding(roomId) {
             dbg(`Открытие нативного здания «${roomId}»...`);
 
-            // 0. Нативно закрываем шахту, если она открыта (иначе игра выкинет на карту)
+            // Игровые объекты (LGCity / LGMine / __lgQuestContext / cityFiles)
+            // живут в page-context: после @grant window — песочница, поэтому
+            // берём unsafeWindow (G), как это уже делается в chat.js.
+            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
+
+            // 1. Безопасно закрываем шахту, если она открыта
             const mnExitBtn = document.querySelector('[data-mn-exit]');
             if (mnExitBtn) {
                 try { mnExitBtn.click(); } catch(e) {}
-                // Даем игре 150мс, чтобы обработать выход, снять классы и перерисовать вкладки
+                // Ждём анимацию, чтобы игра успела снять классы и перерисовать вкладки
                 await new Promise(r => setTimeout(r, 150));
             }
-
-            // 0.1. «Режим призрака» (на всякий случай, если шахта закрылась не до конца)
-            const mn = document.querySelector('.mn');
-            if (mn) {
-                mn.style.setProperty('opacity', '0', 'important');
-                mn.style.setProperty('pointer-events', 'none', 'important');
-                mn.style.setProperty('z-index', '-9999', 'important');
-                document.body.classList.remove('mn-on');
+            if (pageWin.LGMine && typeof pageWin.LGMine.close === 'function') {
+                try { pageWin.LGMine.close(); } catch(e) {}
             }
 
-            // 1. Снимаем блокировку похода (quest lockout / cityLocked)
-            if (window.__lgQuestContext && typeof window.__lgQuestContext.openTown === 'function') {
-                try { window.__lgQuestContext.openTown('fair'); } catch (e) {}
+            // Убираем классы шахты, если они застряли
+            document.body.classList.remove('mn-on');
+            const mnEl = document.querySelector('.mn');
+            if (mnEl) {
+                mnEl.style.setProperty('opacity', '0', 'important');
+                mnEl.style.setProperty('pointer-events', 'none', 'important');
+                mnEl.style.setProperty('z-index', '-9999', 'important');
             }
 
-            // 2. Гарантируем загрузку скриптов города
-            if (!window.LGCity && typeof window.cityFiles === 'function') {
-                try { await window.cityFiles(); } catch (e) {}
+            // 2. Обходим cityLocked (блокировку похода)
+            if (pageWin.__lgQuestContext && typeof pageWin.__lgQuestContext.openTown === 'function') {
+                try { pageWin.__lgQuestContext.openTown('fair'); } catch (e) {}
             }
 
-            // 3. Разблокируем кнопку Города в шапке игры и переключаем вкладку
+            // 3. Гарантируем загрузку скриптов города
+            if (!pageWin.LGCity && typeof pageWin.cityFiles === 'function') {
+                try { await pageWin.cityFiles(); } catch (e) {}
+            }
+
+            // 4. Принудительно переключаем вкладку на Город
             const cityTabBtn = document.querySelector('.tabs button[data-tab="city"]');
             if (cityTabBtn) {
                 cityTabBtn.hidden = false;
@@ -282,24 +293,64 @@
                 else b.removeAttribute('aria-current');
             });
 
-            // 4. Ожидаем инициализации LGCity и открываем официальное окно игры
+            // 5. Защита от выкидывания на карту похода (cityVis).
+            // Игра перерисовывает шапку и может заменить узел вкладки, поэтому
+            // наблюдение переносим на актуальный #tab-city, когда он меняется.
+            const ensureCityObserver = () => {
+                const cityTab = document.getElementById('tab-city');
+                if (!cityTab) return;
+
+                if (!window.__pocketCityObserver) {
+                    window.__pocketCityObserver = new MutationObserver(() => {
+                        if (!window.__POCKET_CITY_OPEN__) return;
+                        const tab = document.getElementById('tab-city');
+                        if (tab && !tab.classList.contains('on')) {
+                            tab.classList.add('on');
+                            const questTab = document.getElementById('tab-quest');
+                            if (questTab) questTab.classList.remove('on');
+                        }
+                    });
+                }
+                if (window.__pocketCityObserverTarget !== cityTab) {
+                    try { window.__pocketCityObserver.disconnect(); } catch (e) {}
+                    window.__pocketCityObserver.observe(cityTab, { attributes: true, attributeFilter: ['class'] });
+                    window.__pocketCityObserverTarget = cityTab;
+                }
+            };
+            ensureCityObserver();
+            window.__POCKET_CITY_OPEN__ = true;
+
+            // 6. Будим город и вызываем панель
             let attempts = 0;
+            let finished = false;
             const interval = setInterval(() => {
+                if (finished) return;
                 attempts++;
-                if (window.LGCity && typeof window.LGCity.panel === 'function') {
+                ensureCityObserver();
+
+                if (pageWin.LGCity && typeof pageWin.LGCity.panel === 'function') {
                     try {
-                        window.LGCity.panel(roomId);
-                        clearInterval(interval);
+                        if (typeof pageWin.LGCity.wake === 'function') {
+                            pageWin.LGCity.wake(); // Будим, если S === null (город уснул)
+                        }
+                        // Ждём один кадр на сборку DOM
+                        requestAnimationFrame(() => {
+                            try {
+                                pageWin.LGCity.panel(roomId);
+                                finished = true;
+                                clearInterval(interval);
+                            } catch(e) { dbg('panel error:', e); }
+                        });
                     } catch (err) {
                         dbg('LGCity.panel attempt failed:', err);
                     }
                 }
+
                 if (attempts > 30) {
                     clearInterval(interval);
+                    window.__POCKET_CITY_OPEN__ = false;
                     dbg('Город не загрузился вовремя.');
-                    if (typeof UI !== 'undefined' && typeof UI.showToast === 'function') {
-                        UI.showToast('Город не загрузился вовремя', true);
-                    }
+                    UI.showToast('Город не загрузился вовремя', true);
                 }
             }, 100);
         },
