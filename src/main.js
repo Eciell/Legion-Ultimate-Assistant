@@ -30,22 +30,52 @@
         fabWrap.className = DOM_IDS.fabWrap;
         fabWrap.id = DOM_IDS.fabWrap;
         fabWrap.innerHTML = `
-            <div class="${DOM_IDS.fabMenu}" id="${DOM_IDS.fabMenu}">
-                <button class="fab-menu-item" id="${DOM_IDS.btnAutoMine}">⛏️ Умная Шахта (Выкл)</button>
-                <button class="fab-menu-item" id="${DOM_IDS.btnBuildSim}">⚙️ Планировщик Героя</button>
-                <button class="fab-menu-item" id="${DOM_IDS.btnAuctionScan}">🔍 Сканер Аукциона</button>
-                <button class="fab-menu-item" id="${DOM_IDS.btnPlayers}">👥 Игроки (Разведка)</button>
-                <button class="fab-menu-item" id="${DOM_IDS.btnFriends}">🤝 Друзья <span id="${DOM_IDS.friendsBadge}" style="display:none; background:#28a745; color:#fff; font-size:11px; padding:1px 6px; border-radius:10px; font-weight:bold; margin-left:auto;">0</span></button>
-                <button class="fab-menu-item" id="${DOM_IDS.btnChatToggle}">💬 Чат Города <span class="${DOM_IDS.chatBadge}" id="${DOM_IDS.chatBadge}">0</span></button>
-                <button class="fab-menu-item" id="${DOM_IDS.btnPopout}">📺 Вынести чат</button>
-                <button class="fab-menu-item" id="${DOM_IDS.btnPocketCity}">🏰 Карманный Город</button>
-                <button class="fab-menu-item" id="${DOM_IDS.btnProfile}">👤 Профиль</button>
-                <button class="fab-menu-item" id="btn-priest-panel">✨ Панель Жреца</button>
-                <button class="fab-menu-item" id="btn-7tv-settings">🎭 Канал 7TV</button>
-                <label class="fab-menu-item" style="cursor:pointer; display:flex; align-items:center; justify-content:space-between; user-select:none; font-size:12px; gap:8px;">
-                    <span>🚫 Отключить перехват чата</span>
-                    <input type="checkbox" id="${DOM_IDS.chkChatDisable}" style="width:16px; height:16px; cursor:pointer; accent-color:#ff5a7a;">
-                </label>
+            <div class="${DOM_IDS.fabMenu}" id="${DOM_IDS.fabMenu}" style="max-height: calc(100vh - 100px); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #caa55c transparent;">
+                <!-- БЛОК: Инструменты (сворачиваемый) -->
+                <div class="fab-section" data-section="tools">
+                    <div class="fab-section-title" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#888; text-transform:uppercase; padding:4px 8px; user-select:none;">
+                        <span>🛠 Инструменты</span>
+                        <span class="fab-arrow" style="font-size:16px; color:#caa55c; font-weight:bold; line-height:1;">▼</span>
+                    </div>
+                    <div class="fab-section-body">
+                        <button class="fab-menu-item" id="${DOM_IDS.btnAutoMine}">⛏️ Умная Шахта (Выкл)</button>
+                        <button class="fab-menu-item" id="${DOM_IDS.btnBuildSim}">⚙️ Планировщик Героя</button>
+                        <button class="fab-menu-item" id="${DOM_IDS.btnAuctionScan}">🔍 Сканер Аукциона</button>
+                        <button class="fab-menu-item" id="${DOM_IDS.btnPocketCity}">🏰 Карманный Город</button>
+                        <button class="fab-menu-item" id="btn-priest-panel">✨ Панель Жреца</button>
+                    </div>
+                </div>
+
+                <!-- БЛОК: Социальное (сворачиваемый) -->
+                <div class="fab-section" data-section="social">
+                    <div class="fab-section-title" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#888; text-transform:uppercase; padding:4px 8px; user-select:none;">
+                        <span>👥 Социальное</span>
+                        <span class="fab-arrow" style="font-size:16px; color:#caa55c; font-weight:bold; line-height:1;">▼</span>
+                    </div>
+                    <div class="fab-section-body">
+                        <button class="fab-menu-item" id="${DOM_IDS.btnPlayers}">👥 Игроки (Разведка)</button>
+                        <button class="fab-menu-item" id="${DOM_IDS.btnFriends}">🤝 Друзья <span id="${DOM_IDS.friendsBadge}" style="display:none; background:#28a745; color:#fff; font-size:11px; padding:1px 6px; border-radius:10px; font-weight:bold; margin-left:auto;">0</span></button>
+                        <button class="fab-menu-item" id="${DOM_IDS.btnPopout}">📺 Вынести чат <span class="${DOM_IDS.chatBadge}" id="${DOM_IDS.chatBadge}">0</span></button>
+                    </div>
+                </div>
+
+                <!-- БЛОК: Прочее (сворачиваемый) -->
+                <div class="fab-section" data-section="settings">
+                    <div class="fab-section-title" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#888; text-transform:uppercase; padding:4px 8px; user-select:none;">
+                        <span>⚙️ Прочее</span>
+                        <span class="fab-arrow" style="font-size:16px; color:#caa55c; font-weight:bold; line-height:1;">▼</span>
+                    </div>
+                    <div class="fab-section-body">
+                        <button class="fab-menu-item" id="${DOM_IDS.btnProfile}">👤 Профиль</button>
+                        <button class="fab-menu-item" id="btn-fab-settings">⚙️ Настройки</button>
+                    </div>
+                </div>
+
+                <!-- ФУТЕР -->
+                <div id="${DOM_IDS.externalChatStatus}" style="font-size:11px; text-align:center; padding:5px; color:#888; margin-top:4px;">Проверка внешнего чата...</div>
+                <div style="text-align:center; font-size:10px; color:#888; margin-top:8px; padding-top:8px; border-top:1px solid #333; user-select:none;">
+                    Version: ${typeof GM_info !== 'undefined' && GM_info.script ? GM_info.script.version : '11.5.3'}
+                </div>
             </div>
             <div class="${DOM_IDS.fabBtn}" id="${DOM_IDS.fabBtn}" title="Меню Legion">
                 <span id="${DOM_IDS.fabIcon}">🐱</span>
@@ -58,10 +88,20 @@
         try {
             const pos = JSON.parse(localStorage.getItem('LEGION_FAB_POS'));
             if (pos && pos.left && pos.top) {
-                fabWrap.style.left = pos.left;
-                fabWrap.style.top = pos.top;
-                fabWrap.style.right = 'auto';
-                fabWrap.style.bottom = 'auto';
+                const leftVal = parseInt(pos.left, 10);
+                const topVal = parseInt(pos.top, 10);
+                const fabSize = 50;
+
+                // Проверяем, что позиция не за пределами экрана
+                if (!isNaN(leftVal) && !isNaN(topVal) && leftVal >= 0 && leftVal <= window.innerWidth - fabSize && topVal >= 0 && topVal <= window.innerHeight - fabSize) {
+                    fabWrap.style.left = pos.left;
+                    fabWrap.style.top = pos.top;
+                    fabWrap.style.right = 'auto';
+                    fabWrap.style.bottom = 'auto';
+                } else {
+                    // Если позиция битая (за экраном) — сбрасываем
+                    localStorage.removeItem('LEGION_FAB_POS');
+                }
             }
         } catch(e) {}
 
@@ -72,21 +112,14 @@
         (document.getElementById(DOM_IDS.btnPocketCity) || document.getElementById('btn-pocket-city'))?.addEventListener('click', () => UI.openPocketCity());
         (document.getElementById(DOM_IDS.btnProfile) || document.getElementById('btn-profile'))?.addEventListener('click', () => UI.togglePlayerHud());
 
-        // 🛡️ Индикатор стелс-режима (всегда включён)
-        const stealthItem = document.createElement('div');
-        stealthItem.className = 'fab-menu-item';
-        stealthItem.style.cssText = 'cursor:default; background:rgba(0,255,102,0.08); border-color:rgba(0,255,102,0.3); color:#00ff66; font-size:11px;';
-        stealthItem.innerHTML = '<span>🛡️ Стелс</span><span style="font-weight:bold;">' + (window.__lgStealthActive ? 'АКТИВЕН' : 'ОШИБКА') + '</span>';
-        document.getElementById(DOM_IDS.fabMenu)?.appendChild(stealthItem);
-        (document.getElementById(DOM_IDS.btnPopout) || document.getElementById('btn-popout'))?.addEventListener('click', () => Chat.popoutChat());
+        // ⚙️ Настройки (Стелс, 7TV, перехват чата) вынесены в отдельную модалку:
+        // FAB-меню стало короче, а служебные переключатели больше не мешают кнопкам.
+        document.getElementById('btn-fab-settings')?.addEventListener('click', () => UI.openSettings());
 
-        const chkChat = document.getElementById(DOM_IDS.chkChatDisable);
-        if (chkChat) {
-            chkChat.checked = !!Chat.disabled;
-            chkChat.addEventListener('change', (e) => {
-                Chat.setDisabled(e.target.checked);
-            });
-        }
+        (document.getElementById(DOM_IDS.btnPopout) || document.getElementById('btn-popout') || document.getElementById('btn-chat-pip'))?.addEventListener('click', () => Chat.popoutChat());
+
+        // Чекбокс «Отключить перехват чата» переехал в UI.openSettings()
+        // (модалка), поэтому старая привязка к DOM_IDS.chkChatDisable удалена.
 
         Miner.init();
         BuildSim.init();        // без кнопки — регистрирует только глобальный клик для .sim-card

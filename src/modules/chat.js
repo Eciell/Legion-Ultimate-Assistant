@@ -252,14 +252,63 @@
         historyLoaded: false,
         disabled: localStorage.getItem('LEGION_CHAT_DISABLED') === 'true',
         _popoutWin: null,
+        // Документ PiP-окна. С v11.5.3 это единственное место, где живёт DOM чата:
+        // обычный (встроенный) виджет удалён, за него отвечает плагин Legion7TV.
+        _pipDoc: null,
+        _inited: false,
         _origWidgetStyles: null,
-        // Куда вернуть виджет после закрытия PiP: родной парент, сосед и исходные классы.
+        // Наследие встроенного виджета (возврат в родной парент). // TODO: REMOVE
         _origWidgetParent: null,
         _origWidgetNextSibling: null,
         _origWidgetClasses: null,
         _origWidgetHadOpen: false,
         isOpen() {
-            return !!(this._popoutWin || (this.widget && this.widget.classList.contains('open')));
+            // Чат существует только внутри PiP-окна.
+            // Опираемся на ссылки окно/документ, а не на isConnected: проверка
+            // связности внутри PiP-документа нестабильна, из-за чего сообщения
+            // при открытом чате продолжали копить непрочитанные.
+            if (!this._popoutWin || this._popoutWin.closed) return false;
+            return !!(this._pipDoc || this.widget);
+        },
+        // Корень чата: всегда берём актуальный DOM из документа PiP-окна.
+        // this.widget может ссылаться на отсоединённый (detached) узел, поэтому
+        // поиск идёт по документу, а не по сохранённой ссылке.
+        _pipRoot() {
+            if (this._pipDoc && this.isOpen()) {
+                return this._pipDoc.querySelector('.chat-pip') || this._pipDoc.body;
+            }
+            return null;
+        },
+        // Поиск элемента чата (инпут, кнопка, лента сообщений) внутри PiP-документа.
+        _pipEl(selector) {
+            const root = this._pipRoot();
+            return root ? root.querySelector(selector) : null;
+        },
+        // Синхронизация подсветки вкладок с this.activeMainTab / this.activeSubTab.
+        // Ищем по всему документу PiP-окна, а не только внутри this.widget: если
+        // ссылка на виджет устарела (окно пересоздано), поиск по документу всё равно
+        // найдёт реальные вкладки и снимет лишние active.
+        _syncTabs(doc) {
+            const d = doc || this._pipDoc || (this.widget && this.widget.ownerDocument) || null;
+            if (!d || typeof d.querySelectorAll !== 'function') return;
+
+            const mainKey = (t) => t.getAttribute('data-main-tab')
+                || (t.dataset && t.dataset.tab) || 'city';
+            const subKey = (t) => t.getAttribute('data-sub-tab')
+                || (t.dataset && t.dataset.tab) || 'general';
+
+            d.querySelectorAll('.chat-main-tab').forEach(t => {
+                t.classList.toggle('active', mainKey(t) === this.activeMainTab);
+            });
+            d.querySelectorAll('.chat-sub-tab').forEach(t => {
+                t.classList.toggle('active', subKey(t) === this.activeSubTab);
+            });
+
+            // Суб-вкладки (Общий/Торговля/Достижения) относятся только к городу.
+            const subTabsRow = typeof d.getElementById === 'function'
+                ? d.getElementById('chat-sub-tabs')
+                : d.querySelector('#chat-sub-tabs');
+            if (subTabsRow) subTabsRow.style.display = this.activeMainTab === 'city' ? 'flex' : 'none';
         },
         getChannelLogin() {
             try {
@@ -354,12 +403,20 @@
         },
 
         showError(msg) {
-            let toast = document.getElementById('chat-toast');
+            // Встроенного виджета больше нет: тост живёт внутри PiP-окна,
+            // а если оно закрыто — показываем обычный тост аддона.
+            const root = this._pipRoot();
+            if (!root) {
+                UI.showToast(msg, true);
+                return;
+            }
+            const doc = root.ownerDocument || document;
+            let toast = doc.getElementById('chat-toast');
             if (!toast) {
-                toast = document.createElement('div');
+                toast = doc.createElement('div');
                 toast.id = 'chat-toast';
                 toast.style.cssText = 'position:absolute;top:45px;left:10px;right:10px;background:#ff5a7a;color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;text-align:center;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,0.5);transition:opacity 0.3s;';
-                this.widget.appendChild(toast);
+                root.appendChild(toast);
             }
             toast.textContent = msg;
             toast.style.opacity = '1';
@@ -381,16 +438,11 @@
         },
 
         updateInputState() {
-            const inp = this.widget?.querySelector('#chat-input') || document.getElementById('chat-input');
-            const sendBtn = this.widget?.querySelector('#chat-send') || document.getElementById('chat-send');
+            const inp = this._pipEl('#chat-input');
+            const sendBtn = this._pipEl('#chat-send');
 
-            // Если открыт PiP, принудительно разрешаем ввод
-            if (this._popoutWin) {
-                if (inp) { inp.disabled = false; inp.placeholder = 'Написать сообщение...'; }
-                if (sendBtn) sendBtn.disabled = false;
-                return;
-            }
-
+            // Чат живёт только в PiP-окне, поэтому состояние ввода считаем
+            // по активной вкладке (город / торговля / шахта / ЛС).
             const inMine = this.isInMine();
 
             if (this.activeMainTab === 'mine' && !inMine) {
@@ -436,12 +488,75 @@
             }
         },
 
+        // v11.5.3: встроенный виджет чата удалён — его заменил сторонний плагин
+        // Legion7TV (ProCto_Fliy). Здесь остаётся только то, что нужно нашему
+        // вынесенному чату и перехватчикам:
+        //   • кнопка «Вынести чат» и настройки 7TV;
+        //   • эмоуты 7TV + синхронизация ника;
+        //   • детектор внешнего чата.
+        // interceptFetch / interceptEventSource / interceptWebSocket вызываются
+        // из main.js сразу после init() — они идемпотентны и остаются включёнными.
         init() {
-            if (this.widget) return;
-            this.widget = document.createElement('div');
-            this.widget.className = `${DOM_IDS.chatWidget} chat-widget`;
-            this.widget.id = DOM_IDS.chatWidget;
-            this.widget.innerHTML = `
+            if (this._inited) return;
+            this._inited = true;
+
+            this.badge = document.getElementById(DOM_IDS.chatBadge) || document.getElementById('chat-badge');
+
+            // btn-chat-pip — id из старой разметки FAB, оставлен для совместимости.
+            (document.getElementById(DOM_IDS.btnPopout)
+                || document.getElementById('btn-popout')
+                || document.getElementById('btn-chat-pip'))?.addEventListener('click', () => this.popoutChat());
+
+            // Настройки 7TV (канал и размер смайлов). В v11.5.3 кнопка FAB
+            // «🎭 Канал 7TV» переехала в модалку UI.openSettings(), поэтому
+            // эта привязка — только фолбэк для старой разметки.
+            document.getElementById('btn-7tv-settings')?.addEventListener('click', () => this.open7tvSettings());
+
+            // 7TV нужен PiP-чату: размер смайлов + набор эмоутов грузим один раз.
+            SevenTV.loadSize();
+            SevenTV.load();
+
+            this.syncMe();
+            this.detectExternalChat();
+        },
+
+        // Детектор стороннего чата (Legion7TV, плагин ProCto_Fliy).
+        // Статус рисуется строкой в FAB-меню; если плагина нет — даём ссылку.
+        detectExternalChat() {
+            setTimeout(() => {
+                const statusEl = document.getElementById(DOM_IDS.externalChatStatus)
+                    || document.getElementById('external-chat-status');
+                if (!statusEl) return;
+
+                // Проверяем, есть ли кнопка 7TV от плагина ProCto_Fliy
+                const has7TVBtn = !!document.querySelector('.t7-btn');
+                // Или проверяем флаг в unsafeWindow: после @grant объекты страницы
+                // живут только там, обычный window их не видит.
+                let has7TVWindow = false;
+                try {
+                    const pageWin = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
+                    has7TVWindow = !!(pageWin && pageWin.LGChat && pageWin.LGChat.__t7);
+                } catch (e) {}
+
+                if (has7TVBtn || has7TVWindow) {
+                    statusEl.innerHTML = `<span style="color:#4cc95a;">✅ Чат Legion7TV активен</span>`;
+                } else {
+                    statusEl.innerHTML = `<a href="https://github.com/mykhailkot-pixel/Legion7TV/raw/refs/heads/main/7tv-multidonate.user.js" target="_blank" style="color:#caa55c; text-decoration:underline;">Установить Legion7TV (чат)</a>`;
+                }
+            }, 2000);
+        },
+
+        // DOM чата собирается только внутри документа PiP-окна.
+        // В основной документ виджет больше не вставляется.
+        _buildWidget(doc) {
+            const docRef = doc || document;
+            const widget = docRef.createElement('div');
+            widget.className = 'chat-pip';
+            // Важно: id НЕ должен совпадать с DOM_IDS.chatWidget — на этот id
+            // в styles.js висят стили встроенного виджета (opacity:0, position:fixed).
+            widget.id = 'chat-pip';
+            widget.style.cssText = 'position:relative; display:flex; flex-direction:column; width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; background:#1d1620; color:#f7eadf;';
+            widget.innerHTML = `
                 <div class="chat-top-bar" id="chat-drag-handle">
                     <div class="chat-main-tabs">
                         <button class="chat-main-tab active" data-main-tab="city" type="button">🏙️ Город</button>
@@ -460,14 +575,10 @@
                     <input type="text" class="chat-input" id="chat-input" placeholder="Написать в чат города..." maxlength="200">
                     <button class="chat-send" id="chat-send" type="button">➤</button>
                 </div>`;
-            document.body.appendChild(this.widget);
-            this.badge = document.getElementById(DOM_IDS.chatBadge) || document.getElementById('chat-badge');
+            this.widget = widget;
 
-            (document.getElementById(DOM_IDS.btnChatToggle) || document.getElementById('btn-chat-toggle'))?.addEventListener('click', () => this.toggle());
-            (document.getElementById(DOM_IDS.btnPopout) || document.getElementById('btn-popout'))?.addEventListener('click', () => this.popoutChat());
-
-            // Делегирование событий на самом виджете: гарантирует работу и в основном окне, и в PiP окне
-            this.widget.addEventListener('click', (e) => {
+            // Делегирование событий: клики по вкладкам/кнопкам внутри PiP-окна.
+            widget.addEventListener('click', (e) => {
                 const target = e.target?.closest ? e.target : (e.target?.parentElement || e.target);
                 if (!target || !target.closest) return;
 
@@ -486,13 +597,16 @@
                 const mainTab = target.closest('.chat-main-tab');
                 if (mainTab) {
                     e.preventDefault();
-                    this.widget.querySelectorAll('.chat-main-tab').forEach(t => t.classList.remove('active'));
-                    mainTab.classList.add('active');
-                    this.activeMainTab = mainTab.getAttribute('data-main-tab') || 'city';
-                    const subTabsRow = this.widget.querySelector('#chat-sub-tabs');
-                    if (subTabsRow) {
-                        subTabsRow.style.display = this.activeMainTab === 'city' ? 'flex' : 'none';
+                    // Ищем вкладки в документе PiP-окна, а не в this.widget:
+                    // после пересоздания окна ссылка на виджет может быть устаревшей.
+                    const tabDoc = this._pipDoc || (this.widget && this.widget.ownerDocument) || mainTab.ownerDocument;
+                    this.activeMainTab = mainTab.getAttribute('data-main-tab')
+                        || (mainTab.dataset && mainTab.dataset.tab) || 'city';
+                    if (tabDoc) {
+                        tabDoc.querySelectorAll('.chat-main-tab').forEach(t => t.classList.remove('active'));
                     }
+                    mainTab.classList.add('active');
+                    this._syncTabs(tabDoc);
                     this.updateInputState();
                     this.renderMessages();
                     return;
@@ -501,9 +615,14 @@
                 const subTab = target.closest('.chat-sub-tab');
                 if (subTab) {
                     e.preventDefault();
-                    this.widget.querySelectorAll('.chat-sub-tab').forEach(t => t.classList.remove('active'));
+                    const tabDoc = this._pipDoc || (this.widget && this.widget.ownerDocument) || subTab.ownerDocument;
+                    this.activeSubTab = subTab.getAttribute('data-sub-tab')
+                        || (subTab.dataset && subTab.dataset.tab) || 'general';
+                    if (tabDoc) {
+                        tabDoc.querySelectorAll('.chat-sub-tab').forEach(t => t.classList.remove('active'));
+                    }
                     subTab.classList.add('active');
-                    this.activeSubTab = subTab.getAttribute('data-sub-tab') || 'general';
+                    this._syncTabs(tabDoc);
                     this.updateInputState();
                     this.renderMessages();
                     return;
@@ -520,11 +639,23 @@
                 });
             }
 
+            // Восстанавливаем активные вкладки: DOM пересоздаётся при каждом открытии PiP,
+            // а состояние (город/шахта/ЛС, общий/торговля/достижения) хранится в полях.
+            // Передаём сам виджет: он ещё не вставлен в документ, и querySelectorAll
+            // по документу его вкладок не найдёт (по элементу — найдёт).
+            this._syncTabs(widget);
+
             this.setupDrag();
             this.syncMe();
+            return widget;
         },
 
         setupDrag() {
+            // Виджет теперь живёт только внутри PiP-окна и растянут на всё окно,
+            // поэтому перетаскивание не нужно. Код оставлен на случай возврата
+            // обычного виджета. // TODO: REMOVE
+            if (this._popoutWin) return;
+
             const handle = this.widget?.querySelector('#chat-drag-handle') || document.getElementById('chat-drag-handle');
             if (!handle) return;
             let dragging = false, offX = 0, offY = 0;
@@ -575,15 +706,8 @@
             handle.addEventListener('pointerup', stopDrag);
             handle.addEventListener('pointercancel', stopDrag);
 
-            // 7TV: размер смайлов + глобальные/канальные эмоуты.
-            SevenTV.loadSize();
-            SevenTV.load();
-
-            // Настройка Twitch-канала для эмоутов 7TV.
-            const btn7tv = document.getElementById('btn-7tv-settings');
-            if (btn7tv) {
-                btn7tv.addEventListener('click', () => this.open7tvSettings());
-            }
+            // 7TV (размер смайлов, загрузка эмоутов, кнопка настроек канала)
+            // перенесён в init(): он нужен PiP-чату даже при закрытом окне.
         },
 
         open7tvSettings() {
@@ -662,51 +786,33 @@
                 UI.showToast('🚫 Перехват чата отключен в меню 🐱', true);
                 return;
             }
-            const open = this.widget.classList.toggle('open');
-            if (open) {
-                this.unreadCount = 0;
-                this.updateBadge();
-                this.updateInputState();
-                this.startBackgroundLiveListener();
-                const inp = this.widget?.querySelector('#chat-input') || document.getElementById('chat-input');
-                if (inp && !inp.disabled) inp.focus();
-                if (this.activeTab === 'mine') {
-                    const box = this.widget?.querySelector('#chat-messages') || document.getElementById('chat-messages');
-                    if (box) box.scrollTop = box.scrollHeight;
-                } else {
-                    if (!this.historyLoaded) this.loadHistory();
-                    else {
-                        const box = this.widget?.querySelector('#chat-messages') || document.getElementById('chat-messages');
-                        if (box) box.scrollTop = box.scrollHeight;
-                    }
-                }
-            } else {
-                this.stopBackgroundLiveListener();
+            // Обычного (встроенного) виджета больше нет: «открыть чат» = вынести в PiP.
+            if (this.isOpen()) {
+                try { this._popoutWin?.focus(); } catch (e) {}
+                return;
             }
+            this.popoutChat();
         },
 
-        // Открыть диалог с игроком прямо в виджете (используется кликабельными тостами ЛС)
-        openDM(nick) {
+        // Открыть ЛС с игроком в вынесенном чате (используется тостами ЛС).
+        async openDM(nick) {
             if (!nick) return;
-            if (!this.widget) this.init();
+            if (this.disabled) {
+                UI.showToast('🚫 Чат отключен в настройках FAB', true);
+                return;
+            }
 
             this.dmTarget = nick;
-
-            // Открываем виджет, если он свернут (в PiP-окне класс .open уже стоит)
-            if (!this.widget.classList.contains('open')) {
-                this.toggle(); // toggle сам выставит .open и сфокусирует инпут
-            }
 
             // Переключаем главную вкладку на ЛС
             this.activeMainTab = 'dm';
 
+            // Виджет живёт только в PiP-окне: если оно закрыто — открываем.
+            if (!this._pipRoot()) await this.popoutChat();
+            if (!this._pipRoot()) return;
+
             // Синхронизируем UI (подсветка вкладок, поле ввода)
-            const mainTabs = this.widget.querySelectorAll('.chat-main-tab');
-            mainTabs.forEach(t => {
-                t.classList.toggle('active', t.getAttribute('data-main-tab') === 'dm');
-            });
-            const subTabsRow = this.widget.querySelector('#chat-sub-tabs');
-            if (subTabsRow) subTabsRow.style.display = 'none';
+            this._syncTabs();
 
             // Диалог открыт — снимаем счётчик непрочитанных
             if (typeof Players !== 'undefined' && typeof Players.clearUnreadDM === 'function') {
@@ -717,15 +823,14 @@
             this.renderMessages();
         },
 
-        close() { 
+        close() {
             if (this._popoutWin) {
                 try { this._popoutWin.close(); } catch(e) {}
-                this._popoutWin = null;
-                this.widget.classList.remove('open');
-                this.stopBackgroundLiveListener();
-                return;
             }
-            this.widget.classList.remove('open'); 
+            // DOM чата живёт в PiP-окне и умирает вместе с ним.
+            this._popoutWin = null;
+            this._pipDoc = null;
+            this.widget = null;
             this.stopBackgroundLiveListener();
         },
 
@@ -740,8 +845,10 @@
                     try { this._popoutWin.focus(); } catch (e) {}
                     return;
                 }
-                // Окно закрылось без pagehide (kill процесса) — сбрасываем ссылку
+                // Окно закрылось без pagehide (kill процесса) — сбрасываем ссылки
                 this._popoutWin = null;
+                this._pipDoc = null;
+                this.widget = null;
             }
 
             try {
@@ -751,9 +858,19 @@
                 if (window.documentPictureInPicture && typeof window.documentPictureInPicture.requestWindow === 'function') {
                     // Не открывать второй PiP, если первый уже висит
                     if (window.documentPictureInPicture.window) {
-                        try { window.documentPictureInPicture.window.focus(); } catch (e) {}
-                        this._popoutWin = window.documentPictureInPicture.window;
+                        const existing = window.documentPictureInPicture.window;
+                        try { existing.focus(); } catch (e) {}
+                        this._popoutWin = existing;
+                        this._pipDoc = existing.document;
+                        // Если DOM чата в окне почему-то потерялся — собираем заново.
+                        if (!this._pipRoot()) {
+                            try { existing.document.body.appendChild(this._buildWidget(existing.document)); } catch (e) {}
+                        }
                         SevenTV.applySize();
+                        this.unreadCount = 0;
+                        this.updateBadge();
+                        this.renderMessages();
+                        this.updateInputState();
                         return;
                     }
                     try {
@@ -779,6 +896,7 @@
                 }
 
                 this._popoutWin = win;
+                this._pipDoc = win.document;
 
                 // 3. Копируем все CSS стили в новое окно
                 try {
@@ -820,7 +938,7 @@
                             overflow: hidden;
                             font-family: 'Nunito', sans-serif;
                         }
-                        .chat-widget {
+                        .chat-pip {
                             display: flex !important;
                             flex-direction: column !important;
                             height: 100% !important;
@@ -855,93 +973,33 @@
                 // Размер смайлов 7TV задаётся CSS-переменной — переносим её в PiP.
                 SevenTV.applySize();
 
-                // 4. Запоминаем родной парент и позицию — вернуть нужно туда, а не в body.
-                this._origWidgetParent = this.widget.parentNode;
-                this._origWidgetNextSibling = this.widget.nextSibling;
-                this._origWidgetClasses = this.widget.className;
-                this._origWidgetHadOpen = this.widget.classList.contains('open');
+                // 4. DOM чата собираем сразу в документе PiP-окна:
+                //    в основной странице встроенного виджета больше нет (v11.5.3).
+                const widget = this._buildWidget(win.document);
+                win.document.body.appendChild(widget);
 
-                // Сохраняем исходные стили виджета (все свойства, которые меняем в PiP-режиме)
-                this._origWidgetStyles = {
-                    position: this.widget.style.position || '',
-                    top: this.widget.style.top || '',
-                    left: this.widget.style.left || '',
-                    bottom: this.widget.style.bottom || '',
-                    right: this.widget.style.right || '',
-                    width: this.widget.style.width || '',
-                    height: this.widget.style.height || '',
-                    maxWidth: this.widget.style.maxWidth || '',
-                    maxHeight: this.widget.style.maxHeight || '',
-                    minWidth: this.widget.style.minWidth || '',
-                    minHeight: this.widget.style.minHeight || '',
-                    borderRadius: this.widget.style.borderRadius || '',
-                    border: this.widget.style.border || '',
-                    boxShadow: this.widget.style.boxShadow || '',
-                    display: this.widget.style.display || '',
-                    flexDirection: this.widget.style.flexDirection || '',
-                    overflow: this.widget.style.overflow || ''
-                };
-
-                // 5. Переносим виджет в body нового окна (растягиваем на всё окно PiP)
-                this.widget.style.position = 'relative';
-                this.widget.style.top = '0';
-                this.widget.style.left = '0';
-                this.widget.style.bottom = 'auto';
-                this.widget.style.right = 'auto';
-                this.widget.style.width = '100%';
-                this.widget.style.height = '100%'; // Важно
-                this.widget.style.maxWidth = '100%';
-                this.widget.style.maxHeight = '100%'; // Важно
-                this.widget.style.minWidth = '0'; // Важно
-                this.widget.style.minHeight = '0'; // Важно
-                this.widget.style.borderRadius = '0';
-                this.widget.style.border = 'none';
-                this.widget.style.boxShadow = 'none';
-                this.widget.style.display = 'flex';
-                this.widget.style.flexDirection = 'column';
-                this.widget.style.overflow = 'hidden';
-                this.widget.classList.add('open');
-
-                win.document.body.appendChild(this.widget);
-
-                // 6. Обработчик возврата виджета при закрытии окна
-                const returnWidget = () => {
+                // 5. Очистка ссылок при закрытии окна: DOM чата умирает вместе с PiP,
+                //    возвращать его в основную страницу больше не нужно.
+                const cleanupPip = () => {
                     if (!this._popoutWin) return;
                     this._popoutWin = null;
-                    const orig = this._origWidgetStyles || {};
-                    const parent = this._origWidgetParent;
-                    const nextSibling = this._origWidgetNextSibling;
-                    if (this.widget) {
-                        // Возврат строго в родной парент (не в body). Иначе виджет теряет
-                        // контекст позиционирования и растягивает страницу.
-                        if (parent && parent.isConnected) {
-                            if (nextSibling && nextSibling.parentNode === parent) {
-                                parent.insertBefore(this.widget, nextSibling);
-                            } else {
-                                parent.appendChild(this.widget);
-                            }
-                        } else if (document.body) {
-                            document.body.appendChild(this.widget);
-                        }
-                        // Снимаем все inline-стили, затем накатываем сохранённые
-                        this.widget.removeAttribute('style');
-                        Object.assign(this.widget.style, orig);
-                        // Восстанавливаем классы: убираем .open, если его не было
-                        if (!this._origWidgetHadOpen) this.widget.classList.remove('open');
-                        // Если он был .open — оставляем; иначе класс .open не должен появиться
-                    }
-                    this._origWidgetStyles = null;
-                    this._origWidgetParent = null;
-                    this._origWidgetNextSibling = null;
-                    this._origWidgetClasses = null;
-                    this.renderMessages();
-                    this.updateInputState();
+                    this._pipDoc = null;
+                    this.widget = null;
+                    this.stopBackgroundLiveListener();
                 };
 
-                win.addEventListener('pagehide', returnWidget);
-                win.addEventListener('unload', returnWidget);
+                win.addEventListener('pagehide', cleanupPip);
+                win.addEventListener('unload', cleanupPip);
 
                 this.startBackgroundLiveListener();
+
+                // Открыли чат — счётчик непрочитанных сбрасываем.
+                this.unreadCount = 0;
+                this.updateBadge();
+
+                // История (кэш localStorage + /api/city/enter) нужна, чтобы PiP
+                // открывался уже с сообщениями. loadHistory сам вызовет renderMessages.
+                this.loadHistory();
                 this.renderMessages();
                 this.updateInputState();
                 UI.showToast('📺 Чат вынесен в отдельное окно');
@@ -958,6 +1016,8 @@
                     b.textContent = this.unreadCount > 99 ? '99+' : this.unreadCount;
                     b.style.display = 'block';
                 } else {
+                    // Сбрасываем и текст: иначе при повторном показе остаётся старый «99+».
+                    b.textContent = '0';
                     b.style.display = 'none';
                 }
             });
@@ -1111,7 +1171,7 @@
         // Клик по нику автора: вставляем «@Ник » в поле ввода
         insertMention(nick) {
             if (!nick) return;
-            const inp = this.widget?.querySelector('#chat-input') || document.getElementById('chat-input');
+            const inp = this._pipEl('#chat-input');
             if (!inp || inp.disabled) return;
             const mention = '@' + nick + ' ';
             const val = inp.value || '';
@@ -1198,8 +1258,24 @@
 
         // Функция отрисовки (вызывается при клике на вкладки и приходе новых сообщений)
         renderMessages() {
-            const box = this.widget?.querySelector('#chat-messages') || document.getElementById('chat-messages');
+            // Лента сообщений живёт в документе PiP-окна: если окно закрыто,
+            // рендерить некуда — сообщения просто копятся в this.messages.
+            // ВАЖНО: контейнер должен браться из актуального документа PiP-окна.
+            // this.widget может указывать на устаревший (detached) DOM.
+            const box = (this._pipDoc && this._pipDoc.querySelector('#chat-messages')) || this._pipEl('#chat-messages');
             if (!box) return;
+
+            // Подсветка вкладок всегда соответствует activeMainTab/activeSubTab:
+            // раньше active-класс мог накапливаться сразу на нескольких вкладках.
+            this._syncTabs();
+
+            // Окно чата открыто (контейнер найден) — непрочитанных быть не должно.
+            // Гасим счётчик прямо здесь: он копился, если инкремент успевал
+            // пройти до/во время открытия PiP.
+            if (this.unreadCount !== 0) {
+                this.unreadCount = 0;
+                this.updateBadge();
+            }
 
             // Запоминаем позицию ДО очистки: если пользователь читает историю,
             // новый рендер не должен утаскивать его вниз.
@@ -1400,7 +1476,7 @@
         },
 
         async send() {
-            const input = this.widget?.querySelector('#chat-input') || document.getElementById('chat-input');
+            const input = this._pipEl('#chat-input');
             if (!input) return;
             const rawText = input.value.trim();
             if (!rawText) return;

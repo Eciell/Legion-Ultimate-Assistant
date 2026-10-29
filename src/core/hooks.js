@@ -12,6 +12,10 @@
     // вступит в конфликт с их перехватчиками.
     // ============================================================
     try {
+        // Подмену ставим на page-context документ (G.document = unsafeWindow.document):
+        // в песочнице Tampermonkey локальный document — прокси, и defineProperty
+        // на нём может бросить исключение. Прокси патчим отдельно, локально глуша ошибку.
+        const pageDoc = G.document || document;
         const docProto = (G.Document && G.Document.prototype) || Document.prototype;
 
         // Сохраняем реальные геттеры для нашего кода (если понадобится)
@@ -37,18 +41,19 @@
             } catch (err) {}
         };
         defineVis(docProto);
-        defineVis(document);
-        if (G.document && G.document !== document) defineVis(G.document);
+        defineVis(pageDoc);
+        if (document && document !== pageDoc && document !== docProto) defineVis(document);
 
         // hasFocus = true
         try {
             if (typeof docProto.hasFocus === 'function') docProto.hasFocus = () => true;
-            if (typeof document.hasFocus === 'function') document.hasFocus = () => true;
+            if (pageDoc && typeof pageDoc.hasFocus === 'function') pageDoc.hasFocus = () => true;
+            if (document && document !== pageDoc && typeof document.hasFocus === 'function') document.hasFocus = () => true;
         } catch (err) {}
 
         // navigator.webdriver = false (классический детект автоматизации)
         try {
-            Object.defineProperty(G.navigator, 'webdriver', {
+            Object.defineProperty(G.navigator || navigator, 'webdriver', {
                 get: () => false,
                 configurable: true
             });
@@ -60,16 +65,26 @@
                 e.stopImmediatePropagation();
             }
         };
-        window.addEventListener('visibilitychange', suppressHiddenEvent, true);
-        document.addEventListener('visibilitychange', suppressHiddenEvent, true);
-        if (G.window && G.window !== window) {
-            G.window.addEventListener('visibilitychange', suppressHiddenEvent, true);
-        }
+        // Каждый target вешаем отдельно: сбой на прокси песочницы не должен
+        // отменять подмену, уже сделанную в page-context.
+        const addVisListener = (target) => {
+            try {
+                if (target && typeof target.addEventListener === 'function') {
+                    target.addEventListener('visibilitychange', suppressHiddenEvent, true);
+                }
+            } catch (err) {}
+        };
+        addVisListener(G.window || G);
+        addVisListener(window);
+        addVisListener(document);
 
         G.__lgStealthActive = true;
+        // Дублируем во внутренний window: часть проверок внутри аддона читает window.*
+        try { window.__lgStealthActive = true; } catch (err) {}
     } catch (e) {
         console.warn('[LEGION] Stealth: не удалось включить подмену видимости', e);
         G.__lgStealthActive = false;
+        try { window.__lgStealthActive = false; } catch (err) {}
     }
 
     // ------------------------------------------------------------

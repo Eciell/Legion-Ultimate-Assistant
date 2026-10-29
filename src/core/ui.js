@@ -192,6 +192,47 @@
 
             return modal;
         },
+        // ⚙️ Служебные настройки аддона: Стелс, канал 7TV и перехват чата.
+        // Вынесены из FAB-меню в модалку, чтобы меню не разрасталось.
+        openSettings() {
+            // Флаг стелса живёт в page-context (его ставит hooks.js через unsafeWindow),
+            // поэтому читаем оттуда же — иначе в песочнице всегда «ОШИБКА».
+            const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+            const stealthOn = !!(G && G.__lgStealthActive);
+            const chatDisabled = (typeof Chat !== 'undefined') ? !!Chat.disabled : false;
+
+            const modal = this.showModal(`
+                <h2>⚙️ Настройки аддона <button class="custom-close" id="custom-close-btn">✖</button></h2>
+                <div style="display:flex; flex-direction:column; gap:15px; padding:10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px;">
+                        <span>🛡️ Стелс-режим</span>
+                        <span style="color:${stealthOn ? '#4cc95a' : '#ff5a7a'}; font-weight:bold;">
+                            ${stealthOn ? 'АКТИВЕН' : 'ОШИБКА'}
+                        </span>
+                    </div>
+                    <button id="modal-7tv-btn" style="width:100%; padding:10px; background:#2a2030; border:1px solid #caa55c; color:#ffcf6a; border-radius:6px; cursor:pointer; text-align:left;">🎭 Настройки канала 7TV</button>
+                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer;">
+                        <span>🚫 Отключить перехват чата</span>
+                        <input type="checkbox" id="modal-chk-chat" style="width:16px; height:16px; accent-color:#ff5a7a;" ${chatDisabled ? 'checked' : ''}>
+                    </label>
+                </div>
+            `, { compact: true });
+
+            if (!modal) return;
+
+            modal.querySelector('#modal-7tv-btn')?.addEventListener('click', () => {
+                this.closeModals();
+                if (typeof Chat !== 'undefined' && typeof Chat.open7tvSettings === 'function') {
+                    Chat.open7tvSettings();
+                }
+            });
+
+            modal.querySelector('#modal-chk-chat')?.addEventListener('change', (e) => {
+                if (typeof Chat !== 'undefined' && typeof Chat.setDisabled === 'function') {
+                    Chat.setDisabled(e.target.checked);
+                }
+            });
+        },
         openPocketCity() {
             this.showModal(`
                 <h2>🏰 Карманный Город <button class="custom-close" id="custom-close-btn">✖</button></h2>
@@ -375,8 +416,17 @@
                     hasMoved = true;
                 }
                 if (hasMoved) {
-                    wrap.style.left = (e.clientX - offX) + 'px';
-                    wrap.style.top = (e.clientY - offY) + 'px';
+                    // Ограничиваем координаты рамками окна: иначе FAB можно утащить
+                    // за пределы экрана и потерять (позиция ещё и сохраняется в localStorage).
+                    const fabSize = 50; // Примерный размер FAB
+                    let newX = e.clientX - offX;
+                    let newY = e.clientY - offY;
+
+                    newX = Math.max(0, Math.min(newX, window.innerWidth - fabSize));
+                    newY = Math.max(0, Math.min(newY, window.innerHeight - fabSize));
+
+                    wrap.style.left = newX + 'px';
+                    wrap.style.top = newY + 'px';
                     wrap.style.right = 'auto';
                     wrap.style.bottom = 'auto';
                 }
@@ -396,8 +446,22 @@
                     } catch (err) {}
                 } else {
                     const isOpen = menu.classList.toggle('open');
-                    if (isOpen && typeof Players !== 'undefined' && Players.updateFriendsBadge) {
-                        Players.updateFriendsBadge();
+                    if (isOpen) {
+                        // Меню не должно улетать за край экрана: если над кнопкой
+                        // мало места — раскрываем его вниз (класс open-down).
+                        const rect = btn.getBoundingClientRect();
+                        const viewportH = window.innerHeight || 800;
+                        const menuHeight = Math.min(menu.scrollHeight || 400, viewportH - 120);
+                        if (rect.top < menuHeight + 20) {
+                            menu.classList.add('open-down');
+                        } else {
+                            menu.classList.remove('open-down');
+                        }
+                        if (typeof Players !== 'undefined' && Players.updateFriendsBadge) {
+                            Players.updateFriendsBadge();
+                        }
+                    } else {
+                        menu.classList.remove('open-down');
                     }
                 }
             });
@@ -414,6 +478,17 @@
                 item.addEventListener('click', (e) => {
                     if (e.target.tagName === 'INPUT' || e.target.closest('input')) return;
                     menu.classList.remove('open');
+                });
+            });
+
+            // Аккордеон: клик по заголовку секции сворачивает/разворачивает её.
+            // stopPropagation не даёт событию дойти до обработчиков меню и страницы.
+            menu.querySelectorAll('.fab-section-title').forEach(title => {
+                title.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const section = title.parentElement;
+                    if (section) section.classList.toggle('collapsed');
                 });
             });
         },

@@ -31,6 +31,7 @@
         btnPocketCity: `${RAND_ID}-btn-pocket-city`,
         btnProfile: `${RAND_ID}-btn-profile`,
         chkChatDisable: `${RAND_ID}-chk-chat-disable`,
+        externalChatStatus: `${RAND_ID}-external-chat-status`,
         chatBadge: `${RAND_ID}-chat-badge`,
         fabChatBadge: `${RAND_ID}-fab-chat-badge`,
         chatWidget: `${RAND_ID}-chat-widget`,
