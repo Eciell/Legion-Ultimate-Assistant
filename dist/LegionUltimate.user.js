@@ -4995,11 +4995,14 @@ const Players = {
         stopMining() {}
     };
 
-    // ===== src/modules/chat.js =====
+    // ===== src/modules/chat/chat-emotes.js =====
     // ============================================================
-    // 7. МОДУЛЬ: ЧАТ
+    // 7.1 МОДУЛЬ: ЧАТ — 7TV эмоуты
     // ============================================================
-    // ============================================================
+    // Вынесено из modules/chat.js (v11.6.0, этап 2 декомпозиции).
+    // Слой-миксин: ChatEmotes.SevenTV пробрасывается в Chat.SevenTV,
+    // а load()/loadSize() вызываются из Chat.init().
+
     // 7TV: глобальные смайлики в чате
     //
     // Сайт отдаёт CSP `connect-src 'self'` и `img-src 'self' data: blob:`,
@@ -5243,31 +5246,713 @@ const Players = {
         }
     };
 
-    const Chat = {
-        widget: null,
-        badge: null,
-        unreadCount: 0,
+    // Слой чата: 7TV-эмоуты (склейка — см. chat/chat.js).
+    const ChatEmotes = { SevenTV };
+
+    // ===== src/modules/chat/chat-history.js =====
+    // ============================================================
+    // 7.2 МОДУЛЬ: ЧАТ — история и кэш сообщений
+    // ============================================================
+    // Вынесено из modules/chat.js (v11.6.0, этап 2 декомпозиции).
+    // Слой-миксин: методы рассчитывают на this === Chat, поэтому
+    // вливаются через Object.assign(Chat, ChatHistory).
+
+    const ChatHistory = {
+        // Ключ localStorage, куда пишется кэш последних 200 сообщений.
+        STORAGE_KEY: 'LEGION_CHAT_HISTORY',
+        // Флаг «история уже подтянута» — loadHistory() выполняется один раз.
         historyLoaded: false,
-        disabled: localStorage.getItem('LEGION_CHAT_DISABLED') === 'true',
+        // Статусы из /api/city/enter (заполняются в loadHistory).
+        muted: false,
+        mod: null,
+        ign: new Set(),
+
+        saveToStorage(author, text, role, isSystem, channel = null, k = null, aw = null, rank = null, id = null) {
+            try {
+                const history = this.loadFromStorage();
+                history.push({ author, text, role, isSystem, channel, k, aw, rank, id, ts: Date.now() });
+                const trimmed = history.length > 200 ? history.slice(-200) : history;
+                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(trimmed));
+            } catch (e) { /* quota */ }
+        },
+
+        loadFromStorage() {
+            try {
+                const raw = localStorage.getItem(this.STORAGE_KEY);
+                if (!raw) return [];
+                const arr = JSON.parse(raw);
+                return Array.isArray(arr) ? arr : [];
+            } catch (e) { return []; }
+        },
+
+        // Своё сообщение кэшируем/обновляем. Ответ на отправку и эхо из потока —
+        // это один и тот же объект (общий ts), поэтому запись ищется по нему:
+        // эхо дописывает в localStorage id, aw и rank, не плодя дублей.
+        cacheOwnMessage(msg) {
+            if (!msg || !msg.text) return;
+            try {
+                const channel = msg.channel || 'city';
+                const ts = msg.ts || Date.now();
+                const entry = {
+                    author: msg.author, text: msg.text, role: msg.role, isSystem: !!msg.isSystem,
+                    channel: msg.channel, k: msg.k, aw: msg.aw, rank: msg.rank,
+                    id: msg.id || null, ts
+                };
+                const history = this.loadFromStorage();
+                const idx = history.findIndex(h => h && h.ts === ts && h.text === msg.text
+                    && (h.author || '') === (msg.author || '')
+                    && (h.channel || 'city') === channel);
+                if (idx >= 0) {
+                    history[idx] = { ...history[idx], ...entry };
+                    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(history));
+                    return;
+                }
+                history.push(entry);
+                const trimmed = history.length > 200 ? history.slice(-200) : history;
+                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(trimmed));
+            } catch (e) {}
+        },
+
+        async loadHistory() {
+            if (this.historyLoaded) return;
+            this.historyLoaded = true;
+
+            const cached = this.loadFromStorage();
+            if (cached.length > 0) {
+                cached.forEach(m => {
+                    if (!this.messages.some(cur => (cur.id && cur.id === m.id) || (cur.author === m.author && cur.text === m.text && cur.channel === m.channel))) {
+                        this.messages.push({ author: m.author, text: m.text, role: m.role, rank: m.rank, isSystem: m.isSystem, channel: m.channel, k: m.k, aw: m.aw, id: m.id || null, ts: m.ts });
+                    }
+                });
+            }
+
+            try {
+                const res = await Utils.fetchApi('/api/city/enter', {});
+                const data = res?.body || res;
+
+                // Флаги мута / модерации / игнора из ответа сервера
+                if (data && data.ok) {
+                    if (data.chatMe) {
+                        if ('muted' in data.chatMe) this.muted = data.chatMe.muted;
+                        if ('mod' in data.chatMe && data.chatMe.mod !== 'own') this.mod = data.chatMe.mod;
+                    }
+                    if (Array.isArray(data.ign)) this.ign = new Set(data.ign);
+                }
+
+                if (data && data.ok && Array.isArray(data.chat)) {
+                    data.chat.forEach(m => {
+                        const parsed = Utils.extractChatFields(m);
+                        if (!parsed.text) return;
+                        const ch = parsed.channel || 'city';
+                        // Не дублируем то, что уже есть в this.messages: по id ИЛИ по автору+тексту
+                        const existing = this.messages.find(cur =>
+                            (parsed.id && cur.id && cur.id === parsed.id) ||
+                            (!cur._pending && cur.author === parsed.author && cur.text === parsed.text &&
+                                (cur.channel || 'city') === ch)
+                        );
+                        if (existing) {
+                            // Кэш мог быть сохранён без титула/статуса — дополняем из истории сервера
+                            if (parsed.aw && !existing.aw) existing.aw = parsed.aw;
+                            if (parsed.rank && !existing.rank) existing.rank = parsed.rank;
+                            return;
+                        }
+                        this.handleIncoming(parsed.author, parsed.text, false, true, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
+                    });
+                }
+            } catch (e) {
+                dbg('Не удалось стянуть историю города', e);
+            }
+
+            this.renderMessages();
+        },
+
+        async syncMe() {
+            try {
+                const res = await Utils.fetchApi('/api/me');
+                const me = res?.hero || res?.body?.hero;
+                if (me) {
+                    this.myNick = me.name || window.LG_CH?.name || 'eciell';
+                    this.myRole = me.class || me.sk?.c || 'legionary';
+                }
+            } catch (e) {}
+        },
+    };
+
+    // ===== src/modules/chat/chat-net.js =====
+    // ============================================================
+    // 7.3 МОДУЛЬ: ЧАТ — сеть: перехватчики и живой поток
+    // ============================================================
+    // Вынесено из modules/chat.js (v11.6.0, этап 2 декомпозиции).
+    // Слой-миксин: перехват fetch / EventSource / WebSocket, живой поток
+    // /api/live и разбор входящих в общий Chat.handleIncoming().
+    // this внутри методов — это Chat (Object.assign в chat/chat.js).
+
+    const ChatNet = {
+        // id текущей шахты (обновляется из /api/mine/* и /api/live).
+        currentMineId: 'home',
+        // Состояние живого потока /api/live.
+        _liveES: null,
+        _livePollTimer: null,
+        _liveRunning: false,
+        _liveConnecting: false,
+        _livePollDelay: 2500,
+
+        getChannelLogin() {
+            try {
+                const m = location.pathname.match(/\/c\/([^/?#]+)/i);
+                if (m && m[1]) return m[1].toLowerCase().trim();
+                const paramC = new URL(location.href).searchParams.get('c');
+                if (paramC && !/^\d+$/.test(paramC)) return paramC.toLowerCase().trim();
+            } catch (e) {}
+            return '';
+        },
+
+        isStreamerMessage(msg) {
+            if (!msg || !msg.author) return false;
+            const author = String(msg.author).toLowerCase().trim();
+            const chLogin = this.getChannelLogin();
+            if (!chLogin) return false;
+            const chBase = chLogin.replace(/channel$/i, '');
+            const authorBase = author.replace(/channel$/i, '');
+            return author === chLogin || author === chBase || authorBase === chBase || authorBase === chLogin;
+        },
+
+        isMentionedMessage(msg) {
+            if (!msg || !msg.text || !this.myNick) return false;
+            const myNick = String(this.myNick).trim();
+            if (!myNick || myNick.length < 2) return false;
+            if (msg.author && String(msg.author).toLowerCase() === myNick.toLowerCase()) return false;
+            const text = String(msg.text).toLowerCase();
+            const lowerNick = myNick.toLowerCase();
+            return text.includes('@' + lowerNick) || text.includes(lowerNick);
+        },
+
+        processMineMessages(list) {
+            if (!list) return;
+            const chats = Utils.extractChatDeep(list);
+            let added = false;
+            chats.forEach(m => {
+                const parsed = Utils.extractChatFields(m);
+                if (parsed.text) {
+                    this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, 'mine', parsed.k, parsed.to, parsed.rank);
+                    added = true;
+                }
+            });
+            if (added) this.renderMessages();
+        },
+
+        processRawMessages(msgs) {
+            if (!msgs || !Array.isArray(msgs)) return;
+            msgs.forEach(m => {
+                const { author, text, id, seq, role, rank, isSystem, aw, channel } = Utils.extractChatFields(m);
+                if (!text) return;
+                this.handleIncoming(author || 'Игрок', text, false, false, id, seq, role, isSystem, aw, channel, null, null, rank);
+            });
+        },
+
+        // Определяем канал живого потока: город или шахта
+        resolveLiveChannel(data) {
+            try {
+                const d = (data && (data.body || data.data || data)) || null;
+                if (d) {
+                    if (d.chatRoom === 'city' || d.town) return 'city';
+                    if (d.chatRoom === 'mine' || d.mine) return 'mine';
+                }
+            } catch (e) {}
+            return this.isInMine() ? 'mine' : 'city';
+        },
+
+        async startBackgroundLiveListener() {
+            if (this.disabled || this._liveConnecting) return;
+
+            // Защита от дублирования: живой поток уже открыт или подключается.
+            if (this._liveES && (this._liveES.readyState === 0 || this._liveES.readyState === 1)) return;
+            // Уже идёт fetch-поллинг — второй цикл не запускаем.
+            if (this._liveRunning && !this._liveES && this._livePollTimer) return;
+
+            // Старое закрытое соединение закрываем перед созданием нового.
+            if (this._liveES) {
+                try { this._liveES.close(); } catch (e) {}
+                this._liveES = null;
+            }
+            this._liveRunning = true;
+            this._liveConnecting = true;
+
+            const sid = new URL(location.href).searchParams.get('sid');
+            const livePath = '/api/live' + (sid ? `?sid=${encodeURIComponent(sid)}` : '');
+            // EventSource должен подключаться к /api/live без префикса канала:
+            // Utils.apiPath() добавляет /c/<канал>/ и ломает поток.
+            const url = livePath;
+
+            const startPollingFallback = () => {
+                if (!this._liveRunning || this._livePollTimer) return;
+                this._liveConnecting = false; // EventSource не создаётся — уходим в поллинг
+                dbg('Starting live fetch polling fallback...');
+                const poll = async () => {
+                    if (!this._liveRunning) return;
+                    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+                    const timeoutId = controller ? setTimeout(() => controller.abort(), 3000) : null;
+                    let hasPayload = false;
+                    try {
+                        const curSid = new URL(location.href).searchParams.get('sid');
+                        // Поллинг идёт на тот же чистый /api/live, что и EventSource (без /c/<канал>/)
+                        const pollUrl = '/api/live' + (curSid ? `?sid=${encodeURIComponent(curSid)}` : '');
+                        const res = await fetch(pollUrl, {
+                            signal: controller ? controller.signal : undefined,
+                            credentials: 'same-origin',
+                            cache: 'no-store'
+                        });
+                        const text = await res.text();
+                        let data = null;
+                        try { data = JSON.parse(text); } catch (e) {}
+
+                        // Если пришел поток SSE строками "data: {...}"
+                        if (!data && text && text.includes('data:')) {
+                            hasPayload = true;
+                            const lines = text.split('\n');
+                            for (const line of lines) {
+                                if (line.startsWith('data:')) {
+                                    try {
+                                        const lineData = JSON.parse(line.slice(5).trim());
+                                        const lineLoc = this.resolveLiveChannel(lineData);
+                                        Utils.updateOnlinePlayers(lineData, lineLoc);
+                                        Utils.processIncomingDMs(lineData);
+                                        const chats = Utils.extractChatDeep(lineData);
+                                        chats.forEach(m => {
+                                            const parsed = Utils.extractChatFields(m);
+                                            if (parsed.text) {
+                                                this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, lineLoc, parsed.k, parsed.to, parsed.rank);
+                                            }
+                                        });
+                                    } catch (err) {}
+                                }
+                            }
+                        } else if (data) {
+                            hasPayload = true;
+                            const pollLoc = this.resolveLiveChannel(data);
+                            Utils.updateOnlinePlayers(data, pollLoc);
+                            Utils.processIncomingDMs(data);
+                            if (data.c) this.currentMineId = data.c;
+                            const chats = Utils.extractChatDeep(data);
+                            if (chats.length > 0) {
+                                chats.forEach(m => {
+                                    const parsed = Utils.extractChatFields(m);
+                                    if (parsed.text) {
+                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, pollLoc, parsed.k, parsed.to, parsed.rank);
+                                    }
+                                });
+                            }
+                        }
+                    } catch (e) {
+                        dbg('Live poll error / abort:', e);
+                    } finally {
+                        // Бэкофф: пустые ответы не должны долбить /api/live каждые 2.5 с.
+                        this._livePollDelay = hasPayload
+                            ? 2500
+                            : Math.min(30000, Math.max(2500, (this._livePollDelay || 2500) * 2));
+                        if (timeoutId) clearTimeout(timeoutId);
+                    }
+                    if (this._liveRunning) {
+                        this._livePollTimer = setTimeout(poll, this._livePollDelay);
+                    }
+                };
+                poll();
+            };
+
+            try {
+                if (typeof EventSource !== 'undefined') {
+                    const es = new EventSource(url, { withCredentials: true, _customLive: true });
+                    this._liveES = es;
+                    this._liveConnecting = false;
+
+                    es.onopen = () => console.log('Live Connected!');
+
+                    const handleData = (raw) => {
+                        try {
+                            let data = raw;
+                            if (typeof data === 'string') {
+                                try { data = JSON.parse(data); } catch(e) {}
+                            }
+                            const esLoc = this.resolveLiveChannel(data);
+                            Utils.updateOnlinePlayers(data, esLoc);
+                            Utils.processIncomingDMs(data);
+                            if (data && data.c) this.currentMineId = data.c;
+                            const chats = Utils.extractChatDeep(data);
+                            if (chats.length > 0) {
+                                chats.forEach(m => {
+                                    const parsed = Utils.extractChatFields(m);
+                                    if (parsed.text) {
+                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, esLoc, parsed.k, parsed.to, parsed.rank);
+                                    }
+                                });
+                            }
+                        } catch (err) {
+                            dbg('Live ES data error:', err);
+                        }
+                    };
+
+                    es.onmessage = (e) => handleData(e.data);
+                    // 'message' обрабатывается onmessage выше — второй раз не вешаем
+                    ['chat', 'mine', 'live', 'event', 'update'].forEach(ev => {
+                        try { es.addEventListener(ev, (e) => handleData(e.data)); } catch(e) {}
+                    });
+
+                    es.onerror = (e) => {
+                        dbg('Live EventSource error, switching to fetch polling:', e);
+                        try { es.close(); } catch(err) {}
+                        this._liveES = null;
+
+                        // Сбрасываем TTL для всех sse-записей (делаем их «протухшими»)
+                        if (window.__lgOnlinePlayers) {
+                            const now = Date.now();
+                            for (const [nick, info] of window.__lgOnlinePlayers.entries()) {
+                                if (info && info.src === 'sse') {
+                                    // Сдвигаем timestamp в прошлое — они больше не считаются свежими
+                                    info.ts = now - 200000; // больше TTL_CITY (180000)
+                                }
+                            }
+                        }
+
+                        // Триггерим перерисовку списка игроков, если он открыт
+                        if (typeof Players !== 'undefined' && Players.onOnlinePlayersUpdated) {
+                            try { Players.onOnlinePlayersUpdated(); } catch(e) {}
+                        }
+
+                        startPollingFallback();
+                    };
+                } else {
+                    startPollingFallback();
+                }
+            } catch (e) {
+                dbg('Live EventSource init failed:', e);
+                this._liveConnecting = false;
+                startPollingFallback();
+            }
+        },
+
+        stopBackgroundLiveListener() {
+            this._liveRunning = false;
+            this._liveConnecting = false;
+            this._livePollDelay = 2500;
+            if (this._liveES) {
+                try { this._liveES.close(); } catch(e) {}
+                this._liveES = null;
+            }
+            if (this._livePollTimer) {
+                clearTimeout(this._livePollTimer);
+                this._livePollTimer = null;
+            }
+        },
+
+        interceptEventSource() {
+            if (this._esIntercepted) return;
+            // @grant переводит Tampermonkey в sandbox: window — это прокси,
+            // поэтому конструктор на странице патчим через unsafeWindow (G).
+            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
+            const OrigES = pageWin.EventSource || window.EventSource;
+            if (!OrigES || OrigES.__lgChatProxied) return;
+            this._esIntercepted = true;
+            const self = this;
+            class ESProxy extends OrigES {
+                constructor(...args) {
+                    super(...args);
+                    if (args[1]?._customLive) return;
+                    const url = String(args[0] || '');
+                    const isLive = url.includes('/api/live');
+                    const isMine = isLive || url.includes('/api/mine/');
+
+                    const handler = (e) => {
+                        try {
+                            let data = e.data;
+                            if (typeof data === 'string') {
+                                try { data = JSON.parse(data); } catch(err) {}
+                            }
+                            let loc = 'city';
+                            if (isLive && data) {
+                                const d = data.body || data.data || data;
+                                // Используем общий метод, который понимает контекст
+                                loc = self.resolveLiveChannel(d);
+                            } else {
+                                loc = isMine ? 'mine' : 'city';
+                            }
+                            // Перехват игроков для модуля «Друзья» (работает всегда)
+                            Utils.updateOnlinePlayers(data, loc);
+                            Utils.processIncomingDMs(data);
+
+                            // Если перехват отключен — ничего не парсим (закрытый виджет не помеха).
+                            if (self.disabled) return;
+
+                            const chats = Utils.extractChatDeep(data);
+                            if (chats.length > 0) {
+                                chats.forEach(m => {
+                                    const parsed = Utils.extractChatFields(m);
+                                    if (parsed.text) {
+                                        const ch = parsed.channel || (loc === 'mine' ? 'mine' : 'city');
+                                        Chat.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
+                                    }
+                                });
+                            }
+                        } catch (err) {
+                            dbg('ES intercept error:', err);
+                        }
+                    };
+
+                    this.addEventListener('message', handler);
+                    // 'message' обрабатывается строкой выше — второй раз не вешаем
+                    ['city', 'chat', 'say', 'init', 'mine', 'live', 'event', 'update'].forEach(ev => {
+                        try { this.addEventListener(ev, handler); } catch(e) {}
+                    });
+                }
+            }
+            try { ESProxy.__lgChatProxied = true; } catch (e) {}
+            try { pageWin.EventSource = ESProxy; } catch (e) {}
+            if (pageWin !== window) { try { window.EventSource = ESProxy; } catch (e) {} }
+        },
+
+        interceptWebSocket() {
+            if (this._wsIntercepted) return;
+            // См. interceptEventSource: патчим конструктор страницы (unsafeWindow).
+            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
+            const OrigWS = pageWin.WebSocket || window.WebSocket;
+            if (!OrigWS || OrigWS.__lgChatProxied) return;
+            this._wsIntercepted = true;
+            const self = this;
+            class WSProxy extends OrigWS {
+                constructor(...args) {
+                    super(...args);
+                    const url = String(args[0] || '');
+                    const isLive = url.includes('/api/live');
+                    const isMine = isLive || url.includes('/api/mine/');
+
+                    this.addEventListener('message', async (e) => {
+                        try {
+                            let data = e.data;
+                            if (typeof Blob !== 'undefined' && data instanceof Blob) {
+                                try {
+                                    const text = await data.text();
+                                    try { data = JSON.parse(text); } catch(err) { data = text; }
+                                } catch (err) {}
+                            } else if (typeof ArrayBuffer !== 'undefined' && data instanceof ArrayBuffer) {
+                                try {
+                                    const text = new TextDecoder().decode(data);
+                                    try { data = JSON.parse(text); } catch(err) { data = text; }
+                                } catch (err) {}
+                            } else if (typeof data === 'string') {
+                                try { data = JSON.parse(data); } catch(err) {}
+                            }
+
+                            let loc = 'city';
+                            if (isLive && data) {
+                                const d = data.body || data.data || data;
+                                // Используем общий метод, который понимает контекст
+                                loc = self.resolveLiveChannel(d);
+                            } else {
+                                loc = isMine ? 'mine' : 'city';
+                            }
+                            // Перехват игроков для модуля «Друзья» (работает всегда)
+                            Utils.updateOnlinePlayers(data, loc);
+                            Utils.processIncomingDMs(data);
+
+                            // Если перехват отключен — ничего не парсим.
+                            // При закрытом виджете сообщения всё равно нужны (счётчик непрочитанных).
+                            if (self.disabled) return;
+
+                            // 1. Извлекаем сообщения через глубокий парсер extractChatDeep
+                            const chats = Utils.extractChatDeep(data);
+                            if (chats.length > 0) {
+                                chats.forEach(m => {
+                                    const parsed = Utils.extractChatFields(m);
+                                    if (parsed.text) {
+                                        const ch = parsed.channel || (loc === 'mine' ? 'mine' : 'city');
+                                        Chat.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
+                                    }
+                                });
+                                return;
+                            }
+
+                            // 2. Строка вида Author: text
+                            if (typeof data === 'string' && data.includes(':')) {
+                                const i = data.indexOf(':');
+                                const a = data.slice(0, i).trim();
+                                const t = data.slice(i + 1).trim();
+                                if (a && t && t.length < 500) {
+                                    Chat.handleIncoming(a, t, false, false, null, null, null, false, null, loc);
+                                }
+                            }
+                        } catch (err) {
+                            dbg('WS intercept error:', err);
+                        }
+                    });
+                }
+            }
+            try { WSProxy.__lgChatProxied = true; } catch (e) {}
+            try { pageWin.WebSocket = WSProxy; } catch (e) {}
+            if (pageWin !== window) { try { window.WebSocket = WSProxy; } catch (e) {} }
+        },
+
+        interceptFetch() {
+            if (this._fetchIntercepted) return;
+            // См. interceptEventSource: в sandbox патчим fetch страницы (unsafeWindow).
+            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
+            const origFetch = pageWin.fetch || window.fetch;
+            if (!origFetch || origFetch.__lgChatProxied) return;
+            this._fetchIntercepted = true;
+            const self = this;
+            const wrappedFetch = async function(...args) {
+                const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
+                const res = await origFetch.apply(this, args);
+
+                // Задача 3: Ранний выход при отправке сообщений (не клонировать и не парсить)
+                if (url.includes('/api/city/say') || url.includes('/api/mine/chat/say')) {
+                    return res;
+                }
+
+                // 0. Перехват живого потока, игроков онлайн и входящих ЛС (работает всегда)
+                const isLive = url.includes('/api/live');
+                if (url.includes('/api/city/') || url.includes('/api/mine/') || isLive) {
+                    res.clone().json().then(data => {
+                        if (data) {
+                            const loc = url.includes('/api/mine/') ? 'mine' : (isLive ? self.resolveLiveChannel(data) : 'city');
+
+                            // Задача 2 & Задача 4: общее количество и топ-игроки шахты из /api/mine/state
+                            if (url.includes('/api/mine/state')) {
+                                const d = data.body || data.data || data;
+                                if (d) {
+                                    if (typeof d.here === 'number') {
+                                        window.__lgMineTotalHere = d.here;
+                                    } else if (d.st && typeof d.st.here === 'number') {
+                                        window.__lgMineTotalHere = d.st.here;
+                                    }
+                                    const topList = d.st?.top || d.top;
+                                    if (Array.isArray(topList)) {
+                                        const now = Date.now();
+                                        topList.forEach(item => {
+                                            const nick = (typeof item === 'string')
+                                                ? item.trim()
+                                                : (item && (item[0] || item.l || item.login || item.nick || item.name || item.n));
+                                            if (nick && typeof nick === 'string' && nick.trim().length >= 2 && nick.trim().toLowerCase() !== 'me') {
+                                                window.__lgOnlinePlayers.set(nick.trim().toLowerCase(), { loc: 'mine', ts: now });
+                                            }
+                                        });
+                                    }
+                                }
+                            }
+
+                            Utils.updateOnlinePlayers(data, loc);
+                            Utils.processIncomingDMs(data);
+
+                            // Чат живого потока разбираем только при включённом перехвате.
+                            if (isLive && !self.disabled) {
+                                if (data.c) self.currentMineId = data.c;
+                                const chats = Utils.extractChatDeep(data);
+                                chats.forEach(m => {
+                                    const parsed = Utils.extractChatFields(m);
+                                    if (parsed.text) {
+                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, loc, parsed.k, parsed.to, parsed.rank);
+                                    }
+                                });
+                            }
+                        }
+                    }).catch(() => {});
+                }
+
+                try {
+                    // 1. Отслеживание ID текущей шахты для навигации
+                    if (url.includes('/api/mine/')) {
+                        const mMatch = url.match(/[?&]c=([^&]+)/);
+                        if (mMatch) {
+                            try { self.currentMineId = decodeURIComponent(mMatch[1]); } catch(e){}
+                        }
+                    }
+
+                    // 2. Профиль персонажа (/api/me)
+                    if (url.includes('/api/me')) {
+                        res.clone().json().then(data => {
+                            const hero = data?.hero || data?.body?.hero || data?.me;
+                            if (hero) {
+                                window.__lgHero = hero;
+                                if (hero.name) self.myNick = hero.name;
+                                if (hero.class) self.myRole = hero.class;
+                                const hud = document.getElementById(DOM_IDS.playerHud) || document.getElementById('legion-player-hud');
+                                if (hud && hud.style.display !== 'none' && typeof UI !== 'undefined' && UI.renderPlayerHudContent) {
+                                    UI.renderPlayerHudContent(hud, hero);
+                                }
+                            }
+                        }).catch(() => {});
+                    }
+
+                    // Парсим чат всегда, если перехват не отключён.
+                    // Закрытый виджет не помеха: сообщения нужны для счётчика непрочитанных.
+                    if (self.disabled) {
+                        return res;
+                    }
+
+                    // 4. Состояние шахты и вход в шахту (сообщения чата шахты в data.chat.chat или data.m)
+                    if (url.includes('/api/mine/state') || url.includes('/api/mine/enter') || url.includes('/api/mine/chat')) {
+                        res.clone().json().then(data => {
+                            if (!data || !data.ok) return;
+                            if (data.c) self.currentMineId = data.c;
+                            const chats = Utils.extractChatDeep(data);
+                            if (chats.length > 0) {
+                                chats.forEach(m => {
+                                    const parsed = Utils.extractChatFields(m);
+                                    if (parsed.text) {
+                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, 'mine', parsed.k, parsed.to, parsed.rank);
+                                    }
+                                });
+                            }
+                        }).catch(() => {});
+                    }
+
+                    // 5. Вход в город (история чата города)
+                    if (url.includes('/api/city/enter')) {
+                        res.clone().json().then(data => {
+                            if (data && data.ok && data.chat && Array.isArray(data.chat)) {
+                                setTimeout(() => {
+                                    data.chat.forEach(m => {
+                                        const parsed = Utils.extractChatFields(m);
+                                        if (parsed.text) {
+                                            self.handleIncoming(parsed.author, parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, parsed.channel || 'city', parsed.k, parsed.to, parsed.rank);
+                                        }
+                                    });
+                                }, 100);
+                            }
+                        }).catch(() => {});
+                    }
+                } catch(e) {}
+
+                return res;
+            };
+            try { wrappedFetch.__lgChatProxied = true; } catch (e) {}
+            try { pageWin.fetch = wrappedFetch; } catch (e) {}
+            if (pageWin !== window) { try { window.fetch = wrappedFetch; } catch (e) {} }
+        }
+    };
+
+    // ===== src/modules/chat/chat-pip.js =====
+    // ============================================================
+    // 7.4 МОДУЛЬ: ЧАТ — PiP-окно, рендер и отправка
+    // ============================================================
+    // Вынесено из modules/chat.js (v11.6.0, этап 2 декомпозиции).
+    // Слой-миксин: единственное место, где живёт DOM чата (окно PiP,
+    // documentPictureInPicture). Рендер ленты и отправка сообщений.
+    // this внутри методов — это Chat (Object.assign в chat/chat.js).
+
+    const ChatPip = {
+        widget: null,
         _popoutWin: null,
         // Документ PiP-окна. С v11.5.3 это единственное место, где живёт DOM чата:
         // обычный (встроенный) виджет удалён, за него отвечает плагин Legion7TV.
         _pipDoc: null,
-        _inited: false,
         _origWidgetStyles: null,
         // Наследие встроенного виджета (возврат в родной парент). // TODO: REMOVE
         _origWidgetParent: null,
         _origWidgetNextSibling: null,
         _origWidgetClasses: null,
         _origWidgetHadOpen: false,
-        isOpen() {
-            // Чат существует только внутри PiP-окна.
-            // Опираемся на ссылки окно/документ, а не на isConnected: проверка
-            // связности внутри PiP-документа нестабильна, из-за чего сообщения
-            // при открытом чате продолжали копить непрочитанные.
-            if (!this._popoutWin || this._popoutWin.closed) return false;
-            return !!(this._pipDoc || this.widget);
-        },
+        cooldownUntil: 0,
+        _toastTimer: null,
+
         // Корень чата: всегда берём актуальный DOM из документа PiP-окна.
         // this.widget может ссылаться на отсоединённый (detached) узел, поэтому
         // поиск идёт по документу, а не по сохранённой ссылке.
@@ -5277,11 +5962,13 @@ const Players = {
             }
             return null;
         },
+
         // Поиск элемента чата (инпут, кнопка, лента сообщений) внутри PiP-документа.
         _pipEl(selector) {
             const root = this._pipRoot();
             return root ? root.querySelector(selector) : null;
         },
+
         // Синхронизация подсветки вкладок с this.activeMainTab / this.activeSubTab.
         // Ищем по всему документу PiP-окна, а не только внутри this.widget: если
         // ссылка на виджет устарела (окно пересоздано), поиск по документу всё равно
@@ -5307,97 +5994,6 @@ const Players = {
                 ? d.getElementById('chat-sub-tabs')
                 : d.querySelector('#chat-sub-tabs');
             if (subTabsRow) subTabsRow.style.display = this.activeMainTab === 'city' ? 'flex' : 'none';
-        },
-        getChannelLogin() {
-            try {
-                const m = location.pathname.match(/\/c\/([^/?#]+)/i);
-                if (m && m[1]) return m[1].toLowerCase().trim();
-                const paramC = new URL(location.href).searchParams.get('c');
-                if (paramC && !/^\d+$/.test(paramC)) return paramC.toLowerCase().trim();
-            } catch (e) {}
-            return '';
-        },
-        isStreamerMessage(msg) {
-            if (!msg || !msg.author) return false;
-            const author = String(msg.author).toLowerCase().trim();
-            const chLogin = this.getChannelLogin();
-            if (!chLogin) return false;
-            const chBase = chLogin.replace(/channel$/i, '');
-            const authorBase = author.replace(/channel$/i, '');
-            return author === chLogin || author === chBase || authorBase === chBase || authorBase === chLogin;
-        },
-        isMentionedMessage(msg) {
-            if (!msg || !msg.text || !this.myNick) return false;
-            const myNick = String(this.myNick).trim();
-            if (!myNick || myNick.length < 2) return false;
-            if (msg.author && String(msg.author).toLowerCase() === myNick.toLowerCase()) return false;
-            const text = String(msg.text).toLowerCase();
-            const lowerNick = myNick.toLowerCase();
-            return text.includes('@' + lowerNick) || text.includes(lowerNick);
-        },
-        setDisabled(val) {
-            this.disabled = !!val;
-            try {
-                localStorage.setItem('LEGION_CHAT_DISABLED', String(this.disabled));
-            } catch (e) {}
-            if (this.disabled) {
-                this.stopBackgroundLiveListener();
-                if (this.isOpen()) {
-                    this.close();
-                }
-                UI.showToast('🚫 Перехват чата отключен');
-            } else {
-                UI.showToast('💬 Перехват чата включен');
-                this.startBackgroundLiveListener();
-            }
-        },
-        STORAGE_KEY: 'LEGION_CHAT_HISTORY',
-        activeMainTab: 'city',
-        activeSubTab: 'general',
-        dmTarget: null, // Ник собеседника, с которым сейчас открыт диалог во вкладке ЛС
-        get activeTab() {
-            if (this.activeMainTab === 'mine' || this.activeMainTab === 'dm') return this.activeMainTab;
-            return this.activeSubTab;
-        },
-        set activeTab(val) {
-            if (val === 'mine' || val === 'dm') {
-                this.activeMainTab = val;
-            } else {
-                this.activeMainTab = 'city';
-                this.activeSubTab = val;
-            }
-        },
-        messages: [], // Массив всех сообщений
-        myNick: window.LG_CH?.name || 'eciell',
-        myRole: 'legionary',
-        currentMineId: 'home',
-        cooldownUntil: 0,
-        // Статусы из /api/city/enter
-        muted: false,
-        mod: null,
-        ign: new Set(),
-        _toastTimer: null,
-        _liveES: null,
-        _livePollTimer: null,
-        _liveRunning: false,
-        _liveConnecting: false,
-        _livePollDelay: 2500,
-
-        getMineId() {
-            return this.currentMineId 
-                || (location.search.match(/[?&]c=([^&]+)/)?.[1]) 
-                || 'home';
-        },
-
-        async syncMe() {
-            try {
-                const res = await Utils.fetchApi('/api/me');
-                const me = res?.hero || res?.body?.hero;
-                if (me) {
-                    this.myNick = me.name || window.LG_CH?.name || 'eciell';
-                    this.myRole = me.class || me.sk?.c || 'legionary';
-                }
-            } catch (e) {}
         },
 
         showError(msg) {
@@ -5426,13 +6022,6 @@ const Players = {
                     setTimeout(() => { if (toast) toast.style.display = 'none'; }, 300);
                 }
             }, 2000);
-        },
-
-        isInMine() {
-            return !!document.querySelector('.mn-world') ||
-                   !!document.querySelector('.mn-screen') ||
-                   !!document.querySelector('.mn-heroes') ||
-                   (location.pathname.includes('/mine') && location.search.includes('sid='));
         },
 
         updateInputState() {
@@ -5484,64 +6073,6 @@ const Players = {
                 }
                 if (sendBtn) sendBtn.disabled = false;
             }
-        },
-
-        // v11.5.3: встроенный виджет чата удалён — его заменил сторонний плагин
-        // Legion7TV (ProCto_Fliy). Здесь остаётся только то, что нужно нашему
-        // вынесенному чату и перехватчикам:
-        //   • кнопка «Вынести чат» и настройки 7TV;
-        //   • эмоуты 7TV + синхронизация ника;
-        //   • детектор внешнего чата.
-        // interceptFetch / interceptEventSource / interceptWebSocket вызываются
-        // из main.js сразу после init() — они идемпотентны и остаются включёнными.
-        init() {
-            if (this._inited) return;
-            this._inited = true;
-
-            this.badge = document.getElementById(DOM_IDS.chatBadge) || document.getElementById('chat-badge');
-
-            // btn-chat-pip — id из старой разметки FAB, оставлен для совместимости.
-            (document.getElementById(DOM_IDS.btnPopout)
-                || document.getElementById('btn-popout')
-                || document.getElementById('btn-chat-pip'))?.addEventListener('click', () => this.popoutChat());
-
-            // Настройки 7TV (канал и размер смайлов). В v11.5.3 кнопка FAB
-            // «🎭 Канал 7TV» переехала в модалку UI.openSettings(), поэтому
-            // эта привязка — только фолбэк для старой разметки.
-            document.getElementById('btn-7tv-settings')?.addEventListener('click', () => this.open7tvSettings());
-
-            // 7TV нужен PiP-чату: размер смайлов + набор эмоутов грузим один раз.
-            SevenTV.loadSize();
-            SevenTV.load();
-
-            this.syncMe();
-            this.detectExternalChat();
-        },
-
-        // Детектор стороннего чата (Legion7TV, плагин ProCto_Fliy).
-        // Статус рисуется строкой в FAB-меню; если плагина нет — даём ссылку.
-        detectExternalChat() {
-            setTimeout(() => {
-                const statusEl = document.getElementById(DOM_IDS.externalChatStatus)
-                    || document.getElementById('external-chat-status');
-                if (!statusEl) return;
-
-                // Проверяем, есть ли кнопка 7TV от плагина ProCto_Fliy
-                const has7TVBtn = !!document.querySelector('.t7-btn');
-                // Или проверяем флаг в unsafeWindow: после @grant объекты страницы
-                // живут только там, обычный window их не видит.
-                let has7TVWindow = false;
-                try {
-                    const pageWin = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
-                    has7TVWindow = !!(pageWin && pageWin.LGChat && pageWin.LGChat.__t7);
-                } catch (e) {}
-
-                if (has7TVBtn || has7TVWindow) {
-                    statusEl.innerHTML = `<span style="color:#4cc95a;">✅ Чат Legion7TV активен</span>`;
-                } else {
-                    statusEl.innerHTML = `<a href="https://github.com/mykhailkot-pixel/Legion7TV/raw/refs/heads/main/7tv-multidonate.user.js" target="_blank" style="color:#caa55c; text-decoration:underline;">Установить Legion7TV (чат)</a>`;
-                }
-            }, 2000);
         },
 
         // DOM чата собирается только внутри документа PiP-окна.
@@ -5779,19 +6310,6 @@ const Players = {
             });
         },
 
-        toggle() {
-            if (this.disabled) {
-                UI.showToast('🚫 Перехват чата отключен в меню 🐱', true);
-                return;
-            }
-            // Обычного (встроенного) виджета больше нет: «открыть чат» = вынести в PiP.
-            if (this.isOpen()) {
-                try { this._popoutWin?.focus(); } catch (e) {}
-                return;
-            }
-            this.popoutChat();
-        },
-
         // Открыть ЛС с игроком в вынесенном чате (используется тостами ЛС).
         async openDM(nick) {
             if (!nick) return;
@@ -6004,165 +6522,6 @@ const Players = {
             } catch (err) {
                 dbg('Popout chat failed:', err);
                 UI.showToast('Ошибка при открытии окна чата', true);
-            }
-        },
-
-        updateBadge() {
-            const badges = document.querySelectorAll('#' + DOM_IDS.chatBadge + ', #' + DOM_IDS.fabChatBadge + ', #chat-badge, #fab-chat-badge');
-            badges.forEach(b => {
-                if (this.unreadCount > 0) {
-                    b.textContent = this.unreadCount > 99 ? '99+' : this.unreadCount;
-                    b.style.display = 'block';
-                } else {
-                    // Сбрасываем и текст: иначе при повторном показе остаётся старый «99+».
-                    b.textContent = '0';
-                    b.style.display = 'none';
-                }
-            });
-        },
-
-        saveToStorage(author, text, role, isSystem, channel = null, k = null, aw = null, rank = null, id = null) {
-            try {
-                const history = this.loadFromStorage();
-                history.push({ author, text, role, isSystem, channel, k, aw, rank, id, ts: Date.now() });
-                const trimmed = history.length > 200 ? history.slice(-200) : history;
-                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(trimmed));
-            } catch (e) { /* quota */ }
-        },
-
-        loadFromStorage() {
-            try {
-                const raw = localStorage.getItem(this.STORAGE_KEY);
-                if (!raw) return [];
-                const arr = JSON.parse(raw);
-                return Array.isArray(arr) ? arr : [];
-            } catch (e) { return []; }
-        },
-
-        // Своё сообщение кэшируем/обновляем. Ответ на отправку и эхо из потока —
-        // это один и тот же объект (общий ts), поэтому запись ищется по нему:
-        // эхо дописывает в localStorage id, aw и rank, не плодя дублей.
-        cacheOwnMessage(msg) {
-            if (!msg || !msg.text) return;
-            try {
-                const channel = msg.channel || 'city';
-                const ts = msg.ts || Date.now();
-                const entry = {
-                    author: msg.author, text: msg.text, role: msg.role, isSystem: !!msg.isSystem,
-                    channel: msg.channel, k: msg.k, aw: msg.aw, rank: msg.rank,
-                    id: msg.id || null, ts
-                };
-                const history = this.loadFromStorage();
-                const idx = history.findIndex(h => h && h.ts === ts && h.text === msg.text
-                    && (h.author || '') === (msg.author || '')
-                    && (h.channel || 'city') === channel);
-                if (idx >= 0) {
-                    history[idx] = { ...history[idx], ...entry };
-                    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(history));
-                    return;
-                }
-                history.push(entry);
-                const trimmed = history.length > 200 ? history.slice(-200) : history;
-                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(trimmed));
-            } catch (e) {}
-        },
-
-        getRoleMeta(role, isSystem) {
-            if (isSystem) return { icon: '🏆', color: '#f0ad4e' }; // Для летописи/достижений
-            const map = {
-                'necromancer': { icon: '💀', color: '#b9a2ff' },
-                'paladin': { icon: '🔨', color: '#f3d36b' },
-                'priest': { icon: '✨', color: '#f0ad4e' },
-                'mage': { icon: '🔮', color: '#5bc0de' },
-                'rogue': { icon: '🗡️', color: '#d8bfd8' },
-                'archer': { icon: '🏹', color: '#5cb85c' },
-                'legionary': { icon: '🛡️', color: '#d9534f' },
-            };
-            return map[role] || { icon: '👤', color: '#ffcf6a' };
-        },
-
-        // Главная функция приема сообщений (§2.3 дедуп по id + дедуп своих исходящих)
-        handleIncoming(author, text, isMine = false, isHistory = false, id = null, seq = null, role = null, isSystem = false, aw = null, channel = null, k = null, to = null, rank = null) {
-            if (!text) return;
-
-            // Перехват и фильтрация ЛС (не добавлять в общий чат)
-            if (channel === 'dm' || k === 'dm') {
-                if (typeof Players !== 'undefined' && Players.handleIncomingDM) {
-                    Players.handleIncomingDM(author, text, to);
-                }
-                // Если этот диалог сейчас открыт во вкладке «✉️ ЛС» — считаем прочитанным.
-                // Перерисовку выполняет Players.refreshUnreadDMViews() -> Chat.renderMessages().
-                if (typeof Players !== 'undefined' && this.activeMainTab === 'dm' && this.dmTarget) {
-                    const myNick = (this.myNick || '').toLowerCase();
-                    const isSelf = (author === 'Я') || (!!myNick && String(author || '').toLowerCase() === myNick);
-                    const peer = isSelf ? (to || '') : (author || '');
-                    if (peer && String(peer).toLowerCase() === String(this.dmTarget).toLowerCase()) {
-                        Players.clearUnreadDM(peer);
-                    }
-                }
-                return;
-            }
-
-            // 1. Если сообщение с таким ID уже есть и оно НЕ в статусе pending — это повтор из поллинга, пропускаем
-            if (id && this.messages.slice(-100).some(m => m.id === id && !m._pending)) {
-                return;
-            }
-
-            // 2. Дедупликация и сопоставление своих исходящих сообщений (_pending)
-            const isSelf = author === this.myNick || (this.myNick && author && author.toLowerCase() === this.myNick.toLowerCase());
-            if (isSelf) {
-                let pendingMsg = null;
-                for (let i = this.messages.length - 1; i >= 0; i--) {
-                    const m = this.messages[i];
-                    const authorMatch = m.author === author || m.author === this.myNick;
-                    const textMatch = m.text === text;
-                    // Pending-сообщение наше собственное: канал эха может отличаться
-                    // (мы в шахте, а отправили в город), поэтому для _pending канал
-                    // не проверяем — он останется тем, куда мы реально отправили.
-                    const channelMatch = !channel || !m.channel || m.channel === channel || m._pending;
-                    if (authorMatch && textMatch && channelMatch && (m._pending || (id && m.id === id))) {
-                        pendingMsg = m;
-                        break;
-                    }
-                }
-                if (pendingMsg) {
-                    pendingMsg._pending = false;
-                    if (id && !pendingMsg.id) pendingMsg.id = id;
-                    if (seq && !pendingMsg.seq) pendingMsg.seq = seq;
-                    if (role && !pendingMsg.role) pendingMsg.role = role;
-                    if (rank && !pendingMsg.rank) pendingMsg.rank = rank;
-                    if (aw && !pendingMsg.aw) pendingMsg.aw = aw;
-                    // НЕ ПЕРЕЗАПИСЫВАЕМ КАНАЛ, если он уже задан (например, 'city')
-                    // Эхо может прийти как 'mine', если мы в шахте, но мы знаем, куда отправили.
-                    if (!pendingMsg.channel && channel) pendingMsg.channel = channel;
-                    // Своё сообщение тоже должно попасть в кэш: сюда мы приходим
-                    // на эхо сервера, а основная ветка ниже уже пропускается.
-                    if (!isHistory) this.cacheOwnMessage(pendingMsg);
-                    this.renderMessages();
-                    return;
-                }
-            }
-
-            // 3. Дедупликация сообщений без ID (по автору и тексту за последние 8 секунд)
-            if (!isHistory && !isMine && !id) {
-                if (this.messages.slice(-25).some(m => m.author === author && m.text === text && (m.channel === channel || !m.channel || !channel) && Date.now() - m.ts < 8000)) return;
-            }
-
-            const msgObj = { author, text, role, rank, isSystem, id, seq, aw, channel, k, to, ts: Date.now() };
-            this.messages.push(msgObj);
-
-            // Сохраняем в кэш только живые сообщения
-            if (!isHistory) this.saveToStorage(author, text, role, isSystem, channel, k, aw, rank, id);
-
-            // Обновляем UI
-            if (!isHistory) {
-                this.renderMessages();
-                // Скролл вниз выполняет renderMessages() и только если пользователь
-                // уже был внизу — иначе чтение истории не прерывается.
-                if (!this.isOpen() && !isMine && !isSelf) {
-                    this.unreadCount++;
-                    this.updateBadge();
-                }
             }
         },
 
@@ -6690,561 +7049,278 @@ const Players = {
                 this.showError('Сбой сети');
             }
         },
-
-        async loadHistory() {
-            if (this.historyLoaded) return;
-            this.historyLoaded = true;
-
-            const cached = this.loadFromStorage();
-            if (cached.length > 0) {
-                cached.forEach(m => {
-                    if (!this.messages.some(cur => (cur.id && cur.id === m.id) || (cur.author === m.author && cur.text === m.text && cur.channel === m.channel))) {
-                        this.messages.push({ author: m.author, text: m.text, role: m.role, rank: m.rank, isSystem: m.isSystem, channel: m.channel, k: m.k, aw: m.aw, id: m.id || null, ts: m.ts });
-                    }
-                });
-            }
-
-            try {
-                const res = await Utils.fetchApi('/api/city/enter', {});
-                const data = res?.body || res;
-
-                // Флаги мута / модерации / игнора из ответа сервера
-                if (data && data.ok) {
-                    if (data.chatMe) {
-                        if ('muted' in data.chatMe) this.muted = data.chatMe.muted;
-                        if ('mod' in data.chatMe && data.chatMe.mod !== 'own') this.mod = data.chatMe.mod;
-                    }
-                    if (Array.isArray(data.ign)) this.ign = new Set(data.ign);
-                }
-
-                if (data && data.ok && Array.isArray(data.chat)) {
-                    data.chat.forEach(m => {
-                        const parsed = Utils.extractChatFields(m);
-                        if (!parsed.text) return;
-                        const ch = parsed.channel || 'city';
-                        // Не дублируем то, что уже есть в this.messages: по id ИЛИ по автору+тексту
-                        const existing = this.messages.find(cur =>
-                            (parsed.id && cur.id && cur.id === parsed.id) ||
-                            (!cur._pending && cur.author === parsed.author && cur.text === parsed.text &&
-                                (cur.channel || 'city') === ch)
-                        );
-                        if (existing) {
-                            // Кэш мог быть сохранён без титула/статуса — дополняем из истории сервера
-                            if (parsed.aw && !existing.aw) existing.aw = parsed.aw;
-                            if (parsed.rank && !existing.rank) existing.rank = parsed.rank;
-                            return;
-                        }
-                        this.handleIncoming(parsed.author, parsed.text, false, true, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
-                    });
-                }
-            } catch (e) {
-                dbg('Не удалось стянуть историю города', e);
-            }
-
-            this.renderMessages();
-        },
-
-        processMineMessages(list) {
-            if (!list) return;
-            const chats = Utils.extractChatDeep(list);
-            let added = false;
-            chats.forEach(m => {
-                const parsed = Utils.extractChatFields(m);
-                if (parsed.text) {
-                    this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, 'mine', parsed.k, parsed.to, parsed.rank);
-                    added = true;
-                }
-            });
-            if (added) this.renderMessages();
-        },
-
-        processRawMessages(msgs) {
-            if (!msgs || !Array.isArray(msgs)) return;
-            msgs.forEach(m => {
-                const { author, text, id, seq, role, rank, isSystem, aw, channel } = Utils.extractChatFields(m);
-                if (!text) return;
-                this.handleIncoming(author || 'Игрок', text, false, false, id, seq, role, isSystem, aw, channel, null, null, rank);
-            });
-        },
-
-        // Определяем канал живого потока: город или шахта
-        resolveLiveChannel(data) {
-            try {
-                const d = (data && (data.body || data.data || data)) || null;
-                if (d) {
-                    if (d.chatRoom === 'city' || d.town) return 'city';
-                    if (d.chatRoom === 'mine' || d.mine) return 'mine';
-                }
-            } catch (e) {}
-            return this.isInMine() ? 'mine' : 'city';
-        },
-
-        async startBackgroundLiveListener() {
-            if (this.disabled || this._liveConnecting) return;
-
-            // Защита от дублирования: живой поток уже открыт или подключается.
-            if (this._liveES && (this._liveES.readyState === 0 || this._liveES.readyState === 1)) return;
-            // Уже идёт fetch-поллинг — второй цикл не запускаем.
-            if (this._liveRunning && !this._liveES && this._livePollTimer) return;
-
-            // Старое закрытое соединение закрываем перед созданием нового.
-            if (this._liveES) {
-                try { this._liveES.close(); } catch (e) {}
-                this._liveES = null;
-            }
-            this._liveRunning = true;
-            this._liveConnecting = true;
-
-            const sid = new URL(location.href).searchParams.get('sid');
-            const livePath = '/api/live' + (sid ? `?sid=${encodeURIComponent(sid)}` : '');
-            // EventSource должен подключаться к /api/live без префикса канала:
-            // Utils.apiPath() добавляет /c/<канал>/ и ломает поток.
-            const url = livePath;
-
-            const startPollingFallback = () => {
-                if (!this._liveRunning || this._livePollTimer) return;
-                this._liveConnecting = false; // EventSource не создаётся — уходим в поллинг
-                dbg('Starting live fetch polling fallback...');
-                const poll = async () => {
-                    if (!this._liveRunning) return;
-                    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-                    const timeoutId = controller ? setTimeout(() => controller.abort(), 3000) : null;
-                    let hasPayload = false;
-                    try {
-                        const curSid = new URL(location.href).searchParams.get('sid');
-                        // Поллинг идёт на тот же чистый /api/live, что и EventSource (без /c/<канал>/)
-                        const pollUrl = '/api/live' + (curSid ? `?sid=${encodeURIComponent(curSid)}` : '');
-                        const res = await fetch(pollUrl, {
-                            signal: controller ? controller.signal : undefined,
-                            credentials: 'same-origin',
-                            cache: 'no-store'
-                        });
-                        const text = await res.text();
-                        let data = null;
-                        try { data = JSON.parse(text); } catch (e) {}
-
-                        // Если пришел поток SSE строками "data: {...}"
-                        if (!data && text && text.includes('data:')) {
-                            hasPayload = true;
-                            const lines = text.split('\n');
-                            for (const line of lines) {
-                                if (line.startsWith('data:')) {
-                                    try {
-                                        const lineData = JSON.parse(line.slice(5).trim());
-                                        const lineLoc = this.resolveLiveChannel(lineData);
-                                        Utils.updateOnlinePlayers(lineData, lineLoc);
-                                        Utils.processIncomingDMs(lineData);
-                                        const chats = Utils.extractChatDeep(lineData);
-                                        chats.forEach(m => {
-                                            const parsed = Utils.extractChatFields(m);
-                                            if (parsed.text) {
-                                                this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, lineLoc, parsed.k, parsed.to, parsed.rank);
-                                            }
-                                        });
-                                    } catch (err) {}
-                                }
-                            }
-                        } else if (data) {
-                            hasPayload = true;
-                            const pollLoc = this.resolveLiveChannel(data);
-                            Utils.updateOnlinePlayers(data, pollLoc);
-                            Utils.processIncomingDMs(data);
-                            if (data.c) this.currentMineId = data.c;
-                            const chats = Utils.extractChatDeep(data);
-                            if (chats.length > 0) {
-                                chats.forEach(m => {
-                                    const parsed = Utils.extractChatFields(m);
-                                    if (parsed.text) {
-                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, pollLoc, parsed.k, parsed.to, parsed.rank);
-                                    }
-                                });
-                            }
-                        }
-                    } catch (e) {
-                        dbg('Live poll error / abort:', e);
-                    } finally {
-                        // Бэкофф: пустые ответы не должны долбить /api/live каждые 2.5 с.
-                        this._livePollDelay = hasPayload
-                            ? 2500
-                            : Math.min(30000, Math.max(2500, (this._livePollDelay || 2500) * 2));
-                        if (timeoutId) clearTimeout(timeoutId);
-                    }
-                    if (this._liveRunning) {
-                        this._livePollTimer = setTimeout(poll, this._livePollDelay);
-                    }
-                };
-                poll();
-            };
-
-            try {
-                if (typeof EventSource !== 'undefined') {
-                    const es = new EventSource(url, { withCredentials: true, _customLive: true });
-                    this._liveES = es;
-                    this._liveConnecting = false;
-
-                    es.onopen = () => console.log('Live Connected!');
-
-                    const handleData = (raw) => {
-                        try {
-                            let data = raw;
-                            if (typeof data === 'string') {
-                                try { data = JSON.parse(data); } catch(e) {}
-                            }
-                            const esLoc = this.resolveLiveChannel(data);
-                            Utils.updateOnlinePlayers(data, esLoc);
-                            Utils.processIncomingDMs(data);
-                            if (data && data.c) this.currentMineId = data.c;
-                            const chats = Utils.extractChatDeep(data);
-                            if (chats.length > 0) {
-                                chats.forEach(m => {
-                                    const parsed = Utils.extractChatFields(m);
-                                    if (parsed.text) {
-                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, esLoc, parsed.k, parsed.to, parsed.rank);
-                                    }
-                                });
-                            }
-                        } catch (err) {
-                            dbg('Live ES data error:', err);
-                        }
-                    };
-
-                    es.onmessage = (e) => handleData(e.data);
-                    // 'message' обрабатывается onmessage выше — второй раз не вешаем
-                    ['chat', 'mine', 'live', 'event', 'update'].forEach(ev => {
-                        try { es.addEventListener(ev, (e) => handleData(e.data)); } catch(e) {}
-                    });
-
-                    es.onerror = (e) => {
-                        dbg('Live EventSource error, switching to fetch polling:', e);
-                        try { es.close(); } catch(err) {}
-                        this._liveES = null;
-
-                        // Сбрасываем TTL для всех sse-записей (делаем их «протухшими»)
-                        if (window.__lgOnlinePlayers) {
-                            const now = Date.now();
-                            for (const [nick, info] of window.__lgOnlinePlayers.entries()) {
-                                if (info && info.src === 'sse') {
-                                    // Сдвигаем timestamp в прошлое — они больше не считаются свежими
-                                    info.ts = now - 200000; // больше TTL_CITY (180000)
-                                }
-                            }
-                        }
-
-                        // Триггерим перерисовку списка игроков, если он открыт
-                        if (typeof Players !== 'undefined' && Players.onOnlinePlayersUpdated) {
-                            try { Players.onOnlinePlayersUpdated(); } catch(e) {}
-                        }
-
-                        startPollingFallback();
-                    };
-                } else {
-                    startPollingFallback();
-                }
-            } catch (e) {
-                dbg('Live EventSource init failed:', e);
-                this._liveConnecting = false;
-                startPollingFallback();
-            }
-        },
-
-        stopBackgroundLiveListener() {
-            this._liveRunning = false;
-            this._liveConnecting = false;
-            this._livePollDelay = 2500;
-            if (this._liveES) {
-                try { this._liveES.close(); } catch(e) {}
-                this._liveES = null;
-            }
-            if (this._livePollTimer) {
-                clearTimeout(this._livePollTimer);
-                this._livePollTimer = null;
-            }
-        },
-
-        interceptEventSource() {
-            if (this._esIntercepted) return;
-            // @grant переводит Tampermonkey в sandbox: window — это прокси,
-            // поэтому конструктор на странице патчим через unsafeWindow (G).
-            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
-            const OrigES = pageWin.EventSource || window.EventSource;
-            if (!OrigES || OrigES.__lgChatProxied) return;
-            this._esIntercepted = true;
-            const self = this;
-            class ESProxy extends OrigES {
-                constructor(...args) {
-                    super(...args);
-                    if (args[1]?._customLive) return;
-                    const url = String(args[0] || '');
-                    const isLive = url.includes('/api/live');
-                    const isMine = isLive || url.includes('/api/mine/');
-
-                    const handler = (e) => {
-                        try {
-                            let data = e.data;
-                            if (typeof data === 'string') {
-                                try { data = JSON.parse(data); } catch(err) {}
-                            }
-                            let loc = 'city';
-                            if (isLive && data) {
-                                const d = data.body || data.data || data;
-                                // Используем общий метод, который понимает контекст
-                                loc = self.resolveLiveChannel(d);
-                            } else {
-                                loc = isMine ? 'mine' : 'city';
-                            }
-                            // Перехват игроков для модуля «Друзья» (работает всегда)
-                            Utils.updateOnlinePlayers(data, loc);
-                            Utils.processIncomingDMs(data);
-
-                            // Если перехват отключен — ничего не парсим (закрытый виджет не помеха).
-                            if (self.disabled) return;
-
-                            const chats = Utils.extractChatDeep(data);
-                            if (chats.length > 0) {
-                                chats.forEach(m => {
-                                    const parsed = Utils.extractChatFields(m);
-                                    if (parsed.text) {
-                                        const ch = parsed.channel || (loc === 'mine' ? 'mine' : 'city');
-                                        Chat.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
-                                    }
-                                });
-                            }
-                        } catch (err) {
-                            dbg('ES intercept error:', err);
-                        }
-                    };
-
-                    this.addEventListener('message', handler);
-                    // 'message' обрабатывается строкой выше — второй раз не вешаем
-                    ['city', 'chat', 'say', 'init', 'mine', 'live', 'event', 'update'].forEach(ev => {
-                        try { this.addEventListener(ev, handler); } catch(e) {}
-                    });
-                }
-            }
-            try { ESProxy.__lgChatProxied = true; } catch (e) {}
-            try { pageWin.EventSource = ESProxy; } catch (e) {}
-            if (pageWin !== window) { try { window.EventSource = ESProxy; } catch (e) {} }
-        },
-
-        interceptWebSocket() {
-            if (this._wsIntercepted) return;
-            // См. interceptEventSource: патчим конструктор страницы (unsafeWindow).
-            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
-            const OrigWS = pageWin.WebSocket || window.WebSocket;
-            if (!OrigWS || OrigWS.__lgChatProxied) return;
-            this._wsIntercepted = true;
-            const self = this;
-            class WSProxy extends OrigWS {
-                constructor(...args) {
-                    super(...args);
-                    const url = String(args[0] || '');
-                    const isLive = url.includes('/api/live');
-                    const isMine = isLive || url.includes('/api/mine/');
-
-                    this.addEventListener('message', async (e) => {
-                        try {
-                            let data = e.data;
-                            if (typeof Blob !== 'undefined' && data instanceof Blob) {
-                                try {
-                                    const text = await data.text();
-                                    try { data = JSON.parse(text); } catch(err) { data = text; }
-                                } catch (err) {}
-                            } else if (typeof ArrayBuffer !== 'undefined' && data instanceof ArrayBuffer) {
-                                try {
-                                    const text = new TextDecoder().decode(data);
-                                    try { data = JSON.parse(text); } catch(err) { data = text; }
-                                } catch (err) {}
-                            } else if (typeof data === 'string') {
-                                try { data = JSON.parse(data); } catch(err) {}
-                            }
-
-                            let loc = 'city';
-                            if (isLive && data) {
-                                const d = data.body || data.data || data;
-                                // Используем общий метод, который понимает контекст
-                                loc = self.resolveLiveChannel(d);
-                            } else {
-                                loc = isMine ? 'mine' : 'city';
-                            }
-                            // Перехват игроков для модуля «Друзья» (работает всегда)
-                            Utils.updateOnlinePlayers(data, loc);
-                            Utils.processIncomingDMs(data);
-
-                            // Если перехват отключен — ничего не парсим.
-                            // При закрытом виджете сообщения всё равно нужны (счётчик непрочитанных).
-                            if (self.disabled) return;
-
-                            // 1. Извлекаем сообщения через глубокий парсер extractChatDeep
-                            const chats = Utils.extractChatDeep(data);
-                            if (chats.length > 0) {
-                                chats.forEach(m => {
-                                    const parsed = Utils.extractChatFields(m);
-                                    if (parsed.text) {
-                                        const ch = parsed.channel || (loc === 'mine' ? 'mine' : 'city');
-                                        Chat.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
-                                    }
-                                });
-                                return;
-                            }
-
-                            // 2. Строка вида Author: text
-                            if (typeof data === 'string' && data.includes(':')) {
-                                const i = data.indexOf(':');
-                                const a = data.slice(0, i).trim();
-                                const t = data.slice(i + 1).trim();
-                                if (a && t && t.length < 500) {
-                                    Chat.handleIncoming(a, t, false, false, null, null, null, false, null, loc);
-                                }
-                            }
-                        } catch (err) {
-                            dbg('WS intercept error:', err);
-                        }
-                    });
-                }
-            }
-            try { WSProxy.__lgChatProxied = true; } catch (e) {}
-            try { pageWin.WebSocket = WSProxy; } catch (e) {}
-            if (pageWin !== window) { try { window.WebSocket = WSProxy; } catch (e) {} }
-        },
-
-        interceptFetch() {
-            if (this._fetchIntercepted) return;
-            // См. interceptEventSource: в sandbox патчим fetch страницы (unsafeWindow).
-            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
-            const origFetch = pageWin.fetch || window.fetch;
-            if (!origFetch || origFetch.__lgChatProxied) return;
-            this._fetchIntercepted = true;
-            const self = this;
-            const wrappedFetch = async function(...args) {
-                const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
-                const res = await origFetch.apply(this, args);
-
-                // Задача 3: Ранний выход при отправке сообщений (не клонировать и не парсить)
-                if (url.includes('/api/city/say') || url.includes('/api/mine/chat/say')) {
-                    return res;
-                }
-
-                // 0. Перехват живого потока, игроков онлайн и входящих ЛС (работает всегда)
-                const isLive = url.includes('/api/live');
-                if (url.includes('/api/city/') || url.includes('/api/mine/') || isLive) {
-                    res.clone().json().then(data => {
-                        if (data) {
-                            const loc = url.includes('/api/mine/') ? 'mine' : (isLive ? self.resolveLiveChannel(data) : 'city');
-
-                            // Задача 2 & Задача 4: общее количество и топ-игроки шахты из /api/mine/state
-                            if (url.includes('/api/mine/state')) {
-                                const d = data.body || data.data || data;
-                                if (d) {
-                                    if (typeof d.here === 'number') {
-                                        window.__lgMineTotalHere = d.here;
-                                    } else if (d.st && typeof d.st.here === 'number') {
-                                        window.__lgMineTotalHere = d.st.here;
-                                    }
-                                    const topList = d.st?.top || d.top;
-                                    if (Array.isArray(topList)) {
-                                        const now = Date.now();
-                                        topList.forEach(item => {
-                                            const nick = (typeof item === 'string')
-                                                ? item.trim()
-                                                : (item && (item[0] || item.l || item.login || item.nick || item.name || item.n));
-                                            if (nick && typeof nick === 'string' && nick.trim().length >= 2 && nick.trim().toLowerCase() !== 'me') {
-                                                window.__lgOnlinePlayers.set(nick.trim().toLowerCase(), { loc: 'mine', ts: now });
-                                            }
-                                        });
-                                    }
-                                }
-                            }
-
-                            Utils.updateOnlinePlayers(data, loc);
-                            Utils.processIncomingDMs(data);
-
-                            // Чат живого потока разбираем только при включённом перехвате.
-                            if (isLive && !self.disabled) {
-                                if (data.c) self.currentMineId = data.c;
-                                const chats = Utils.extractChatDeep(data);
-                                chats.forEach(m => {
-                                    const parsed = Utils.extractChatFields(m);
-                                    if (parsed.text) {
-                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, loc, parsed.k, parsed.to, parsed.rank);
-                                    }
-                                });
-                            }
-                        }
-                    }).catch(() => {});
-                }
-
-                try {
-                    // 1. Отслеживание ID текущей шахты для навигации
-                    if (url.includes('/api/mine/')) {
-                        const mMatch = url.match(/[?&]c=([^&]+)/);
-                        if (mMatch) {
-                            try { self.currentMineId = decodeURIComponent(mMatch[1]); } catch(e){}
-                        }
-                    }
-
-                    // 2. Профиль персонажа (/api/me)
-                    if (url.includes('/api/me')) {
-                        res.clone().json().then(data => {
-                            const hero = data?.hero || data?.body?.hero || data?.me;
-                            if (hero) {
-                                window.__lgHero = hero;
-                                if (hero.name) self.myNick = hero.name;
-                                if (hero.class) self.myRole = hero.class;
-                                const hud = document.getElementById(DOM_IDS.playerHud) || document.getElementById('legion-player-hud');
-                                if (hud && hud.style.display !== 'none' && typeof UI !== 'undefined' && UI.renderPlayerHudContent) {
-                                    UI.renderPlayerHudContent(hud, hero);
-                                }
-                            }
-                        }).catch(() => {});
-                    }
-
-                    // Парсим чат всегда, если перехват не отключён.
-                    // Закрытый виджет не помеха: сообщения нужны для счётчика непрочитанных.
-                    if (self.disabled) {
-                        return res;
-                    }
-
-                    // 4. Состояние шахты и вход в шахту (сообщения чата шахты в data.chat.chat или data.m)
-                    if (url.includes('/api/mine/state') || url.includes('/api/mine/enter') || url.includes('/api/mine/chat')) {
-                        res.clone().json().then(data => {
-                            if (!data || !data.ok) return;
-                            if (data.c) self.currentMineId = data.c;
-                            const chats = Utils.extractChatDeep(data);
-                            if (chats.length > 0) {
-                                chats.forEach(m => {
-                                    const parsed = Utils.extractChatFields(m);
-                                    if (parsed.text) {
-                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, 'mine', parsed.k, parsed.to, parsed.rank);
-                                    }
-                                });
-                            }
-                        }).catch(() => {});
-                    }
-
-                    // 5. Вход в город (история чата города)
-                    if (url.includes('/api/city/enter')) {
-                        res.clone().json().then(data => {
-                            if (data && data.ok && data.chat && Array.isArray(data.chat)) {
-                                setTimeout(() => {
-                                    data.chat.forEach(m => {
-                                        const parsed = Utils.extractChatFields(m);
-                                        if (parsed.text) {
-                                            self.handleIncoming(parsed.author, parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, parsed.channel || 'city', parsed.k, parsed.to, parsed.rank);
-                                        }
-                                    });
-                                }, 100);
-                            }
-                        }).catch(() => {});
-                    }
-                } catch(e) {}
-
-                return res;
-            };
-            try { wrappedFetch.__lgChatProxied = true; } catch (e) {}
-            try { pageWin.fetch = wrappedFetch; } catch (e) {}
-            if (pageWin !== window) { try { window.fetch = wrappedFetch; } catch (e) {} }
-        }
     };
+
+    // ===== src/modules/chat/chat.js =====
+    // ============================================================
+    // 7. МОДУЛЬ: ЧАТ (фасад)
+    // ============================================================
+    // Чат разложен на независимые слои (src/modules/chat/):
+    //   • chat-emotes.js — 7TV-смайлики и их кэш;
+    //   • chat-history.js — localStorage-кэш и /api/city/enter;
+    //   • chat-net.js — перехватчики сети и разбор входящих;
+    //   • chat-pip.js — DOM/PiP-окно, рендер и отправка.
+    // Слои — обычные объекты, методы которых рассчитывают на this === Chat,
+    // поэтому склеиваются через Object.assign ниже. Внешний контракт
+    // (Chat.popoutChat / renderMessages / interceptFetch для ui.js,
+    // players.js и main.js) при этом не меняется.
+
+    const Chat = {
+        badge: null,
+        unreadCount: 0,
+        disabled: localStorage.getItem('LEGION_CHAT_DISABLED') === 'true',
+        _inited: false,
+        messages: [], // Массив всех сообщений
+        activeMainTab: 'city',
+        activeSubTab: 'general',
+        myNick: window.LG_CH?.name || 'eciell',
+        myRole: 'legionary',
+        dmTarget: null, // Ник собеседника, с которым сейчас открыт диалог во вкладке ЛС
+        currentMineId: 'home',
+        SevenTV: ChatEmotes.SevenTV, // тот же объект, что и const SevenTV
+
+        get activeTab() {
+            if (this.activeMainTab === 'mine' || this.activeMainTab === 'dm') return this.activeMainTab;
+            return this.activeSubTab;
+        },
+        set activeTab(val) {
+            if (val === 'mine' || val === 'dm') {
+                this.activeMainTab = val;
+            } else {
+                this.activeMainTab = 'city';
+                this.activeSubTab = val;
+            }
+        },
+
+        isOpen() {
+            // Чат существует только внутри PiP-окна.
+            // Опираемся на ссылки окно/документ, а не на isConnected: проверка
+            // связности внутри PiP-документа нестабильна, из-за чего сообщения
+            // при открытом чате продолжали копить непрочитанные.
+            if (!this._popoutWin || this._popoutWin.closed) return false;
+            return !!(this._pipDoc || this.widget);
+        },
+
+        getMineId() {
+            return this.currentMineId 
+                || (location.search.match(/[?&]c=([^&]+)/)?.[1]) 
+                || 'home';
+        },
+
+        isInMine() {
+            return !!document.querySelector('.mn-world') ||
+                   !!document.querySelector('.mn-screen') ||
+                   !!document.querySelector('.mn-heroes') ||
+                   (location.pathname.includes('/mine') && location.search.includes('sid='));
+        },
+
+        setDisabled(val) {
+            this.disabled = !!val;
+            try {
+                localStorage.setItem('LEGION_CHAT_DISABLED', String(this.disabled));
+            } catch (e) {}
+            if (this.disabled) {
+                this.stopBackgroundLiveListener();
+                if (this.isOpen()) {
+                    this.close();
+                }
+                UI.showToast('🚫 Перехват чата отключен');
+            } else {
+                UI.showToast('💬 Перехват чата включен');
+                this.startBackgroundLiveListener();
+            }
+        },
+
+        // v11.5.3: встроенный виджет чата удалён — его заменил сторонний плагин
+        // Legion7TV (ProCto_Fliy). Здесь остаётся только то, что нужно нашему
+        // вынесенному чату и перехватчикам:
+        //   • кнопка «Вынести чат» и настройки 7TV;
+        //   • эмоуты 7TV + синхронизация ника;
+        //   • детектор внешнего чата.
+        // interceptFetch / interceptEventSource / interceptWebSocket вызываются
+        // из main.js сразу после init() — они идемпотентны и остаются включёнными.
+        init() {
+            if (this._inited) return;
+            this._inited = true;
+
+            this.badge = document.getElementById(DOM_IDS.chatBadge) || document.getElementById('chat-badge');
+
+            // btn-chat-pip — id из старой разметки FAB, оставлен для совместимости.
+            (document.getElementById(DOM_IDS.btnPopout)
+                || document.getElementById('btn-popout')
+                || document.getElementById('btn-chat-pip'))?.addEventListener('click', () => this.popoutChat());
+
+            // Настройки 7TV (канал и размер смайлов). В v11.5.3 кнопка FAB
+            // «🎭 Канал 7TV» переехала в модалку UI.openSettings(), поэтому
+            // эта привязка — только фолбэк для старой разметки.
+            document.getElementById('btn-7tv-settings')?.addEventListener('click', () => this.open7tvSettings());
+
+            // 7TV нужен PiP-чату: размер смайлов + набор эмоутов грузим один раз.
+            SevenTV.loadSize();
+            SevenTV.load();
+
+            this.syncMe();
+            this.detectExternalChat();
+        },
+
+        // Детектор стороннего чата (Legion7TV, плагин ProCto_Fliy).
+        // Статус рисуется строкой в FAB-меню; если плагина нет — даём ссылку.
+        detectExternalChat() {
+            setTimeout(() => {
+                const statusEl = document.getElementById(DOM_IDS.externalChatStatus)
+                    || document.getElementById('external-chat-status');
+                if (!statusEl) return;
+
+                // Проверяем, есть ли кнопка 7TV от плагина ProCto_Fliy
+                const has7TVBtn = !!document.querySelector('.t7-btn');
+                // Или проверяем флаг в unsafeWindow: после @grant объекты страницы
+                // живут только там, обычный window их не видит.
+                let has7TVWindow = false;
+                try {
+                    const pageWin = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
+                    has7TVWindow = !!(pageWin && pageWin.LGChat && pageWin.LGChat.__t7);
+                } catch (e) {}
+
+                if (has7TVBtn || has7TVWindow) {
+                    statusEl.innerHTML = `<span style="color:#4cc95a;">✅ Чат Legion7TV активен</span>`;
+                } else {
+                    statusEl.innerHTML = `<a href="https://github.com/mykhailkot-pixel/Legion7TV/raw/refs/heads/main/7tv-multidonate.user.js" target="_blank" style="color:#caa55c; text-decoration:underline;">Установить Legion7TV (чат)</a>`;
+                }
+            }, 2000);
+        },
+
+        getRoleMeta(role, isSystem) {
+            if (isSystem) return { icon: '🏆', color: '#f0ad4e' }; // Для летописи/достижений
+            const map = {
+                'necromancer': { icon: '💀', color: '#b9a2ff' },
+                'paladin': { icon: '🔨', color: '#f3d36b' },
+                'priest': { icon: '✨', color: '#f0ad4e' },
+                'mage': { icon: '🔮', color: '#5bc0de' },
+                'rogue': { icon: '🗡️', color: '#d8bfd8' },
+                'archer': { icon: '🏹', color: '#5cb85c' },
+                'legionary': { icon: '🛡️', color: '#d9534f' },
+            };
+            return map[role] || { icon: '👤', color: '#ffcf6a' };
+        },
+
+        // Главная функция приема сообщений (§2.3 дедуп по id + дедуп своих исходящих)
+        handleIncoming(author, text, isMine = false, isHistory = false, id = null, seq = null, role = null, isSystem = false, aw = null, channel = null, k = null, to = null, rank = null) {
+            if (!text) return;
+
+            // Перехват и фильтрация ЛС (не добавлять в общий чат)
+            if (channel === 'dm' || k === 'dm') {
+                if (typeof Players !== 'undefined' && Players.handleIncomingDM) {
+                    Players.handleIncomingDM(author, text, to);
+                }
+                // Если этот диалог сейчас открыт во вкладке «✉️ ЛС» — считаем прочитанным.
+                // Перерисовку выполняет Players.refreshUnreadDMViews() -> Chat.renderMessages().
+                if (typeof Players !== 'undefined' && this.activeMainTab === 'dm' && this.dmTarget) {
+                    const myNick = (this.myNick || '').toLowerCase();
+                    const isSelf = (author === 'Я') || (!!myNick && String(author || '').toLowerCase() === myNick);
+                    const peer = isSelf ? (to || '') : (author || '');
+                    if (peer && String(peer).toLowerCase() === String(this.dmTarget).toLowerCase()) {
+                        Players.clearUnreadDM(peer);
+                    }
+                }
+                return;
+            }
+
+            // 1. Если сообщение с таким ID уже есть и оно НЕ в статусе pending — это повтор из поллинга, пропускаем
+            if (id && this.messages.slice(-100).some(m => m.id === id && !m._pending)) {
+                return;
+            }
+
+            // 2. Дедупликация и сопоставление своих исходящих сообщений (_pending)
+            const isSelf = author === this.myNick || (this.myNick && author && author.toLowerCase() === this.myNick.toLowerCase());
+            if (isSelf) {
+                let pendingMsg = null;
+                for (let i = this.messages.length - 1; i >= 0; i--) {
+                    const m = this.messages[i];
+                    const authorMatch = m.author === author || m.author === this.myNick;
+                    const textMatch = m.text === text;
+                    // Pending-сообщение наше собственное: канал эха может отличаться
+                    // (мы в шахте, а отправили в город), поэтому для _pending канал
+                    // не проверяем — он останется тем, куда мы реально отправили.
+                    const channelMatch = !channel || !m.channel || m.channel === channel || m._pending;
+                    if (authorMatch && textMatch && channelMatch && (m._pending || (id && m.id === id))) {
+                        pendingMsg = m;
+                        break;
+                    }
+                }
+                if (pendingMsg) {
+                    pendingMsg._pending = false;
+                    if (id && !pendingMsg.id) pendingMsg.id = id;
+                    if (seq && !pendingMsg.seq) pendingMsg.seq = seq;
+                    if (role && !pendingMsg.role) pendingMsg.role = role;
+                    if (rank && !pendingMsg.rank) pendingMsg.rank = rank;
+                    if (aw && !pendingMsg.aw) pendingMsg.aw = aw;
+                    // НЕ ПЕРЕЗАПИСЫВАЕМ КАНАЛ, если он уже задан (например, 'city')
+                    // Эхо может прийти как 'mine', если мы в шахте, но мы знаем, куда отправили.
+                    if (!pendingMsg.channel && channel) pendingMsg.channel = channel;
+                    // Своё сообщение тоже должно попасть в кэш: сюда мы приходим
+                    // на эхо сервера, а основная ветка ниже уже пропускается.
+                    if (!isHistory) this.cacheOwnMessage(pendingMsg);
+                    this.renderMessages();
+                    return;
+                }
+            }
+
+            // 3. Дедупликация сообщений без ID (по автору и тексту за последние 8 секунд)
+            if (!isHistory && !isMine && !id) {
+                if (this.messages.slice(-25).some(m => m.author === author && m.text === text && (m.channel === channel || !m.channel || !channel) && Date.now() - m.ts < 8000)) return;
+            }
+
+            const msgObj = { author, text, role, rank, isSystem, id, seq, aw, channel, k, to, ts: Date.now() };
+            this.messages.push(msgObj);
+
+            // Сохраняем в кэш только живые сообщения
+            if (!isHistory) this.saveToStorage(author, text, role, isSystem, channel, k, aw, rank, id);
+
+            // Обновляем UI
+            if (!isHistory) {
+                this.renderMessages();
+                // Скролл вниз выполняет renderMessages() и только если пользователь
+                // уже был внизу — иначе чтение истории не прерывается.
+                if (!this.isOpen() && !isMine && !isSelf) {
+                    this.unreadCount++;
+                    this.updateBadge();
+                }
+            }
+        },
+
+        updateBadge() {
+            const badges = document.querySelectorAll('#' + DOM_IDS.chatBadge + ', #' + DOM_IDS.fabChatBadge + ', #chat-badge, #fab-chat-badge');
+            badges.forEach(b => {
+                if (this.unreadCount > 0) {
+                    b.textContent = this.unreadCount > 99 ? '99+' : this.unreadCount;
+                    b.style.display = 'block';
+                } else {
+                    // Сбрасываем и текст: иначе при повторном показе остаётся старый «99+».
+                    b.textContent = '0';
+                    b.style.display = 'none';
+                }
+            });
+        },
+
+        toggle() {
+            if (this.disabled) {
+                UI.showToast('🚫 Перехват чата отключен в меню 🐱', true);
+                return;
+            }
+            // Обычного (встроенного) виджета больше нет: «открыть чат» = вынести в PiP.
+            if (this.isOpen()) {
+                try { this._popoutWin?.focus(); } catch (e) {}
+                return;
+            }
+            this.popoutChat();
+        },
+    };
+
+    // Подмешиваем слои. Объекты независимы и не пересекаются по ключам,
+    // порядок важен лишь для читаемости: сначала данные, потом сеть, потом UI.
+    Object.assign(Chat, ChatHistory);
+    Object.assign(Chat, ChatNet);
+    Object.assign(Chat, ChatPip);
 
     // Экспорт 7TV для отладки: window.__LEGION__.Chat.SevenTV
     Chat.SevenTV = SevenTV;

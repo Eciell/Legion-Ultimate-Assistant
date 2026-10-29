@@ -33,7 +33,23 @@ const HEADER_PERSONAL = 'header-personal.js';
 const HEADER_ULTIMATE = 'header-ultimate.js';
 
 const MAIN_FILE = 'main.js';
-const CHAT_FILE = 'modules/chat.js';
+
+/**
+ * Слои чата (v11.6.0: modules/chat.js разложен на 5 файлов).
+ *
+ * Порядок критичен: эмоуты -> история -> сеть -> PiP -> фасад.
+ * chat/chat.js объявляет Chat и подмешивает остальные слои через
+ * Object.assign(Chat, ChatHistory/ChatNet/ChatPip), поэтому обязан идти
+ * последним; ChatEmotes.SevenTV нужен фасаду уже на этапе создания объекта.
+ */
+const CHAT_MODULES = [
+    'modules/chat/chat-emotes.js',
+    'modules/chat/chat-history.js',
+    'modules/chat/chat-net.js',
+    'modules/chat/chat-pip.js',
+    'modules/chat/chat.js'
+];
+
 const MINER_FILE = 'modules/miner.js';
 // Личный модуль: подключается только в Personal и только если файл существует.
 const QUEST_FILE = 'modules/quest.js';
@@ -63,7 +79,10 @@ const SHARED_MODULES = [
     'modules/hero-planner.js',
     'modules/auction.js',
     'modules/players.js',
-    'modules/priest-assistant.js'
+    'modules/priest-assistant.js',
+    // Чат — отдельным блоком в конце (см. CHAT_MODULES): фасад chat.js
+    // обязан склеиться последним, чтобы main.js увидел готовый Chat.
+    ...CHAT_MODULES
 ];
 
 /**
@@ -77,16 +96,20 @@ const TARGETS = {
     ultimate: {
         output: 'LegionUltimate.user.js',
         header: HEADER_ULTIMATE,
-        modules: [...SHARED_MODULES, CHAT_FILE],
+        modules: [...SHARED_MODULES],
         optionalModules: [],
         // main.js обращается к Miner в boot()/shutdown() — на месте модуля заглушка.
         minerStub: true,
+        // Заглушка вставляется перед первым слоем чата (там раньше стоял chat.js).
+        minerStubBefore: CHAT_MODULES[0],
         title: 'Ultimate (публичная, без Майнера)'
     },
     personal: {
         output: 'LegionPersonal.user.js',
         header: HEADER_PERSONAL,
-        modules: [...SHARED_MODULES, MINER_FILE, CHAT_FILE],
+        // miner.js грузится после чата: модуль только объявляет объект Miner,
+        // а вызывает его main.js (идёт последним), поэтому порядок не важен.
+        modules: [...SHARED_MODULES, MINER_FILE],
         optionalModules: [QUEST_FILE],
         minerStub: false,
         title: 'Personal (личная, с Майнером)'
@@ -146,7 +169,8 @@ function assemble(target) {
     for (const relPath of target.modules) {
         // Ultimate собирается без miner.js — на его месте ставим заглушку,
         // иначе boot()/shutdown() из main.js упадут с ReferenceError.
-        if (target.minerStub && relPath === CHAT_FILE) {
+        // Якорь — первый слой чата (раньше здесь и стоял modules/chat.js).
+        if (target.minerStub && relPath === target.minerStubBefore) {
             chunks.push(banner(MINER_FILE, '(исключён из этой сборки, используется заглушка)'), MINER_STUB, '');
         }
         chunks.push(banner(relPath), readSource(relPath), '');
