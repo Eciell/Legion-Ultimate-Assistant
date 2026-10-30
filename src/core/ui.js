@@ -48,7 +48,7 @@
         },
         closeModals() {
             // Снимаем удержание вкладки «Город»: MutationObserver в
-            // openNativeBuilding больше не должен возвращать её на экран.
+            // PocketCity.openNativeBuilding больше не должен возвращать её на экран.
             window.__POCKET_CITY_OPEN__ = false;
             if (typeof Players !== 'undefined') Players.currentDMPeer = null;
             document.querySelectorAll('.' + DOM_IDS.customModal + ', .custom-modal').forEach(el => el.remove());
@@ -201,22 +201,8 @@
             const stealthOn = !!(G && G.__lgStealthActive);
             const chatDisabled = (typeof Chat !== 'undefined') ? !!Chat.disabled : false;
 
-            const modal = this.showModal(`
-                <h2>⚙️ Настройки аддона <button class="custom-close" id="custom-close-btn">✖</button></h2>
-                <div style="display:flex; flex-direction:column; gap:15px; padding:10px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px;">
-                        <span>🛡️ Стелс-режим</span>
-                        <span style="color:${stealthOn ? '#4cc95a' : '#ff5a7a'}; font-weight:bold;">
-                            ${stealthOn ? 'АКТИВЕН' : 'ОШИБКА'}
-                        </span>
-                    </div>
-                    <button id="modal-7tv-btn" style="width:100%; padding:10px; background:#2a2030; border:1px solid #caa55c; color:#ffcf6a; border-radius:6px; cursor:pointer; text-align:left;">🎭 Настройки канала 7TV</button>
-                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer;">
-                        <span>🚫 Отключить перехват чата</span>
-                        <input type="checkbox" id="modal-chk-chat" style="width:16px; height:16px; accent-color:#ff5a7a;" ${chatDisabled ? 'checked' : ''}>
-                    </label>
-                </div>
-            `, { compact: true });
+            // Разметка модалки — в core/ui-templates.js (UITemplates.settingsModal).
+            const modal = this.showModal(UITemplates.settingsModal(stealthOn, chatDisabled), { compact: true });
 
             if (!modal) return;
 
@@ -233,168 +219,9 @@
                 }
             });
         },
-        openPocketCity() {
-            this.showModal(`
-                <h2>🏰 Карманный Город <button class="custom-close" id="custom-close-btn">✖</button></h2>
-                <div style="font-size:13px; color:#aaa; margin-bottom:15px; text-align:center;">
-                    Прямой доступ к официальным зданиям игры из любой локации:
-                </div>
-                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:12px; margin-bottom:10px;">
-                    <button class="pocket-grid-btn" data-room="auction" style="padding:16px 10px; background:#1b2838; border:2px solid #335577; border-radius:10px; color:#8fd3ff; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
-                        <span style="font-size:32px;">🏛️</span>
-                        <span>Аукцион</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Рынок</small>
-                    </button>
-                    <button class="pocket-grid-btn" data-room="shop" style="padding:16px 10px; background:#1b3824; border:2px solid #2d663e; border-radius:10px; color:#78e08f; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
-                        <span style="font-size:32px;">🏪</span>
-                        <span>Лавка</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Магазин NPC</small>
-                    </button>
-                    <button class="pocket-grid-btn" data-room="anvil" style="padding:16px 10px; background:#381e3a; border:2px solid #663366; border-radius:10px; color:#f3a683; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
-                        <span style="font-size:32px;">🔨</span>
-                        <span>Когтекузня</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Заточка / Ремонт</small>
-                    </button>
-                    <button class="pocket-grid-btn" data-room="trainer" style="padding:16px 10px; background:#3a351e; border:2px solid #665b2d; border-radius:10px; color:#f7d794; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
-                        <span style="font-size:32px;">🎓</span>
-                        <span>Тренер</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Дерево навыков</small>
-                    </button>
-                    <button class="pocket-grid-btn" data-room="storage" style="padding:16px 10px; background:#292929; border:2px solid #555; border-radius:10px; color:#e0e0e0; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
-                        <span style="font-size:32px;">📦</span>
-                        <span>Склад</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Банк / Сундук</small>
-                    </button>
-                </div>
-            `);
-
-            document.querySelectorAll('.pocket-grid-btn').forEach(btn => {
-                btn.addEventListener('mouseenter', () => { btn.style.transform = 'translateY(-3px)'; btn.style.boxShadow = '0 6px 15px rgba(0,0,0,0.5)'; });
-                btn.addEventListener('mouseleave', () => { btn.style.transform = 'none'; btn.style.boxShadow = 'none'; });
-                btn.addEventListener('click', (e) => {
-                    const room = e.currentTarget.getAttribute('data-room');
-                    UI.closeModals();
-                    if (room && typeof UI.openNativeBuilding === 'function') {
-                        UI.openNativeBuilding(room);
-                    }
-                });
-            });
-        },
-        async openNativeBuilding(roomId) {
-            dbg(`Открытие нативного здания «${roomId}»...`);
-
-            // Игровые объекты (LGCity / LGMine / __lgQuestContext / cityFiles)
-            // живут в page-context: после @grant window — песочница, поэтому
-            // берём unsafeWindow (G), как это уже делается в chat.js.
-            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
-
-            // 1. Безопасно закрываем шахту, если она открыта
-            const mnExitBtn = document.querySelector('[data-mn-exit]');
-            if (mnExitBtn) {
-                try { mnExitBtn.click(); } catch(e) {}
-                // Ждём анимацию, чтобы игра успела снять классы и перерисовать вкладки
-                await new Promise(r => setTimeout(r, 150));
-            }
-            if (pageWin.LGMine && typeof pageWin.LGMine.close === 'function') {
-                try { pageWin.LGMine.close(); } catch(e) {}
-            }
-
-            // Убираем классы шахты, если они застряли
-            document.body.classList.remove('mn-on');
-            const mnEl = document.querySelector('.mn');
-            if (mnEl) {
-                mnEl.style.setProperty('opacity', '0', 'important');
-                mnEl.style.setProperty('pointer-events', 'none', 'important');
-                mnEl.style.setProperty('z-index', '-9999', 'important');
-            }
-
-            // 2. Обходим cityLocked (блокировку похода)
-            if (pageWin.__lgQuestContext && typeof pageWin.__lgQuestContext.openTown === 'function') {
-                try { pageWin.__lgQuestContext.openTown('fair'); } catch (e) {}
-            }
-
-            // 3. Гарантируем загрузку скриптов города
-            if (!pageWin.LGCity && typeof pageWin.cityFiles === 'function') {
-                try { await pageWin.cityFiles(); } catch (e) {}
-            }
-
-            // 4. Принудительно переключаем вкладку на Город
-            const cityTabBtn = document.querySelector('.tabs button[data-tab="city"]');
-            if (cityTabBtn) {
-                cityTabBtn.hidden = false;
-                cityTabBtn.removeAttribute('aria-disabled');
-                cityTabBtn.classList.remove('tab-lock');
-                try { cityTabBtn.click(); } catch (e) {}
-            }
-
-            document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.id === 'tab-city'));
-            document.querySelectorAll('.tabs button').forEach(b => {
-                const tab = b.dataset?.tab || b.getAttribute?.('data-tab');
-                if (tab === 'city') b.setAttribute('aria-current', 'page');
-                else b.removeAttribute('aria-current');
-            });
-
-            // 5. Защита от выкидывания на карту похода (cityVis).
-            // Игра перерисовывает шапку и может заменить узел вкладки, поэтому
-            // наблюдение переносим на актуальный #tab-city, когда он меняется.
-            const ensureCityObserver = () => {
-                const cityTab = document.getElementById('tab-city');
-                if (!cityTab) return;
-
-                if (!window.__pocketCityObserver) {
-                    window.__pocketCityObserver = new MutationObserver(() => {
-                        if (!window.__POCKET_CITY_OPEN__) return;
-                        const tab = document.getElementById('tab-city');
-                        if (tab && !tab.classList.contains('on')) {
-                            tab.classList.add('on');
-                            const questTab = document.getElementById('tab-quest');
-                            if (questTab) questTab.classList.remove('on');
-                        }
-                    });
-                }
-                if (window.__pocketCityObserverTarget !== cityTab) {
-                    try { window.__pocketCityObserver.disconnect(); } catch (e) {}
-                    window.__pocketCityObserver.observe(cityTab, { attributes: true, attributeFilter: ['class'] });
-                    window.__pocketCityObserverTarget = cityTab;
-                }
-            };
-            ensureCityObserver();
-            window.__POCKET_CITY_OPEN__ = true;
-
-            // 6. Будим город и вызываем панель
-            let attempts = 0;
-            let finished = false;
-            const interval = setInterval(() => {
-                if (finished) return;
-                attempts++;
-                ensureCityObserver();
-
-                if (pageWin.LGCity && typeof pageWin.LGCity.panel === 'function') {
-                    try {
-                        if (typeof pageWin.LGCity.wake === 'function') {
-                            pageWin.LGCity.wake(); // Будим, если S === null (город уснул)
-                        }
-                        // Ждём один кадр на сборку DOM
-                        requestAnimationFrame(() => {
-                            try {
-                                pageWin.LGCity.panel(roomId);
-                                finished = true;
-                                clearInterval(interval);
-                            } catch(e) { dbg('panel error:', e); }
-                        });
-                    } catch (err) {
-                        dbg('LGCity.panel attempt failed:', err);
-                    }
-                }
-
-                if (attempts > 30) {
-                    clearInterval(interval);
-                    window.__POCKET_CITY_OPEN__ = false;
-                    dbg('Город не загрузился вовремя.');
-                    UI.showToast('Город не загрузился вовремя', true);
-                }
-            }, 100);
-        },
+        // 🏰 Карманный город вынесен в modules/pocket-city.js (v11.6.0, этап 3):
+        //    UI.openPocketCity()     -> PocketCity.open()
+        //    UI.openNativeBuilding() -> PocketCity.openNativeBuilding()
         setupFab(wrap, btn, menu) {
             let dragging = false, startX = 0, startY = 0, offX = 0, offY = 0, hasMoved = false;
 
@@ -515,32 +342,9 @@
             const locText = inMine ? '⛏️ Шахта' : '🏙️ Город';
             const locColor = inMine ? '#4cc95a' : '#8fd3ff';
 
-            hud.innerHTML = `
-                <div class="player-hud-header" id="player-hud-drag-handle">
-                    <span style="font-weight:bold; color:#ffcf6a; font-size:12px; display:flex; align-items:center; gap:4px;">
-                        <span>👤</span> <span>${Utils.escapeHtml(name)}</span>
-                    </span>
-                    <button class="player-hud-close" id="player-hud-close-btn" title="Закрыть">✖</button>
-                </div>
-                <div class="player-hud-body">
-                    <div class="player-hud-row">
-                        <span class="player-hud-label">Класс:</span>
-                        <span class="player-hud-val" style="color:#f7d794;">${Utils.escapeHtml(className)} (ур. ${lvl})</span>
-                    </div>
-                    <div class="player-hud-row">
-                        <span class="player-hud-label">Здоровье:</span>
-                        <span class="player-hud-val" id="player-hud-hp" style="color:#ff5a7a;">❤️ ${hpNow} / ${hpMax}</span>
-                    </div>
-                    <div class="player-hud-row">
-                        <span class="player-hud-label">Монеты:</span>
-                        <span class="player-hud-val" id="player-hud-money" style="color:#ffcf6a;">🪙 ${Utils.formatMoney(moneyVal)}</span>
-                    </div>
-                    <div class="player-hud-row">
-                        <span class="player-hud-label">Локация:</span>
-                        <span class="player-hud-val" id="player-hud-loc" style="color:${locColor};">${locText}</span>
-                    </div>
-                </div>
-            `;
+            // Разметка HUD — в core/ui-templates.js (UITemplates.playerHud):
+            // шаблон сам экранирует ник/класс и форматирует монеты.
+            hud.innerHTML = UITemplates.playerHud(name, className, lvl, { now: hpNow, max: hpMax }, moneyVal, { text: locText, color: locColor });
 
             hud.querySelector('#player-hud-close-btn')?.addEventListener('click', () => {
                 hud.style.display = 'none';
@@ -619,15 +423,8 @@
             if (hero) {
                 this.renderPlayerHudContent(hud, hero);
             } else {
-                hud.innerHTML = `
-                    <div class="player-hud-header" id="player-hud-drag-handle">
-                        <span style="font-weight:bold; color:#ffcf6a; font-size:12px;">👤 Профиль</span>
-                        <button class="player-hud-close" id="player-hud-close-btn" title="Закрыть">✖</button>
-                    </div>
-                    <div class="player-hud-body" style="text-align:center; color:#aaa; padding:15px 10px;">
-                        Загрузка профиля...
-                    </div>
-                `;
+                // Заглушка до ответа /api/me — тоже из шаблонов.
+                hud.innerHTML = UITemplates.playerHudLoading();
                 hud.querySelector('#player-hud-close-btn')?.addEventListener('click', () => {
                     hud.style.display = 'none';
                     if (UI._hudTimer) {

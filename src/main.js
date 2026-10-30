@@ -10,8 +10,10 @@
     //   core/utils-chat.js   -> Utils.chatHash / extractChatFields / extractChatDeep / updateOnlinePlayers / processIncomingDMs
     //   core/styles.js -> STYLES
     //   core/hooks.js  -> перехватчики LGCity / LGAuction / LGQuest / LGMine
+    //   core/ui-templates.js -> UITemplates (HTML: FAB-меню, модалки, HUD)
     //   core/ui.js     -> UI
-    //   modules/*      -> BuildSim, HeroPlanner, Auction, Players, PriestAssistant, Miner, Chat
+    //   modules/*      -> BuildSim, HeroPlanner, Auction, Players, PriestAssistant,
+    //                     PocketCity, Miner, Chat
     // ============================================================
 
     // 5.3. Защита от повторного запуска (single-instance guard)
@@ -33,59 +35,9 @@
         const fabWrap = document.createElement('div');
         fabWrap.className = DOM_IDS.fabWrap;
         fabWrap.id = DOM_IDS.fabWrap;
-        fabWrap.innerHTML = `
-            <div class="${DOM_IDS.fabMenu}" id="${DOM_IDS.fabMenu}" style="max-height: calc(100vh - 100px); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #caa55c transparent;">
-                <!-- БЛОК: Инструменты (сворачиваемый) -->
-                <div class="fab-section" data-section="tools">
-                    <div class="fab-section-title" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#888; text-transform:uppercase; padding:4px 8px; user-select:none;">
-                        <span>🛠 Инструменты</span>
-                        <span class="fab-arrow" style="font-size:16px; color:#caa55c; font-weight:bold; line-height:1;">▼</span>
-                    </div>
-                    <div class="fab-section-body">
-                        <button class="fab-menu-item" id="${DOM_IDS.btnAutoMine}">⛏️ Умная Шахта (Выкл)</button>
-                        <button class="fab-menu-item" id="${DOM_IDS.btnBuildSim}">⚙️ Планировщик Героя</button>
-                        <button class="fab-menu-item" id="${DOM_IDS.btnAuctionScan}">🔍 Сканер Аукциона</button>
-                        <button class="fab-menu-item" id="${DOM_IDS.btnPocketCity}">🏰 Карманный Город</button>
-                        <button class="fab-menu-item" id="btn-priest-panel">✨ Панель Жреца</button>
-                    </div>
-                </div>
-
-                <!-- БЛОК: Социальное (сворачиваемый) -->
-                <div class="fab-section" data-section="social">
-                    <div class="fab-section-title" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#888; text-transform:uppercase; padding:4px 8px; user-select:none;">
-                        <span>👥 Социальное</span>
-                        <span class="fab-arrow" style="font-size:16px; color:#caa55c; font-weight:bold; line-height:1;">▼</span>
-                    </div>
-                    <div class="fab-section-body">
-                        <button class="fab-menu-item" id="${DOM_IDS.btnPlayers}">👥 Игроки (Разведка)</button>
-                        <button class="fab-menu-item" id="${DOM_IDS.btnFriends}">🤝 Друзья <span id="${DOM_IDS.friendsBadge}" style="display:none; background:#28a745; color:#fff; font-size:11px; padding:1px 6px; border-radius:10px; font-weight:bold; margin-left:auto;">0</span></button>
-                        <button class="fab-menu-item" id="${DOM_IDS.btnPopout}">📺 Вынести чат <span class="${DOM_IDS.chatBadge}" id="${DOM_IDS.chatBadge}">0</span></button>
-                    </div>
-                </div>
-
-                <!-- БЛОК: Прочее (сворачиваемый) -->
-                <div class="fab-section" data-section="settings">
-                    <div class="fab-section-title" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#888; text-transform:uppercase; padding:4px 8px; user-select:none;">
-                        <span>⚙️ Прочее</span>
-                        <span class="fab-arrow" style="font-size:16px; color:#caa55c; font-weight:bold; line-height:1;">▼</span>
-                    </div>
-                    <div class="fab-section-body">
-                        <button class="fab-menu-item" id="${DOM_IDS.btnProfile}">👤 Профиль</button>
-                        <button class="fab-menu-item" id="btn-fab-settings">⚙️ Настройки</button>
-                    </div>
-                </div>
-
-                <!-- ФУТЕР -->
-                <div id="${DOM_IDS.externalChatStatus}" style="font-size:11px; text-align:center; padding:5px; color:#888; margin-top:4px;">Проверка внешнего чата...</div>
-                <div style="text-align:center; font-size:10px; color:#888; margin-top:8px; padding-top:8px; border-top:1px solid #333; user-select:none;">
-                    Version: ${typeof GM_info !== 'undefined' && GM_info.script ? GM_info.script.version : '11.5.3'}
-                </div>
-            </div>
-            <div class="${DOM_IDS.fabBtn}" id="${DOM_IDS.fabBtn}" title="Меню Legion">
-                <span id="${DOM_IDS.fabIcon}">🐱</span>
-                <span class="${DOM_IDS.chatBadge}" id="${DOM_IDS.fabChatBadge}">0</span>
-            </div>
-        `;
+        // Вся разметка FAB-меню и круглой кнопки — в core/ui-templates.js
+        // (v11.6.0, этап 3): main.js только подставляет id и версию скрипта.
+        fabWrap.innerHTML = UITemplates.fabMenu(typeof GM_info !== 'undefined' && GM_info.script ? GM_info.script.version : '11.5.3', DOM_IDS);
         document.body.appendChild(fabWrap);
 
         // Восстановление позиции FAB из localStorage (§ Задача 2)
@@ -113,7 +65,8 @@
         const fabMenu = document.getElementById(DOM_IDS.fabMenu) || document.getElementById('legion-fab-menu');
         UI.setupFab(fabWrap, fabBtn, fabMenu);
 
-        (document.getElementById(DOM_IDS.btnPocketCity) || document.getElementById('btn-pocket-city'))?.addEventListener('click', () => UI.openPocketCity());
+        // 🏰 Карманный город — модуль (modules/pocket-city.js), не UI.
+        (document.getElementById(DOM_IDS.btnPocketCity) || document.getElementById('btn-pocket-city'))?.addEventListener('click', () => PocketCity.open());
         (document.getElementById(DOM_IDS.btnProfile) || document.getElementById('btn-profile'))?.addEventListener('click', () => UI.togglePlayerHud());
 
         // ⚙️ Настройки (Стелс, 7TV, перехват чата) вынесены в отдельную модалку:
@@ -147,12 +100,14 @@
         const legionApi = {
             Utils,
             UI,
+            UITemplates,
             Miner,
             BuildSim,
             HeroPlanner,
             Auction,
             Players,
             PriestAssistant,
+            PocketCity,
             Chat,
             DOM_IDS,
             RAND_ID,

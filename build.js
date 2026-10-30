@@ -70,6 +70,9 @@ const CORE_ORDER = [
     'core/utils-chat.js',
     'core/styles.js',
     'core/hooks.js',
+    // v11.6.0: HTML-шаблоны (FAB-меню, модалки, HUD) вынесены из ui.js и
+    // main.js. Идут строго перед ui.js: методы UI зовут UITemplates.
+    'core/ui-templates.js',
     'core/ui.js'
 ];
 
@@ -80,6 +83,9 @@ const SHARED_MODULES = [
     'modules/auction.js',
     'modules/players.js',
     'modules/priest-assistant.js',
+    // v11.6.0: логика «Карманного города» вынесена из ui.js в отдельный модуль.
+    // Модули грузятся после core/ui.js, поэтому UI/UITemplates уже объявлены.
+    'modules/pocket-city.js',
     // Чат — отдельным блоком в конце (см. CHAT_MODULES): фасад chat.js
     // обязан склеиться последним, чтобы main.js увидел готовый Chat.
     ...CHAT_MODULES
