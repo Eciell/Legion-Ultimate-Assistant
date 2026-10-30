@@ -93,16 +93,79 @@
                 };
             }
         };
+        // ------------------------------------------------------------
+        // LGQuest (поход)
+        //
+        // В реальном клиенте у LGQuest НЕТ метода open() (см.
+        // docs/ARCHITECTURE.md §2: init(QX), data(q), show(on), result(r),
+        // hero(), _view()), поэтому старый хук по val.open не срабатывал
+        // никогда и G.__lgQuestContext оставался пустым.
+        // Теперь контекст берём из:
+        //   1) init(QX) — штатная точка входа в экран похода;
+        //   2) _view() — игра зовёт его на собственные действия игрока;
+        //      используем как маркер «мы в походе» и как страховку, если
+        //      аддон загрузился уже после старта похода.
+        // ------------------------------------------------------------
+
+        // QX-мост обязан быть объектом с геймплейными методами: так мы не
+        // сохраним случайно DOM-узел или номер комнаты.
+        const isQuestCtx = (o) => !!o && typeof o === 'object' && !o.nodeType &&
+            (typeof o.data === 'function' || typeof o.act === 'function' ||
+             typeof o.api === 'function' || typeof o.hero === 'function');
+
+        // Фасад app.js (window.LG) отдаёт текущий QX через qx() — это
+        // единственный способ достать контекст, если init() уже прошёл
+        // до загрузки аддона. Любая ошибка фасада не должна ломать игру.
+        const questCtxFromFacade = () => {
+            try {
+                const qx = G.LG && typeof G.LG.qx === 'function' ? G.LG.qx() : null;
+                return isQuestCtx(qx) ? qx : null;
+            } catch (e) {
+                return null;
+            }
+        };
+
         const hookQuest = (val) => {
             rawLGQuest = val;
-            if (val && !val.__hooked && typeof val.open === 'function') {
-                val.__hooked = true;
-                const orig = val.open;
-                val.open = function (el, qx) {
-                    if (qx) G.__lgQuestContext = qx;
-                    return orig.apply(this, arguments);
+            if (!val || val.__hooked) return;
+
+            let patched = false;
+
+            // 1) init(QX) — сохраняем контекст похода.
+            if (typeof val.init === 'function') {
+                const origInit = val.init;
+                val.init = function (ctx) {
+                    // Если init позвали без QX — пробуем фасад.
+                    const qx = isQuestCtx(ctx) ? ctx : questCtxFromFacade();
+                    if (qx) {
+                        G.__lgQuestContext = qx;
+                        G.__lgQuestOn = true;
+                        dbg('LGQuest.init: контекст похода сохранён');
+                    }
+                    return origInit.apply(this, arguments);
                 };
+                patched = true;
             }
+
+            // 2) _view() — перехватываем вызов, чтобы точно знать, что
+            //    мы внутри похода (и добираем контекст, если его нет).
+            if (typeof val._view === 'function') {
+                const origView = val._view;
+                val._view = function () {
+                    if (!G.__lgQuestContext) {
+                        const qx = questCtxFromFacade();
+                        if (qx) G.__lgQuestContext = qx;
+                    }
+                    G.__lgQuestOn = true;
+                    return origView.apply(this, arguments);
+                };
+                patched = true;
+            }
+
+            // Метку ставим только если реально что-то подменили: если
+            // методы ещё не созданы, следующий сеттер LGQuest (или сторож)
+            // попробует повесить хук повторно.
+            if (patched) val.__hooked = true;
         };
 
         if (rawLGCity) hookCity(rawLGCity);

@@ -1303,16 +1303,79 @@
                 };
             }
         };
+        // ------------------------------------------------------------
+        // LGQuest (поход)
+        //
+        // В реальном клиенте у LGQuest НЕТ метода open() (см.
+        // docs/ARCHITECTURE.md §2: init(QX), data(q), show(on), result(r),
+        // hero(), _view()), поэтому старый хук по val.open не срабатывал
+        // никогда и G.__lgQuestContext оставался пустым.
+        // Теперь контекст берём из:
+        //   1) init(QX) — штатная точка входа в экран похода;
+        //   2) _view() — игра зовёт его на собственные действия игрока;
+        //      используем как маркер «мы в походе» и как страховку, если
+        //      аддон загрузился уже после старта похода.
+        // ------------------------------------------------------------
+
+        // QX-мост обязан быть объектом с геймплейными методами: так мы не
+        // сохраним случайно DOM-узел или номер комнаты.
+        const isQuestCtx = (o) => !!o && typeof o === 'object' && !o.nodeType &&
+            (typeof o.data === 'function' || typeof o.act === 'function' ||
+             typeof o.api === 'function' || typeof o.hero === 'function');
+
+        // Фасад app.js (window.LG) отдаёт текущий QX через qx() — это
+        // единственный способ достать контекст, если init() уже прошёл
+        // до загрузки аддона. Любая ошибка фасада не должна ломать игру.
+        const questCtxFromFacade = () => {
+            try {
+                const qx = G.LG && typeof G.LG.qx === 'function' ? G.LG.qx() : null;
+                return isQuestCtx(qx) ? qx : null;
+            } catch (e) {
+                return null;
+            }
+        };
+
         const hookQuest = (val) => {
             rawLGQuest = val;
-            if (val && !val.__hooked && typeof val.open === 'function') {
-                val.__hooked = true;
-                const orig = val.open;
-                val.open = function (el, qx) {
-                    if (qx) G.__lgQuestContext = qx;
-                    return orig.apply(this, arguments);
+            if (!val || val.__hooked) return;
+
+            let patched = false;
+
+            // 1) init(QX) — сохраняем контекст похода.
+            if (typeof val.init === 'function') {
+                const origInit = val.init;
+                val.init = function (ctx) {
+                    // Если init позвали без QX — пробуем фасад.
+                    const qx = isQuestCtx(ctx) ? ctx : questCtxFromFacade();
+                    if (qx) {
+                        G.__lgQuestContext = qx;
+                        G.__lgQuestOn = true;
+                        dbg('LGQuest.init: контекст похода сохранён');
+                    }
+                    return origInit.apply(this, arguments);
                 };
+                patched = true;
             }
+
+            // 2) _view() — перехватываем вызов, чтобы точно знать, что
+            //    мы внутри похода (и добираем контекст, если его нет).
+            if (typeof val._view === 'function') {
+                const origView = val._view;
+                val._view = function () {
+                    if (!G.__lgQuestContext) {
+                        const qx = questCtxFromFacade();
+                        if (qx) G.__lgQuestContext = qx;
+                    }
+                    G.__lgQuestOn = true;
+                    return origView.apply(this, arguments);
+                };
+                patched = true;
+            }
+
+            // Метку ставим только если реально что-то подменили: если
+            // методы ещё не созданы, следующий сеттер LGQuest (или сторож)
+            // попробует повесить хук повторно.
+            if (patched) val.__hooked = true;
         };
 
         if (rawLGCity) hookCity(rawLGCity);
@@ -4465,16 +4528,21 @@ const Players = {
     //   q.b.low  — массив [login, name, hp] по раненым участникам
     //   q.b.sk   — умения героя в бою [id, кулдаун, тип] ('heal' = хилка)
     //
-    // HUD показывает только отслеживаемых игроков (по умолчанию — друзей из
-    // Players) и даёт кнопку быстрого хила. Рендер дешёвый: тяжёлая часть
-    // (innerHTML) пересобирается только при изменении данных боя.
+    // HUD показывает только отслеживаемых игроков и даёт кнопку быстрого хила.
+    // Источник списка по умолчанию — НАТИВНЫЕ друзья игры (/api/friends),
+    // свой локальный список Players.getFriendsList() больше не используется.
+    // Рендер дешёвый: тяжёлая часть (innerHTML) пересобирается только при
+    // изменении данных боя.
     // ============================================================
     const PriestAssistant = {
         hudEl: null,
         watchedNicks: [],          // ники как ввёл пользователь (сравнение — без учёта регистра)
+        nativeFriends: new Set(),  // нативные друзья игры (/api/friends), логины в нижнем регистре
         isVisible: false,          // HUD открывается/закрывается вручную из FAB-меню
         _remindedThisCombat: false,
         _updateInterval: null,
+        _friendsInterval: null,    // периодическое обновление нативных друзей
+        _friendsLoading: false,    // защита от наложения запросов /api/friends
         _menuBtn: null,
         _ownsMenuBtn: false,       // true — кнопку создали сами (фолбэк), её же и удаляем
         _onQuestUpdate: null,
@@ -4485,6 +4553,13 @@ const Players = {
         VISIBLE_KEY: 'LEGION_PRIEST_HUD_VISIBLE',
 
         init() {
+            // Список друзей берём у игры: аддон больше не ведёт свой.
+            // Запрос асинхронный — HUD успевает отрисоваться и без него.
+            this.loadNativeFriends();
+            if (this._friendsInterval) clearInterval(this._friendsInterval);
+            // Друга могли добавить прямо в игре — раз в минуту обновляем.
+            this._friendsInterval = setInterval(() => this.loadNativeFriends(), 60000);
+
             this._loadVisibility();
             this._loadWatched();
             this._bindMenuButton();
@@ -4509,6 +4584,10 @@ const Players = {
                 clearInterval(this._updateInterval);
                 this._updateInterval = null;
             }
+            if (this._friendsInterval) {
+                clearInterval(this._friendsInterval);
+                this._friendsInterval = null;
+            }
             if (this._onQuestUpdate) {
                 document.removeEventListener('lg-quest-update', this._onQuestUpdate);
                 this._onQuestUpdate = null;
@@ -4526,6 +4605,44 @@ const Players = {
             }
             this._dragBound = false;
             this._remindedThisCombat = false;
+        },
+
+        // ------------------------------------------------------------
+        // Нативные друзья игры (GET /api/friends).
+        //
+        // Ответ современного клиента: { ok: true, friends: [{ login, ... }] },
+        // но старые сборки могли отдавать просто массив логинов — поэтому
+        // нормализуем оба варианта. При ошибке/пустом ответе прошлый кэш
+        // НЕ затираем: панель продолжает работать по последнему списку.
+        // ------------------------------------------------------------
+        async loadNativeFriends() {
+            if (this._friendsLoading) return;       // запрос уже в полёте
+            this._friendsLoading = true;
+            try {
+                const res = await Utils.fetchApi('/api/friends');
+                const data = res?.body || res;
+                // Ответ: { ok, friends: [...] } либо просто массив друзей.
+                const list = Array.isArray(data) ? data
+                           : Array.isArray(data?.friends) ? data.friends
+                           : Array.isArray(res?.friends) ? res.friends
+                           : null;
+                if (!list) return;
+
+                const set = new Set();
+                list.forEach(f => {
+                    const raw = (f && typeof f === 'object')
+                        ? (f.login || f.nick || f.name || '')
+                        : f;
+                    const key = String(raw || '').trim().toLowerCase();
+                    if (key) set.add(key);
+                });
+                this.nativeFriends = set;
+                dbg(`[PRIEST] Загружено нативных друзей: ${set.size}`);
+            } catch (e) {
+                dbg('[PRIEST] Ошибка загрузки нативных друзей:', e);
+            } finally {
+                this._friendsLoading = false;
+            }
         },
 
         _loadVisibility() {
@@ -4623,17 +4740,14 @@ const Players = {
             return out;
         },
 
-        // Кого отслеживаем. Пустой список = все друзья (как написано в настройках).
+        // Кого отслеживаем. Пустой свой список = все нативные друзья игры
+        // (как и написано в настройках панели).
         _getWatchSet() {
             if (this.watchedNicks.length) {
                 return new Set(this.watchedNicks.map(n => n.toLowerCase()));
             }
-            if (typeof Players !== 'undefined' && typeof Players.getFriendsList === 'function') {
-                try {
-                    return new Set(Players.getFriendsList().map(n => String(n).toLowerCase()));
-                } catch (e) {}
-            }
-            return new Set();
+            // nativeFriends уже приведены к нижнему регистру в loadNativeFriends().
+            return new Set(this.nativeFriends);
         },
 
         _getMyNick() {
@@ -4829,9 +4943,18 @@ const Players = {
         },
 
         _outsideQuestHtml() {
-            const listHtml = this.watchedNicks.length
-                ? this.watchedNicks.map(n => `<div class="priest-hud-watch-item">• ${Utils.escapeHtml(n)}</div>`).join('')
-                : '<div class="priest-hud-watch-item">• (Все друзья)</div>';
+            // Вне похода показываем, кого реально отслеживаем: свой список
+            // либо нативных друзей игры (их может быть много — выводим счётчик).
+            let listHtml;
+            if (this.watchedNicks.length) {
+                listHtml = this.watchedNicks
+                    .map(n => `<div class="priest-hud-watch-item">• ${Utils.escapeHtml(n)}</div>`)
+                    .join('');
+            } else if (this.nativeFriends.size) {
+                listHtml = `<div class="priest-hud-watch-item">• Друзей в игре: ${this.nativeFriends.size}</div>`;
+            } else {
+                listHtml = '<div class="priest-hud-watch-item">• (Все друзья)</div>';
+            }
 
             return this._hudHeader('✨ Жрец: Ожидание похода') +
                 `<div class="priest-hud-watchlist">${listHtml}</div>`;
