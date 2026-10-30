@@ -1407,6 +1407,9 @@
                     <div class="fab-section-body">
                         <button class="fab-menu-item" id="${d.btnProfile}">👤 Профиль</button>
                         <button class="fab-menu-item" id="btn-fab-settings">⚙️ Настройки</button>
+                        <!-- 🧹 Чистка журнала событий (li.jr-e): opt-in переключатель,
+                             обработчик — в main.js (modules/performance.js). -->
+                        <button class="fab-menu-item" id="btn-perf-cleanup">🧹 Чистка журнала</button>
                     </div>
                 </div>
 
@@ -5087,6 +5090,91 @@ const Players = {
         }
     };
 
+    // ===== src/modules/performance.js =====
+    // ============================================================
+    // 6.6. МОДУЛЬ: PERFORMANCE (modules/performance.js)
+    //
+    // Оптимизация памяти. Журнал событий игры (<li class="jr-e">) растёт и
+    // никогда не чистится: в долгой сессии DOM доходит до 200к+ узлов, из-за
+    // чего страница начинает заметно лагать. Модуль по таймеру удаляет старые
+    // записи и оставляет только последние KEEP_LAST.
+    //
+    // ВАЖНО: трогаем ТОЛЬКО li.jr-e. FPS, глобальные анимации, интерфейс игры
+    // и любые другие узлы не затрагиваются — никакого «общего» сборщика мусора.
+    //
+    // Выключено по умолчанию (opt-in): настройка хранится в localStorage и
+    // переживает перезагрузку. Подключается после core/ui.js (SHARED_MODULES
+    // в build.js): UI.showToast зовётся по клику, на этапе загрузки зависимостей
+    // нет — как у остальных модулей.
+    // ============================================================
+    const Performance = {
+        // Сколько последних записей журнала оставляем в DOM.
+        KEEP_LAST: 50,
+        // Период проверки, мс. Проверка дешёвая (один querySelectorAll без
+        // записи в DOM, пока узлов <= KEEP_LAST), поэтому чистим раз в секунду:
+        // так журнал не успевает разрастись даже при плотном потоке событий.
+        CHECK_INTERVAL: 1000,
+        // Ключ настройки в localStorage ('true' / 'false').
+        STORAGE_KEY: 'LG_PERF_CLEANUP',
+
+        enabled: false,
+        _interval: null,
+
+        init() {
+            this.enabled = localStorage.getItem(this.STORAGE_KEY) === 'true';
+            // silent = true: при загрузке страницы тост не нужен, иначе он
+            // всплывал бы каждый раз при входе в игру без действий игрока.
+            if (this.enabled) this.enable(true);
+        },
+
+        toggle() {
+            this.enabled = !this.enabled;
+            localStorage.setItem(this.STORAGE_KEY, this.enabled);
+            if (this.enabled) this.enable();
+            else this.disable();
+            return this.enabled;
+        },
+
+        enable(silent = false) {
+            // Защита от двойного интервала (например, повторный toggle/init).
+            if (this._interval) return;
+            this._interval = setInterval(() => this.cleanup(), this.CHECK_INTERVAL);
+            if (!silent) UI.showToast('🧹 Чистка журнала ВКЛ (Оставляем 50 последних)');
+        },
+
+        disable() {
+            if (this._interval) {
+                clearInterval(this._interval);
+                this._interval = null;
+            }
+            UI.showToast('🧹 Чистка журнала ВЫКЛ');
+        },
+
+        /**
+         * Удаляет из журнала все записи, кроме последних KEEP_LAST.
+         *
+         * querySelectorAll отдаёт статичный NodeList в порядке документа,
+         * поэтому индексы [0 .. length - KEEP_LAST) — самые старые узлы.
+         * NodeList статичный, так что remove() по ходу цикла индексы не сдвигает.
+         *
+         * @returns {number} сколько узлов удалено за этот проход
+         */
+        cleanup() {
+            try {
+                const logs = document.querySelectorAll('li.jr-e');
+                const excess = logs.length - this.KEEP_LAST;
+                if (excess <= 0) return 0;
+
+                for (let i = 0; i < excess; i++) logs[i].remove();
+                dbg(`[PERF] Журнал очищен: удалено ${excess}, осталось ${this.KEEP_LAST}`);
+                return excess;
+            } catch (e) {
+                dbg('[PERF] Ошибка очистки:', e);
+                return 0;
+            }
+        }
+    };
+
     // ===== src/modules/miner.js (исключён из этой сборки, используется заглушка) =====
     const Miner = {
         abortController: null,
@@ -7535,7 +7623,7 @@ const Players = {
     //   core/ui-templates.js -> UITemplates (HTML: FAB-меню, модалки, HUD)
     //   core/ui.js     -> UI
     //   modules/*      -> BuildSim, HeroPlanner, Auction, Players, PriestAssistant,
-    //                     PocketCity, Miner, Chat
+    //                     PocketCity, Performance, Chat
     // ============================================================
 
     // 5.3. Защита от повторного запуска (single-instance guard)
@@ -7597,6 +7685,13 @@ const Players = {
         // здесь давал двойной вызов popoutChat() и мигающее окно.
         document.getElementById('btn-fab-settings')?.addEventListener('click', () => UI.openSettings());
 
+        // 🧹 Чистка журнала событий (modules/performance.js): opt-in, состояние
+        // в localStorage (LG_PERF_CLEANUP). Удаляет только старые li.jr-e,
+        // FPS и глобальные анимации игры не трогает.
+        document.getElementById('btn-perf-cleanup')?.addEventListener('click', () => {
+            Performance.toggle();
+        });
+
         // Чекбокс «Отключить перехват чата» переехал в UI.openSettings()
         // (модалка), поэтому старая привязка к DOM_IDS.chkChatDisable удалена.
 
@@ -7607,6 +7702,7 @@ const Players = {
         Auction.init();
         Players.init();
         Chat.init();
+        Performance.init();     // 🧹 Чистка журнала событий (только если включена в меню)
 
         Chat.interceptEventSource();
         Chat.interceptWebSocket();
@@ -7630,6 +7726,7 @@ const Players = {
             Players,
             PriestAssistant,
             PocketCity,
+            Performance,
             Chat,
             DOM_IDS,
             RAND_ID,
@@ -7648,6 +7745,13 @@ const Players = {
                 if (UI._hudTimer) {
                     clearInterval(UI._hudTimer);
                     UI._hudTimer = null;
+                }
+                // Чистка журнала: гасим таймер напрямую, без Performance.disable() —
+                // тот зовёт UI.showToast, а при shutdown тост не нужен
+                // (так же поступаем с Players._badgeTimer выше).
+                if (Performance._interval) {
+                    clearInterval(Performance._interval);
+                    Performance._interval = null;
                 }
                 if (Chat._popoutWin) {
                     try { Chat._popoutWin.close(); } catch(e) {}

@@ -63,6 +63,9 @@
                     <div class="fab-section-body">
                         <button class="fab-menu-item" id="${d.btnProfile}">👤 Профиль</button>
                         <button class="fab-menu-item" id="btn-fab-settings">⚙️ Настройки</button>
+                        <!-- 🧹 Чистка журнала событий (li.jr-e): opt-in переключатель,
+                             обработчик — в main.js (modules/performance.js). -->
+                        <button class="fab-menu-item" id="btn-perf-cleanup">🧹 Чистка журнала</button>
                     </div>
                 </div>
 

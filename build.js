@@ -86,6 +86,9 @@ const SHARED_MODULES = [
     // v11.6.0: логика «Карманного города» вынесена из ui.js в отдельный модуль.
     // Модули грузятся после core/ui.js, поэтому UI/UITemplates уже объявлены.
     'modules/pocket-city.js',
+    // v11.5.3: чистка журнала событий (li.jr-e) — только DOM-память, FPS
+    // и анимации не трогает. Модуль объявляет Performance, init() зовёт main.js.
+    'modules/performance.js',
     // Чат — отдельным блоком в конце (см. CHAT_MODULES): фасад chat.js
     // обязан склеиться последним, чтобы main.js увидел готовый Chat.
     ...CHAT_MODULES

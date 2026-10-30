@@ -13,7 +13,7 @@
     //   core/ui-templates.js -> UITemplates (HTML: FAB-меню, модалки, HUD)
     //   core/ui.js     -> UI
     //   modules/*      -> BuildSim, HeroPlanner, Auction, Players, PriestAssistant,
-    //                     PocketCity, Miner, Chat
+    //                     PocketCity, Performance, Chat
     // ============================================================
 
     // 5.3. Защита от повторного запуска (single-instance guard)
@@ -75,6 +75,13 @@
         // здесь давал двойной вызов popoutChat() и мигающее окно.
         document.getElementById('btn-fab-settings')?.addEventListener('click', () => UI.openSettings());
 
+        // 🧹 Чистка журнала событий (modules/performance.js): opt-in, состояние
+        // в localStorage (LG_PERF_CLEANUP). Удаляет только старые li.jr-e,
+        // FPS и глобальные анимации игры не трогает.
+        document.getElementById('btn-perf-cleanup')?.addEventListener('click', () => {
+            Performance.toggle();
+        });
+
         // Чекбокс «Отключить перехват чата» переехал в UI.openSettings()
         // (модалка), поэтому старая привязка к DOM_IDS.chkChatDisable удалена.
 
@@ -85,6 +92,7 @@
         Auction.init();
         Players.init();
         Chat.init();
+        Performance.init();     // 🧹 Чистка журнала событий (только если включена в меню)
 
         Chat.interceptEventSource();
         Chat.interceptWebSocket();
@@ -108,6 +116,7 @@
             Players,
             PriestAssistant,
             PocketCity,
+            Performance,
             Chat,
             DOM_IDS,
             RAND_ID,
@@ -126,6 +135,13 @@
                 if (UI._hudTimer) {
                     clearInterval(UI._hudTimer);
                     UI._hudTimer = null;
+                }
+                // Чистка журнала: гасим таймер напрямую, без Performance.disable() —
+                // тот зовёт UI.showToast, а при shutdown тост не нужен
+                // (так же поступаем с Players._badgeTimer выше).
+                if (Performance._interval) {
+                    clearInterval(Performance._interval);
+                    Performance._interval = null;
                 }
                 if (Chat._popoutWin) {
                     try { Chat._popoutWin.close(); } catch(e) {}
