@@ -51,7 +51,8 @@
             // PocketCity.openNativeBuilding больше не должен возвращать её на экран.
             window.__POCKET_CITY_OPEN__ = false;
             if (typeof Players !== 'undefined') Players.currentDMPeer = null;
-            document.querySelectorAll('.' + DOM_IDS.customModal + ', .custom-modal').forEach(el => el.remove());
+            // Удаляем только наши модалки (по префиксному классу), не трогая чужие.
+            document.querySelectorAll('.' + DOM_IDS.customModal).forEach(el => el.remove());
             document.querySelectorAll('.sim-card').forEach(el => el.remove());
         },
         makeDraggable(element, handleSelector = 'h2', storageKey = 'LEGION_MODAL_POS') {
@@ -164,24 +165,29 @@
             modal.className = classNames;
             modal.innerHTML = html;
 
-            // Восстановление позиции из localStorage под ключом LEGION_MODAL_POS
-            try {
-                const pos = JSON.parse(localStorage.getItem('LEGION_MODAL_POS') || 'null');
-                if (pos && pos.left && pos.top) {
-                    const leftVal = parseInt(pos.left, 10);
-                    const topVal = parseInt(pos.top, 10);
-                    const maxLeft = Math.max(10, (window.innerWidth || 1000) - (options.compact ? 100 : 200));
-                    const maxTop = Math.max(10, (window.innerHeight || 800) - 60);
+            // Восстановление позиции из localStorage под ключом LEGION_MODAL_POS.
+            // Для компактных окон позицию не читаем: её всё равно перезапишет
+            // makeDraggable() (центрирование), а остаток от развёрнутой модалки
+            // мог оказаться за границами экрана.
+            if (!options.compact) {
+                try {
+                    const pos = JSON.parse(localStorage.getItem('LEGION_MODAL_POS') || 'null');
+                    if (pos && pos.left && pos.top) {
+                        const leftVal = parseInt(pos.left, 10);
+                        const topVal = parseInt(pos.top, 10);
+                        const maxLeft = Math.max(10, (window.innerWidth || 1000) - 200);
+                        const maxTop = Math.max(10, (window.innerHeight || 800) - 60);
 
-                    if (!isNaN(leftVal) && !isNaN(topVal) && leftVal >= 0 && leftVal <= maxLeft && topVal >= 0 && topVal <= maxTop) {
-                        modal.style.left = pos.left;
-                        modal.style.top = pos.top;
-                        modal.style.transform = 'none';
-                        modal.style.right = 'auto';
-                        modal.style.bottom = 'auto';
+                        if (!isNaN(leftVal) && !isNaN(topVal) && leftVal >= 0 && leftVal <= maxLeft && topVal >= 0 && topVal <= maxTop) {
+                            modal.style.left = pos.left;
+                            modal.style.top = pos.top;
+                            modal.style.transform = 'none';
+                            modal.style.right = 'auto';
+                            modal.style.bottom = 'auto';
+                        }
                     }
-                }
-            } catch (e) {}
+                } catch (e) {}
+            }
 
             document.body.appendChild(modal);
             const closeBtn = modal.querySelector('#custom-close-btn') || document.getElementById('custom-close-btn');
@@ -322,7 +328,9 @@
 
         renderPlayerHudContent(hud, hero) {
             if (!hud) return;
-            const name = hero?.name || hero?.n || window.LG_CH?.name || (window.ME?.user?.name) || 'Игрок';
+            // LG_CH/ME — объекты page-context, в песочнице доступны только через G
+            // (глобальный G объявлен в core/constants.js, здесь не дублируем).
+            const name = hero?.name || hero?.n || G.LG_CH?.name || (G.ME?.user?.name) || 'Игрок';
             const rawClass = hero?.class || hero?.c || hero?.sk?.c || 'recruit';
             const className = (typeof BuildSim !== 'undefined' && BuildSim.classNames?.[rawClass]) || rawClass;
             const lvl = hero?.lvl || hero?.level || hero?.l || 1;
@@ -419,7 +427,7 @@
 
             hud.style.display = 'flex';
 
-            let hero = window.ME?.hero || window.ME?.me || window.__lgHero;
+            let hero = G.ME?.hero || G.ME?.me || window.__lgHero;
             if (hero) {
                 this.renderPlayerHudContent(hud, hero);
             } else {
@@ -460,7 +468,7 @@
                     locEl.style.color = inMine ? '#4cc95a' : '#8fd3ff';
                 }
 
-                const currentHero = window.ME?.hero || window.ME?.me || window.__lgHero;
+                const currentHero = G.ME?.hero || G.ME?.me || window.__lgHero;
                 if (currentHero) {
                     const hpEl = hud.querySelector('#player-hud-hp');
                     if (hpEl) {

@@ -182,6 +182,61 @@
                 let spent = 0; Object.values(simTree).forEach(v => spent += v);
                 if (spent >= MAX_POINTS) return;
             }
+            if (delta < 0) {
+                // Полная симуляция снятия: строим дерево «как будто очко уже снято»
+                // и проверяем, что всё оставшееся валидно по ДВУМ правилам игры:
+                //   1) прямой prerequisite (node.pre) должен остаться изученным;
+                //   2) в ветке должно остаться не меньше очков, чем требует тир (node.req).
+                const clsData = (this.skillsCache && Array.isArray(this.skillsCache.classes))
+                    ? this.skillsCache.classes.find(c => c.id === clsId)
+                    : null;
+                const branches = (clsData && Array.isArray(clsData.branches)) ? clsData.branches : [];
+
+                if (branches.length) {
+                    const allNodes = branches.flatMap(b => (b && b.nodes) || []);
+
+                    // Копия дерева, а не мутация: откатывать simTree при отказе не нужно.
+                    const testTree = { ...simTree };
+                    testTree[nodeId] = Math.max(0, current + delta);
+                    if (testTree[nodeId] === 0) delete testTree[nodeId];
+
+                    let invalid = false;
+                    for (const [id, rank] of Object.entries(testTree)) {
+                        if (rank <= 0) continue;
+                        const node = allNodes.find(n => n.id === id);
+                        if (!node) continue;
+
+                        // 1. Прямая зависимость.
+                        if (node.pre && !(testTree[node.pre] > 0)) {
+                            invalid = true;
+                            break;
+                        }
+
+                        // 2. Требование по очкам в ветке. Считаем сумму по ветке
+                        //    именно в симулированном дереве: снятие могло опустить
+                        //    очки ветки ниже req у оставшихся узлов.
+                        if (node.req > 0) {
+                            const branch = branches.find(b => b && b.nodes && b.nodes.some(n => n.id === id));
+                            if (branch) {
+                                const bIds = new Set((branch.nodes || []).map(n => n.id));
+                                let bp = 0;
+                                Object.entries(testTree).forEach(([cid, cv]) => {
+                                    if (bIds.has(cid)) bp += cv;
+                                });
+                                if (bp < node.req) {
+                                    invalid = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (invalid) {
+                        UI.showToast('Сначала снимите зависимые навыки', true);
+                        return;
+                    }
+                }
+            }
             simTree[nodeId] = Math.max(0, current + delta);
             if (simTree[nodeId] === 0) delete simTree[nodeId];
             this.renderTree(clsId);

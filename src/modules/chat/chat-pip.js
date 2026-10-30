@@ -228,8 +228,10 @@
 
             const inp = this.widget.querySelector('#chat-input');
             if (inp) {
-                inp.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
+                // keydown вместо keypress: keypress не срабатывает для части
+                // раскладок/методов ввода и помечен как deprecated.
+                inp.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
                         this.send();
                     }
@@ -415,7 +417,9 @@
             this._popoutWin = null;
             this._pipDoc = null;
             this.widget = null;
-            this.stopBackgroundLiveListener();
+            // ВАЖНО: stopBackgroundLiveListener() здесь НЕ вызываем. Фоновый
+            // слушатель запущен специально, чтобы ловить непрочитанные ЛС/чат при
+            // закрытом PiP. Останавливает его только shutdown() в main.js.
         },
 
         async popoutChat() {
@@ -569,7 +573,8 @@
                     this._popoutWin = null;
                     this._pipDoc = null;
                     this.widget = null;
-                    this.stopBackgroundLiveListener();
+                    // Фоновый слушатель не останавливаем: он должен продолжать
+                    // считать непрочитанные сообщения после закрытия PiP.
                 };
 
                 win.addEventListener('pagehide', cleanupPip);
@@ -908,12 +913,20 @@
 
             // Открыт диалог во вкладке «✉️ ЛС» — отправляем ЛС прямо из виджета
             if (this.activeMainTab === 'dm' && this.dmTarget) {
+                // Сначала проверяем, не команда ли это /w: иначе в текст сообщения
+                // уйдёт «/w Ник привет» целиком, и собеседник получит команду как текст.
+                const dmCmd = rawText.match(/^\/(?:w|dm|whisper)\s+(?:"([^"]+)"|'([^']+)'|(\S+))(?:\s+(.*))?$/i);
+                const actualText = dmCmd ? (dmCmd[4] || '').trim() : rawText;
+                if (!actualText) {
+                    this.showError('Формат: /w Ник сообщение');
+                    return;
+                }
                 if (typeof Players === 'undefined' || typeof Players.sendDM !== 'function') {
                     this.showError('Отправка ЛС недоступна');
                     return;
                 }
                 input.value = '';
-                const ok = await Players.sendDM(this.dmTarget, rawText);
+                const ok = await Players.sendDM(this.dmTarget, actualText);
                 if (ok) {
                     this.renderMessages(); // Перерисовываем историю с новым сообщением
                 } else {
@@ -1003,8 +1016,9 @@
                 if (dmMatch) {
                     const payload = { text: cleanText, to: toUser, k: 'dm' }; // k: 'dm' обязателен!
 
-                    // 1. Пытаемся использовать нативный контекст города (как в прошлой версии)
-                    const nativeCtx = window.__lgCityContext || window.LGCity;
+                    // 1. Пытаемся использовать нативный контекст города (как в прошлой версии).
+                    // Контекст — объект страницы, в песочнице доступен только через G.
+                    const nativeCtx = G.__lgCityContext || G.LGCity;
                     if (nativeCtx && typeof nativeCtx.api === 'function') {
                         try {
                             const nativeData = await nativeCtx.api('/api/city/say', payload);

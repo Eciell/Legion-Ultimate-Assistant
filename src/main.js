@@ -71,9 +71,9 @@
 
         // ⚙️ Настройки (Стелс, 7TV, перехват чата) вынесены в отдельную модалку:
         // FAB-меню стало короче, а служебные переключатели больше не мешают кнопкам.
+        // Кнопку «Вынести чат» (PiP) привязывает Chat.init(): второй слушатель
+        // здесь давал двойной вызов popoutChat() и мигающее окно.
         document.getElementById('btn-fab-settings')?.addEventListener('click', () => UI.openSettings());
-
-        (document.getElementById(DOM_IDS.btnPopout) || document.getElementById('btn-popout') || document.getElementById('btn-chat-pip'))?.addEventListener('click', () => Chat.popoutChat());
 
         // Чекбокс «Отключить перехват чата» переехал в UI.openSettings()
         // (модалка), поэтому старая привязка к DOM_IDS.chkChatDisable удалена.

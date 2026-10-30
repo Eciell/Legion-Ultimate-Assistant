@@ -104,7 +104,7 @@
                             if (parsed.rank && !existing.rank) existing.rank = parsed.rank;
                             return;
                         }
-                        this.handleIncoming(parsed.author, parsed.text, false, true, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
+                        this.handleIncoming(parsed.author, parsed.text, true, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
                     });
                 }
             } catch (e) {
@@ -119,7 +119,8 @@
                 const res = await Utils.fetchApi('/api/me');
                 const me = res?.hero || res?.body?.hero;
                 if (me) {
-                    this.myNick = me.name || window.LG_CH?.name || 'eciell';
+                    // LG_CH/ME живут в page-context — читаем через G, без хардкода ника.
+                    this.myNick = me.name || G.LG_CH?.name || G.ME?.user?.name || null;
                     this.myRole = me.class || me.sk?.c || 'legionary';
                 }
             } catch (e) {}

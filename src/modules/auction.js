@@ -16,8 +16,27 @@
             if (this.cityStockLoading) return this.cityStockLoading;
 
             this.cityStockLoading = (async () => {
+                const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+                let timeoutId = null;
                 try {
-                    const res = await Utils.fetchApi('/api/city/stock');
+                    // Жёсткий таймаут. Одного AbortController мало: Utils.fetchApi
+                    // сначала пробует нативный ctx.api игры, которому signal не
+                    // передать, поэтому гоняем запрос с таймером через
+                    // Promise.race — Auction.open() не должен висеть навсегда
+                    // на «Считаем цены...», если /api/city/stock молчит.
+                    const timeout = new Promise((_, reject) => {
+                        timeoutId = setTimeout(() => {
+                            if (controller) {
+                                try { controller.abort(); } catch (err) {}
+                            }
+                            reject(new Error('timeout 8000ms'));
+                        }, 8000);
+                    });
+
+                    const res = await Promise.race([
+                        Utils.fetchApi('/api/city/stock', null, controller ? controller.signal : undefined),
+                        timeout
+                    ]);
                     const data = res?.body || res;
                     if (data && (data.ok !== false)) {
                         const m = new Map();
@@ -43,8 +62,9 @@
                         return m;
                     }
                 } catch (e) {
-                    dbg('[AUCTION] Ошибка загрузки /api/city/stock:', e);
+                    dbg('[AUCTION] Таймаут или ошибка /api/city/stock:', e);
                 } finally {
+                    if (timeoutId) clearTimeout(timeoutId);
                     this.cityStockLoading = null;
                 }
                 return this.cityStockMap;
@@ -111,6 +131,12 @@
             try {
                 if (!this.cityStockLoaded) {
                     await this.fetchCityStock();
+                    // fetchCityStock ограничен таймаутом (8 с): если цены магазина
+                    // не загрузились, продолжаем без них — оценка пойдёт по
+                    // data.vals / медиане рынка, но модалка не зависнет.
+                    if (!this.cityStockLoaded) {
+                        dbg('[AUCTION] Цены магазинов недоступны — считаем без них');
+                    }
                 }
                 const res = await Utils.fetchApi('/api/auction');
                 const lots = res.lots || res.body?.lots;

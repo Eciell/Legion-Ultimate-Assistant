@@ -2,7 +2,7 @@
     // 4.2. МОДУЛЬ: АССИСТЕНТ ЖРЕЦА (HUD для Похода)
     //
     // Данные боя берём из нативного контекста похода, который перехватывает
-    // hooks.js (window.__lgQuestContext):
+    // hooks.js (G.__lgQuestContext, в песочнице читается через G):
     //   q.b.st   — состояние боя ('hit' = бой идёт)
     //   q.b.low  — массив [login, name, hp] по раненым участникам
     //   q.b.sk   — умения героя в бою [id, кулдаун, тип] ('heal' = хилка)
@@ -188,10 +188,10 @@
 
             const candidates = [
                 playerNick,
-                window.ME?.user?.login,
-                window.ME?.user?.name,
-                window.ME?.hero?.n,
-                window.ME?.hero?.name,
+                G.ME?.user?.login,
+                G.ME?.user?.name,
+                G.ME?.hero?.n,
+                G.ME?.hero?.name,
                 typeof Chat !== 'undefined' ? Chat.myNick : ''
             ];
             for (const c of candidates) {
@@ -200,16 +200,19 @@
             return '';
         },
 
-        // Роль героя. В игре встречаются оба поля: role и class
-        // (см. Chat.myRole = hero.class, BuildSim.classNames.priest).
+        // Роль героя. В Legion класс лежит в hero.class; role — устаревшее/пустое
+        // поле, поэтому проверяем его только после class (см. Chat.myRole =
+        // hero.class, BuildSim.classNames.priest).
         _getMyRole() {
-            const hero = window.ME?.hero || window.ME?.me || window.__lgHero || null;
+            // ME/герой — объекты страницы: в песочнице доступны только через G.
+            const hero = G.ME?.hero || G.ME?.me || G.__lgHero || window.__lgHero || null;
             const candidates = [
-                hero && hero.role,
                 hero && hero.class,
+                hero && hero.role,
                 hero && hero.cl,
                 hero && hero.sk && hero.sk.c,
-                window.ME?.user?.role,
+                G.ME?.user?.class,
+                G.ME?.user?.role,
                 typeof Chat !== 'undefined' ? Chat.myRole : ''
             ];
             for (const c of candidates) {
@@ -221,7 +224,9 @@
         // ctx.data() — снимок состояния похода (тот же объект, что игра гоняет
         // в своём рендере). ctx.act() — отправка действия в бой.
         _readQuest() {
-            const ctx = window.__lgQuestContext;
+            // Контекст похода — объект страницы (hooks.js пишет G.__lgQuestContext);
+            // в песочнице window-копия всегда пустая, поэтому нужен G.
+            const ctx = G.__lgQuestContext || window.__lgQuestContext;
             if (!ctx || typeof ctx.data !== 'function') return null;
             try {
                 const q = ctx.data();
@@ -409,7 +414,7 @@
         heal(login, btn) {
             if (!login) return;
 
-            const ctx = window.__lgQuestContext;
+            const ctx = G.__lgQuestContext || window.__lgQuestContext;
             if (!ctx || typeof ctx.act !== 'function') {
                 UI.showToast('Поход: нет доступа к контексту боя', true);
                 return;

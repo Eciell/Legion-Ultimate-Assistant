@@ -19,7 +19,9 @@
         messages: [], // Массив всех сообщений
         activeMainTab: 'city',
         activeSubTab: 'general',
-        myNick: window.LG_CH?.name || 'eciell',
+        // Ник узнаём из page-context (LG_CH) либо позже — асинхронно из syncMe().
+        // Хардкод чужого ника опаснее пустого значения: до ответа /api/me лучше null.
+        myNick: (typeof unsafeWindow !== 'undefined' && unsafeWindow.LG_CH?.name) || window.LG_CH?.name || null,
         myRole: 'legionary',
         dmTarget: null, // Ник собеседника, с которым сейчас открыт диалог во вкладке ЛС
         currentMineId: 'home',
@@ -150,14 +152,32 @@
         },
 
         // Главная функция приема сообщений (§2.3 дедуп по id + дедуп своих исходящих)
-        handleIncoming(author, text, isMine = false, isHistory = false, id = null, seq = null, role = null, isSystem = false, aw = null, channel = null, k = null, to = null, rank = null) {
+        // isMine убран из сигнатуры: все вызовы передавали false, а свои сообщения
+        // определяются по нику (isSelf) ниже.
+        handleIncoming(author, text, isHistory = false, id = null, seq = null, role = null, isSystem = false, aw = null, channel = null, k = null, to = null, rank = null) {
             if (!text) return;
 
             // Перехват и фильтрация ЛС (не добавлять в общий чат)
             if (channel === 'dm' || k === 'dm') {
-                if (typeof Players !== 'undefined' && Players.handleIncomingDM) {
+                // processIncomingDMs() уже вызвал Players.handleIncomingDM для этого
+                // пакета (chat-net парсит входящие ЛС отдельно), поэтому историю
+                // повторно в Players не отдаём — иначе дублируются тосты/счётчики.
+                if (!isHistory && typeof Players !== 'undefined' && Players.handleIncomingDM) {
                     Players.handleIncomingDM(author, text, to);
                 }
+
+                // Пытаемся склеить с pending-сообщением из ЛС, чтобы оно не висело
+                // в памяти черновиком (эхо приходит через тот же поток).
+                if (this.myNick) {
+                    for (let i = this.messages.length - 1; i >= 0; i--) {
+                        const m = this.messages[i];
+                        if (m._pending && m.k === 'dm' && m.text === text) {
+                            m._pending = false;
+                            break;
+                        }
+                    }
+                }
+
                 // Если этот диалог сейчас открыт во вкладке «✉️ ЛС» — считаем прочитанным.
                 // Перерисовку выполняет Players.refreshUnreadDMViews() -> Chat.renderMessages().
                 if (typeof Players !== 'undefined' && this.activeMainTab === 'dm' && this.dmTarget) {
@@ -212,7 +232,7 @@
             }
 
             // 3. Дедупликация сообщений без ID (по автору и тексту за последние 8 секунд)
-            if (!isHistory && !isMine && !id) {
+            if (!isHistory && !id) {
                 if (this.messages.slice(-25).some(m => m.author === author && m.text === text && (m.channel === channel || !m.channel || !channel) && Date.now() - m.ts < 8000)) return;
             }
 
@@ -222,12 +242,18 @@
             // Сохраняем в кэш только живые сообщения
             if (!isHistory) this.saveToStorage(author, text, role, isSystem, channel, k, aw, rank, id);
 
+            // Ограничиваем массив, чтобы не копить память в долгих сессиях.
+            // Срез делаем только при переполнении — это редкая операция.
+            if (this.messages.length > 500) {
+                this.messages = this.messages.slice(-500);
+            }
+
             // Обновляем UI
             if (!isHistory) {
                 this.renderMessages();
                 // Скролл вниз выполняет renderMessages() и только если пользователь
                 // уже был внизу — иначе чтение истории не прерывается.
-                if (!this.isOpen() && !isMine && !isSelf) {
+                if (!this.isOpen() && !isSelf) {
                     this.unreadCount++;
                     this.updateBadge();
                 }

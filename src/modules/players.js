@@ -170,7 +170,9 @@ const Players = {
         },
 
         getMyNick() {
-            return (window.ME && (window.ME.user?.name || window.ME.hero?.n || window.ME.hero?.name)) ||
+            // ME живёт в page-context: в песочнице Tampermonkey (@grant) обычный
+            // window его не видит, поэтому читаем через G (= unsafeWindow).
+            return (G.ME && (G.ME.user?.name || G.ME.hero?.n || G.ME.hero?.name)) ||
                    (typeof Chat !== 'undefined' && Chat.myNick) ||
                    '';
         },
@@ -212,13 +214,13 @@ const Players = {
             // 3. Фолбэк на методы игры, если Map пуста
             if (set.size === 0) {
                 try {
-                    const dbgVal = window.LGCity?.debug?.();
+                    const dbgVal = G.LGCity?.debug?.();
                     if (dbgVal && Array.isArray(dbgVal.others)) {
                         dbgVal.others.forEach(l => { if (l) set.add(String(l).trim().toLowerCase()); });
                     }
                 } catch (e) {}
                 try {
-                    const peek = window.LGCity?.peek?.();
+                    const peek = G.LGCity?.peek?.();
                     if (peek && Array.isArray(peek.w)) {
                         peek.w.forEach(item => { if (item && item[0]) set.add(String(item[0]).trim().toLowerCase()); });
                     }
@@ -248,7 +250,9 @@ const Players = {
 
             // 2. Из st.dg (свежие данные с сервера) — обновляем Map как 'api'
             try {
-                const st = window.__lgMineState;
+                // Глубокое состояние шахты кладёт miner.js в page-context (G.__lgMineState),
+                // window.__lgMineState — лишь песочничная копия; читаем page-версию первой.
+                const st = G.__lgMineState || window.__lgMineState;
                 if (st && st.dg && (!st.at || now - st.at < 15000)) { // если снимок свежий (менее 15 сек)
                     Object.values(st.dg).flat().forEach(l => {
                         if (l) {
@@ -280,7 +284,7 @@ const Players = {
             // 4. Фолбэк на st.dl
             if (set.size === 0) {
                 try {
-                    const st = window.__lgMineState;
+                    const st = G.__lgMineState || window.__lgMineState;
                     if (st && Array.isArray(st.dl)) {
                         st.dl.forEach(item => {
                             const n = item && item[3];
@@ -317,7 +321,7 @@ const Players = {
             const now = Date.now();
 
             // /api/mine/state — не чаще раза в 10 секунд
-            if (window.location.pathname.includes('/mine') || document.querySelector('.mn-heroes') || window.__lgMineState) {
+            if (window.location.pathname.includes('/mine') || document.querySelector('.mn-heroes') || G.__lgMineState || window.__lgMineState) {
                 if (now - this._lastMineStateScan > 10000) {
                     this._lastMineStateScan = now;
                     try {
@@ -390,8 +394,8 @@ const Players = {
         openTradeWith(nick) {
             if (!nick) return;
             try {
-                if (window.LGTrade && typeof window.LGTrade.invite === 'function') {
-                    window.LGTrade.invite(nick);
+                if (G.LGTrade && typeof G.LGTrade.invite === 'function') {
+                    G.LGTrade.invite(nick);
                     return;
                 }
             } catch (e) {}
@@ -455,12 +459,15 @@ const Players = {
             try {
                 // ВАЖНО: чистый fetch, а не Utils.fetchApi: тот возьмёт контекст ШАХТЫ
                 // (__lgMineContext), прогрев уйдёт не туда, и отправка в город даст 409.
-                await fetch('/api/city/enter', {
+                const warmRes = await fetch('/api/city/enter', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'same-origin',
                     body: JSON.stringify({})
                 });
+                // Не роняем отправку из-за прогрева, но фиксируем проблему в логе:
+                // 401/403 здесь означают, что сессия города не поднялась.
+                if (!warmRes || !warmRes.ok) dbg('Session warmup failed:', warmRes && warmRes.status);
             } catch (e) {
                 dbg('Session warmup failed', e);
             }
@@ -472,7 +479,7 @@ const Players = {
                 let nativeOk = null;
 
                 // 1. Пытаемся использовать нативный контекст города (как в прошлой версии)
-                const nativeCtx = window.__lgCityContext || window.LGCity;
+                const nativeCtx = G.__lgCityContext || G.LGCity;
                 if (nativeCtx && typeof nativeCtx.api === 'function') {
                     try {
                         const nativeData = await nativeCtx.api('/api/city/say', payload);
@@ -651,7 +658,7 @@ const Players = {
             const mineSetInit = this.getMinePlayers();
             const totalMine = (typeof window.__lgMineTotalHere === 'number' && window.__lgMineTotalHere > 0)
                 ? window.__lgMineTotalHere
-                : (window.__lgMineState?.here || window.__lgMineState?.st?.here || 0);
+                : ((G.__lgMineState || window.__lgMineState)?.here || (G.__lgMineState || window.__lgMineState)?.st?.here || 0);
             const countText = totalMine > 0
                 ? `В шахте: ${totalMine} (известно ников: ${mineSetInit.size})`
                 : `Игроков: ${this.playersMap.size} (Шахта: ${mineSetInit.size}, Город: ${citySetInit.size})`;
@@ -684,7 +691,7 @@ const Players = {
                 if (countEl) {
                     const totalMineNow = (typeof window.__lgMineTotalHere === 'number' && window.__lgMineTotalHere > 0)
                         ? window.__lgMineTotalHere
-                        : (window.__lgMineState?.here || window.__lgMineState?.st?.here || 0);
+                        : ((G.__lgMineState || window.__lgMineState)?.here || (G.__lgMineState || window.__lgMineState)?.st?.here || 0);
                     if (totalMineNow > 0) {
                         countEl.textContent = `В шахте: ${totalMineNow} (известно ников: ${mineSet.size})`;
                     } else {
@@ -896,7 +903,9 @@ const Players = {
                 }
             };
             addBtn?.addEventListener('click', handleAdd);
-            addInput?.addEventListener('keypress', (e) => {
+            // keydown вместо deprecated keypress: последний не срабатывает
+            // при вводе через часть методов ввода/раскладок.
+            addInput?.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') handleAdd();
             });
 
@@ -1013,7 +1022,7 @@ const Players = {
                 };
 
                 dmSendBtn?.addEventListener('click', doSend);
-                dmInput?.addEventListener('keypress', (e) => {
+                dmInput?.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter') doSend();
                 });
                 setTimeout(() => dmInput?.focus(), 100);

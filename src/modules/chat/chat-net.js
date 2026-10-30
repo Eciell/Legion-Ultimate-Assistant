@@ -15,6 +15,27 @@
         _liveRunning: false,
         _liveConnecting: false,
         _livePollDelay: 2500,
+        // Пауза опроса, пока вкладка скрыта: сервер не долбим, но цикл не рвём.
+        _liveHiddenDelay: 5000,
+
+        // Реальная видимость вкладки. Стелс-режим (hooks.js) подменяет
+        // document.hidden/visibilityState на «всегда видимо», поэтому берём
+        // сохранённый там нативный геттер, а при его отсутствии — обычное свойство.
+        _isLiveTabHidden() {
+            try {
+                const realGetter = G.__lgRealDoc && G.__lgRealDoc.getHidden;
+                if (typeof realGetter === 'function') {
+                    // G.document — настоящий page-Document: нативный геттер ждёт
+                    // именно его в this (прокси песочницы может бросить TypeError).
+                    try { return !!realGetter.call(G.document || document); } catch (e) {}
+                }
+            } catch (e) {}
+            try {
+                return !!document.hidden;
+            } catch (e) {
+                return false;
+            }
+        },
 
         getChannelLogin() {
             try {
@@ -53,7 +74,7 @@
             chats.forEach(m => {
                 const parsed = Utils.extractChatFields(m);
                 if (parsed.text) {
-                    this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, 'mine', parsed.k, parsed.to, parsed.rank);
+                    this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, 'mine', parsed.k, parsed.to, parsed.rank);
                     added = true;
                 }
             });
@@ -65,7 +86,7 @@
             msgs.forEach(m => {
                 const { author, text, id, seq, role, rank, isSystem, aw, channel } = Utils.extractChatFields(m);
                 if (!text) return;
-                this.handleIncoming(author || 'Игрок', text, false, false, id, seq, role, isSystem, aw, channel, null, null, rank);
+                this.handleIncoming(author || 'Игрок', text, false, id, seq, role, isSystem, aw, channel, null, null, rank);
             });
         },
 
@@ -109,6 +130,16 @@
                 dbg('Starting live fetch polling fallback...');
                 const poll = async () => {
                     if (!this._liveRunning) return;
+                    // Скрытая вкладка: сеть не трогаем, но следующий тик оставляем —
+                    // иначе после возврата на вкладку поток не перезапустится
+                    // (visibilitychange в стелс-режиме гасится hooks.js).
+                    // Исключение — открытое PiP-окно чата: оно может быть видимым,
+                    // даже когда вкладка игры свёрнута, и тогда поток нужен.
+                    const pipOpen = !!(this._popoutWin && !this._popoutWin.closed);
+                    if (!pipOpen && this._isLiveTabHidden()) {
+                        this._livePollTimer = setTimeout(poll, this._liveHiddenDelay || 5000);
+                        return;
+                    }
                     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
                     const timeoutId = controller ? setTimeout(() => controller.abort(), 3000) : null;
                     let hasPayload = false;
@@ -140,7 +171,7 @@
                                         chats.forEach(m => {
                                             const parsed = Utils.extractChatFields(m);
                                             if (parsed.text) {
-                                                this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, lineLoc, parsed.k, parsed.to, parsed.rank);
+                                                this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, lineLoc, parsed.k, parsed.to, parsed.rank);
                                             }
                                         });
                                     } catch (err) {}
@@ -157,7 +188,7 @@
                                 chats.forEach(m => {
                                     const parsed = Utils.extractChatFields(m);
                                     if (parsed.text) {
-                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, pollLoc, parsed.k, parsed.to, parsed.rank);
+                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, pollLoc, parsed.k, parsed.to, parsed.rank);
                                     }
                                 });
                             }
@@ -201,7 +232,7 @@
                                 chats.forEach(m => {
                                     const parsed = Utils.extractChatFields(m);
                                     if (parsed.text) {
-                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, esLoc, parsed.k, parsed.to, parsed.rank);
+                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, esLoc, parsed.k, parsed.to, parsed.rank);
                                     }
                                 });
                             }
@@ -307,7 +338,7 @@
                                     const parsed = Utils.extractChatFields(m);
                                     if (parsed.text) {
                                         const ch = parsed.channel || (loc === 'mine' ? 'mine' : 'city');
-                                        Chat.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
+                                        Chat.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
                                     }
                                 });
                             }
@@ -383,7 +414,7 @@
                                     const parsed = Utils.extractChatFields(m);
                                     if (parsed.text) {
                                         const ch = parsed.channel || (loc === 'mine' ? 'mine' : 'city');
-                                        Chat.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
+                                        Chat.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
                                     }
                                 });
                                 return;
@@ -395,7 +426,7 @@
                                 const a = data.slice(0, i).trim();
                                 const t = data.slice(i + 1).trim();
                                 if (a && t && t.length < 500) {
-                                    Chat.handleIncoming(a, t, false, false, null, null, null, false, null, loc);
+                                    Chat.handleIncoming(a, t, false, null, null, null, false, null, loc);
                                 }
                             }
                         } catch (err) {
@@ -467,8 +498,34 @@
                                 chats.forEach(m => {
                                     const parsed = Utils.extractChatFields(m);
                                     if (parsed.text) {
-                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, loc, parsed.k, parsed.to, parsed.rank);
+                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, loc, parsed.k, parsed.to, parsed.rank);
                                     }
+                                });
+                            }
+
+                            // История города из /api/city/enter: разбираем в этом же
+                            // .then(), используя уже прочитанные data. Раньше ниже был
+                            // отдельный блок со вторым res.clone().json() на тот же
+                            // ответ — двойной парсинг и лишняя нагрузка.
+                            // isHistory=true: это история, а не новое сообщение —
+                            // в кэш/счётчик непрочитанных она попадать не должна
+                            // (и ЛС отсюда повторно в Players не отдаются).
+                            if (url.includes('/api/city/enter') && data.ok && Array.isArray(data.chat)) {
+                                data.chat.forEach(m => {
+                                    const parsed = Utils.extractChatFields(m);
+                                    if (!parsed.text) return;
+                                    const ch = parsed.channel || 'city';
+                                    // loadHistory() разбирает тот же ответ, поэтому
+                                    // пропускаем то, что уже лежит в this.messages:
+                                    // по id ИЛИ по автору+тексту (у старых сообщений
+                                    // id может отсутствовать).
+                                    const known = self.messages.some(cur =>
+                                        (parsed.id && cur.id && cur.id === parsed.id) ||
+                                        (!cur._pending && cur.author === parsed.author && cur.text === parsed.text &&
+                                            (cur.channel || 'city') === ch)
+                                    );
+                                    if (known) return;
+                                    self.handleIncoming(parsed.author, parsed.text, true, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
                                 });
                             }
                         }
@@ -516,28 +573,16 @@
                                 chats.forEach(m => {
                                     const parsed = Utils.extractChatFields(m);
                                     if (parsed.text) {
-                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, 'mine', parsed.k, parsed.to, parsed.rank);
+                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, 'mine', parsed.k, parsed.to, parsed.rank);
                                     }
                                 });
                             }
                         }).catch(() => {});
                     }
 
-                    // 5. Вход в город (история чата города)
-                    if (url.includes('/api/city/enter')) {
-                        res.clone().json().then(data => {
-                            if (data && data.ok && data.chat && Array.isArray(data.chat)) {
-                                setTimeout(() => {
-                                    data.chat.forEach(m => {
-                                        const parsed = Utils.extractChatFields(m);
-                                        if (parsed.text) {
-                                            self.handleIncoming(parsed.author, parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, parsed.channel || 'city', parsed.k, parsed.to, parsed.rank);
-                                        }
-                                    });
-                                }, 100);
-                            }
-                        }).catch(() => {});
-                    }
+                    // 5. Вход в город (/api/city/enter) — история чата разбирается
+                    // в первом .then() этого перехватчика, отдельный res.clone()
+                    // здесь больше не нужен (устранён двойной парсинг ответа).
                 } catch(e) {}
 
                 return res;

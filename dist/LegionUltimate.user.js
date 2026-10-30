@@ -1727,7 +1727,8 @@
             // PocketCity.openNativeBuilding больше не должен возвращать её на экран.
             window.__POCKET_CITY_OPEN__ = false;
             if (typeof Players !== 'undefined') Players.currentDMPeer = null;
-            document.querySelectorAll('.' + DOM_IDS.customModal + ', .custom-modal').forEach(el => el.remove());
+            // Удаляем только наши модалки (по префиксному классу), не трогая чужие.
+            document.querySelectorAll('.' + DOM_IDS.customModal).forEach(el => el.remove());
             document.querySelectorAll('.sim-card').forEach(el => el.remove());
         },
         makeDraggable(element, handleSelector = 'h2', storageKey = 'LEGION_MODAL_POS') {
@@ -1840,24 +1841,29 @@
             modal.className = classNames;
             modal.innerHTML = html;
 
-            // Восстановление позиции из localStorage под ключом LEGION_MODAL_POS
-            try {
-                const pos = JSON.parse(localStorage.getItem('LEGION_MODAL_POS') || 'null');
-                if (pos && pos.left && pos.top) {
-                    const leftVal = parseInt(pos.left, 10);
-                    const topVal = parseInt(pos.top, 10);
-                    const maxLeft = Math.max(10, (window.innerWidth || 1000) - (options.compact ? 100 : 200));
-                    const maxTop = Math.max(10, (window.innerHeight || 800) - 60);
+            // Восстановление позиции из localStorage под ключом LEGION_MODAL_POS.
+            // Для компактных окон позицию не читаем: её всё равно перезапишет
+            // makeDraggable() (центрирование), а остаток от развёрнутой модалки
+            // мог оказаться за границами экрана.
+            if (!options.compact) {
+                try {
+                    const pos = JSON.parse(localStorage.getItem('LEGION_MODAL_POS') || 'null');
+                    if (pos && pos.left && pos.top) {
+                        const leftVal = parseInt(pos.left, 10);
+                        const topVal = parseInt(pos.top, 10);
+                        const maxLeft = Math.max(10, (window.innerWidth || 1000) - 200);
+                        const maxTop = Math.max(10, (window.innerHeight || 800) - 60);
 
-                    if (!isNaN(leftVal) && !isNaN(topVal) && leftVal >= 0 && leftVal <= maxLeft && topVal >= 0 && topVal <= maxTop) {
-                        modal.style.left = pos.left;
-                        modal.style.top = pos.top;
-                        modal.style.transform = 'none';
-                        modal.style.right = 'auto';
-                        modal.style.bottom = 'auto';
+                        if (!isNaN(leftVal) && !isNaN(topVal) && leftVal >= 0 && leftVal <= maxLeft && topVal >= 0 && topVal <= maxTop) {
+                            modal.style.left = pos.left;
+                            modal.style.top = pos.top;
+                            modal.style.transform = 'none';
+                            modal.style.right = 'auto';
+                            modal.style.bottom = 'auto';
+                        }
                     }
-                }
-            } catch (e) {}
+                } catch (e) {}
+            }
 
             document.body.appendChild(modal);
             const closeBtn = modal.querySelector('#custom-close-btn') || document.getElementById('custom-close-btn');
@@ -1998,7 +2004,9 @@
 
         renderPlayerHudContent(hud, hero) {
             if (!hud) return;
-            const name = hero?.name || hero?.n || window.LG_CH?.name || (window.ME?.user?.name) || 'Игрок';
+            // LG_CH/ME — объекты page-context, в песочнице доступны только через G
+            // (глобальный G объявлен в core/constants.js, здесь не дублируем).
+            const name = hero?.name || hero?.n || G.LG_CH?.name || (G.ME?.user?.name) || 'Игрок';
             const rawClass = hero?.class || hero?.c || hero?.sk?.c || 'recruit';
             const className = (typeof BuildSim !== 'undefined' && BuildSim.classNames?.[rawClass]) || rawClass;
             const lvl = hero?.lvl || hero?.level || hero?.l || 1;
@@ -2095,7 +2103,7 @@
 
             hud.style.display = 'flex';
 
-            let hero = window.ME?.hero || window.ME?.me || window.__lgHero;
+            let hero = G.ME?.hero || G.ME?.me || window.__lgHero;
             if (hero) {
                 this.renderPlayerHudContent(hud, hero);
             } else {
@@ -2136,7 +2144,7 @@
                     locEl.style.color = inMine ? '#4cc95a' : '#8fd3ff';
                 }
 
-                const currentHero = window.ME?.hero || window.ME?.me || window.__lgHero;
+                const currentHero = G.ME?.hero || G.ME?.me || window.__lgHero;
                 if (currentHero) {
                     const hpEl = hud.querySelector('#player-hud-hp');
                     if (hpEl) {
@@ -2349,6 +2357,61 @@
                 }
                 let spent = 0; Object.values(simTree).forEach(v => spent += v);
                 if (spent >= MAX_POINTS) return;
+            }
+            if (delta < 0) {
+                // Полная симуляция снятия: строим дерево «как будто очко уже снято»
+                // и проверяем, что всё оставшееся валидно по ДВУМ правилам игры:
+                //   1) прямой prerequisite (node.pre) должен остаться изученным;
+                //   2) в ветке должно остаться не меньше очков, чем требует тир (node.req).
+                const clsData = (this.skillsCache && Array.isArray(this.skillsCache.classes))
+                    ? this.skillsCache.classes.find(c => c.id === clsId)
+                    : null;
+                const branches = (clsData && Array.isArray(clsData.branches)) ? clsData.branches : [];
+
+                if (branches.length) {
+                    const allNodes = branches.flatMap(b => (b && b.nodes) || []);
+
+                    // Копия дерева, а не мутация: откатывать simTree при отказе не нужно.
+                    const testTree = { ...simTree };
+                    testTree[nodeId] = Math.max(0, current + delta);
+                    if (testTree[nodeId] === 0) delete testTree[nodeId];
+
+                    let invalid = false;
+                    for (const [id, rank] of Object.entries(testTree)) {
+                        if (rank <= 0) continue;
+                        const node = allNodes.find(n => n.id === id);
+                        if (!node) continue;
+
+                        // 1. Прямая зависимость.
+                        if (node.pre && !(testTree[node.pre] > 0)) {
+                            invalid = true;
+                            break;
+                        }
+
+                        // 2. Требование по очкам в ветке. Считаем сумму по ветке
+                        //    именно в симулированном дереве: снятие могло опустить
+                        //    очки ветки ниже req у оставшихся узлов.
+                        if (node.req > 0) {
+                            const branch = branches.find(b => b && b.nodes && b.nodes.some(n => n.id === id));
+                            if (branch) {
+                                const bIds = new Set((branch.nodes || []).map(n => n.id));
+                                let bp = 0;
+                                Object.entries(testTree).forEach(([cid, cv]) => {
+                                    if (bIds.has(cid)) bp += cv;
+                                });
+                                if (bp < node.req) {
+                                    invalid = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (invalid) {
+                        UI.showToast('Сначала снимите зависимые навыки', true);
+                        return;
+                    }
+                }
             }
             simTree[nodeId] = Math.max(0, current + delta);
             if (simTree[nodeId] === 0) delete simTree[nodeId];
@@ -2964,8 +3027,27 @@
             if (this.cityStockLoading) return this.cityStockLoading;
 
             this.cityStockLoading = (async () => {
+                const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+                let timeoutId = null;
                 try {
-                    const res = await Utils.fetchApi('/api/city/stock');
+                    // Жёсткий таймаут. Одного AbortController мало: Utils.fetchApi
+                    // сначала пробует нативный ctx.api игры, которому signal не
+                    // передать, поэтому гоняем запрос с таймером через
+                    // Promise.race — Auction.open() не должен висеть навсегда
+                    // на «Считаем цены...», если /api/city/stock молчит.
+                    const timeout = new Promise((_, reject) => {
+                        timeoutId = setTimeout(() => {
+                            if (controller) {
+                                try { controller.abort(); } catch (err) {}
+                            }
+                            reject(new Error('timeout 8000ms'));
+                        }, 8000);
+                    });
+
+                    const res = await Promise.race([
+                        Utils.fetchApi('/api/city/stock', null, controller ? controller.signal : undefined),
+                        timeout
+                    ]);
                     const data = res?.body || res;
                     if (data && (data.ok !== false)) {
                         const m = new Map();
@@ -2991,8 +3073,9 @@
                         return m;
                     }
                 } catch (e) {
-                    dbg('[AUCTION] Ошибка загрузки /api/city/stock:', e);
+                    dbg('[AUCTION] Таймаут или ошибка /api/city/stock:', e);
                 } finally {
+                    if (timeoutId) clearTimeout(timeoutId);
                     this.cityStockLoading = null;
                 }
                 return this.cityStockMap;
@@ -3059,6 +3142,12 @@
             try {
                 if (!this.cityStockLoaded) {
                     await this.fetchCityStock();
+                    // fetchCityStock ограничен таймаутом (8 с): если цены магазина
+                    // не загрузились, продолжаем без них — оценка пойдёт по
+                    // data.vals / медиане рынка, но модалка не зависнет.
+                    if (!this.cityStockLoaded) {
+                        dbg('[AUCTION] Цены магазинов недоступны — считаем без них');
+                    }
                 }
                 const res = await Utils.fetchApi('/api/auction');
                 const lots = res.lots || res.body?.lots;
@@ -3508,7 +3597,9 @@ const Players = {
         },
 
         getMyNick() {
-            return (window.ME && (window.ME.user?.name || window.ME.hero?.n || window.ME.hero?.name)) ||
+            // ME живёт в page-context: в песочнице Tampermonkey (@grant) обычный
+            // window его не видит, поэтому читаем через G (= unsafeWindow).
+            return (G.ME && (G.ME.user?.name || G.ME.hero?.n || G.ME.hero?.name)) ||
                    (typeof Chat !== 'undefined' && Chat.myNick) ||
                    '';
         },
@@ -3550,13 +3641,13 @@ const Players = {
             // 3. Фолбэк на методы игры, если Map пуста
             if (set.size === 0) {
                 try {
-                    const dbgVal = window.LGCity?.debug?.();
+                    const dbgVal = G.LGCity?.debug?.();
                     if (dbgVal && Array.isArray(dbgVal.others)) {
                         dbgVal.others.forEach(l => { if (l) set.add(String(l).trim().toLowerCase()); });
                     }
                 } catch (e) {}
                 try {
-                    const peek = window.LGCity?.peek?.();
+                    const peek = G.LGCity?.peek?.();
                     if (peek && Array.isArray(peek.w)) {
                         peek.w.forEach(item => { if (item && item[0]) set.add(String(item[0]).trim().toLowerCase()); });
                     }
@@ -3586,7 +3677,9 @@ const Players = {
 
             // 2. Из st.dg (свежие данные с сервера) — обновляем Map как 'api'
             try {
-                const st = window.__lgMineState;
+                // Глубокое состояние шахты кладёт miner.js в page-context (G.__lgMineState),
+                // window.__lgMineState — лишь песочничная копия; читаем page-версию первой.
+                const st = G.__lgMineState || window.__lgMineState;
                 if (st && st.dg && (!st.at || now - st.at < 15000)) { // если снимок свежий (менее 15 сек)
                     Object.values(st.dg).flat().forEach(l => {
                         if (l) {
@@ -3618,7 +3711,7 @@ const Players = {
             // 4. Фолбэк на st.dl
             if (set.size === 0) {
                 try {
-                    const st = window.__lgMineState;
+                    const st = G.__lgMineState || window.__lgMineState;
                     if (st && Array.isArray(st.dl)) {
                         st.dl.forEach(item => {
                             const n = item && item[3];
@@ -3655,7 +3748,7 @@ const Players = {
             const now = Date.now();
 
             // /api/mine/state — не чаще раза в 10 секунд
-            if (window.location.pathname.includes('/mine') || document.querySelector('.mn-heroes') || window.__lgMineState) {
+            if (window.location.pathname.includes('/mine') || document.querySelector('.mn-heroes') || G.__lgMineState || window.__lgMineState) {
                 if (now - this._lastMineStateScan > 10000) {
                     this._lastMineStateScan = now;
                     try {
@@ -3728,8 +3821,8 @@ const Players = {
         openTradeWith(nick) {
             if (!nick) return;
             try {
-                if (window.LGTrade && typeof window.LGTrade.invite === 'function') {
-                    window.LGTrade.invite(nick);
+                if (G.LGTrade && typeof G.LGTrade.invite === 'function') {
+                    G.LGTrade.invite(nick);
                     return;
                 }
             } catch (e) {}
@@ -3793,12 +3886,15 @@ const Players = {
             try {
                 // ВАЖНО: чистый fetch, а не Utils.fetchApi: тот возьмёт контекст ШАХТЫ
                 // (__lgMineContext), прогрев уйдёт не туда, и отправка в город даст 409.
-                await fetch('/api/city/enter', {
+                const warmRes = await fetch('/api/city/enter', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'same-origin',
                     body: JSON.stringify({})
                 });
+                // Не роняем отправку из-за прогрева, но фиксируем проблему в логе:
+                // 401/403 здесь означают, что сессия города не поднялась.
+                if (!warmRes || !warmRes.ok) dbg('Session warmup failed:', warmRes && warmRes.status);
             } catch (e) {
                 dbg('Session warmup failed', e);
             }
@@ -3810,7 +3906,7 @@ const Players = {
                 let nativeOk = null;
 
                 // 1. Пытаемся использовать нативный контекст города (как в прошлой версии)
-                const nativeCtx = window.__lgCityContext || window.LGCity;
+                const nativeCtx = G.__lgCityContext || G.LGCity;
                 if (nativeCtx && typeof nativeCtx.api === 'function') {
                     try {
                         const nativeData = await nativeCtx.api('/api/city/say', payload);
@@ -3989,7 +4085,7 @@ const Players = {
             const mineSetInit = this.getMinePlayers();
             const totalMine = (typeof window.__lgMineTotalHere === 'number' && window.__lgMineTotalHere > 0)
                 ? window.__lgMineTotalHere
-                : (window.__lgMineState?.here || window.__lgMineState?.st?.here || 0);
+                : ((G.__lgMineState || window.__lgMineState)?.here || (G.__lgMineState || window.__lgMineState)?.st?.here || 0);
             const countText = totalMine > 0
                 ? `В шахте: ${totalMine} (известно ников: ${mineSetInit.size})`
                 : `Игроков: ${this.playersMap.size} (Шахта: ${mineSetInit.size}, Город: ${citySetInit.size})`;
@@ -4022,7 +4118,7 @@ const Players = {
                 if (countEl) {
                     const totalMineNow = (typeof window.__lgMineTotalHere === 'number' && window.__lgMineTotalHere > 0)
                         ? window.__lgMineTotalHere
-                        : (window.__lgMineState?.here || window.__lgMineState?.st?.here || 0);
+                        : ((G.__lgMineState || window.__lgMineState)?.here || (G.__lgMineState || window.__lgMineState)?.st?.here || 0);
                     if (totalMineNow > 0) {
                         countEl.textContent = `В шахте: ${totalMineNow} (известно ников: ${mineSet.size})`;
                     } else {
@@ -4234,7 +4330,9 @@ const Players = {
                 }
             };
             addBtn?.addEventListener('click', handleAdd);
-            addInput?.addEventListener('keypress', (e) => {
+            // keydown вместо deprecated keypress: последний не срабатывает
+            // при вводе через часть методов ввода/раскладок.
+            addInput?.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') handleAdd();
             });
 
@@ -4351,7 +4449,7 @@ const Players = {
                 };
 
                 dmSendBtn?.addEventListener('click', doSend);
-                dmInput?.addEventListener('keypress', (e) => {
+                dmInput?.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter') doSend();
                 });
                 setTimeout(() => dmInput?.focus(), 100);
@@ -4497,7 +4595,7 @@ const Players = {
     // 4.2. МОДУЛЬ: АССИСТЕНТ ЖРЕЦА (HUD для Похода)
     //
     // Данные боя берём из нативного контекста похода, который перехватывает
-    // hooks.js (window.__lgQuestContext):
+    // hooks.js (G.__lgQuestContext, в песочнице читается через G):
     //   q.b.st   — состояние боя ('hit' = бой идёт)
     //   q.b.low  — массив [login, name, hp] по раненым участникам
     //   q.b.sk   — умения героя в бою [id, кулдаун, тип] ('heal' = хилка)
@@ -4683,10 +4781,10 @@ const Players = {
 
             const candidates = [
                 playerNick,
-                window.ME?.user?.login,
-                window.ME?.user?.name,
-                window.ME?.hero?.n,
-                window.ME?.hero?.name,
+                G.ME?.user?.login,
+                G.ME?.user?.name,
+                G.ME?.hero?.n,
+                G.ME?.hero?.name,
                 typeof Chat !== 'undefined' ? Chat.myNick : ''
             ];
             for (const c of candidates) {
@@ -4695,16 +4793,19 @@ const Players = {
             return '';
         },
 
-        // Роль героя. В игре встречаются оба поля: role и class
-        // (см. Chat.myRole = hero.class, BuildSim.classNames.priest).
+        // Роль героя. В Legion класс лежит в hero.class; role — устаревшее/пустое
+        // поле, поэтому проверяем его только после class (см. Chat.myRole =
+        // hero.class, BuildSim.classNames.priest).
         _getMyRole() {
-            const hero = window.ME?.hero || window.ME?.me || window.__lgHero || null;
+            // ME/герой — объекты страницы: в песочнице доступны только через G.
+            const hero = G.ME?.hero || G.ME?.me || G.__lgHero || window.__lgHero || null;
             const candidates = [
-                hero && hero.role,
                 hero && hero.class,
+                hero && hero.role,
                 hero && hero.cl,
                 hero && hero.sk && hero.sk.c,
-                window.ME?.user?.role,
+                G.ME?.user?.class,
+                G.ME?.user?.role,
                 typeof Chat !== 'undefined' ? Chat.myRole : ''
             ];
             for (const c of candidates) {
@@ -4716,7 +4817,9 @@ const Players = {
         // ctx.data() — снимок состояния похода (тот же объект, что игра гоняет
         // в своём рендере). ctx.act() — отправка действия в бой.
         _readQuest() {
-            const ctx = window.__lgQuestContext;
+            // Контекст похода — объект страницы (hooks.js пишет G.__lgQuestContext);
+            // в песочнице window-копия всегда пустая, поэтому нужен G.
+            const ctx = G.__lgQuestContext || window.__lgQuestContext;
             if (!ctx || typeof ctx.data !== 'function') return null;
             try {
                 const q = ctx.data();
@@ -4904,7 +5007,7 @@ const Players = {
         heal(login, btn) {
             if (!login) return;
 
-            const ctx = window.__lgQuestContext;
+            const ctx = G.__lgQuestContext || window.__lgQuestContext;
             if (!ctx || typeof ctx.act !== 'function') {
                 UI.showToast('Поход: нет доступа к контексту боя', true);
                 return;
@@ -5489,7 +5592,7 @@ const Players = {
                             if (parsed.rank && !existing.rank) existing.rank = parsed.rank;
                             return;
                         }
-                        this.handleIncoming(parsed.author, parsed.text, false, true, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
+                        this.handleIncoming(parsed.author, parsed.text, true, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
                     });
                 }
             } catch (e) {
@@ -5504,7 +5607,8 @@ const Players = {
                 const res = await Utils.fetchApi('/api/me');
                 const me = res?.hero || res?.body?.hero;
                 if (me) {
-                    this.myNick = me.name || window.LG_CH?.name || 'eciell';
+                    // LG_CH/ME живут в page-context — читаем через G, без хардкода ника.
+                    this.myNick = me.name || G.LG_CH?.name || G.ME?.user?.name || null;
                     this.myRole = me.class || me.sk?.c || 'legionary';
                 }
             } catch (e) {}
@@ -5529,6 +5633,27 @@ const Players = {
         _liveRunning: false,
         _liveConnecting: false,
         _livePollDelay: 2500,
+        // Пауза опроса, пока вкладка скрыта: сервер не долбим, но цикл не рвём.
+        _liveHiddenDelay: 5000,
+
+        // Реальная видимость вкладки. Стелс-режим (hooks.js) подменяет
+        // document.hidden/visibilityState на «всегда видимо», поэтому берём
+        // сохранённый там нативный геттер, а при его отсутствии — обычное свойство.
+        _isLiveTabHidden() {
+            try {
+                const realGetter = G.__lgRealDoc && G.__lgRealDoc.getHidden;
+                if (typeof realGetter === 'function') {
+                    // G.document — настоящий page-Document: нативный геттер ждёт
+                    // именно его в this (прокси песочницы может бросить TypeError).
+                    try { return !!realGetter.call(G.document || document); } catch (e) {}
+                }
+            } catch (e) {}
+            try {
+                return !!document.hidden;
+            } catch (e) {
+                return false;
+            }
+        },
 
         getChannelLogin() {
             try {
@@ -5567,7 +5692,7 @@ const Players = {
             chats.forEach(m => {
                 const parsed = Utils.extractChatFields(m);
                 if (parsed.text) {
-                    this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, 'mine', parsed.k, parsed.to, parsed.rank);
+                    this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, 'mine', parsed.k, parsed.to, parsed.rank);
                     added = true;
                 }
             });
@@ -5579,7 +5704,7 @@ const Players = {
             msgs.forEach(m => {
                 const { author, text, id, seq, role, rank, isSystem, aw, channel } = Utils.extractChatFields(m);
                 if (!text) return;
-                this.handleIncoming(author || 'Игрок', text, false, false, id, seq, role, isSystem, aw, channel, null, null, rank);
+                this.handleIncoming(author || 'Игрок', text, false, id, seq, role, isSystem, aw, channel, null, null, rank);
             });
         },
 
@@ -5623,6 +5748,16 @@ const Players = {
                 dbg('Starting live fetch polling fallback...');
                 const poll = async () => {
                     if (!this._liveRunning) return;
+                    // Скрытая вкладка: сеть не трогаем, но следующий тик оставляем —
+                    // иначе после возврата на вкладку поток не перезапустится
+                    // (visibilitychange в стелс-режиме гасится hooks.js).
+                    // Исключение — открытое PiP-окно чата: оно может быть видимым,
+                    // даже когда вкладка игры свёрнута, и тогда поток нужен.
+                    const pipOpen = !!(this._popoutWin && !this._popoutWin.closed);
+                    if (!pipOpen && this._isLiveTabHidden()) {
+                        this._livePollTimer = setTimeout(poll, this._liveHiddenDelay || 5000);
+                        return;
+                    }
                     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
                     const timeoutId = controller ? setTimeout(() => controller.abort(), 3000) : null;
                     let hasPayload = false;
@@ -5654,7 +5789,7 @@ const Players = {
                                         chats.forEach(m => {
                                             const parsed = Utils.extractChatFields(m);
                                             if (parsed.text) {
-                                                this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, lineLoc, parsed.k, parsed.to, parsed.rank);
+                                                this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, lineLoc, parsed.k, parsed.to, parsed.rank);
                                             }
                                         });
                                     } catch (err) {}
@@ -5671,7 +5806,7 @@ const Players = {
                                 chats.forEach(m => {
                                     const parsed = Utils.extractChatFields(m);
                                     if (parsed.text) {
-                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, pollLoc, parsed.k, parsed.to, parsed.rank);
+                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, pollLoc, parsed.k, parsed.to, parsed.rank);
                                     }
                                 });
                             }
@@ -5715,7 +5850,7 @@ const Players = {
                                 chats.forEach(m => {
                                     const parsed = Utils.extractChatFields(m);
                                     if (parsed.text) {
-                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, esLoc, parsed.k, parsed.to, parsed.rank);
+                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, esLoc, parsed.k, parsed.to, parsed.rank);
                                     }
                                 });
                             }
@@ -5821,7 +5956,7 @@ const Players = {
                                     const parsed = Utils.extractChatFields(m);
                                     if (parsed.text) {
                                         const ch = parsed.channel || (loc === 'mine' ? 'mine' : 'city');
-                                        Chat.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
+                                        Chat.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
                                     }
                                 });
                             }
@@ -5897,7 +6032,7 @@ const Players = {
                                     const parsed = Utils.extractChatFields(m);
                                     if (parsed.text) {
                                         const ch = parsed.channel || (loc === 'mine' ? 'mine' : 'city');
-                                        Chat.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
+                                        Chat.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
                                     }
                                 });
                                 return;
@@ -5909,7 +6044,7 @@ const Players = {
                                 const a = data.slice(0, i).trim();
                                 const t = data.slice(i + 1).trim();
                                 if (a && t && t.length < 500) {
-                                    Chat.handleIncoming(a, t, false, false, null, null, null, false, null, loc);
+                                    Chat.handleIncoming(a, t, false, null, null, null, false, null, loc);
                                 }
                             }
                         } catch (err) {
@@ -5981,8 +6116,34 @@ const Players = {
                                 chats.forEach(m => {
                                     const parsed = Utils.extractChatFields(m);
                                     if (parsed.text) {
-                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, loc, parsed.k, parsed.to, parsed.rank);
+                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, loc, parsed.k, parsed.to, parsed.rank);
                                     }
+                                });
+                            }
+
+                            // История города из /api/city/enter: разбираем в этом же
+                            // .then(), используя уже прочитанные data. Раньше ниже был
+                            // отдельный блок со вторым res.clone().json() на тот же
+                            // ответ — двойной парсинг и лишняя нагрузка.
+                            // isHistory=true: это история, а не новое сообщение —
+                            // в кэш/счётчик непрочитанных она попадать не должна
+                            // (и ЛС отсюда повторно в Players не отдаются).
+                            if (url.includes('/api/city/enter') && data.ok && Array.isArray(data.chat)) {
+                                data.chat.forEach(m => {
+                                    const parsed = Utils.extractChatFields(m);
+                                    if (!parsed.text) return;
+                                    const ch = parsed.channel || 'city';
+                                    // loadHistory() разбирает тот же ответ, поэтому
+                                    // пропускаем то, что уже лежит в this.messages:
+                                    // по id ИЛИ по автору+тексту (у старых сообщений
+                                    // id может отсутствовать).
+                                    const known = self.messages.some(cur =>
+                                        (parsed.id && cur.id && cur.id === parsed.id) ||
+                                        (!cur._pending && cur.author === parsed.author && cur.text === parsed.text &&
+                                            (cur.channel || 'city') === ch)
+                                    );
+                                    if (known) return;
+                                    self.handleIncoming(parsed.author, parsed.text, true, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
                                 });
                             }
                         }
@@ -6030,28 +6191,16 @@ const Players = {
                                 chats.forEach(m => {
                                     const parsed = Utils.extractChatFields(m);
                                     if (parsed.text) {
-                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, 'mine', parsed.k, parsed.to, parsed.rank);
+                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, 'mine', parsed.k, parsed.to, parsed.rank);
                                     }
                                 });
                             }
                         }).catch(() => {});
                     }
 
-                    // 5. Вход в город (история чата города)
-                    if (url.includes('/api/city/enter')) {
-                        res.clone().json().then(data => {
-                            if (data && data.ok && data.chat && Array.isArray(data.chat)) {
-                                setTimeout(() => {
-                                    data.chat.forEach(m => {
-                                        const parsed = Utils.extractChatFields(m);
-                                        if (parsed.text) {
-                                            self.handleIncoming(parsed.author, parsed.text, false, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, parsed.channel || 'city', parsed.k, parsed.to, parsed.rank);
-                                        }
-                                    });
-                                }, 100);
-                            }
-                        }).catch(() => {});
-                    }
+                    // 5. Вход в город (/api/city/enter) — история чата разбирается
+                    // в первом .then() этого перехватчика, отдельный res.clone()
+                    // здесь больше не нужен (устранён двойной парсинг ответа).
                 } catch(e) {}
 
                 return res;
@@ -6293,8 +6442,10 @@ const Players = {
 
             const inp = this.widget.querySelector('#chat-input');
             if (inp) {
-                inp.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
+                // keydown вместо keypress: keypress не срабатывает для части
+                // раскладок/методов ввода и помечен как deprecated.
+                inp.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
                         this.send();
                     }
@@ -6480,7 +6631,9 @@ const Players = {
             this._popoutWin = null;
             this._pipDoc = null;
             this.widget = null;
-            this.stopBackgroundLiveListener();
+            // ВАЖНО: stopBackgroundLiveListener() здесь НЕ вызываем. Фоновый
+            // слушатель запущен специально, чтобы ловить непрочитанные ЛС/чат при
+            // закрытом PiP. Останавливает его только shutdown() в main.js.
         },
 
         async popoutChat() {
@@ -6634,7 +6787,8 @@ const Players = {
                     this._popoutWin = null;
                     this._pipDoc = null;
                     this.widget = null;
-                    this.stopBackgroundLiveListener();
+                    // Фоновый слушатель не останавливаем: он должен продолжать
+                    // считать непрочитанные сообщения после закрытия PiP.
                 };
 
                 win.addEventListener('pagehide', cleanupPip);
@@ -6973,12 +7127,20 @@ const Players = {
 
             // Открыт диалог во вкладке «✉️ ЛС» — отправляем ЛС прямо из виджета
             if (this.activeMainTab === 'dm' && this.dmTarget) {
+                // Сначала проверяем, не команда ли это /w: иначе в текст сообщения
+                // уйдёт «/w Ник привет» целиком, и собеседник получит команду как текст.
+                const dmCmd = rawText.match(/^\/(?:w|dm|whisper)\s+(?:"([^"]+)"|'([^']+)'|(\S+))(?:\s+(.*))?$/i);
+                const actualText = dmCmd ? (dmCmd[4] || '').trim() : rawText;
+                if (!actualText) {
+                    this.showError('Формат: /w Ник сообщение');
+                    return;
+                }
                 if (typeof Players === 'undefined' || typeof Players.sendDM !== 'function') {
                     this.showError('Отправка ЛС недоступна');
                     return;
                 }
                 input.value = '';
-                const ok = await Players.sendDM(this.dmTarget, rawText);
+                const ok = await Players.sendDM(this.dmTarget, actualText);
                 if (ok) {
                     this.renderMessages(); // Перерисовываем историю с новым сообщением
                 } else {
@@ -7068,8 +7230,9 @@ const Players = {
                 if (dmMatch) {
                     const payload = { text: cleanText, to: toUser, k: 'dm' }; // k: 'dm' обязателен!
 
-                    // 1. Пытаемся использовать нативный контекст города (как в прошлой версии)
-                    const nativeCtx = window.__lgCityContext || window.LGCity;
+                    // 1. Пытаемся использовать нативный контекст города (как в прошлой версии).
+                    // Контекст — объект страницы, в песочнице доступен только через G.
+                    const nativeCtx = G.__lgCityContext || G.LGCity;
                     if (nativeCtx && typeof nativeCtx.api === 'function') {
                         try {
                             const nativeData = await nativeCtx.api('/api/city/say', payload);
@@ -7206,7 +7369,9 @@ const Players = {
         messages: [], // Массив всех сообщений
         activeMainTab: 'city',
         activeSubTab: 'general',
-        myNick: window.LG_CH?.name || 'eciell',
+        // Ник узнаём из page-context (LG_CH) либо позже — асинхронно из syncMe().
+        // Хардкод чужого ника опаснее пустого значения: до ответа /api/me лучше null.
+        myNick: (typeof unsafeWindow !== 'undefined' && unsafeWindow.LG_CH?.name) || window.LG_CH?.name || null,
         myRole: 'legionary',
         dmTarget: null, // Ник собеседника, с которым сейчас открыт диалог во вкладке ЛС
         currentMineId: 'home',
@@ -7337,14 +7502,32 @@ const Players = {
         },
 
         // Главная функция приема сообщений (§2.3 дедуп по id + дедуп своих исходящих)
-        handleIncoming(author, text, isMine = false, isHistory = false, id = null, seq = null, role = null, isSystem = false, aw = null, channel = null, k = null, to = null, rank = null) {
+        // isMine убран из сигнатуры: все вызовы передавали false, а свои сообщения
+        // определяются по нику (isSelf) ниже.
+        handleIncoming(author, text, isHistory = false, id = null, seq = null, role = null, isSystem = false, aw = null, channel = null, k = null, to = null, rank = null) {
             if (!text) return;
 
             // Перехват и фильтрация ЛС (не добавлять в общий чат)
             if (channel === 'dm' || k === 'dm') {
-                if (typeof Players !== 'undefined' && Players.handleIncomingDM) {
+                // processIncomingDMs() уже вызвал Players.handleIncomingDM для этого
+                // пакета (chat-net парсит входящие ЛС отдельно), поэтому историю
+                // повторно в Players не отдаём — иначе дублируются тосты/счётчики.
+                if (!isHistory && typeof Players !== 'undefined' && Players.handleIncomingDM) {
                     Players.handleIncomingDM(author, text, to);
                 }
+
+                // Пытаемся склеить с pending-сообщением из ЛС, чтобы оно не висело
+                // в памяти черновиком (эхо приходит через тот же поток).
+                if (this.myNick) {
+                    for (let i = this.messages.length - 1; i >= 0; i--) {
+                        const m = this.messages[i];
+                        if (m._pending && m.k === 'dm' && m.text === text) {
+                            m._pending = false;
+                            break;
+                        }
+                    }
+                }
+
                 // Если этот диалог сейчас открыт во вкладке «✉️ ЛС» — считаем прочитанным.
                 // Перерисовку выполняет Players.refreshUnreadDMViews() -> Chat.renderMessages().
                 if (typeof Players !== 'undefined' && this.activeMainTab === 'dm' && this.dmTarget) {
@@ -7399,7 +7582,7 @@ const Players = {
             }
 
             // 3. Дедупликация сообщений без ID (по автору и тексту за последние 8 секунд)
-            if (!isHistory && !isMine && !id) {
+            if (!isHistory && !id) {
                 if (this.messages.slice(-25).some(m => m.author === author && m.text === text && (m.channel === channel || !m.channel || !channel) && Date.now() - m.ts < 8000)) return;
             }
 
@@ -7409,12 +7592,18 @@ const Players = {
             // Сохраняем в кэш только живые сообщения
             if (!isHistory) this.saveToStorage(author, text, role, isSystem, channel, k, aw, rank, id);
 
+            // Ограничиваем массив, чтобы не копить память в долгих сессиях.
+            // Срез делаем только при переполнении — это редкая операция.
+            if (this.messages.length > 500) {
+                this.messages = this.messages.slice(-500);
+            }
+
             // Обновляем UI
             if (!isHistory) {
                 this.renderMessages();
                 // Скролл вниз выполняет renderMessages() и только если пользователь
                 // уже был внизу — иначе чтение истории не прерывается.
-                if (!this.isOpen() && !isMine && !isSelf) {
+                if (!this.isOpen() && !isSelf) {
                     this.unreadCount++;
                     this.updateBadge();
                 }
@@ -7532,9 +7721,9 @@ const Players = {
 
         // ⚙️ Настройки (Стелс, 7TV, перехват чата) вынесены в отдельную модалку:
         // FAB-меню стало короче, а служебные переключатели больше не мешают кнопкам.
+        // Кнопку «Вынести чат» (PiP) привязывает Chat.init(): второй слушатель
+        // здесь давал двойной вызов popoutChat() и мигающее окно.
         document.getElementById('btn-fab-settings')?.addEventListener('click', () => UI.openSettings());
-
-        (document.getElementById(DOM_IDS.btnPopout) || document.getElementById('btn-popout') || document.getElementById('btn-chat-pip'))?.addEventListener('click', () => Chat.popoutChat());
 
         // Чекбокс «Отключить перехват чата» переехал в UI.openSettings()
         // (модалка), поэтому старая привязка к DOM_IDS.chkChatDisable удалена.
