@@ -82,6 +82,21 @@
     const Y_MAP = { 30: 80, 20: 230, 10: 380, 5: 530, 0: 680 };
     const SKIP_FX_PREFIXES = ['ctl_', 'act_', 'cd_'];
 
+    /*
+     * ------------------------------------------------------------
+     * ИГРОВЫЕ ТАБЛИЦЫ (05_Mechanics.md)
+     *
+     * Единый источник данных для модулей: раньше auction.js (ENCH_BONUS)
+     * и hero-planner.js (ENCH.bonus) держали свои копии одной и той же
+     * таблицы заточки, и они могли разъехаться.
+     * ------------------------------------------------------------
+     */
+    const GAME_DATA = {
+        // Прирост характеристик предмета от уровня заточки, %:
+        // индекс массива = уровень заточки (0..15), значение — процент.
+        ENCHANT_MULTIPLIERS: [0, 4, 9, 15, 22, 31, 42, 56, 74, 97, 125, 160, 200, 250, 310, 400]
+    };
+
     // Единый объект утилит: наполняется модулями utils-* сразу после
     // объявления, поэтому к вызову кода из main.js он содержит всё нужное.
     const Utils = {};
@@ -471,9 +486,6 @@
             });
         },
         getItemName(id, itemsMap = null) {
-            if (typeof Auction !== 'undefined' && Auction.getItemName) {
-                return Auction.getItemName(id, itemsMap);
-            }
             if (!id) return '—';
             try {
                 if (itemsMap && itemsMap[id]?.name) return itemsMap[id].name;
@@ -508,6 +520,61 @@
                 return id.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
             }
             return String(id);
+        },
+        // Умный парсер: определяет слот, редкость и класс по ID предмета.
+        // Вынесено из modules/auction.js (v11.6.0, этап 4): мета нужна и арту
+        // строк (enhanceAuctionRows/enhanceDossierLots), и сканеру аукциона,
+        // поэтому живёт в core рядом с getItemName/getItemIcon.
+        // В песочнице window — прокси без игровых объектов, справочник читаем
+        // из unsafeWindow (G), как это делает getItemName.
+        getItemMeta(id, rarityHint = '') {
+            if (!id) return { slot: '', rarity: '', role: '' };
+
+            let item = {};
+            try {
+                const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+                item = G.MDDoodle?.names?.cats?.items?.[id] || {};
+            } catch(e) {}
+
+            let slot = item.slot || '';
+            // Приоритет: серверное значение лота → справочник MDDoodle → эвристика по ID
+            let rarity = (rarityHint ? String(rarityHint).toLowerCase().trim() : '') || item.rarity || '';
+            let role = item.role || '';
+
+            // 1. Определяем слот (тип снаряжения)
+            if (!slot) {
+                if (id.match(/(sword|club|pitchfork|hatchet|spear|hammer|mace|gladius|bow|crook|staff|censer|axe|spatha|blade|dagger|stiletto|wand|rod|shiv|dirk|kris|fang|scepter|broom|fork)/)) slot = 'weapon';
+                else if (id.match(/(lorica|robe|armor|jacket|mantle|cuirass|chainmail|segmentata|shroud|vest|cloak|cassock|jerkin|leathers)/)) slot = 'armor';
+                else if (id.match(/(galea|hat|cap|helm|crown|hood|mask|tiara|head|beret|colpak)/)) slot = 'helmet';
+                else if (id.match(/(shield|buckler|scutum)/)) slot = 'shield';
+                else if (/^seal_/i.test(id) || /печать/i.test(id)) slot = 'scroll';
+                else if (id.match(/(amulet|charm|bead|coin|tooth|ring|pendant|seal|halo|lucky|ear|horn|tear)/)) slot = 'trinket';
+                else if (id.match(/(potion|apple|pear|pretzel|bread|kvass|cheese|pie|ham|roast|tea|stew|candy|milk)/)) slot = 'food';
+                else if (id.match(/(star|sphere|aurus)/)) slot = 'material';
+                else if (id.match(/(scroll)/)) slot = 'scroll';
+            }
+
+            // 2. Определяем редкость
+            if (!rarity) {
+                if (id.match(/(legendary|aquila|diana|storm_heart|vesta|orcus|sol_hammer|dragon_scale|star_mantle|triumph|phoenix|mars_horn|hadrian|jack_lantern|laverna|metamorph)/)) rarity = 'legendary';
+                else if (id.match(/(epic|_epic)/)) rarity = 'epic';
+                else if (id.match(/(rare|mercury|crypt|lich|apollo|gladius|spatha|lorica|galea|scutum|storm_staff|centurion|legate|champion|warhammer|triarius|assassin|retiarius|longbow|sagittarius|ember|elder|gold_censer|tower_shield|hoplite|spiked|stargazer|crested|horned|priest_tiara|wolfpack|frost_bead|praetorian|pontifex|golden_crown|healer_beads)/)) rarity = 'rare';
+                else if (id.match(/(uncommon|sharp|bearded|flanged|composite|yew|silver|iron_|chainmail|chain|leather|adept_robe|adept|hunter_cap|hunter|wizard_hat|wizard|segmentata|scale_armor|sage|archer_charm|legion_charm|miner_helmet|iron_galea)/)) rarity = 'uncommon';
+                else rarity = 'common';
+            }
+
+            // 3. Определяем класс
+            if (!role) {
+                if (id.match(/(leg_|gladius|spatha|pitchfork|lorica|galea|scutum|hoplite|segmentata|legion|centurion|hatchet|pilum)/)) role = 'legionary';
+                else if (id.match(/(arc_|bow|ranger|marksman|hunter_cap|hunter_armor|yew_bow|composite)/)) role = 'archer';
+                else if (id.match(/(mag_|staff|crook|wizard|archmage|stargazer|ember|elder|walking_staff)/)) role = 'mage';
+                else if (id.match(/(pri_|censer|priest|pontifex|tiara|healer)/)) role = 'priest';
+                else if (id.match(/(rog_|dagger|stiletto|assassin|retiarius|kris|dirk|shiv)/)) role = 'rogue';
+                else if (id.match(/(nec_|skull|grimoire|bone|dead|proserpina)/)) role = 'necromancer';
+                else if (id.match(/(pal_|holymace|sol_hammer|templar|blessed|dawn_plate|apollo)/)) role = 'paladin';
+            }
+
+            return { slot, rarity, role };
         },
         // Иконка предмета: официальные каталоги MDDoodle (icons + категории).
         // В значениях каталогов встречаются и строки-URL, и объекты предметов,
@@ -2461,10 +2528,11 @@
     const HeroPlanner = {
         // Таблица заточки (05_Mechanics.md). TODO: переключить источник на
         // hero.crafts / API в v1.1, если игра начнёт отдавать таблицу.
+        // Бонус заточки (проценты по уровням) — общий: GAME_DATA.ENCHANT_MULTIPLIERS
+        // в core/constants.js, чтобы не дублировать его с auction.js.
         ENCH: {
             max: 15,
             chance: [0, 95, 90, 80, 70, 55, 42, 30, 20, 12, 7, 4, 2, 1, 0.5, 0],
-            bonus:  [0, 4, 9, 15, 22, 31, 42, 56, 74, 97, 125, 160, 200, 250, 310, 400],
             price:  [0, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5.5, 7.5, 10, 13, 17, 22, 28, 35],
             priceMin: 10,
             slots: ['weapon', 'shield', 'armor', 'helmet', 'trinket']
@@ -2484,7 +2552,7 @@
         // Округление подтверждено живой игрой: и статы, и цена считаются через
         // Math.round. Все вызовы идут сюда — если поведение изменится, правим здесь.
         enchantStat(base, en) {
-            const bonus = this.ENCH.bonus[Math.min(15, +en || 0)] || 0;
+            const bonus = GAME_DATA.ENCHANT_MULTIPLIERS[Math.min(15, +en || 0)] || 0;
             return Math.round(base * (1 + bonus / 100));
         },
 
@@ -2630,7 +2698,7 @@
                     if (hasStats0) {
                         baseStats = item.stats0;
                     } else {
-                        const curBonus = this.ENCH.bonus[Math.min(15, curEn)] || 0;
+                        const curBonus = GAME_DATA.ENCHANT_MULTIPLIERS[Math.min(15, curEn)] || 0;
                         const divisor = 1 + curBonus / 100;
                         for (const [k, v] of Object.entries(item.stats || {})) {
                             baseStats[k] = Math.round(v / divisor);
@@ -2684,8 +2752,8 @@
                             `;
                         }
 
-                        // Бонус заточки на этом уровне (ENCH.bonus, %), для новых уровней — 0
-                        const bonusPct = this.ENCH.bonus[lv] || 0;
+                        // Бонус заточки на этом уровне (GAME_DATA.ENCHANT_MULTIPLIERS, %), для новых уровней — 0
+                        const bonusPct = GAME_DATA.ENCHANT_MULTIPLIERS[lv] || 0;
                         rows += `<tr style="${isCur ? 'background:rgba(202,165,92,0.12);' : ''}">
                             <td><b>+${lv}</b>${isCur ? ' <small style="color:#ffcf6a;">(текущая)</small>' : ''}</td>
                             <td>${Math.min(100, chance)}%</td>
@@ -2885,7 +2953,6 @@
         cityStockMap: new Map(),
         cityStockLoaded: false,
         cityStockLoading: null,
-        ENCH_BONUS: [0, 4, 9, 15, 22, 31, 42, 56, 74, 97, 125, 160, 200, 250, 310, 400],
 
         init() {
             (document.getElementById(DOM_IDS.btnAuctionScan) || document.getElementById('btn-auction-scan'))?.addEventListener('click', () => this.open());
@@ -2942,7 +3009,7 @@
 
             // 1. Поиск базовой цены в кэше магазинов
             const shopPrice = this.cityStockMap ? (this.cityStockMap.get(lot.i) || 0) : 0;
-            const bonus = en > 0 ? (this.ENCH_BONUS[Math.min(15, en)] || 0) : 0;
+            const bonus = en > 0 ? (GAME_DATA.ENCHANT_MULTIPLIERS[Math.min(15, en)] || 0) : 0;
 
             let fairUnit = 0;
             let sourceType = 'none';
@@ -2983,99 +3050,10 @@
             };
         },
 
-        getItemName(id, itemsMap = null) {
-            if (!id) return '—';
-
-            // 1. Сначала ищем в data.items[lot.i]?.name (или res.items[l.i]?.name из ответа аукциона)
-            if (itemsMap && itemsMap[id]?.name) {
-                return itemsMap[id].name;
-            }
-
-            // 2. MDDoodle
-            try {
-                const mdName = window.MDDoodle?.names?.[id] || window.MDDoodle?.names?.cats?.items?.[id]?.name;
-                if (mdName) return mdName;
-            } catch (e) {}
-
-            // 3. Словарь известных популярных ресурсов
-            const KNOWN_ITEMS = {
-                enchant_star: 'Звезда заточки',
-                star: 'Звезда',
-                sphere: 'Сфера',
-                aurus: 'Аурус',
-                seal_fire: 'Печать огня',
-                seal_water: 'Печать воды',
-                seal_earth: 'Печать земли',
-                seal_air: 'Печать воздуха',
-                scroll_tp: 'Свиток телепортации',
-                scroll_res: 'Свиток воскрешения',
-                potion_hp: 'Зелье здоровья',
-                potion_mp: 'Зелье маны',
-                ore_iron: 'Железная руда',
-                ore_gold: 'Золотая руда',
-                gem_ruby: 'Рубин',
-                gem_sapphire: 'Сапфир',
-                gem_emerald: 'Изумруд',
-                gem_diamond: 'Алмаз'
-            };
-            if (KNOWN_ITEMS[id]) return KNOWN_ITEMS[id];
-
-            // 4. Если в id есть знак подчеркивания _, заменяем его на пробел и делаем первую букву каждого слова заглавной
-            if (typeof id === 'string' && id.includes('_')) {
-                return id.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-            }
-
-            return String(id);
-        },
-
-        // Умный парсер: определяет слот, редкость и класс по ID предмета
-        getItemMeta(id, rarityHint = '') {
-            if (!id) return { slot: '', rarity: '', role: '' };
-
-            let item = {};
-            try { item = window.MDDoodle?.names?.cats?.items?.[id] || {}; } catch(e) {}
-
-            let slot = item.slot || '';
-            // Приоритет: серверное значение лота → справочник MDDoodle → эвристика по ID
-            let rarity = (rarityHint ? String(rarityHint).toLowerCase().trim() : '') || item.rarity || '';
-            let role = item.role || '';
-
-            // 1. Определяем слот (тип снаряжения)
-            if (!slot) {
-                if (id.match(/(sword|club|pitchfork|hatchet|spear|hammer|mace|gladius|bow|crook|staff|censer|axe|spatha|blade|dagger|stiletto|wand|rod|shiv|dirk|kris|fang|scepter|broom|fork)/)) slot = 'weapon';
-                else if (id.match(/(lorica|robe|armor|jacket|mantle|cuirass|chainmail|segmentata|shroud|vest|cloak|cassock|jerkin|leathers)/)) slot = 'armor';
-                else if (id.match(/(galea|hat|cap|helm|crown|hood|mask|tiara|head|beret|colpak)/)) slot = 'helmet';
-                else if (id.match(/(shield|buckler|scutum)/)) slot = 'shield';
-                else if (/^seal_/i.test(id) || /печать/i.test(id)) slot = 'scroll';
-                else if (id.match(/(amulet|charm|bead|coin|tooth|ring|pendant|seal|halo|lucky|ear|horn|tear)/)) slot = 'trinket';
-                else if (id.match(/(potion|apple|pear|pretzel|bread|kvass|cheese|pie|ham|roast|tea|stew|candy|milk)/)) slot = 'food';
-                else if (id.match(/(star|sphere|aurus)/)) slot = 'material';
-                else if (id.match(/(scroll)/)) slot = 'scroll';
-            }
-
-            // 2. Определяем редкость
-            if (!rarity) {
-                if (id.match(/(legendary|aquila|diana|storm_heart|vesta|orcus|sol_hammer|dragon_scale|star_mantle|triumph|phoenix|mars_horn|hadrian|jack_lantern|laverna|metamorph)/)) rarity = 'legendary';
-                else if (id.match(/(epic|_epic)/)) rarity = 'epic';
-                else if (id.match(/(rare|mercury|crypt|lich|apollo|gladius|spatha|lorica|galea|scutum|storm_staff|centurion|legate|champion|warhammer|triarius|assassin|retiarius|longbow|sagittarius|ember|elder|gold_censer|tower_shield|hoplite|spiked|stargazer|crested|horned|priest_tiara|wolfpack|frost_bead|praetorian|pontifex|golden_crown|healer_beads)/)) rarity = 'rare';
-                else if (id.match(/(uncommon|sharp|bearded|flanged|composite|yew|silver|iron_|chainmail|chain|leather|adept_robe|adept|hunter_cap|hunter|wizard_hat|wizard|segmentata|scale_armor|sage|archer_charm|legion_charm|miner_helmet|iron_galea)/)) rarity = 'uncommon';
-                else rarity = 'common';
-            }
-
-            // 3. Определяем класс
-            if (!role) {
-                if (id.match(/(leg_|gladius|spatha|pitchfork|lorica|galea|scutum|hoplite|segmentata|legion|centurion|hatchet|pilum)/)) role = 'legionary';
-                else if (id.match(/(arc_|bow|ranger|marksman|hunter_cap|hunter_armor|yew_bow|composite)/)) role = 'archer';
-                else if (id.match(/(mag_|staff|crook|wizard|archmage|stargazer|ember|elder|walking_staff)/)) role = 'mage';
-                else if (id.match(/(pri_|censer|priest|pontifex|tiara|healer)/)) role = 'priest';
-                else if (id.match(/(rog_|dagger|stiletto|assassin|retiarius|kris|dirk|shiv)/)) role = 'rogue';
-                else if (id.match(/(nec_|skull|grimoire|bone|dead|proserpina)/)) role = 'necromancer';
-                else if (id.match(/(pal_|holymace|sol_hammer|templar|blessed|dawn_plate|apollo)/)) role = 'paladin';
-            }
-
-            return { slot, rarity, role };
-        },
-
+        // Парсинг предметов переехал в core/utils-art.js (v11.6.0, этап 4),
+        // чтобы не было цикла utils-art.getItemName -> Auction.getItemName:
+        //    Auction.getItemName(id, itemsMap) -> Utils.getItemName(id, itemsMap)
+        //    Auction.getItemMeta(id, rarityHint) -> Utils.getItemMeta(id, rarityHint)
         async open() {
             UI.showModal(`<h2>🔍 Сканер Аукциона <button class="custom-close" id="custom-close-btn">✖</button></h2><div class="loader">Считаем цены...</div>`);
             try {
@@ -3120,7 +3098,7 @@
                     const serverRarity = group.lots.map(l => l.rarity).find(r => r)
                         || (itemsMap && itemsMap[group.id] && itemsMap[group.id].rarity)
                         || '';
-                    const meta = this.getItemMeta(group.id, serverRarity); // Получаем слот, редкость, класс
+                    const meta = Utils.getItemMeta(group.id, serverRarity); // Получаем слот, редкость, класс
 
                     group.lots.forEach(l => {
                         const ev = this.getLotEvaluation(l, res, activeMap);
@@ -3131,7 +3109,7 @@
                         processed.push({
                             id: l.i,
                             e: en,
-                            name: this.getItemName(l.i, itemsMap) + (en > 0 ? ' +' + en : ''),
+                            name: Utils.getItemName(l.i, itemsMap) + (en > 0 ? ' +' + en : ''),
                             icon: Utils.getItemIcon(l.i),
                             qty: l.qty,
                             totalPrice: l.p,

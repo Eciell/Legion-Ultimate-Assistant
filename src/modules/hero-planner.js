@@ -5,10 +5,11 @@
     const HeroPlanner = {
         // Таблица заточки (05_Mechanics.md). TODO: переключить источник на
         // hero.crafts / API в v1.1, если игра начнёт отдавать таблицу.
+        // Бонус заточки (проценты по уровням) — общий: GAME_DATA.ENCHANT_MULTIPLIERS
+        // в core/constants.js, чтобы не дублировать его с auction.js.
         ENCH: {
             max: 15,
             chance: [0, 95, 90, 80, 70, 55, 42, 30, 20, 12, 7, 4, 2, 1, 0.5, 0],
-            bonus:  [0, 4, 9, 15, 22, 31, 42, 56, 74, 97, 125, 160, 200, 250, 310, 400],
             price:  [0, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5.5, 7.5, 10, 13, 17, 22, 28, 35],
             priceMin: 10,
             slots: ['weapon', 'shield', 'armor', 'helmet', 'trinket']
@@ -28,7 +29,7 @@
         // Округление подтверждено живой игрой: и статы, и цена считаются через
         // Math.round. Все вызовы идут сюда — если поведение изменится, правим здесь.
         enchantStat(base, en) {
-            const bonus = this.ENCH.bonus[Math.min(15, +en || 0)] || 0;
+            const bonus = GAME_DATA.ENCHANT_MULTIPLIERS[Math.min(15, +en || 0)] || 0;
             return Math.round(base * (1 + bonus / 100));
         },
 
@@ -174,7 +175,7 @@
                     if (hasStats0) {
                         baseStats = item.stats0;
                     } else {
-                        const curBonus = this.ENCH.bonus[Math.min(15, curEn)] || 0;
+                        const curBonus = GAME_DATA.ENCHANT_MULTIPLIERS[Math.min(15, curEn)] || 0;
                         const divisor = 1 + curBonus / 100;
                         for (const [k, v] of Object.entries(item.stats || {})) {
                             baseStats[k] = Math.round(v / divisor);
@@ -228,8 +229,8 @@
                             `;
                         }
 
-                        // Бонус заточки на этом уровне (ENCH.bonus, %), для новых уровней — 0
-                        const bonusPct = this.ENCH.bonus[lv] || 0;
+                        // Бонус заточки на этом уровне (GAME_DATA.ENCHANT_MULTIPLIERS, %), для новых уровней — 0
+                        const bonusPct = GAME_DATA.ENCHANT_MULTIPLIERS[lv] || 0;
                         rows += `<tr style="${isCur ? 'background:rgba(202,165,92,0.12);' : ''}">
                             <td><b>+${lv}</b>${isCur ? ' <small style="color:#ffcf6a;">(текущая)</small>' : ''}</td>
                             <td>${Math.min(100, chance)}%</td>
