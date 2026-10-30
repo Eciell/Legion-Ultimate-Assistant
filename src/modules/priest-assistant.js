@@ -122,8 +122,8 @@
                 this._setVisible(!this.isVisible);
             });
 
-            // Ставим сразу после «Профиля»: пункт остаётся в группе кнопок и не
-            // задевает чекбокс «Отключить перехват чата» и индикатор стелса.
+            // Ставим сразу после «Профиля»: пункт остаётся в группе кнопок
+            // и не задевает кнопку «⚙️ Настройки» того же блока.
             const profileBtn = document.getElementById(DOM_IDS.btnProfile);
             if (profileBtn) profileBtn.insertAdjacentElement('afterend', created);
             else fabMenu.appendChild(created);

@@ -15,26 +15,16 @@
         _liveRunning: false,
         _liveConnecting: false,
         _livePollDelay: 2500,
-        // Пауза опроса, пока вкладка скрыта: сервер не долбим, но цикл не рвём.
+        // TODO: REMOVE — пауза скрытой вкладки больше не используется:
+        // поллинг полностью останавливается и поднимается по visibilitychange.
         _liveHiddenDelay: 5000,
+        // Обработчик visibilitychange, который перезапускает поллинг после
+        // возврата на вкладку. Ставится один раз в startBackgroundLiveListener().
+        _visibilityHandler: null,
 
-        // Реальная видимость вкладки. Стелс-режим (hooks.js) подменяет
-        // document.hidden/visibilityState на «всегда видимо», поэтому берём
-        // сохранённый там нативный геттер, а при его отсутствии — обычное свойство.
         _isLiveTabHidden() {
-            try {
-                const realGetter = G.__lgRealDoc && G.__lgRealDoc.getHidden;
-                if (typeof realGetter === 'function') {
-                    // G.document — настоящий page-Document: нативный геттер ждёт
-                    // именно его в this (прокси песочницы может бросить TypeError).
-                    try { return !!realGetter.call(G.document || document); } catch (e) {}
-                }
-            } catch (e) {}
-            try {
-                return !!document.hidden;
-            } catch (e) {
-                return false;
-            }
+            // Стелс-режим удалён: просто читаем нативный document.hidden.
+            return !!document.hidden;
         },
 
         getChannelLogin() {
@@ -105,6 +95,18 @@
         async startBackgroundLiveListener() {
             if (this.disabled || this._liveConnecting) return;
 
+            // Возврат на вкладку: поллинг останавливается при document.hidden
+            // (см. poll ниже), поэтому поток поднимаем заново по visibilitychange.
+            if (!this._visibilityHandler) {
+                this._visibilityHandler = () => {
+                    if (!document.hidden && !this._liveRunning) {
+                        this._livePollDelay = 2500;
+                        this.startBackgroundLiveListener();
+                    }
+                };
+                document.addEventListener('visibilitychange', this._visibilityHandler);
+            }
+
             // Защита от дублирования: живой поток уже открыт или подключается.
             if (this._liveES && (this._liveES.readyState === 0 || this._liveES.readyState === 1)) return;
             // Уже идёт fetch-поллинг — второй цикл не запускаем.
@@ -130,16 +132,6 @@
                 dbg('Starting live fetch polling fallback...');
                 const poll = async () => {
                     if (!this._liveRunning) return;
-                    // Скрытая вкладка: сеть не трогаем, но следующий тик оставляем —
-                    // иначе после возврата на вкладку поток не перезапустится
-                    // (visibilitychange в стелс-режиме гасится hooks.js).
-                    // Исключение — открытое PiP-окно чата: оно может быть видимым,
-                    // даже когда вкладка игры свёрнута, и тогда поток нужен.
-                    const pipOpen = !!(this._popoutWin && !this._popoutWin.closed);
-                    if (!pipOpen && this._isLiveTabHidden()) {
-                        this._livePollTimer = setTimeout(poll, this._liveHiddenDelay || 5000);
-                        return;
-                    }
                     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
                     const timeoutId = controller ? setTimeout(() => controller.abort(), 3000) : null;
                     let hasPayload = false;
@@ -202,9 +194,18 @@
                             : Math.min(30000, Math.max(2500, (this._livePollDelay || 2500) * 2));
                         if (timeoutId) clearTimeout(timeoutId);
                     }
-                    if (this._liveRunning) {
-                        this._livePollTimer = setTimeout(poll, this._livePollDelay);
+                    if (!this._liveRunning) return;
+                    // Не поллим, если вкладка скрыта и PiP не открыт.
+                    const pipOpen = !!(this._popoutWin && !this._popoutWin.closed);
+                    if (this._isLiveTabHidden() && !pipOpen) {
+                        // Ждём разворота вкладки. Слушатель visibilitychange перезапустит poll,
+                        // но только если _liveRunning снят — иначе startBackgroundLiveListener()
+                        // посчитает поток уже запущенным и выйдет по гарду.
+                        this._liveRunning = false;
+                        this._livePollTimer = null;
+                        return;
                     }
+                    this._livePollTimer = setTimeout(poll, this._livePollDelay);
                 };
                 poll();
             };
@@ -284,6 +285,12 @@
             this._liveRunning = false;
             this._liveConnecting = false;
             this._livePollDelay = 2500;
+            // Снимаем слушатель разворота вкладки: при повторном старте он
+            // будет поставлен заново (startBackgroundLiveListener).
+            if (this._visibilityHandler) {
+                document.removeEventListener('visibilitychange', this._visibilityHandler);
+                this._visibilityHandler = null;
+            }
             if (this._liveES) {
                 try { this._liveES.close(); } catch(e) {}
                 this._liveES = null;

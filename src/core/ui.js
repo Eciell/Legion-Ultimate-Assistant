@@ -198,17 +198,13 @@
 
             return modal;
         },
-        // ⚙️ Служебные настройки аддона: Стелс, канал 7TV и перехват чата.
+        // ⚙️ Служебные настройки аддона: канал 7TV и перехват чата.
         // Вынесены из FAB-меню в модалку, чтобы меню не разрасталось.
         openSettings() {
-            // Флаг стелса живёт в page-context (его ставит hooks.js через unsafeWindow),
-            // поэтому читаем оттуда же — иначе в песочнице всегда «ОШИБКА».
-            const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-            const stealthOn = !!(G && G.__lgStealthActive);
             const chatDisabled = (typeof Chat !== 'undefined') ? !!Chat.disabled : false;
 
             // Разметка модалки — в core/ui-templates.js (UITemplates.settingsModal).
-            const modal = this.showModal(UITemplates.settingsModal(stealthOn, chatDisabled), { compact: true });
+            const modal = this.showModal(UITemplates.settingsModal(chatDisabled), { compact: true });
 
             if (!modal) return;
 

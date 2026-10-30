@@ -83,20 +83,12 @@
          * Модалка служебных настроек аддона (открывается из FAB-меню).
          * Обработчики кнопок навешивает UI.openSettings().
          *
-         * @param {boolean} stealthActive флаг стелса из page-context
-         * @param {boolean} chatDisabled  перехват чата отключён
+         * @param {boolean} chatDisabled перехват чата отключён
          */
-        settingsModal(stealthActive, chatDisabled) {
-            const stealthOn = !!stealthActive;
+        settingsModal(chatDisabled) {
             return `
                 <h2>⚙️ Настройки аддона <button class="custom-close" id="custom-close-btn">✖</button></h2>
                 <div style="display:flex; flex-direction:column; gap:15px; padding:10px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px;">
-                        <span>🛡️ Стелс-режим</span>
-                        <span style="color:${stealthOn ? '#4cc95a' : '#ff5a7a'}; font-weight:bold;">
-                            ${stealthOn ? 'АКТИВЕН' : 'ОШИБКА'}
-                        </span>
-                    </div>
                     <button id="modal-7tv-btn" style="width:100%; padding:10px; background:#2a2030; border:1px solid #caa55c; color:#ffcf6a; border-radius:6px; cursor:pointer; text-align:left;">🎭 Настройки канала 7TV</button>
                     <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer;">
                         <span>🚫 Отключить перехват чата</span>

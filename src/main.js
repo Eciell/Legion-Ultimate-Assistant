@@ -69,7 +69,7 @@
         (document.getElementById(DOM_IDS.btnPocketCity) || document.getElementById('btn-pocket-city'))?.addEventListener('click', () => PocketCity.open());
         (document.getElementById(DOM_IDS.btnProfile) || document.getElementById('btn-profile'))?.addEventListener('click', () => UI.togglePlayerHud());
 
-        // ⚙️ Настройки (Стелс, 7TV, перехват чата) вынесены в отдельную модалку:
+        // ⚙️ Настройки (7TV, перехват чата) вынесены в отдельную модалку:
         // FAB-меню стало короче, а служебные переключатели больше не мешают кнопкам.
         // Кнопку «Вынести чат» (PiP) привязывает Chat.init(): второй слушатель
         // здесь давал двойной вызов popoutChat() и мигающее окно.

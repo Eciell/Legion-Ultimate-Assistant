@@ -1213,129 +1213,6 @@
     // G объявлен в core/constants.js (подключается первым) — здесь не дублируем.
     // ============================================================
 
-    // ============================================================
-    // 0.1.0. 🛡️ СТЕЛС-РЕЖИМ (Анти-детект вкладки)
-    //
-    // Скрываем от игры, что вкладка неактивна. Нужно для SSE и для
-    // телеметрии vh. Блок обязан выполняться ДО хуков LGCity /
-    // LGAuction / LGQuest / LGMine, иначе наша подмена fetch
-    // вступит в конфликт с их перехватчиками.
-    // ============================================================
-    try {
-        // Подмену ставим на page-context документ (G.document = unsafeWindow.document):
-        // в песочнице Tampermonkey локальный document — прокси, и defineProperty
-        // на нём может бросить исключение. Прокси патчим отдельно, локально глуша ошибку.
-        const pageDoc = G.document || document;
-        const docProto = (G.Document && G.Document.prototype) || Document.prototype;
-
-        // Сохраняем реальные геттеры для нашего кода (если понадобится)
-        if (!G.__lgRealDoc) {
-            G.__lgRealDoc = {
-                getHidden: Object.getOwnPropertyDescriptor(docProto, 'hidden')?.get,
-                getVisibilityState: Object.getOwnPropertyDescriptor(docProto, 'visibilityState')?.get
-            };
-        }
-
-        const defineVis = (target) => {
-            try {
-                Object.defineProperty(target, 'hidden', {
-                    get: () => false,
-                    set: () => {},
-                    configurable: true
-                });
-                Object.defineProperty(target, 'visibilityState', {
-                    get: () => 'visible',
-                    set: () => {},
-                    configurable: true
-                });
-            } catch (err) {}
-        };
-        defineVis(docProto);
-        defineVis(pageDoc);
-        if (document && document !== pageDoc && document !== docProto) defineVis(document);
-
-        // hasFocus = true
-        try {
-            if (typeof docProto.hasFocus === 'function') docProto.hasFocus = () => true;
-            if (pageDoc && typeof pageDoc.hasFocus === 'function') pageDoc.hasFocus = () => true;
-            if (document && document !== pageDoc && typeof document.hasFocus === 'function') document.hasFocus = () => true;
-        } catch (err) {}
-
-        // navigator.webdriver = false (классический детект автоматизации)
-        try {
-            Object.defineProperty(G.navigator || navigator, 'webdriver', {
-                get: () => false,
-                configurable: true
-            });
-        } catch (err) {}
-
-        // Блокируем события скрытия (только для игры, но не мешаем нашим слушателям)
-        const suppressHiddenEvent = (e) => {
-            if (e && (e.type === 'visibilitychange' || e.type === 'webkitvisibilitychange')) {
-                e.stopImmediatePropagation();
-            }
-        };
-        // Каждый target вешаем отдельно: сбой на прокси песочницы не должен
-        // отменять подмену, уже сделанную в page-context.
-        const addVisListener = (target) => {
-            try {
-                if (target && typeof target.addEventListener === 'function') {
-                    target.addEventListener('visibilitychange', suppressHiddenEvent, true);
-                }
-            } catch (err) {}
-        };
-        addVisListener(G.window || G);
-        addVisListener(window);
-        addVisListener(document);
-
-        G.__lgStealthActive = true;
-        // Дублируем во внутренний window: часть проверок внутри аддона читает window.*
-        try { window.__lgStealthActive = true; } catch (err) {}
-    } catch (e) {
-        console.warn('[LEGION] Stealth: не удалось включить подмену видимости', e);
-        G.__lgStealthActive = false;
-        try { window.__lgStealthActive = false; } catch (err) {}
-    }
-
-    // ------------------------------------------------------------
-    // 0.1.0.1. Патч телеметрии: vh: 0 для POST /api/mine/*, /api/quest/*, /api/q*
-    // Обёртка ставится один раз (флаг на page-window), чтобы не плодить слои.
-    // ------------------------------------------------------------
-    if (!G.__lgStealthFetchHooked) {
-        G.__lgStealthFetchHooked = true;
-        const stealthOrigFetch = G.fetch || window.fetch;
-        const wrapFetch = function(...args) {
-            try {
-                const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
-                const opts = args[1] || {};
-                const isTarget = /\/api\/(mine|quest|q[a-z]+)/i.test(url);
-                const isPost = (opts.method || 'GET').toUpperCase() === 'POST';
-
-                if (isTarget && isPost && opts.body) {
-                    if (typeof opts.body === 'string') {
-                        try {
-                            const bodyObj = JSON.parse(opts.body);
-                            if (bodyObj && typeof bodyObj === 'object') {
-                                let changed = false;
-                                if (bodyObj.vh !== 0) { bodyObj.vh = 0; changed = true; }
-                                if (bodyObj.k !== 1) { bodyObj.k = 1; changed = true; }
-                                if (changed) {
-                                    args[1] = { ...opts, body: JSON.stringify(bodyObj) };
-                                }
-                            }
-                        } catch (e) {}
-                    } else if (opts.body instanceof URLSearchParams) {
-                        if (opts.body.get('vh') !== '0') opts.body.set('vh', '0');
-                        if (opts.body.get('k') !== '1') opts.body.set('k', '1');
-                    }
-                }
-            } catch (e) {}
-            return stealthOrigFetch.apply(this, args);
-        };
-        G.fetch = wrapFetch;
-        window.fetch = wrapFetch;
-    }
-
     // ------------------------------------------------------------
     // 0.1.1. LGMine (шахта)
     //
@@ -1550,20 +1427,12 @@
          * Модалка служебных настроек аддона (открывается из FAB-меню).
          * Обработчики кнопок навешивает UI.openSettings().
          *
-         * @param {boolean} stealthActive флаг стелса из page-context
-         * @param {boolean} chatDisabled  перехват чата отключён
+         * @param {boolean} chatDisabled перехват чата отключён
          */
-        settingsModal(stealthActive, chatDisabled) {
-            const stealthOn = !!stealthActive;
+        settingsModal(chatDisabled) {
             return `
                 <h2>⚙️ Настройки аддона <button class="custom-close" id="custom-close-btn">✖</button></h2>
                 <div style="display:flex; flex-direction:column; gap:15px; padding:10px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px;">
-                        <span>🛡️ Стелс-режим</span>
-                        <span style="color:${stealthOn ? '#4cc95a' : '#ff5a7a'}; font-weight:bold;">
-                            ${stealthOn ? 'АКТИВЕН' : 'ОШИБКА'}
-                        </span>
-                    </div>
                     <button id="modal-7tv-btn" style="width:100%; padding:10px; background:#2a2030; border:1px solid #caa55c; color:#ffcf6a; border-radius:6px; cursor:pointer; text-align:left;">🎭 Настройки канала 7TV</button>
                     <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer;">
                         <span>🚫 Отключить перехват чата</span>
@@ -1874,17 +1743,13 @@
 
             return modal;
         },
-        // ⚙️ Служебные настройки аддона: Стелс, канал 7TV и перехват чата.
+        // ⚙️ Служебные настройки аддона: канал 7TV и перехват чата.
         // Вынесены из FAB-меню в модалку, чтобы меню не разрасталось.
         openSettings() {
-            // Флаг стелса живёт в page-context (его ставит hooks.js через unsafeWindow),
-            // поэтому читаем оттуда же — иначе в песочнице всегда «ОШИБКА».
-            const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-            const stealthOn = !!(G && G.__lgStealthActive);
             const chatDisabled = (typeof Chat !== 'undefined') ? !!Chat.disabled : false;
 
             // Разметка модалки — в core/ui-templates.js (UITemplates.settingsModal).
-            const modal = this.showModal(UITemplates.settingsModal(stealthOn, chatDisabled), { compact: true });
+            const modal = this.showModal(UITemplates.settingsModal(chatDisabled), { compact: true });
 
             if (!modal) return;
 
@@ -4715,8 +4580,8 @@ const Players = {
                 this._setVisible(!this.isVisible);
             });
 
-            // Ставим сразу после «Профиля»: пункт остаётся в группе кнопок и не
-            // задевает чекбокс «Отключить перехват чата» и индикатор стелса.
+            // Ставим сразу после «Профиля»: пункт остаётся в группе кнопок
+            // и не задевает кнопку «⚙️ Настройки» того же блока.
             const profileBtn = document.getElementById(DOM_IDS.btnProfile);
             if (profileBtn) profileBtn.insertAdjacentElement('afterend', created);
             else fabMenu.appendChild(created);
@@ -5633,26 +5498,16 @@ const Players = {
         _liveRunning: false,
         _liveConnecting: false,
         _livePollDelay: 2500,
-        // Пауза опроса, пока вкладка скрыта: сервер не долбим, но цикл не рвём.
+        // TODO: REMOVE — пауза скрытой вкладки больше не используется:
+        // поллинг полностью останавливается и поднимается по visibilitychange.
         _liveHiddenDelay: 5000,
+        // Обработчик visibilitychange, который перезапускает поллинг после
+        // возврата на вкладку. Ставится один раз в startBackgroundLiveListener().
+        _visibilityHandler: null,
 
-        // Реальная видимость вкладки. Стелс-режим (hooks.js) подменяет
-        // document.hidden/visibilityState на «всегда видимо», поэтому берём
-        // сохранённый там нативный геттер, а при его отсутствии — обычное свойство.
         _isLiveTabHidden() {
-            try {
-                const realGetter = G.__lgRealDoc && G.__lgRealDoc.getHidden;
-                if (typeof realGetter === 'function') {
-                    // G.document — настоящий page-Document: нативный геттер ждёт
-                    // именно его в this (прокси песочницы может бросить TypeError).
-                    try { return !!realGetter.call(G.document || document); } catch (e) {}
-                }
-            } catch (e) {}
-            try {
-                return !!document.hidden;
-            } catch (e) {
-                return false;
-            }
+            // Стелс-режим удалён: просто читаем нативный document.hidden.
+            return !!document.hidden;
         },
 
         getChannelLogin() {
@@ -5723,6 +5578,18 @@ const Players = {
         async startBackgroundLiveListener() {
             if (this.disabled || this._liveConnecting) return;
 
+            // Возврат на вкладку: поллинг останавливается при document.hidden
+            // (см. poll ниже), поэтому поток поднимаем заново по visibilitychange.
+            if (!this._visibilityHandler) {
+                this._visibilityHandler = () => {
+                    if (!document.hidden && !this._liveRunning) {
+                        this._livePollDelay = 2500;
+                        this.startBackgroundLiveListener();
+                    }
+                };
+                document.addEventListener('visibilitychange', this._visibilityHandler);
+            }
+
             // Защита от дублирования: живой поток уже открыт или подключается.
             if (this._liveES && (this._liveES.readyState === 0 || this._liveES.readyState === 1)) return;
             // Уже идёт fetch-поллинг — второй цикл не запускаем.
@@ -5748,16 +5615,6 @@ const Players = {
                 dbg('Starting live fetch polling fallback...');
                 const poll = async () => {
                     if (!this._liveRunning) return;
-                    // Скрытая вкладка: сеть не трогаем, но следующий тик оставляем —
-                    // иначе после возврата на вкладку поток не перезапустится
-                    // (visibilitychange в стелс-режиме гасится hooks.js).
-                    // Исключение — открытое PiP-окно чата: оно может быть видимым,
-                    // даже когда вкладка игры свёрнута, и тогда поток нужен.
-                    const pipOpen = !!(this._popoutWin && !this._popoutWin.closed);
-                    if (!pipOpen && this._isLiveTabHidden()) {
-                        this._livePollTimer = setTimeout(poll, this._liveHiddenDelay || 5000);
-                        return;
-                    }
                     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
                     const timeoutId = controller ? setTimeout(() => controller.abort(), 3000) : null;
                     let hasPayload = false;
@@ -5820,9 +5677,18 @@ const Players = {
                             : Math.min(30000, Math.max(2500, (this._livePollDelay || 2500) * 2));
                         if (timeoutId) clearTimeout(timeoutId);
                     }
-                    if (this._liveRunning) {
-                        this._livePollTimer = setTimeout(poll, this._livePollDelay);
+                    if (!this._liveRunning) return;
+                    // Не поллим, если вкладка скрыта и PiP не открыт.
+                    const pipOpen = !!(this._popoutWin && !this._popoutWin.closed);
+                    if (this._isLiveTabHidden() && !pipOpen) {
+                        // Ждём разворота вкладки. Слушатель visibilitychange перезапустит poll,
+                        // но только если _liveRunning снят — иначе startBackgroundLiveListener()
+                        // посчитает поток уже запущенным и выйдет по гарду.
+                        this._liveRunning = false;
+                        this._livePollTimer = null;
+                        return;
                     }
+                    this._livePollTimer = setTimeout(poll, this._livePollDelay);
                 };
                 poll();
             };
@@ -5902,6 +5768,12 @@ const Players = {
             this._liveRunning = false;
             this._liveConnecting = false;
             this._livePollDelay = 2500;
+            // Снимаем слушатель разворота вкладки: при повторном старте он
+            // будет поставлен заново (startBackgroundLiveListener).
+            if (this._visibilityHandler) {
+                document.removeEventListener('visibilitychange', this._visibilityHandler);
+                this._visibilityHandler = null;
+            }
             if (this._liveES) {
                 try { this._liveES.close(); } catch(e) {}
                 this._liveES = null;
@@ -7719,7 +7591,7 @@ const Players = {
         (document.getElementById(DOM_IDS.btnPocketCity) || document.getElementById('btn-pocket-city'))?.addEventListener('click', () => PocketCity.open());
         (document.getElementById(DOM_IDS.btnProfile) || document.getElementById('btn-profile'))?.addEventListener('click', () => UI.togglePlayerHud());
 
-        // ⚙️ Настройки (Стелс, 7TV, перехват чата) вынесены в отдельную модалку:
+        // ⚙️ Настройки (7TV, перехват чата) вынесены в отдельную модалку:
         // FAB-меню стало короче, а служебные переключатели больше не мешают кнопкам.
         // Кнопку «Вынести чат» (PiP) привязывает Chat.init(): второй слушатель
         // здесь давал двойной вызов popoutChat() и мигающее окно.
