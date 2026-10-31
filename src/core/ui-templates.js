@@ -167,7 +167,8 @@
                 <div style="font-size:13px; color:#aaa; margin-bottom:15px; text-align:center;">
                     Прямой доступ к официальным зданиям игры из любой локации:
                 </div>
-                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:12px; margin-bottom:10px;">
+                <!-- minmax(120px): 7 карточек-зданий укладываются в один ряд при ширине окна 1200px -->
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:12px; margin-bottom:10px;">
                     <button class="pocket-grid-btn" data-room="auction" style="padding:16px 10px; background:#1b2838; border:2px solid #335577; border-radius:10px; color:#8fd3ff; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
                         <span style="font-size:32px;">🏛️</span>
                         <span>Аукцион</span>
@@ -180,8 +181,8 @@
                     </button>
                     <button class="pocket-grid-btn" data-room="anvil" style="padding:16px 10px; background:#381e3a; border:2px solid #663366; border-radius:10px; color:#f3a683; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
                         <span style="font-size:32px;">🔨</span>
-                        <span>Когтекузня</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Заточка / Ремонт</small>
+                        <span>Заточка</span>
+                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Наковальня / Ремонт</small>
                     </button>
                     <button class="pocket-grid-btn" data-room="trainer" style="padding:16px 10px; background:#3a351e; border:2px solid #665b2d; border-radius:10px; color:#f7d794; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
                         <span style="font-size:32px;">🎓</span>
@@ -192,6 +193,16 @@
                         <span style="font-size:32px;">📦</span>
                         <span>Склад</span>
                         <small style="color:#8899aa; font-size:10px; font-weight:normal;">Банк / Сундук</small>
+                    </button>
+                    <button class="pocket-grid-btn" data-room="forge" style="padding:16px 10px; background:#3a1a14; border:2px solid #663322; border-radius:10px; color:#ff9977; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
+                        <span style="font-size:32px;">⚔️</span>
+                        <span>Кузня</span>
+                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Оружие и броня</small>
+                    </button>
+                    <button class="pocket-grid-btn" data-room="magic" style="padding:16px 10px; background:#1a1a38; border:2px solid #333366; border-radius:10px; color:#aaaaff; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
+                        <span style="font-size:32px;">🔮</span>
+                        <span>Звездочёт</span>
+                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Зелья/Свитки</small>
                     </button>
                 </div>
             `;
