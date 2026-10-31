@@ -33,30 +33,24 @@
         async openNativeBuilding(roomId) {
             dbg(`Открытие нативного здания «${roomId}»...`);
 
-            // 1. Безопасно закрываем шахту, если она открыта
-            const mnExitBtn = document.querySelector('[data-mn-exit]');
-            if (mnExitBtn) {
-                try { mnExitBtn.click(); } catch(e) {}
-                // Ждём анимацию, чтобы игра успела снять классы и перерисовать вкладки
-                await new Promise(r => setTimeout(r, 150));
-            }
-
             // Игровые объекты (LGCity / __lgQuestContext / cityFiles) живут
             // в page-context: после @grant window — песочница, поэтому берём
             // unsafeWindow (G), как это уже делается в chat.js.
             const pageWin = (typeof G !== 'undefined' && G) ? G : window;
 
-            // 2. Обходим cityLocked (блокировку похода)
+            // 1. Обходим cityLocked (блокировку похода).
+            // Шахту намеренно НЕ закрываем: она остаётся открытой под окном
+            // здания (как у конкурента), иначе игрока выбрасывало из промысла.
             if (pageWin.__lgQuestContext && typeof pageWin.__lgQuestContext.openTown === 'function') {
                 try { pageWin.__lgQuestContext.openTown('fair'); } catch (e) {}
             }
 
-            // 3. Гарантируем загрузку скриптов города
+            // 2. Гарантируем загрузку скриптов города
             if (!pageWin.LGCity && typeof pageWin.cityFiles === 'function') {
                 try { await pageWin.cityFiles(); } catch (e) {}
             }
 
-            // 4. Принудительно переключаем вкладку на Город
+            // 3. Принудительно переключаем вкладку на Город
             const cityTabBtn = document.querySelector('.tabs button[data-tab="city"]');
             if (cityTabBtn) {
                 cityTabBtn.hidden = false;
@@ -72,7 +66,7 @@
                 else b.removeAttribute('aria-current');
             });
 
-            // 5. Ожидаем инициализации LGCity и открываем панель
+            // 4. Ожидаем инициализации LGCity и открываем панель
             let attempts = 0;
             const interval = setInterval(() => {
                 attempts++;
