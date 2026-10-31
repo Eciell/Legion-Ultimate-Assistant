@@ -304,7 +304,7 @@
                 else if (id.match(/(shield|buckler|scutum)/)) slot = 'shield';
                 else if (/^seal_/i.test(id) || /печать/i.test(id)) slot = 'scroll';
                 else if (id.match(/(amulet|charm|bead|coin|tooth|ring|pendant|seal|halo|lucky|ear|horn|tear)/)) slot = 'trinket';
-                else if (id.match(/(potion|apple|pear|pretzel|bread|kvass|cheese|pie|ham|roast|tea|stew|candy|milk)/)) slot = 'food';
+                else if (id.match(/(potion|apple|pear|pretzel|bread|kvass|cheese|pie|ham|roast|tea|stew|candy|milk|catnip|mint)/)) slot = 'food';
                 else if (id.match(/(star|sphere|aurus)/)) slot = 'material';
                 else if (id.match(/(scroll)/)) slot = 'scroll';
             }

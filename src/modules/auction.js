@@ -365,10 +365,10 @@
 
                     let filtered = current.filter(l => {
                         if (q && !l.name.toLowerCase().includes(q)) return false;
-                        if (fSlot && l.metaSlot && l.metaSlot !== fSlot) return false;
-                        if (fRarity && l.metaRarity && l.metaRarity !== fRarity) return false;
-
-                        // Если выбран класс, показываем предметы этого класса + универсальные
+                        // Если фильтр выбран, предмет ОБЯЗАН иметь этот слот. Если слот неизвестен (пустой) — скрываем его.
+                        if (fSlot && l.metaSlot !== fSlot) return false;
+                        if (fRarity && l.metaRarity !== fRarity) return false;
+                        // Универсальные предметы (без роли) должны проходить фильтр класса
                         if (fRole && l.metaRole && l.metaRole !== fRole) return false;
 
                         if (onlyDeals && l.discount < 10) return false;

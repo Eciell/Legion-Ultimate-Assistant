@@ -549,7 +549,7 @@
                 else if (id.match(/(shield|buckler|scutum)/)) slot = 'shield';
                 else if (/^seal_/i.test(id) || /печать/i.test(id)) slot = 'scroll';
                 else if (id.match(/(amulet|charm|bead|coin|tooth|ring|pendant|seal|halo|lucky|ear|horn|tear)/)) slot = 'trinket';
-                else if (id.match(/(potion|apple|pear|pretzel|bread|kvass|cheese|pie|ham|roast|tea|stew|candy|milk)/)) slot = 'food';
+                else if (id.match(/(potion|apple|pear|pretzel|bread|kvass|cheese|pie|ham|roast|tea|stew|candy|milk|catnip|mint)/)) slot = 'food';
                 else if (id.match(/(star|sphere|aurus)/)) slot = 'material';
                 else if (id.match(/(scroll)/)) slot = 'scroll';
             }
@@ -3330,10 +3330,10 @@
 
                     let filtered = current.filter(l => {
                         if (q && !l.name.toLowerCase().includes(q)) return false;
-                        if (fSlot && l.metaSlot && l.metaSlot !== fSlot) return false;
-                        if (fRarity && l.metaRarity && l.metaRarity !== fRarity) return false;
-
-                        // Если выбран класс, показываем предметы этого класса + универсальные
+                        // Если фильтр выбран, предмет ОБЯЗАН иметь этот слот. Если слот неизвестен (пустой) — скрываем его.
+                        if (fSlot && l.metaSlot !== fSlot) return false;
+                        if (fRarity && l.metaRarity !== fRarity) return false;
+                        // Универсальные предметы (без роли) должны проходить фильтр класса
                         if (fRole && l.metaRole && l.metaRole !== fRole) return false;
 
                         if (onlyDeals && l.discount < 10) return false;
