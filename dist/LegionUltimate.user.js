@@ -1372,6 +1372,21 @@
                 patched = true;
             }
 
+            // 3) data(q) — сеттер игры: сохраняем СЫРОЙ пакет до буферизации.
+            //    quest.js кладёт его в RAW и показывает с задержкой стрима (q.dl),
+            //    поэтому _view() отстаёт. Этот снимок нужен Ассистенту Жреца:
+            //    раненые (b.low) должны быть максимально свежими.
+            if (typeof val.data === 'function' && !val.__dataHooked) {
+                const origData = val.data;
+                val.data = function (q) {
+                    // G — это unsafeWindow (см. core/constants.js).
+                    if (q) G.__lgRawQuestData = q;
+                    return origData.apply(this, arguments);
+                };
+                val.__dataHooked = true;
+                patched = true;
+            }
+
             // Метку ставим только если реально что-то подменили: если
             // методы ещё не созданы, следующий сеттер LGQuest (или сторож)
             // попробует повесить хук повторно.
@@ -4533,9 +4548,16 @@ const Players = {
     // ============================================================
     // 4.2. МОДУЛЬ: АССИСТЕНТ ЖРЕЦА (HUD для Похода)
     //
-    // Данные боя берём из нативного контекста похода, который перехватывает
-    // hooks.js (G.__lgQuestContext, в песочнице читается через G):
-    //   q.b.st   — состояние боя ('hit' = бой идёт)
+    // Данные боя берём из нативного модуля игры (в песочнице — через G).
+    // Приоритет источников — от самого свежего к самому «ленивому»:
+    //   G.__lgRawQuestData  — сырой пакет, перехваченный hooks.js на LGQuest.data(q)
+    //                         (до буферизации и задержки стрима q.dl);
+    //   G.__BB_LAST_RAW_Q__ — аналогичный снимок от «Чёрного ящика»;
+    //   G.LGQuest._view()   — штатный геттер игры (данные с задержкой);
+    //                         data(q) — СЕТТЕР, без аргумента возвращает undefined.
+    //   q.on     — поход активен (false — завершён/не запущен)
+    //   q.b.st   — фаза боя: 'party' (ход отряда — основное окно хила),
+    //              'tele'/'mech'/'trans'/'hit' — бой идёт, 'intro'/'end' — нет
     //   q.b.low  — массив [login, name, hp] по раненым участникам
     //   q.b.sk   — умения героя в бою [id, кулдаун, тип] ('heal' = хилка)
     //
@@ -4550,6 +4572,8 @@ const Players = {
         watchedNicks: [],          // ники как ввёл пользователь (сравнение — без учёта регистра)
         nativeFriends: new Set(),  // нативные друзья игры (/api/friends), логины в нижнем регистре
         isVisible: false,          // HUD открывается/закрывается вручную из FAB-меню
+        // true — показывать всех раненых отряда, игнорируя список (по умолчанию).
+        showAllWounded: true,
         _remindedThisCombat: false,
         _updateInterval: null,
         _friendsInterval: null,    // периодическое обновление нативных друзей
@@ -4562,6 +4586,7 @@ const Players = {
         STORAGE_KEY: 'LEGION_PRIEST_WATCHED',
         HUD_POS_KEY: 'LEGION_PRIEST_HUD_POS',
         VISIBLE_KEY: 'LEGION_PRIEST_HUD_VISIBLE',
+        ALL_KEY: 'LEGION_PRIEST_ALL',   // режим «показывать всех раненых»
 
         init() {
             // Список друзей берём у игры: аддон больше не ведёт свой.
@@ -4573,6 +4598,7 @@ const Players = {
 
             this._loadVisibility();
             this._loadWatched();
+            this._loadShowAll();
             this._bindMenuButton();
 
             // Игра отдельного события об изменениях боя не даёт, но если оно
@@ -4736,6 +4762,33 @@ const Players = {
             }
         },
 
+        // Режим «показывать всех раненых». Включён по умолчанию: пользователь
+        // должен явно выключить его ('false'), чтобы вернуться к фильтру по
+        // списку. Читаем/пишем безопасно — при запрещённом localStorage
+        // аддон не должен падать на старте.
+        _loadShowAll() {
+            try {
+                this.showAllWounded = localStorage.getItem(this.ALL_KEY) !== 'false';
+            } catch (e) {
+                this.showAllWounded = true;
+            }
+        },
+
+        _saveShowAll() {
+            try {
+                localStorage.setItem(this.ALL_KEY, this.showAllWounded);
+            } catch (e) {
+                dbg('PriestAssistant: не удалось сохранить режим "все раненые"', e);
+            }
+        },
+
+        // Переключение режима (чекбокс в настройках, при необходимости — кнопка в меню).
+        toggleShowAll() {
+            this.showAllWounded = !this.showAllWounded;
+            this._saveShowAll();
+            this.renderHud(true);
+        },
+
         // Ники храним как ввёл пользователь (чтобы список читался нормально),
         // дубликаты убираем без учёта регистра.
         _normalizeNicks(list) {
@@ -4804,29 +4857,66 @@ const Players = {
             return '';
         },
 
-        // ctx.data() — снимок состояния похода (тот же объект, что игра гоняет
-        // в своём рендере). ctx.act() — отправка действия в бой.
+        // Состояние похода. Порядок источников (от самого свежего):
+        //   1) __lgRawQuestData — сырой пакет из hooks.js (без задержки стрима);
+        //   2) __BB_LAST_RAW_Q__ — сырой снимок от BlackBox (если он стоит);
+        //   3) LGQuest._view() — штатный геттер игры (данные с задержкой q.dl);
+        //   4) __lgQuestContext.data() — старый фолбэк.
         _readQuest() {
-            // Контекст похода — объект страницы (hooks.js пишет G.__lgQuestContext);
-            // в песочнице window-копия всегда пустая, поэтому нужен G.
-            const ctx = G.__lgQuestContext || window.__lgQuestContext;
-            if (!ctx || typeof ctx.data !== 'function') return null;
-            try {
-                const q = ctx.data();
-                return (q && typeof q === 'object') ? q : null;
-            } catch (e) {
-                dbg('PriestAssistant: не удалось прочитать данные похода', e);
-                return null;
+            const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+
+            // 1. Самый свежий пакет: игра зовёт data(q) на каждое обновление,
+            //    hooks.js кладёт его сюда ДО буферизации в RAW игры.
+            if (G.__lgRawQuestData && typeof G.__lgRawQuestData === 'object') {
+                // { on: false } — поход завершён: это достоверно, старые
+                // снимки (BlackBox/_view) подставлять нельзя.
+                return G.__lgRawQuestData.on === false ? null : G.__lgRawQuestData;
             }
+
+            // 2. Пакет от «Чёрного ящика» (если хука из п.1 ещё нет).
+            if (G.__BB_LAST_RAW_Q__ && typeof G.__BB_LAST_RAW_Q__ === 'object') {
+                return G.__BB_LAST_RAW_Q__.on === false ? null : G.__BB_LAST_RAW_Q__;
+            }
+
+            // 3. Запасной вариант: _view() — данные с задержкой стрима.
+            if (G.LGQuest && typeof G.LGQuest._view === 'function') {
+                try {
+                    const v = G.LGQuest._view();
+                    if (v && typeof v === 'object') return v.on === false ? null : v;
+                } catch (e) {}
+            }
+
+            // 4. Старый fallback (у контекста QX метода data нет).
+            const ctx = G.__lgQuestContext || window.__lgQuestContext;
+            if (ctx && typeof ctx.data === 'function') {
+                try {
+                    const q = ctx.data();
+                    if (q && typeof q === 'object') return q;
+                } catch (e) {}
+            }
+            return null;
         },
 
-        _collectWounded(q) {
+        // Бой активен, если объект боя есть и фаза не 'end' и не 'intro'.
+        // Фазы по docs/API.md: 'party' (ход отряда — тут и нужен хил),
+        // 'tele', 'hit', 'mech', 'trans' — бой идёт; 'intro' и 'end' — нет.
+        _isBattleActive(battle) {
+            return !!battle && typeof battle === 'object' &&
+                battle.st !== 'end' && battle.st !== 'intro';
+        },
+
+        // Раненые отряда (q.b.low). Показываем либо отслеживаемых (свой список
+        // / друзья игры), либо ВСЕХ, если включён showAllWounded.
+        // q можно не передавать — тогда читаем состояние похода сами.
+        _collectWounded(q = this._readQuest()) {
             const battle = q && q.b;
-            if (!battle || battle.st !== 'hit' || !Array.isArray(battle.low)) return [];
+            if (!this._isBattleActive(battle) || !Array.isArray(battle.low)) return [];
 
             const myNick = this._getMyNick();
-            const watch = this._getWatchSet();
-            if (!watch.size) return [];
+            const isAll = this.showAllWounded;
+            // В режиме «все» фильтр по списку не нужен вообще.
+            const watchSet = isAll ? null : this._getWatchSet();
+            if (!isAll && !watchSet.size) return [];
 
             const seen = new Set();
             return battle.low
@@ -4844,9 +4934,11 @@ const Players = {
                 })
                 .filter(w => {
                     const key = w.login.toLowerCase();
-                    if (!key || key === myNick || seen.has(key) || !watch.has(key)) return false;
+                    if (!key || key === myNick || seen.has(key)) return false;
                     seen.add(key);
-                    return true;
+                    // Режим «все раненые»: показываем каждого, кроме себя.
+                    if (isAll) return true;
+                    return watchSet.has(key);
                 })
                 .sort((a, b) => a.hp - b.hp);
         },
@@ -4864,13 +4956,17 @@ const Players = {
 
             const q = this._readQuest();
 
+            // Бой активен, если есть объект q.b и фаза не 'end' и не 'intro'.
+            // Хил нужен именно в 'party' (ход отряда), а не только в 'hit'.
+            const isBattle = this._isBattleActive(q && q.b);
+
             // Напоминание жрецу: бой идёт, панель закрыта — один раз за бой.
-            if (q && q.b && q.b.st === 'hit' && this._getMyRole() === 'priest') {
+            if (isBattle && this._getMyRole() === 'priest') {
                 if (!this.isVisible && !this._remindedThisCombat) {
                     UI.showToast('✨ Вы Жрец! Откройте Панель Жреца в меню для быстрого хила.', false);
                     this._remindedThisCombat = true;
                 }
-            } else if (!q || !q.b || q.b.st !== 'hit') {
+            } else if (!isBattle) {
                 // Бой закончился (или мы не в походе) — напоминание снова разрешено.
                 this._remindedThisCombat = false;
             }
@@ -4890,16 +4986,17 @@ const Players = {
             }
 
             // Состояние 2: в походе, но бой ещё не идёт (или уже закончился).
-            if (!q.b || q.b.st !== 'hit') {
-                this._showHud(this._hudHeader('✨ Жрец: Ожидание боя'), force);
+            if (!isBattle) {
+                this._showHud(this._hudHeader('✨ Жрец: Ожидание боя') + this._watchListHtml(), force);
                 return;
             }
 
             const wounded = this._collectWounded(q);
 
             // Состояние 3: бой идёт, но из отслеживаемых никто не ранен.
+            // Список наблюдаемых оставляем под заголовком — видно, что панель жива.
             if (!wounded.length) {
-                this._showHud(this._hudHeader('✨ Жрец: Все целы', '#4cc95a'), force);
+                this._showHud(this._hudHeader('✨ Жрец: Все целы', '#4cc95a') + this._watchListHtml(), force);
                 return;
             }
 
@@ -4953,9 +5050,10 @@ const Players = {
             `;
         },
 
-        _outsideQuestHtml() {
-            // Вне похода показываем, кого реально отслеживаем: свой список
-            // либо нативных друзей игры (их может быть много — выводим счётчик).
+        // Список отслеживаемых ников — общий рендер для всех состояний HUD.
+        // Показываем свой список либо нативных друзей игры (их может быть
+        // много, поэтому выводим счётчик). Пусто — значит «все друзья».
+        _watchListHtml() {
             let listHtml;
             if (this.watchedNicks.length) {
                 listHtml = this.watchedNicks
@@ -4967,8 +5065,12 @@ const Players = {
                 listHtml = '<div class="priest-hud-watch-item">• (Все друзья)</div>';
             }
 
-            return this._hudHeader('✨ Жрец: Ожидание похода') +
-                `<div class="priest-hud-watchlist">${listHtml}</div>`;
+            return `<div class="priest-hud-watchlist">${listHtml}</div>`;
+        },
+
+        _outsideQuestHtml() {
+            // Вне похода показываем, кого реально отслеживаем.
+            return this._hudHeader('✨ Жрец: Ожидание похода') + this._watchListHtml();
         },
 
         // Перетаскивание вешаем один раз — когда в HUD уже есть .priest-hud-header.
@@ -5042,9 +5144,13 @@ const Players = {
                 <h2>✨ Настройки Жреца <button class="custom-close" id="custom-close-btn">✖</button></h2>
                 <div style="padding: 10px;">
                     <div style="font-size: 13px; color: #aaa; margin-bottom: 15px;">
-                        Введите ники через запятую или пробел. Если поле пустое, панель будет отслеживать всех ваших друзей.
+                        Введите ники через запятую или пробел. Если поле пустое, панель будет отслеживать всех ваших друзей. Галочка ниже полностью отключает фильтр по списку.
                     </div>
                     <textarea id="priest-nicks-input" maxlength="500" style="width: 100%; height: 100px; background: #111; border: 1px solid #444; color: #fff; padding: 10px; border-radius: 6px; box-sizing: border-box; font-family: monospace; resize: vertical;" placeholder="ник1, ник2, ник3">${Utils.escapeHtml(current)}</textarea>
+                    <label style="margin-top: 12px; display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="priest-show-all" style="width: 16px; height: 16px; accent-color: #caa55c; flex-shrink: 0;" ${this.showAllWounded ? 'checked' : ''}>
+                        <span style="font-size: 13px;">Показывать ВСЕХ раненых (игнорировать список)</span>
+                    </label>
                     <div style="display: flex; gap: 10px; margin-top: 15px;">
                         <button id="priest-save-btn" style="flex: 1; padding: 10px; background: #caa55c; color: #1d1620; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">Сохранить</button>
                     </div>
@@ -5054,6 +5160,17 @@ const Players = {
             const input = modal?.querySelector('#priest-nicks-input');
             const saveBtn = modal?.querySelector('#priest-save-btn');
             if (!input || !saveBtn) return;
+
+            // Режим «все раненые» применяем сразу, без кнопки «Сохранить»:
+            // состояние пишем в localStorage и сразу перерисовываем HUD.
+            const showAllChk = modal.querySelector('#priest-show-all');
+            if (showAllChk) {
+                showAllChk.addEventListener('change', (e) => {
+                    this.showAllWounded = !!e.target.checked;
+                    this._saveShowAll();
+                    this.renderHud(true);
+                });
+            }
 
             saveBtn.addEventListener('click', () => {
                 // Разделители: запятая, пробел, перенос строки (и их сочетания).
