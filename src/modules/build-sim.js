@@ -4,6 +4,9 @@
     const BuildSim = {
         skillsCache: null,
         simulatedSkills: {},
+        savedBuilds: {}, // { [clsId]: [{ name, skills }] } — сохранённые в localStorage билды по классам
+        _currentBuildName: '', // имя последнего сохранённого/загруженного билда (для будущих фич UI)
+        _currentBuildNames: {}, // { [clsId]: name } — активный билд каждого класса (нужен для кнопки «Удалить»)
 
         statNames: { hp: 'Макс. HP', atk: 'Физ. урон', mag: 'Магия', def: 'Броня', crit: 'Крит %', dodge: 'Уклонение', pierce: 'Пробивание', resist: 'Сопротивление' },
         fxNames: { melee: 'Физ. урон %', magic: 'Магия %', hp: 'Макс. HP %', def: 'Броня', healPow: 'Сила лечения %', healIn: 'Вх. лечение %', crit: 'Крит %', critDmg: 'Сила крита', skel: 'Урон скелетов %', skelT: 'Время скелетов', leech: 'Вампиризм %', block: 'Снижение урона %', dodge: 'Уклонение %', lead: 'Урон по боссам %', first: 'Урон 1-й ход %', dmg: 'Весь урон %', pierce: 'Пробивание %', resist: 'Сопротивление', healCrit: 'Крит лечения %', regen: 'Регенерация %', low: 'Урон при низком HP %', a_siyanie: 'Сияние +%', a_obereg: 'Оберег +%', a_dlan: 'Длань +%', a_aura: 'Аура +%', aura: 'Аура −урон %', a_svet: 'Свет +%', a_vspyshka: 'Вспышка +%', a_oznob: 'Озноб +%', a_pricel: 'Прицел +%', a_grad: 'Град +%', a_natisk: 'Натиск +%', a_stoyka: 'Стойка +%', a_vspinu: 'Вспину +%', a_yad: 'Яд +%', a_vytyanut: 'Вытянуть +%', a_podnyat: 'Поднять +%', poison: 'Отрава %', steal: 'Кража %', loot: 'Добыча %', skelN: 'Скелетов +', volley: 'Залп +%', shieldBlock: 'Щит блок %', trapDodge: 'Ловушки %', steady: 'Промах→удар %', cleave: 'Замах %', cleaveBoss: 'Замах по боссу %', penBoss: 'Бронебой по боссу %', drain: 'Вытягивание %', hex: 'Проклятие +%', holy: 'По нежити +%', poisonT: 'Время отравы' },
@@ -63,6 +66,14 @@
 
         async mount(container) {
             if (!container) return;
+            // Сохранённые билды поднимаем до парсинга /api/me и /api/skills,
+            // чтобы UI успел отрисовать список «Мои билды» при первом renderTree.
+            this.loadSavedBuilds();
+            // Очки при каждом открытии начинаются с нуля (this.simulatedSkills = {}),
+            // поэтому и «активного» билда нет: кнопка «Удалить» до выбора/загрузки
+            // честно попросит выбрать билд.
+            this._currentBuildNames = {};
+            this._currentBuildName = '';
             container.innerHTML = `<div class="loader">Загрузка данных...</div>`;
             try {
                 const me = await Utils.fetchApi('/api/me');
@@ -114,9 +125,19 @@
                         <div class="tab-content" id="tab-${c.id}">
                             <div class="sim-tree-wrap">
                                 <div class="sim-tree-inner">
-                                    <div class="sim-top-bar">
-                                        <div class="sim-free-pts">Свободно очков: <span id="free-${c.id}">0</span> / ${MAX_POINTS} <span style="font-size:12px;color:#aaa;">(Тестовый режим)</span></div>
-                                        <button class="sim-reset-btn" data-reset="${c.id}">Сбросить всё</button>
+                                    <div class="sim-top-bar" style="display: flex; flex-direction: column; gap: 12px; background: #1e1724; padding: 12px; border-radius: 8px; border: 1px solid #3d2f44; margin-bottom: 15px;">
+                                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                                            <div class="sim-free-pts" style="font-size: 14px; color: #eee;">Свободно очков: <span id="free-${c.id}" style="color: #caa55c; font-weight: bold; font-size: 18px;">0</span> <span style="color: #888;">/ ${MAX_POINTS}</span></div>
+                                            <button class="sim-reset-btn" data-reset="${c.id}" style="background: rgba(255, 90, 122, 0.1); color: #ff5a7a; border: 1px solid #ff5a7a; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s;">Сбросить всё</button>
+                                        </div>
+                                        <div style="display: flex; gap: 8px; align-items: center; border-top: 1px solid #3d2f44; padding-top: 12px;">
+                                            <input type="text" id="save-name-${c.id}" class="search-bar" style="margin:0; padding:8px 12px; font-size:12px; flex:1; background:#0f0f15; border:1px solid #3d2f44; color:#fff; border-radius:6px; outline:none;" placeholder="Название нового билда...">
+                                            <button class="sim-save-btn" data-save="${c.id}" style="background: #28a745; color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 12px; font-weight: bold; cursor: pointer;">💾 Сохранить</button>
+                                            <select id="load-select-${c.id}" class="search-bar" style="margin:0; padding:8px 12px; font-size:12px; width:180px; background:#0f0f15; border:1px solid #3d2f44; color:#fff; border-radius:6px; cursor:pointer; outline:none;">
+                                                <option value="">— Мои билды —</option>
+                                            </select>
+                                            <button class="sim-del-btn" data-del="${c.id}" style="background: #3a2028; color: #ff5a7a; border: 1px solid #ff5a7a; border-radius: 6px; padding: 8px 12px; font-size: 12px; cursor: pointer;" title="Удалить выбранный билд">🗑️</button>
+                                        </div>
                                     </div>
                                     <div class="sim-branches" id="tree-${c.id}"></div>
                                 </div>
@@ -157,6 +178,89 @@
             this.simulatedSkills[clsId] = {};
             this.renderTree(clsId);
             document.querySelectorAll('.sim-card').forEach(c => c.remove());
+        },
+
+        // ------------------------------------------------------------
+        // Сохранённые билды (localStorage, ключ LEGION_SAVED_BUILDS).
+        // Формат: { [clsId]: [{ name, skills }] }, skills — { [nodeId]: rank }.
+        // Ключ общий для всех классов, поэтому запись идёт целиком объектом.
+        // ------------------------------------------------------------
+        // Активный билд запоминаем и общим полем (по ТЗ), и по классам:
+        // иначе после переключения вкладки «Удалить» целилось бы в билд
+        // другого класса с тем же именем.
+        _setCurrentBuild(clsId, name) {
+            this._currentBuildName = name || '';
+            if (!this._currentBuildNames) this._currentBuildNames = {};
+            if (name) this._currentBuildNames[clsId] = name;
+            else delete this._currentBuildNames[clsId];
+        },
+
+        loadSavedBuilds() {
+            try {
+                const raw = localStorage.getItem('LEGION_SAVED_BUILDS');
+                if (raw) this.savedBuilds = JSON.parse(raw) || {};
+            } catch (e) {
+                // Битый JSON / приватный режим — начинаем с чистого списка.
+                this.savedBuilds = {};
+            }
+        },
+
+        saveCurrentBuild(clsId, name) {
+            if (!name) return false;
+            if (!this.savedBuilds[clsId]) this.savedBuilds[clsId] = [];
+
+            const currentSkills = this.simulatedSkills[clsId] || {};
+            // Проверяем, нет ли уже билда с таким именем
+            const existing = this.savedBuilds[clsId].findIndex(b => b.name === name);
+            const entry = { name: name, skills: { ...currentSkills } };
+
+            if (existing >= 0) this.savedBuilds[clsId][existing] = entry;
+            else this.savedBuilds[clsId].push(entry);
+
+            this._setCurrentBuild(clsId, name);
+            try {
+                localStorage.setItem('LEGION_SAVED_BUILDS', JSON.stringify(this.savedBuilds));
+            } catch (e) {}
+            return true;
+        },
+
+        loadBuild(clsId, index) {
+            if (!this.savedBuilds[clsId] || !this.savedBuilds[clsId][index]) return;
+            const build = this.savedBuilds[clsId][index];
+            this.simulatedSkills[clsId] = { ...build.skills };
+            this._setCurrentBuild(clsId, build.name);
+            this.renderTree(clsId);
+            UI.showToast(`📥 Билд «${build.name}» загружен`);
+        },
+
+        deleteBuild(clsId, index) {
+            if (!this.savedBuilds[clsId] || !this.savedBuilds[clsId][index]) return;
+            const name = this.savedBuilds[clsId][index].name;
+            this.savedBuilds[clsId].splice(index, 1);
+            // Удалили активный билд — забываем его имя, чтобы «Удалить»
+            // не целилась в уже исчезнувшую запись.
+            if (this._currentBuildNames && this._currentBuildNames[clsId] === name) {
+                this._setCurrentBuild(clsId, '');
+            }
+            try {
+                localStorage.setItem('LEGION_SAVED_BUILDS', JSON.stringify(this.savedBuilds));
+            } catch (e) {}
+            this.renderTree(clsId);
+            UI.showToast(`🗑️ Билд «${name}» удален`);
+        },
+
+        // Удаление по имени активного билда: кнопка «🗑️» вызывает именно это.
+        // Возвращает true, если запись найдена и удалена.
+        deleteCurrentBuild(clsId) {
+            const name = this._currentBuildNames ? this._currentBuildNames[clsId] : '';
+            const list = this.savedBuilds[clsId] || [];
+            const idx = name ? list.findIndex(b => b.name === name) : -1;
+            if (idx < 0) {
+                UI.showToast('Сначала загрузите или выберите билд', true);
+                return false;
+            }
+            this.deleteBuild(clsId, idx);
+            return true;
         },
 
         yFor(req) {
@@ -340,6 +444,56 @@
             }
             const statsEl = document.getElementById(`stats-${clsId}`);
             if (statsEl) statsEl.innerHTML = statsHtml;
+
+            // --- Сохранённые билды: список + обработчики ---
+            // Верхняя панель (.sim-top-bar) живёт вне #tree-${clsId}, поэтому
+            // перерисовка дерева её не убивает — можно просто переназначать
+            // .onclick (idempotent) вместо addEventListener в каждом рендере.
+            const sel = document.getElementById(`load-select-${clsId}`);
+            const delBtn = document.querySelector(`.sim-del-btn[data-del="${clsId}"]`);
+            const saveBtn = document.querySelector(`.sim-save-btn[data-save="${clsId}"]`);
+            const saveInput = document.getElementById(`save-name-${clsId}`);
+
+            if (sel && saveBtn && delBtn && saveInput) {
+                const builds = this.savedBuilds[clsId] || [];
+                // Имя билда вводит пользователь → экранируем перед вставкой в innerHTML.
+                sel.innerHTML = `<option value="">— Мои билды (${builds.length}) —</option>` +
+                    builds.map((b, i) => `<option value="${i}">${Utils.escapeHtml(b.name)}</option>`).join('');
+
+                // Преселект активного билда: видно, что именно удалит «🗑️».
+                const currentName = this._currentBuildNames ? (this._currentBuildNames[clsId] || '') : '';
+                const currentIdx = currentName ? builds.findIndex(b => b.name === currentName) : -1;
+                if (currentIdx >= 0) sel.value = String(currentIdx);
+                delBtn.title = currentIdx >= 0
+                    ? `Удалить билд «${currentName}»`
+                    : 'Удалить выбранный билд';
+
+                saveBtn.onclick = () => {
+                    const name = saveInput.value.trim();
+                    if (!name) { UI.showToast('Введите имя билда', true); return; }
+                    if (this.saveCurrentBuild(clsId, name)) {
+                        UI.showToast('💾 Билд сохранен');
+                        this.renderTree(clsId); // перерисовка для обновления списка
+                    }
+                };
+
+                sel.onchange = () => {
+                    // Выбор в списке сразу загружает билд и делает его активным;
+                    // sel.value после renderTree выставит преселект выше.
+                    if (sel.value !== '') this.loadBuild(clsId, +sel.value);
+                };
+
+                delBtn.onclick = () => {
+                    // Целимся в активный билд (this._currentBuildNames), а не в sel.value:
+                    // после перерисовки select сбрасывается на «— Мои билды —»,
+                    // из-за чего индекс из sel.value терялся.
+                    const targetName = this._currentBuildNames ? (this._currentBuildNames[clsId] || '') : '';
+                    if (!targetName) { UI.showToast('Сначала загрузите или выберите билд', true); return; }
+                    if (window.confirm(`Удалить билд «${targetName}»?`)) {
+                        this.deleteCurrentBuild(clsId);
+                    }
+                };
+            }
         },
 
         showNodeCard(clsId, nodeId, event) {

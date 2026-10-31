@@ -28,6 +28,32 @@
     // 8. ИНИЦИАЛИЗАЦИЯ
     // ============================================================
     function boot() {
+        // 1. Защита от iframe и Document PiP.
+        // window.top в кросс-доменном iframe кидает SecurityError, поэтому try/catch:
+        // ошибка доступа сама по себе означает, что мы в чужом iframe.
+        let isIframe = false;
+        try { isIframe = window.self !== window.top; } catch (e) { isIframe = true; }
+
+        let isPiP = false;
+        try { isPiP = !!(window.documentPictureInPicture && window.documentPictureInPicture.window === window); } catch (e) { isPiP = false; }
+
+        // 2. Защита от legion-chat-window и других вторичных контекстов.
+        //   /site/ver      — служебные страницы сайта (без /c/<канал>/);
+        //   ?minechat      — окно чата шахты стороннего аддона;
+        //   window.name    — именованные popup-окна (lgChat у того же аддона);
+        //   не /c/...      — любой путь вне страницы канала игрой не является.
+        // В таких контекстах мы бы создали второй style/fabWrap — дубликат FAB-меню.
+        const isLegionChat =
+            location.pathname.startsWith('/site/ver') ||
+            location.search.includes('minechat') ||
+            window.name === 'lgChat' ||
+            !location.pathname.startsWith('/c/');
+
+        if (isIframe || isPiP || isLegionChat) {
+            dbg('Скрипт запущен во вторичном контексте (iframe / PiP / legion-chat-window), инициализация отменена.');
+            return;
+        }
+
         const style = document.createElement('style');
         style.textContent = STYLES;
         document.head.appendChild(style);
@@ -114,10 +140,6 @@
             _booted: true,
             shutdown: () => {
                 PriestAssistant.destroy();
-                if (Players._badgeTimer) {
-                    clearInterval(Players._badgeTimer);
-                    Players._badgeTimer = null;
-                }
                 if (Miner.abortController) {
                     try { Miner.abortController.abort(); } catch(e) {}
                     Miner.abortController = null;

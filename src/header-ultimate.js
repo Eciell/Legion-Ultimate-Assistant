@@ -7,7 +7,8 @@
 // @connect      cdn.7tv.app
 // @connect      api.ivr.fi
 // @author       eciell
-// @match        https://play.multidonate.ru/*
+// @match        https://play.multidonate.ru/c/*
+// @noframes
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
 // @updateURL    https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js

@@ -7,8 +7,6 @@ const Players = {
         _lastItemsMap: {},
         _lastAuctionScan: 0,
         _lastMineStateScan: 0,
-        _badgeTimer: null,
-        _updateFriendsListFn: null,
         currentDMPeer: null,
         // Непрочитанные ЛС: { 'ник': количество }
         unreadDMs: {},
@@ -44,13 +42,8 @@ const Players = {
         },
 
         refreshUnreadDMViews() {
-            // Перерисовываем список друзей (если открыт) и вкладку «✉️ ЛС» (если активна)
-            try {
-                const listEl = document.getElementById('friends-view-list');
-                if (listEl && listEl.style.display !== 'none' && typeof this._updateFriendsListFn === 'function') {
-                    this._updateFriendsListFn();
-                }
-            } catch (e) {}
+            // Перерисовываем вкладку «✉️ ЛС», если она активна.
+            // (Список «Друзья» удалён в 11.5.4: в игре появились нативные друзья.)
             try {
                 if (typeof Chat !== 'undefined' && Chat.activeMainTab === 'dm' && typeof Chat.renderMessages === 'function') {
                     Chat.renderMessages();
@@ -60,113 +53,6 @@ const Players = {
 
         init() {
             (document.getElementById(DOM_IDS.btnPlayers) || document.getElementById('btn-players'))?.addEventListener('click', () => this.open());
-            (document.getElementById(DOM_IDS.btnFriends) || document.getElementById('btn-friends'))?.addEventListener('click', () => this.openFriends());
-            this.updateFriendsBadge();
-
-            // Автообновление бейджа и списка друзей раз в 1.5 секунды
-            if (this._badgeTimer) clearInterval(this._badgeTimer);
-            this._badgeTimer = setInterval(() => {
-                this.updateFriendsBadge();
-                const listEl = document.getElementById('friends-view-list');
-                if (listEl && listEl.style.display !== 'none' && typeof this._updateFriendsListFn === 'function') {
-                    this._updateFriendsListFn();
-                }
-            }, 1500);
-        },
-
-        onOnlinePlayersUpdated() {
-            this.updateFriendsBadge();
-            const listEl = document.getElementById('friends-view-list');
-            if (listEl && listEl.style.display !== 'none' && typeof this._updateFriendsListFn === 'function') {
-                this._updateFriendsListFn();
-            }
-        },
-
-        getFriendsList() {
-            try {
-                const raw = localStorage.getItem('LEGION_FRIENDS');
-                const arr = JSON.parse(raw);
-                if (Array.isArray(arr)) {
-                    return [...new Set(arr.map(s => String(s).trim()).filter(Boolean))];
-                }
-            } catch (e) {}
-            return [];
-        },
-
-        saveFriendsList(list) {
-            try {
-                const clean = [...new Set((list || []).map(s => String(s).trim()).filter(Boolean))];
-                localStorage.setItem('LEGION_FRIENDS', JSON.stringify(clean));
-                this.updateFriendsBadge();
-            } catch (e) {
-                dbg('Error saving friends list:', e);
-            }
-        },
-
-        isFriend(nick) {
-            if (!nick) return false;
-            const target = String(nick).trim().toLowerCase();
-            return this.getFriendsList().some(n => n.toLowerCase() === target);
-        },
-
-        addFriend(rawNick) {
-            if (!rawNick) return false;
-            const nick = String(rawNick).trim();
-            if (nick.length < 2 || nick.length > 30) {
-                UI.showToast('Некорректный ник игрока', true);
-                return false;
-            }
-            const myNick = this.getMyNick().toLowerCase();
-            if (myNick && nick.toLowerCase() === myNick) {
-                UI.showToast('Нельзя добавить себя в друзья', true);
-                return false;
-            }
-            if (this.isFriend(nick)) {
-                UI.showToast(`${nick} уже в друзьях`);
-                return false;
-            }
-            const list = this.getFriendsList();
-            list.push(nick);
-            this.saveFriendsList(list);
-            UI.showToast(`🤝 ${nick} добавлен в друзья!`);
-            return true;
-        },
-
-        removeFriend(rawNick) {
-            if (!rawNick) return false;
-            const target = String(rawNick).trim().toLowerCase();
-            const list = this.getFriendsList().filter(n => n.toLowerCase() !== target);
-            this.saveFriendsList(list);
-            UI.showToast(`❌ ${rawNick} удален из друзей`);
-            return true;
-        },
-
-        updateFriendsBadge() {
-            const friends = this.getFriendsList();
-            const badge = document.getElementById(DOM_IDS.friendsBadge);
-            if (!friends.length) {
-                if (badge) badge.style.display = 'none';
-                return 0;
-            }
-            const citySet = this.getCityPlayers();
-            const mineSet = this.getMinePlayers();
-            let onlineCount = 0;
-            friends.forEach(f => {
-                const k = f.toLowerCase();
-                if (citySet.has(k) || mineSet.has(k)) {
-                    onlineCount++;
-                }
-            });
-
-            if (badge) {
-                if (onlineCount > 0) {
-                    badge.textContent = String(onlineCount);
-                    badge.style.display = 'inline-block';
-                } else {
-                    badge.style.display = 'none';
-                }
-            }
-            return onlineCount;
         },
 
         getMyNick() {
@@ -387,8 +273,6 @@ const Players = {
             } else {
                 applyLots(this._lastLots);
             }
-
-            this.updateFriendsBadge();
         },
 
         openTradeWith(nick) {
@@ -717,7 +601,6 @@ const Players = {
                 container.innerHTML = filtered.map(p => {
                     const key = p.nick.toLowerCase();
                     const badges = [];
-                    if (this.isFriend(p.nick)) badges.push(`<span style="background:rgba(202,165,92,0.25);color:#ffcf6a;border:1px solid #caa55c;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;">⭐ Друг</span>`);
                     if (citySet.has(key)) badges.push(`<span style="background:rgba(0,255,102,0.18);color:#00ff66;border:1px solid rgba(0,255,102,0.4);padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;">🏛️ В Городе</span>`);
                     if (mineSet.has(key)) badges.push(`<span style="background:rgba(255,153,0,0.18);color:#ff9900;border:1px solid rgba(255,153,0,0.4);padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;">⛏️ В Шахте</span>`);
                     if (p.lotsCount > 0) badges.push(`<span style="background:rgba(255,215,0,0.15);color:#ffd700;border:1px solid rgba(255,215,0,0.3);padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;">🏛️ Лотов: ${p.lotsCount}</span>`);
@@ -751,179 +634,17 @@ const Players = {
             });
         },
 
-        async openFriends() {
-            UI.showModal(`<h2>🤝 Друзья <button class="custom-close" id="custom-close-btn">✖</button></h2><div class="loader">Сканируем локации...</div>`, { compact: true });
-            await this.scan();
-            this.renderFriends();
-        },
-
-        renderFriends() {
-            UI.showModal(`
-                <h2>🤝 Друзья <button class="custom-close" id="custom-close-btn">✖</button></h2>
-                <div id="friends-view-list" style="display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden;">
-                    <div style="display:flex; gap:8px; margin-bottom:12px; align-items:center; background:#1e1724; padding:8px 10px; border-radius:6px; border:1px solid #3d2f44;">
-                        <input type="text" id="friend-add-input" class="search-bar" style="margin:0; flex:1; padding:6px 10px; font-size:13px;" placeholder="➕ Введите ник для добавления...">
-                        <button id="friend-add-btn" style="background:#28a745; color:#fff; border:none; padding:6px 14px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:12px; white-space:nowrap;">Добавить</button>
-                    </div>
-
-                    <div style="display:flex; gap:8px; margin-bottom:12px; align-items:center;">
-                        <input type="text" id="friends-search" class="search-bar" style="margin:0; flex:1; padding:6px 10px; font-size:13px;" placeholder="🔍 Поиск среди друзей...">
-                        <button id="friends-refresh" style="background:#caa55c; color:#1d1620; border:none; padding:6px 14px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:12px;">🔄 Обновить</button>
-                    </div>
-
-                    <div style="font-size:12px; color:#aaa; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
-                        <span id="friends-count">Всего друзей: 0</span>
-                        <span style="color:#ffcf6a;">(Нажмите на карточку для досье)</span>
-                    </div>
-
-                    <div id="friends-items" style="max-height:42vh; overflow-y:auto; display:flex; flex-direction:column; gap:6px; padding-right:2px;"></div>
-                </div>
-                <div id="friends-view-dossier" style="display:none; max-height:52vh; overflow-y:auto; padding-right:2px;"></div>
-            `, { compact: true });
-
-            const updateFriendsList = () => {
-                const q = (document.getElementById('friends-search')?.value || '').trim().toLowerCase();
-                const container = document.getElementById('friends-items');
-                const countEl = document.getElementById('friends-count');
-                if (!container) return;
-                const prevScroll = container.scrollTop;
-
-                const friends = this.getFriendsList();
-                const citySet = this.getCityPlayers();
-                const mineSet = this.getMinePlayers();
-
-                let onlineCount = 0;
-                friends.forEach(f => {
-                    const k = f.toLowerCase();
-                    if (citySet.has(k) || mineSet.has(k)) onlineCount++;
-                });
-
-                if (countEl) {
-                    countEl.innerHTML = `Всего друзей: <b>${friends.length}</b> (онлайн: <span style="color:#00ff66; font-weight:bold;">${onlineCount}</span>)`;
-                }
-
-                if (friends.length === 0) {
-                    container.innerHTML = `<div style="text-align:center; padding:30px 15px; color:#888; font-style:italic;">У вас пока нет друзей в списке.<br><span style="font-size:12px; color:#aaa;">Добавьте друга через поле выше или нажмите ⭐ в Досье игрока.</span></div>`;
-                    return;
-                }
-
-                // Сортировка: онлайн вверху, затем по алфавиту
-                const sorted = [...friends].sort((a, b) => {
-                    const aNear = (citySet.has(a.toLowerCase()) || mineSet.has(a.toLowerCase())) ? 1 : 0;
-                    const bNear = (citySet.has(b.toLowerCase()) || mineSet.has(b.toLowerCase())) ? 1 : 0;
-                    if (bNear !== aNear) return bNear - aNear;
-                    return a.localeCompare(b);
-                });
-
-                const filtered = sorted.filter(f => !q || f.toLowerCase().includes(q));
-                if (filtered.length === 0) {
-                    container.innerHTML = `<div style="text-align:center; padding:20px; color:#888;">Друзья не найдены</div>`;
-                    return;
-                }
-
-                const dmBtnStyle = 'background:#007bff; color:#fff; border:none; border-radius:4px; padding:3px 7px; cursor:pointer; font-size:12px; line-height:1; user-select:none;';
-                const dmBtnTitle = 'Написать в ЛС';
-
-                container.innerHTML = filtered.map(nick => {
-                    const key = nick.toLowerCase();
-                    const p = this.playersMap.get(key) || { nick, sources: new Set(), lastSeen: 0, lotsCount: 0 };
-                    const isCity = citySet.has(key);
-                    const isMine = mineSet.has(key);
-
-                    const badges = [];
-                    if (isCity) badges.push(`<span style="background:rgba(0,255,102,0.18);color:#00ff66;border:1px solid rgba(0,255,102,0.4);padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;">🏛️ В Городе</span>`);
-                    if (isMine) badges.push(`<span style="background:rgba(255,153,0,0.18);color:#ff9900;border:1px solid rgba(255,153,0,0.4);padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;">⛏️ В Шахте</span>`);
-                    if (p.lotsCount > 0) badges.push(`<span style="background:rgba(255,215,0,0.15);color:#ffd700;border:1px solid rgba(255,215,0,0.3);padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;">🏛️ Лотов: ${p.lotsCount}</span>`);
-                    if (!isCity && !isMine) badges.push(`<span style="background:rgba(150,150,150,0.15);color:#8899aa;border:1px solid rgba(150,150,150,0.3);padding:2px 6px;border-radius:4px;font-size:11px;">📍 Не в сети</span>`);
-
-                    return `
-                        <div class="friend-card-row" data-nick="${Utils.escapeHtml(nick)}" style="background:#26202e; border:1px solid #44374a; border-radius:6px; padding:8px 12px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; transition:all 0.15s;">
-                            <span style="font-weight:bold; color:#f7eadf; font-size:13px; display:flex; align-items:center; gap:6px;">${Utils.escapeHtml(nick)}${this.getUnreadDM(nick) > 0 ? `<span title="Непрочитанных ЛС: ${this.getUnreadDM(nick)}" style="background:#ff3b5c; color:#fff; font-size:10px; font-weight:bold; padding:1px 6px; border-radius:10px;">${this.getUnreadDM(nick)}</span>` : ''}</span>
-                            <div style="display:flex; gap:6px; align-items:center;">
-                                ${badges.join('')}
-                                <button class="friend-quick-dm" data-nick="${Utils.escapeHtml(nick)}" title="${dmBtnTitle}" style="${dmBtnStyle}">✉️</button>
-                                <button class="friend-quick-trade" data-nick="${Utils.escapeHtml(nick)}" title="Предложить обмен" style="background:#28a745; color:#fff; border:none; border-radius:4px; padding:3px 7px; cursor:pointer; font-size:12px; line-height:1; user-select:none;">🤝</button>
-                                <button class="friend-quick-del" data-nick="${Utils.escapeHtml(nick)}" title="Удалить из друзей" style="background:#3a2028; color:#ff5a7a; border:1px solid #ff5a7a; border-radius:4px; padding:3px 7px; cursor:pointer; font-size:12px; line-height:1; user-select:none;">✖</button>
-                                <span style="color:#caa55c; font-size:14px; margin-left:2px;">›</span>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-
-                container.querySelectorAll('.friend-card-row').forEach(row => {
-                    row.addEventListener('click', (e) => {
-                        if (e.target.closest('button')) return;
-                        const nick = row.getAttribute('data-nick');
-                        if (nick) this.openDossier(nick, 'friends');
-                    });
-                });
-
-                container.querySelectorAll('.friend-quick-dm').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        const nick = btn.getAttribute('data-nick');
-                        if (nick) this.openWhisperWith(nick);
-                    });
-                });
-
-                container.querySelectorAll('.friend-quick-trade').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        const nick = btn.getAttribute('data-nick');
-                        if (nick) this.openTradeWith(nick);
-                    });
-                });
-
-                container.querySelectorAll('.friend-quick-del').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        const nick = btn.getAttribute('data-nick');
-                        if (nick && window.confirm(`Удалить игрока ${nick} из друзей?`)) {
-                            this.removeFriend(nick);
-                            updateFriendsList();
-                        }
-                    });
-                });
-                if (prevScroll) {
-                    container.scrollTop = prevScroll;
-                }
-            };
-
-            this._updateFriendsListFn = updateFriendsList;
-            updateFriendsList();
-
-            const addInput = document.getElementById('friend-add-input');
-            const addBtn = document.getElementById('friend-add-btn');
-            const handleAdd = () => {
-                const val = (addInput?.value || '').trim();
-                if (!val) return;
-                if (this.addFriend(val)) {
-                    if (addInput) addInput.value = '';
-                    updateFriendsList();
-                }
-            };
-            addBtn?.addEventListener('click', handleAdd);
-            // keydown вместо deprecated keypress: последний не срабатывает
-            // при вводе через часть методов ввода/раскладок.
-            addInput?.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') handleAdd();
-            });
-
-            document.getElementById('friends-search')?.addEventListener('input', updateFriendsList);
-            document.getElementById('friends-refresh')?.addEventListener('click', async () => {
-                await this.scan();
-                updateFriendsList();
-            });
-        },
-
+        // backView оставлен в сигнатуре для совместимости вызовов (openDossier(nick, 'players', true));
+        // вид «Друзья» удалён, поэтому параметр больше не влияет на разметку.
         openDossier(nick, backView = null, forceDM = false) {
-            const isFriends = backView === 'friends' || (!backView && !!document.getElementById('friends-view-list'));
-            const listEl = document.getElementById(isFriends ? 'friends-view-list' : 'players-view-list');
-            const dossierEl = document.getElementById(isFriends ? 'friends-view-dossier' : 'players-view-dossier');
+            // Модуль «Друзья» удалён в 11.5.4 (нативные друзья игры) — досье
+            // всегда живёт в окне «Разведка (Игроки)».
+            const listEl = document.getElementById('players-view-list');
+            const dossierEl = document.getElementById('players-view-dossier');
             if (!listEl || !dossierEl) return;
 
             // Открыли диалог — непрочитанные ЛС от этого игрока обнуляем
-            if (isFriends) this.clearUnreadDM(nick);
+            if (forceDM) this.clearUnreadDM(nick);
 
             listEl.style.display = 'none';
             dossierEl.style.display = 'flex';
@@ -952,10 +673,9 @@ const Players = {
                 });
             }
 
-            const isFriend = this.isFriend(nick);
             const totalLotsPrice = playerLots.reduce((acc, l) => acc + (+l.p || 0), 0);
 
-            if (isFriends || forceDM) {
+            if (forceDM) {
                 this.currentDMPeer = nick;
                 const lotsHtml = playerLots.map(l => {
                     const name = Utils.getItemName(l.i) + (l.e || l.en ? ' +' + (l.e || l.en) : '');
@@ -984,7 +704,6 @@ const Players = {
                         </div>
                         <div style="display:flex; gap:6px;">
                             <button id="dossier-trade-btn" title="Предложить обмен" style="padding:4px 8px; background:#28a745; color:#fff; border:none; border-radius:4px; font-weight:bold; cursor:pointer; font-size:11px;">🤝 Обмен</button>
-                            <button id="dossier-friend-del-btn" title="Удалить из друзей" style="padding:4px 8px; background:#3a2028; color:#ff5a7a; border:1px solid #ff5a7a; border-radius:4px; font-weight:bold; cursor:pointer; font-size:11px;">✖</button>
                         </div>
                     </div>
                     ${playerLots.length > 0 ? `
@@ -1036,20 +755,6 @@ const Players = {
                     lotsContainer.style.display = isOpen ? 'none' : 'flex';
                     if (lotsArrow) lotsArrow.textContent = isOpen ? '▾ Показать' : '▴ Скрыть';
                 });
-
-                document.getElementById('dossier-friend-del-btn')?.addEventListener('click', () => {
-                    if (window.confirm(`Удалить игрока ${nick} из друзей?`)) {
-                        this.removeFriend(nick);
-                        this.currentDMPeer = null;
-                        dossierEl.style.display = 'none';
-                        listEl.style.display = 'flex';
-                        if (isFriends) {
-                            this.renderFriends();
-                        } else {
-                            this.render();
-                        }
-                    }
-                });
             } else {
                 // Обычный режим досье из вкладки «Разведка (Игроки)»
                 this.currentDMPeer = null;
@@ -1061,9 +766,6 @@ const Players = {
                     <div style="display:flex; gap:8px; margin-bottom:12px; flex-shrink:0;">
                         <button id="dossier-trade-btn" style="flex:1; padding:8px 4px; background:#28a745; color:#fff; border:none; border-radius:6px; font-weight:bold; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; font-size:12px;">🤝 Обмен</button>
                         <button id="dossier-dm-btn" style="flex:1; padding:8px 4px; background:#28a745; color:#fff; border:none; border-radius:6px; font-weight:bold; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; font-size:12px;" title="Написать в ЛС">✉️ ЛС</button>
-                        <button id="dossier-friend-btn" style="flex:1; padding:8px 4px; background:${isFriend ? '#dc3545' : '#caa55c'}; color:${isFriend ? '#fff' : '#1d1620'}; border:none; border-radius:6px; font-weight:bold; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; font-size:12px;">
-                            ${isFriend ? '💔 Удалить из друзей' : '⭐ В друзья'}
-                        </button>
                     </div>
                     <div style="background:#1b1622; border:1px solid #44374a; border-radius:6px; padding:10px; margin-bottom:12px; flex-shrink:0;">
                         <div style="font-size:12px; margin-bottom:4px;"><b>Текущая локация:</b> <span style="color:${locationColor}; font-weight:bold;">${locationText}</span></div>
@@ -1095,34 +797,13 @@ const Players = {
                     // Принудительно открываем вид чата, оставаясь в текущем окне
                     this.openDossier(nick, 'players', true);
                 });
-
-                const friendBtn = document.getElementById('dossier-friend-btn');
-                if (friendBtn) {
-                    friendBtn.addEventListener('click', () => {
-                        if (this.isFriend(nick)) {
-                            this.removeFriend(nick);
-                            friendBtn.textContent = '⭐ В друзья';
-                            friendBtn.style.background = '#caa55c';
-                            friendBtn.style.color = '#1d1620';
-                        } else {
-                            this.addFriend(nick);
-                            friendBtn.textContent = '💔 Удалить из друзей';
-                            friendBtn.style.background = '#dc3545';
-                            friendBtn.style.color = '#fff';
-                        }
-                    });
-                }
             }
 
             document.getElementById('dossier-back-btn')?.addEventListener('click', () => {
                 this.currentDMPeer = null;
                 dossierEl.style.display = 'none';
                 listEl.style.display = 'flex';
-                if (isFriends) {
-                    this.renderFriends();
-                } else {
-                    this.render();
-                }
+                this.render();
             });
             document.getElementById('dossier-trade-btn')?.addEventListener('click', () => this.openTradeWith(nick));
 

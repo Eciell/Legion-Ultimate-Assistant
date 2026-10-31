@@ -32,8 +32,6 @@
         btnBuildSim: `${RAND_ID}-btn-build-sim`,
         btnAuctionScan: `${RAND_ID}-btn-auction-scan`,
         btnPlayers: `${RAND_ID}-btn-players`,
-        btnFriends: `${RAND_ID}-btn-friends`,
-        friendsBadge: `${RAND_ID}-friends-badge`,
         btnChatToggle: `${RAND_ID}-btn-chat-toggle`,
         btnPopout: `${RAND_ID}-btn-popout`,
         btnPocketCity: `${RAND_ID}-btn-pocket-city`,

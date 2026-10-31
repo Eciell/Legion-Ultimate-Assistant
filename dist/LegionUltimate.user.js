@@ -7,7 +7,8 @@
 // @connect      cdn.7tv.app
 // @connect      api.ivr.fi
 // @author       eciell
-// @match        https://play.multidonate.ru/*
+// @match        https://play.multidonate.ru/c/*
+// @noframes
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
 // @updateURL    https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js
@@ -52,8 +53,6 @@
         btnBuildSim: `${RAND_ID}-btn-build-sim`,
         btnAuctionScan: `${RAND_ID}-btn-auction-scan`,
         btnPlayers: `${RAND_ID}-btn-players`,
-        btnFriends: `${RAND_ID}-btn-friends`,
-        friendsBadge: `${RAND_ID}-friends-badge`,
         btnChatToggle: `${RAND_ID}-btn-chat-toggle`,
         btnPopout: `${RAND_ID}-btn-popout`,
         btnPocketCity: `${RAND_ID}-btn-pocket-city`,
@@ -965,11 +964,16 @@
         .modal-tab.active { background: #caa55c; color: #1d1620; border-color: #caa55c; }
         .tab-content { display: none; flex: 1; overflow: hidden; position: relative; }
         .tab-content.active { display: flex; gap: 20px; }
-        .sim-tree-wrap { flex: 1; background: #223029; border: 10px solid #6b4423; border-radius: 12px; box-shadow: inset 0 0 20px rgba(0,0,0,0.8); position: relative; overflow: auto; display: flex; flex-direction: column; }
-        .sim-tree-inner { min-width: 700px; padding: 20px; display: flex; flex-direction: column; height: 840px; }
-        .sim-top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background: rgba(0,0,0,0.4); padding: 10px 15px; border-radius: 8px; border: 2px solid #caa55c; position: relative; z-index: 10; }
-        .sim-free-pts { font-size: 18px; font-weight: bold; color: #ffcf6a; }
-        .sim-branches { position: relative; height: 760px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
+        /* Контейнер дерева: тёмная тема + ограничение по высоте экрана и вертикальный скролл */
+        .sim-tree-wrap { flex: 1; background: #16121a !important; border: 1px solid #3d2f44; border-radius: 8px; box-shadow: inset 0 0 20px rgba(0,0,0,0.6); position: relative; overflow-y: auto; overflow-x: auto; max-height: calc(100vh - 250px); padding-bottom: 20px; display: flex; flex-direction: column; }
+        /* Высоту НЕ фиксируем: иначе содержимое (панель + ветки 760px) выше бокса,
+           и нижний ряд нод (top: 680px) вываливается за серый фон. */
+        .sim-tree-inner { min-width: 700px; padding: 20px; display: flex; flex-direction: column; height: auto; min-height: 760px; flex-shrink: 0; background: transparent !important; position: relative; }
+        .sim-top-bar { display: flex; flex-direction: column; gap: 12px; margin-bottom: 15px; background: #1e1724; padding: 12px; border-radius: 8px; border: 1px solid #3d2f44; position: relative; z-index: 10; }
+        .sim-free-pts { font-size: 14px; color: #eee; }
+        /* Ветки растягиваются на всю доступную высоту: нижняя нода на 680px
+           занимает ещё ~40px вниз (иконка 44px центрирована по top), поэтому 740px. */
+        .sim-branches { position: relative; height: 100%; min-height: 740px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
         .sim-branch { position: relative; background: rgba(255,255,255,0.03); border-radius: 8px; height: 100%; }
         .sim-branch-header { text-align: center; font-weight: bold; color: #ffcf6a; font-size: 14px; position: absolute; top: 0; width: 100%; pointer-events: none; }
         .sim-branch-pts { font-size: 11px; color: #aaa; margin-top: 2px; }
@@ -992,10 +996,17 @@
         .sim-card button { background: #caa55c; border: 2px solid #2b1d18; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; color: #2b1d18; font-size: 13px; }
         .sim-card button:disabled { opacity: 0.5; cursor: not-allowed; }
         .sim-card-close { position: absolute; top: 8px; right: 8px; cursor: pointer; font-size: 16px; color: #888; }
-        .sim-reset-btn { background: #caa55c; color: #2b1d18; border: 2px solid #2b1d18; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; }
-        .sim-reset-btn:hover { background: #ffcf6a; }
-        .build-right { width: 250px; flex-shrink: 0; background: #111; padding: 15px; border-radius: 8px; border: 1px solid #333; height: fit-content; }
-        .stats-panel h3 { margin-top: 0; color: #ffcf6a; font-size: 16px; border-bottom: 1px solid #444; padding-bottom: 5px; }
+        .sim-reset-btn { background: rgba(255,90,122,0.1); color: #ff5a7a; border: 1px solid #ff5a7a; padding: 6px 14px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .sim-reset-btn:hover { background: rgba(255,90,122,0.22); }
+        /* Кнопки сохранения/удаления билдов в верхней панели планировщика */
+        .sim-save-btn { background: #28a745; color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s; white-space: nowrap; }
+        .sim-save-btn:hover { background: #34c759; }
+        .sim-del-btn { background: #3a2028; color: #ff5a7a; border: 1px solid #ff5a7a; border-radius: 6px; padding: 8px 12px; font-size: 12px; cursor: pointer; transition: 0.2s; }
+        .sim-del-btn:hover { background: rgba(255,90,122,0.22); }
+        .build-right { width: 250px; flex-shrink: 0; background: #1e1724; padding: 15px; border-radius: 8px; border: 1px solid #3d2f44; height: fit-content; }
+        /* Панель статов справа */
+        .stats-panel { background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px; padding: 15px; }
+        .stats-panel h3 { color: #ffcf6a; margin-top: 0; font-size: 14px; border-bottom: 1px solid #3d2f44; padding-bottom: 10px; }
         .stat-line { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
         .stat-line span { color: #aaa; }
         .stat-line b { color: #4cc95a; }
@@ -1471,7 +1482,6 @@
                     </div>
                     <div class="fab-section-body">
                         <button class="fab-menu-item" id="${d.btnPlayers}">👥 Игроки (Разведка)</button>
-                        <button class="fab-menu-item" id="${d.btnFriends}">🤝 Друзья <span id="${d.friendsBadge}" style="display:none; background:#28a745; color:#fff; font-size:11px; padding:1px 6px; border-radius:10px; font-weight:bold; margin-left:auto;">0</span></button>
                         <button class="fab-menu-item" id="${d.btnPopout}">📺 Вынести чат <span class="${d.chatBadge}" id="${d.chatBadge}">0</span></button>
                     </div>
                 </div>
@@ -2134,6 +2144,9 @@
     const BuildSim = {
         skillsCache: null,
         simulatedSkills: {},
+        savedBuilds: {}, // { [clsId]: [{ name, skills }] } — сохранённые в localStorage билды по классам
+        _currentBuildName: '', // имя последнего сохранённого/загруженного билда (для будущих фич UI)
+        _currentBuildNames: {}, // { [clsId]: name } — активный билд каждого класса (нужен для кнопки «Удалить»)
 
         statNames: { hp: 'Макс. HP', atk: 'Физ. урон', mag: 'Магия', def: 'Броня', crit: 'Крит %', dodge: 'Уклонение', pierce: 'Пробивание', resist: 'Сопротивление' },
         fxNames: { melee: 'Физ. урон %', magic: 'Магия %', hp: 'Макс. HP %', def: 'Броня', healPow: 'Сила лечения %', healIn: 'Вх. лечение %', crit: 'Крит %', critDmg: 'Сила крита', skel: 'Урон скелетов %', skelT: 'Время скелетов', leech: 'Вампиризм %', block: 'Снижение урона %', dodge: 'Уклонение %', lead: 'Урон по боссам %', first: 'Урон 1-й ход %', dmg: 'Весь урон %', pierce: 'Пробивание %', resist: 'Сопротивление', healCrit: 'Крит лечения %', regen: 'Регенерация %', low: 'Урон при низком HP %', a_siyanie: 'Сияние +%', a_obereg: 'Оберег +%', a_dlan: 'Длань +%', a_aura: 'Аура +%', aura: 'Аура −урон %', a_svet: 'Свет +%', a_vspyshka: 'Вспышка +%', a_oznob: 'Озноб +%', a_pricel: 'Прицел +%', a_grad: 'Град +%', a_natisk: 'Натиск +%', a_stoyka: 'Стойка +%', a_vspinu: 'Вспину +%', a_yad: 'Яд +%', a_vytyanut: 'Вытянуть +%', a_podnyat: 'Поднять +%', poison: 'Отрава %', steal: 'Кража %', loot: 'Добыча %', skelN: 'Скелетов +', volley: 'Залп +%', shieldBlock: 'Щит блок %', trapDodge: 'Ловушки %', steady: 'Промах→удар %', cleave: 'Замах %', cleaveBoss: 'Замах по боссу %', penBoss: 'Бронебой по боссу %', drain: 'Вытягивание %', hex: 'Проклятие +%', holy: 'По нежити +%', poisonT: 'Время отравы' },
@@ -2193,6 +2206,14 @@
 
         async mount(container) {
             if (!container) return;
+            // Сохранённые билды поднимаем до парсинга /api/me и /api/skills,
+            // чтобы UI успел отрисовать список «Мои билды» при первом renderTree.
+            this.loadSavedBuilds();
+            // Очки при каждом открытии начинаются с нуля (this.simulatedSkills = {}),
+            // поэтому и «активного» билда нет: кнопка «Удалить» до выбора/загрузки
+            // честно попросит выбрать билд.
+            this._currentBuildNames = {};
+            this._currentBuildName = '';
             container.innerHTML = `<div class="loader">Загрузка данных...</div>`;
             try {
                 const me = await Utils.fetchApi('/api/me');
@@ -2244,9 +2265,19 @@
                         <div class="tab-content" id="tab-${c.id}">
                             <div class="sim-tree-wrap">
                                 <div class="sim-tree-inner">
-                                    <div class="sim-top-bar">
-                                        <div class="sim-free-pts">Свободно очков: <span id="free-${c.id}">0</span> / ${MAX_POINTS} <span style="font-size:12px;color:#aaa;">(Тестовый режим)</span></div>
-                                        <button class="sim-reset-btn" data-reset="${c.id}">Сбросить всё</button>
+                                    <div class="sim-top-bar" style="display: flex; flex-direction: column; gap: 12px; background: #1e1724; padding: 12px; border-radius: 8px; border: 1px solid #3d2f44; margin-bottom: 15px;">
+                                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                                            <div class="sim-free-pts" style="font-size: 14px; color: #eee;">Свободно очков: <span id="free-${c.id}" style="color: #caa55c; font-weight: bold; font-size: 18px;">0</span> <span style="color: #888;">/ ${MAX_POINTS}</span></div>
+                                            <button class="sim-reset-btn" data-reset="${c.id}" style="background: rgba(255, 90, 122, 0.1); color: #ff5a7a; border: 1px solid #ff5a7a; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s;">Сбросить всё</button>
+                                        </div>
+                                        <div style="display: flex; gap: 8px; align-items: center; border-top: 1px solid #3d2f44; padding-top: 12px;">
+                                            <input type="text" id="save-name-${c.id}" class="search-bar" style="margin:0; padding:8px 12px; font-size:12px; flex:1; background:#0f0f15; border:1px solid #3d2f44; color:#fff; border-radius:6px; outline:none;" placeholder="Название нового билда...">
+                                            <button class="sim-save-btn" data-save="${c.id}" style="background: #28a745; color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 12px; font-weight: bold; cursor: pointer;">💾 Сохранить</button>
+                                            <select id="load-select-${c.id}" class="search-bar" style="margin:0; padding:8px 12px; font-size:12px; width:180px; background:#0f0f15; border:1px solid #3d2f44; color:#fff; border-radius:6px; cursor:pointer; outline:none;">
+                                                <option value="">— Мои билды —</option>
+                                            </select>
+                                            <button class="sim-del-btn" data-del="${c.id}" style="background: #3a2028; color: #ff5a7a; border: 1px solid #ff5a7a; border-radius: 6px; padding: 8px 12px; font-size: 12px; cursor: pointer;" title="Удалить выбранный билд">🗑️</button>
+                                        </div>
                                     </div>
                                     <div class="sim-branches" id="tree-${c.id}"></div>
                                 </div>
@@ -2287,6 +2318,89 @@
             this.simulatedSkills[clsId] = {};
             this.renderTree(clsId);
             document.querySelectorAll('.sim-card').forEach(c => c.remove());
+        },
+
+        // ------------------------------------------------------------
+        // Сохранённые билды (localStorage, ключ LEGION_SAVED_BUILDS).
+        // Формат: { [clsId]: [{ name, skills }] }, skills — { [nodeId]: rank }.
+        // Ключ общий для всех классов, поэтому запись идёт целиком объектом.
+        // ------------------------------------------------------------
+        // Активный билд запоминаем и общим полем (по ТЗ), и по классам:
+        // иначе после переключения вкладки «Удалить» целилось бы в билд
+        // другого класса с тем же именем.
+        _setCurrentBuild(clsId, name) {
+            this._currentBuildName = name || '';
+            if (!this._currentBuildNames) this._currentBuildNames = {};
+            if (name) this._currentBuildNames[clsId] = name;
+            else delete this._currentBuildNames[clsId];
+        },
+
+        loadSavedBuilds() {
+            try {
+                const raw = localStorage.getItem('LEGION_SAVED_BUILDS');
+                if (raw) this.savedBuilds = JSON.parse(raw) || {};
+            } catch (e) {
+                // Битый JSON / приватный режим — начинаем с чистого списка.
+                this.savedBuilds = {};
+            }
+        },
+
+        saveCurrentBuild(clsId, name) {
+            if (!name) return false;
+            if (!this.savedBuilds[clsId]) this.savedBuilds[clsId] = [];
+
+            const currentSkills = this.simulatedSkills[clsId] || {};
+            // Проверяем, нет ли уже билда с таким именем
+            const existing = this.savedBuilds[clsId].findIndex(b => b.name === name);
+            const entry = { name: name, skills: { ...currentSkills } };
+
+            if (existing >= 0) this.savedBuilds[clsId][existing] = entry;
+            else this.savedBuilds[clsId].push(entry);
+
+            this._setCurrentBuild(clsId, name);
+            try {
+                localStorage.setItem('LEGION_SAVED_BUILDS', JSON.stringify(this.savedBuilds));
+            } catch (e) {}
+            return true;
+        },
+
+        loadBuild(clsId, index) {
+            if (!this.savedBuilds[clsId] || !this.savedBuilds[clsId][index]) return;
+            const build = this.savedBuilds[clsId][index];
+            this.simulatedSkills[clsId] = { ...build.skills };
+            this._setCurrentBuild(clsId, build.name);
+            this.renderTree(clsId);
+            UI.showToast(`📥 Билд «${build.name}» загружен`);
+        },
+
+        deleteBuild(clsId, index) {
+            if (!this.savedBuilds[clsId] || !this.savedBuilds[clsId][index]) return;
+            const name = this.savedBuilds[clsId][index].name;
+            this.savedBuilds[clsId].splice(index, 1);
+            // Удалили активный билд — забываем его имя, чтобы «Удалить»
+            // не целилась в уже исчезнувшую запись.
+            if (this._currentBuildNames && this._currentBuildNames[clsId] === name) {
+                this._setCurrentBuild(clsId, '');
+            }
+            try {
+                localStorage.setItem('LEGION_SAVED_BUILDS', JSON.stringify(this.savedBuilds));
+            } catch (e) {}
+            this.renderTree(clsId);
+            UI.showToast(`🗑️ Билд «${name}» удален`);
+        },
+
+        // Удаление по имени активного билда: кнопка «🗑️» вызывает именно это.
+        // Возвращает true, если запись найдена и удалена.
+        deleteCurrentBuild(clsId) {
+            const name = this._currentBuildNames ? this._currentBuildNames[clsId] : '';
+            const list = this.savedBuilds[clsId] || [];
+            const idx = name ? list.findIndex(b => b.name === name) : -1;
+            if (idx < 0) {
+                UI.showToast('Сначала загрузите или выберите билд', true);
+                return false;
+            }
+            this.deleteBuild(clsId, idx);
+            return true;
         },
 
         yFor(req) {
@@ -2470,6 +2584,56 @@
             }
             const statsEl = document.getElementById(`stats-${clsId}`);
             if (statsEl) statsEl.innerHTML = statsHtml;
+
+            // --- Сохранённые билды: список + обработчики ---
+            // Верхняя панель (.sim-top-bar) живёт вне #tree-${clsId}, поэтому
+            // перерисовка дерева её не убивает — можно просто переназначать
+            // .onclick (idempotent) вместо addEventListener в каждом рендере.
+            const sel = document.getElementById(`load-select-${clsId}`);
+            const delBtn = document.querySelector(`.sim-del-btn[data-del="${clsId}"]`);
+            const saveBtn = document.querySelector(`.sim-save-btn[data-save="${clsId}"]`);
+            const saveInput = document.getElementById(`save-name-${clsId}`);
+
+            if (sel && saveBtn && delBtn && saveInput) {
+                const builds = this.savedBuilds[clsId] || [];
+                // Имя билда вводит пользователь → экранируем перед вставкой в innerHTML.
+                sel.innerHTML = `<option value="">— Мои билды (${builds.length}) —</option>` +
+                    builds.map((b, i) => `<option value="${i}">${Utils.escapeHtml(b.name)}</option>`).join('');
+
+                // Преселект активного билда: видно, что именно удалит «🗑️».
+                const currentName = this._currentBuildNames ? (this._currentBuildNames[clsId] || '') : '';
+                const currentIdx = currentName ? builds.findIndex(b => b.name === currentName) : -1;
+                if (currentIdx >= 0) sel.value = String(currentIdx);
+                delBtn.title = currentIdx >= 0
+                    ? `Удалить билд «${currentName}»`
+                    : 'Удалить выбранный билд';
+
+                saveBtn.onclick = () => {
+                    const name = saveInput.value.trim();
+                    if (!name) { UI.showToast('Введите имя билда', true); return; }
+                    if (this.saveCurrentBuild(clsId, name)) {
+                        UI.showToast('💾 Билд сохранен');
+                        this.renderTree(clsId); // перерисовка для обновления списка
+                    }
+                };
+
+                sel.onchange = () => {
+                    // Выбор в списке сразу загружает билд и делает его активным;
+                    // sel.value после renderTree выставит преселект выше.
+                    if (sel.value !== '') this.loadBuild(clsId, +sel.value);
+                };
+
+                delBtn.onclick = () => {
+                    // Целимся в активный билд (this._currentBuildNames), а не в sel.value:
+                    // после перерисовки select сбрасывается на «— Мои билды —»,
+                    // из-за чего индекс из sel.value терялся.
+                    const targetName = this._currentBuildNames ? (this._currentBuildNames[clsId] || '') : '';
+                    if (!targetName) { UI.showToast('Сначала загрузите или выберите билд', true); return; }
+                    if (window.confirm(`Удалить билд «${targetName}»?`)) {
+                        this.deleteCurrentBuild(clsId);
+                    }
+                };
+            }
         },
 
         showNodeCard(clsId, nodeId, event) {
@@ -3388,8 +3552,6 @@ const Players = {
         _lastItemsMap: {},
         _lastAuctionScan: 0,
         _lastMineStateScan: 0,
-        _badgeTimer: null,
-        _updateFriendsListFn: null,
         currentDMPeer: null,
         // Непрочитанные ЛС: { 'ник': количество }
         unreadDMs: {},
@@ -3425,13 +3587,8 @@ const Players = {
         },
 
         refreshUnreadDMViews() {
-            // Перерисовываем список друзей (если открыт) и вкладку «✉️ ЛС» (если активна)
-            try {
-                const listEl = document.getElementById('friends-view-list');
-                if (listEl && listEl.style.display !== 'none' && typeof this._updateFriendsListFn === 'function') {
-                    this._updateFriendsListFn();
-                }
-            } catch (e) {}
+            // Перерисовываем вкладку «✉️ ЛС», если она активна.
+            // (Список «Друзья» удалён в 11.5.4: в игре появились нативные друзья.)
             try {
                 if (typeof Chat !== 'undefined' && Chat.activeMainTab === 'dm' && typeof Chat.renderMessages === 'function') {
                     Chat.renderMessages();
@@ -3441,113 +3598,6 @@ const Players = {
 
         init() {
             (document.getElementById(DOM_IDS.btnPlayers) || document.getElementById('btn-players'))?.addEventListener('click', () => this.open());
-            (document.getElementById(DOM_IDS.btnFriends) || document.getElementById('btn-friends'))?.addEventListener('click', () => this.openFriends());
-            this.updateFriendsBadge();
-
-            // Автообновление бейджа и списка друзей раз в 1.5 секунды
-            if (this._badgeTimer) clearInterval(this._badgeTimer);
-            this._badgeTimer = setInterval(() => {
-                this.updateFriendsBadge();
-                const listEl = document.getElementById('friends-view-list');
-                if (listEl && listEl.style.display !== 'none' && typeof this._updateFriendsListFn === 'function') {
-                    this._updateFriendsListFn();
-                }
-            }, 1500);
-        },
-
-        onOnlinePlayersUpdated() {
-            this.updateFriendsBadge();
-            const listEl = document.getElementById('friends-view-list');
-            if (listEl && listEl.style.display !== 'none' && typeof this._updateFriendsListFn === 'function') {
-                this._updateFriendsListFn();
-            }
-        },
-
-        getFriendsList() {
-            try {
-                const raw = localStorage.getItem('LEGION_FRIENDS');
-                const arr = JSON.parse(raw);
-                if (Array.isArray(arr)) {
-                    return [...new Set(arr.map(s => String(s).trim()).filter(Boolean))];
-                }
-            } catch (e) {}
-            return [];
-        },
-
-        saveFriendsList(list) {
-            try {
-                const clean = [...new Set((list || []).map(s => String(s).trim()).filter(Boolean))];
-                localStorage.setItem('LEGION_FRIENDS', JSON.stringify(clean));
-                this.updateFriendsBadge();
-            } catch (e) {
-                dbg('Error saving friends list:', e);
-            }
-        },
-
-        isFriend(nick) {
-            if (!nick) return false;
-            const target = String(nick).trim().toLowerCase();
-            return this.getFriendsList().some(n => n.toLowerCase() === target);
-        },
-
-        addFriend(rawNick) {
-            if (!rawNick) return false;
-            const nick = String(rawNick).trim();
-            if (nick.length < 2 || nick.length > 30) {
-                UI.showToast('Некорректный ник игрока', true);
-                return false;
-            }
-            const myNick = this.getMyNick().toLowerCase();
-            if (myNick && nick.toLowerCase() === myNick) {
-                UI.showToast('Нельзя добавить себя в друзья', true);
-                return false;
-            }
-            if (this.isFriend(nick)) {
-                UI.showToast(`${nick} уже в друзьях`);
-                return false;
-            }
-            const list = this.getFriendsList();
-            list.push(nick);
-            this.saveFriendsList(list);
-            UI.showToast(`🤝 ${nick} добавлен в друзья!`);
-            return true;
-        },
-
-        removeFriend(rawNick) {
-            if (!rawNick) return false;
-            const target = String(rawNick).trim().toLowerCase();
-            const list = this.getFriendsList().filter(n => n.toLowerCase() !== target);
-            this.saveFriendsList(list);
-            UI.showToast(`❌ ${rawNick} удален из друзей`);
-            return true;
-        },
-
-        updateFriendsBadge() {
-            const friends = this.getFriendsList();
-            const badge = document.getElementById(DOM_IDS.friendsBadge);
-            if (!friends.length) {
-                if (badge) badge.style.display = 'none';
-                return 0;
-            }
-            const citySet = this.getCityPlayers();
-            const mineSet = this.getMinePlayers();
-            let onlineCount = 0;
-            friends.forEach(f => {
-                const k = f.toLowerCase();
-                if (citySet.has(k) || mineSet.has(k)) {
-                    onlineCount++;
-                }
-            });
-
-            if (badge) {
-                if (onlineCount > 0) {
-                    badge.textContent = String(onlineCount);
-                    badge.style.display = 'inline-block';
-                } else {
-                    badge.style.display = 'none';
-                }
-            }
-            return onlineCount;
         },
 
         getMyNick() {
@@ -3768,8 +3818,6 @@ const Players = {
             } else {
                 applyLots(this._lastLots);
             }
-
-            this.updateFriendsBadge();
         },
 
         openTradeWith(nick) {
@@ -4098,7 +4146,6 @@ const Players = {
                 container.innerHTML = filtered.map(p => {
                     const key = p.nick.toLowerCase();
                     const badges = [];
-                    if (this.isFriend(p.nick)) badges.push(`<span style="background:rgba(202,165,92,0.25);color:#ffcf6a;border:1px solid #caa55c;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;">⭐ Друг</span>`);
                     if (citySet.has(key)) badges.push(`<span style="background:rgba(0,255,102,0.18);color:#00ff66;border:1px solid rgba(0,255,102,0.4);padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;">🏛️ В Городе</span>`);
                     if (mineSet.has(key)) badges.push(`<span style="background:rgba(255,153,0,0.18);color:#ff9900;border:1px solid rgba(255,153,0,0.4);padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;">⛏️ В Шахте</span>`);
                     if (p.lotsCount > 0) badges.push(`<span style="background:rgba(255,215,0,0.15);color:#ffd700;border:1px solid rgba(255,215,0,0.3);padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;">🏛️ Лотов: ${p.lotsCount}</span>`);
@@ -4132,179 +4179,17 @@ const Players = {
             });
         },
 
-        async openFriends() {
-            UI.showModal(`<h2>🤝 Друзья <button class="custom-close" id="custom-close-btn">✖</button></h2><div class="loader">Сканируем локации...</div>`, { compact: true });
-            await this.scan();
-            this.renderFriends();
-        },
-
-        renderFriends() {
-            UI.showModal(`
-                <h2>🤝 Друзья <button class="custom-close" id="custom-close-btn">✖</button></h2>
-                <div id="friends-view-list" style="display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden;">
-                    <div style="display:flex; gap:8px; margin-bottom:12px; align-items:center; background:#1e1724; padding:8px 10px; border-radius:6px; border:1px solid #3d2f44;">
-                        <input type="text" id="friend-add-input" class="search-bar" style="margin:0; flex:1; padding:6px 10px; font-size:13px;" placeholder="➕ Введите ник для добавления...">
-                        <button id="friend-add-btn" style="background:#28a745; color:#fff; border:none; padding:6px 14px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:12px; white-space:nowrap;">Добавить</button>
-                    </div>
-
-                    <div style="display:flex; gap:8px; margin-bottom:12px; align-items:center;">
-                        <input type="text" id="friends-search" class="search-bar" style="margin:0; flex:1; padding:6px 10px; font-size:13px;" placeholder="🔍 Поиск среди друзей...">
-                        <button id="friends-refresh" style="background:#caa55c; color:#1d1620; border:none; padding:6px 14px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:12px;">🔄 Обновить</button>
-                    </div>
-
-                    <div style="font-size:12px; color:#aaa; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
-                        <span id="friends-count">Всего друзей: 0</span>
-                        <span style="color:#ffcf6a;">(Нажмите на карточку для досье)</span>
-                    </div>
-
-                    <div id="friends-items" style="max-height:42vh; overflow-y:auto; display:flex; flex-direction:column; gap:6px; padding-right:2px;"></div>
-                </div>
-                <div id="friends-view-dossier" style="display:none; max-height:52vh; overflow-y:auto; padding-right:2px;"></div>
-            `, { compact: true });
-
-            const updateFriendsList = () => {
-                const q = (document.getElementById('friends-search')?.value || '').trim().toLowerCase();
-                const container = document.getElementById('friends-items');
-                const countEl = document.getElementById('friends-count');
-                if (!container) return;
-                const prevScroll = container.scrollTop;
-
-                const friends = this.getFriendsList();
-                const citySet = this.getCityPlayers();
-                const mineSet = this.getMinePlayers();
-
-                let onlineCount = 0;
-                friends.forEach(f => {
-                    const k = f.toLowerCase();
-                    if (citySet.has(k) || mineSet.has(k)) onlineCount++;
-                });
-
-                if (countEl) {
-                    countEl.innerHTML = `Всего друзей: <b>${friends.length}</b> (онлайн: <span style="color:#00ff66; font-weight:bold;">${onlineCount}</span>)`;
-                }
-
-                if (friends.length === 0) {
-                    container.innerHTML = `<div style="text-align:center; padding:30px 15px; color:#888; font-style:italic;">У вас пока нет друзей в списке.<br><span style="font-size:12px; color:#aaa;">Добавьте друга через поле выше или нажмите ⭐ в Досье игрока.</span></div>`;
-                    return;
-                }
-
-                // Сортировка: онлайн вверху, затем по алфавиту
-                const sorted = [...friends].sort((a, b) => {
-                    const aNear = (citySet.has(a.toLowerCase()) || mineSet.has(a.toLowerCase())) ? 1 : 0;
-                    const bNear = (citySet.has(b.toLowerCase()) || mineSet.has(b.toLowerCase())) ? 1 : 0;
-                    if (bNear !== aNear) return bNear - aNear;
-                    return a.localeCompare(b);
-                });
-
-                const filtered = sorted.filter(f => !q || f.toLowerCase().includes(q));
-                if (filtered.length === 0) {
-                    container.innerHTML = `<div style="text-align:center; padding:20px; color:#888;">Друзья не найдены</div>`;
-                    return;
-                }
-
-                const dmBtnStyle = 'background:#007bff; color:#fff; border:none; border-radius:4px; padding:3px 7px; cursor:pointer; font-size:12px; line-height:1; user-select:none;';
-                const dmBtnTitle = 'Написать в ЛС';
-
-                container.innerHTML = filtered.map(nick => {
-                    const key = nick.toLowerCase();
-                    const p = this.playersMap.get(key) || { nick, sources: new Set(), lastSeen: 0, lotsCount: 0 };
-                    const isCity = citySet.has(key);
-                    const isMine = mineSet.has(key);
-
-                    const badges = [];
-                    if (isCity) badges.push(`<span style="background:rgba(0,255,102,0.18);color:#00ff66;border:1px solid rgba(0,255,102,0.4);padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;">🏛️ В Городе</span>`);
-                    if (isMine) badges.push(`<span style="background:rgba(255,153,0,0.18);color:#ff9900;border:1px solid rgba(255,153,0,0.4);padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;">⛏️ В Шахте</span>`);
-                    if (p.lotsCount > 0) badges.push(`<span style="background:rgba(255,215,0,0.15);color:#ffd700;border:1px solid rgba(255,215,0,0.3);padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;">🏛️ Лотов: ${p.lotsCount}</span>`);
-                    if (!isCity && !isMine) badges.push(`<span style="background:rgba(150,150,150,0.15);color:#8899aa;border:1px solid rgba(150,150,150,0.3);padding:2px 6px;border-radius:4px;font-size:11px;">📍 Не в сети</span>`);
-
-                    return `
-                        <div class="friend-card-row" data-nick="${Utils.escapeHtml(nick)}" style="background:#26202e; border:1px solid #44374a; border-radius:6px; padding:8px 12px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; transition:all 0.15s;">
-                            <span style="font-weight:bold; color:#f7eadf; font-size:13px; display:flex; align-items:center; gap:6px;">${Utils.escapeHtml(nick)}${this.getUnreadDM(nick) > 0 ? `<span title="Непрочитанных ЛС: ${this.getUnreadDM(nick)}" style="background:#ff3b5c; color:#fff; font-size:10px; font-weight:bold; padding:1px 6px; border-radius:10px;">${this.getUnreadDM(nick)}</span>` : ''}</span>
-                            <div style="display:flex; gap:6px; align-items:center;">
-                                ${badges.join('')}
-                                <button class="friend-quick-dm" data-nick="${Utils.escapeHtml(nick)}" title="${dmBtnTitle}" style="${dmBtnStyle}">✉️</button>
-                                <button class="friend-quick-trade" data-nick="${Utils.escapeHtml(nick)}" title="Предложить обмен" style="background:#28a745; color:#fff; border:none; border-radius:4px; padding:3px 7px; cursor:pointer; font-size:12px; line-height:1; user-select:none;">🤝</button>
-                                <button class="friend-quick-del" data-nick="${Utils.escapeHtml(nick)}" title="Удалить из друзей" style="background:#3a2028; color:#ff5a7a; border:1px solid #ff5a7a; border-radius:4px; padding:3px 7px; cursor:pointer; font-size:12px; line-height:1; user-select:none;">✖</button>
-                                <span style="color:#caa55c; font-size:14px; margin-left:2px;">›</span>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-
-                container.querySelectorAll('.friend-card-row').forEach(row => {
-                    row.addEventListener('click', (e) => {
-                        if (e.target.closest('button')) return;
-                        const nick = row.getAttribute('data-nick');
-                        if (nick) this.openDossier(nick, 'friends');
-                    });
-                });
-
-                container.querySelectorAll('.friend-quick-dm').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        const nick = btn.getAttribute('data-nick');
-                        if (nick) this.openWhisperWith(nick);
-                    });
-                });
-
-                container.querySelectorAll('.friend-quick-trade').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        const nick = btn.getAttribute('data-nick');
-                        if (nick) this.openTradeWith(nick);
-                    });
-                });
-
-                container.querySelectorAll('.friend-quick-del').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        const nick = btn.getAttribute('data-nick');
-                        if (nick && window.confirm(`Удалить игрока ${nick} из друзей?`)) {
-                            this.removeFriend(nick);
-                            updateFriendsList();
-                        }
-                    });
-                });
-                if (prevScroll) {
-                    container.scrollTop = prevScroll;
-                }
-            };
-
-            this._updateFriendsListFn = updateFriendsList;
-            updateFriendsList();
-
-            const addInput = document.getElementById('friend-add-input');
-            const addBtn = document.getElementById('friend-add-btn');
-            const handleAdd = () => {
-                const val = (addInput?.value || '').trim();
-                if (!val) return;
-                if (this.addFriend(val)) {
-                    if (addInput) addInput.value = '';
-                    updateFriendsList();
-                }
-            };
-            addBtn?.addEventListener('click', handleAdd);
-            // keydown вместо deprecated keypress: последний не срабатывает
-            // при вводе через часть методов ввода/раскладок.
-            addInput?.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') handleAdd();
-            });
-
-            document.getElementById('friends-search')?.addEventListener('input', updateFriendsList);
-            document.getElementById('friends-refresh')?.addEventListener('click', async () => {
-                await this.scan();
-                updateFriendsList();
-            });
-        },
-
+        // backView оставлен в сигнатуре для совместимости вызовов (openDossier(nick, 'players', true));
+        // вид «Друзья» удалён, поэтому параметр больше не влияет на разметку.
         openDossier(nick, backView = null, forceDM = false) {
-            const isFriends = backView === 'friends' || (!backView && !!document.getElementById('friends-view-list'));
-            const listEl = document.getElementById(isFriends ? 'friends-view-list' : 'players-view-list');
-            const dossierEl = document.getElementById(isFriends ? 'friends-view-dossier' : 'players-view-dossier');
+            // Модуль «Друзья» удалён в 11.5.4 (нативные друзья игры) — досье
+            // всегда живёт в окне «Разведка (Игроки)».
+            const listEl = document.getElementById('players-view-list');
+            const dossierEl = document.getElementById('players-view-dossier');
             if (!listEl || !dossierEl) return;
 
             // Открыли диалог — непрочитанные ЛС от этого игрока обнуляем
-            if (isFriends) this.clearUnreadDM(nick);
+            if (forceDM) this.clearUnreadDM(nick);
 
             listEl.style.display = 'none';
             dossierEl.style.display = 'flex';
@@ -4333,10 +4218,9 @@ const Players = {
                 });
             }
 
-            const isFriend = this.isFriend(nick);
             const totalLotsPrice = playerLots.reduce((acc, l) => acc + (+l.p || 0), 0);
 
-            if (isFriends || forceDM) {
+            if (forceDM) {
                 this.currentDMPeer = nick;
                 const lotsHtml = playerLots.map(l => {
                     const name = Utils.getItemName(l.i) + (l.e || l.en ? ' +' + (l.e || l.en) : '');
@@ -4365,7 +4249,6 @@ const Players = {
                         </div>
                         <div style="display:flex; gap:6px;">
                             <button id="dossier-trade-btn" title="Предложить обмен" style="padding:4px 8px; background:#28a745; color:#fff; border:none; border-radius:4px; font-weight:bold; cursor:pointer; font-size:11px;">🤝 Обмен</button>
-                            <button id="dossier-friend-del-btn" title="Удалить из друзей" style="padding:4px 8px; background:#3a2028; color:#ff5a7a; border:1px solid #ff5a7a; border-radius:4px; font-weight:bold; cursor:pointer; font-size:11px;">✖</button>
                         </div>
                     </div>
                     ${playerLots.length > 0 ? `
@@ -4417,20 +4300,6 @@ const Players = {
                     lotsContainer.style.display = isOpen ? 'none' : 'flex';
                     if (lotsArrow) lotsArrow.textContent = isOpen ? '▾ Показать' : '▴ Скрыть';
                 });
-
-                document.getElementById('dossier-friend-del-btn')?.addEventListener('click', () => {
-                    if (window.confirm(`Удалить игрока ${nick} из друзей?`)) {
-                        this.removeFriend(nick);
-                        this.currentDMPeer = null;
-                        dossierEl.style.display = 'none';
-                        listEl.style.display = 'flex';
-                        if (isFriends) {
-                            this.renderFriends();
-                        } else {
-                            this.render();
-                        }
-                    }
-                });
             } else {
                 // Обычный режим досье из вкладки «Разведка (Игроки)»
                 this.currentDMPeer = null;
@@ -4442,9 +4311,6 @@ const Players = {
                     <div style="display:flex; gap:8px; margin-bottom:12px; flex-shrink:0;">
                         <button id="dossier-trade-btn" style="flex:1; padding:8px 4px; background:#28a745; color:#fff; border:none; border-radius:6px; font-weight:bold; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; font-size:12px;">🤝 Обмен</button>
                         <button id="dossier-dm-btn" style="flex:1; padding:8px 4px; background:#28a745; color:#fff; border:none; border-radius:6px; font-weight:bold; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; font-size:12px;" title="Написать в ЛС">✉️ ЛС</button>
-                        <button id="dossier-friend-btn" style="flex:1; padding:8px 4px; background:${isFriend ? '#dc3545' : '#caa55c'}; color:${isFriend ? '#fff' : '#1d1620'}; border:none; border-radius:6px; font-weight:bold; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; font-size:12px;">
-                            ${isFriend ? '💔 Удалить из друзей' : '⭐ В друзья'}
-                        </button>
                     </div>
                     <div style="background:#1b1622; border:1px solid #44374a; border-radius:6px; padding:10px; margin-bottom:12px; flex-shrink:0;">
                         <div style="font-size:12px; margin-bottom:4px;"><b>Текущая локация:</b> <span style="color:${locationColor}; font-weight:bold;">${locationText}</span></div>
@@ -4476,34 +4342,13 @@ const Players = {
                     // Принудительно открываем вид чата, оставаясь в текущем окне
                     this.openDossier(nick, 'players', true);
                 });
-
-                const friendBtn = document.getElementById('dossier-friend-btn');
-                if (friendBtn) {
-                    friendBtn.addEventListener('click', () => {
-                        if (this.isFriend(nick)) {
-                            this.removeFriend(nick);
-                            friendBtn.textContent = '⭐ В друзья';
-                            friendBtn.style.background = '#caa55c';
-                            friendBtn.style.color = '#1d1620';
-                        } else {
-                            this.addFriend(nick);
-                            friendBtn.textContent = '💔 Удалить из друзей';
-                            friendBtn.style.background = '#dc3545';
-                            friendBtn.style.color = '#fff';
-                        }
-                    });
-                }
             }
 
             document.getElementById('dossier-back-btn')?.addEventListener('click', () => {
                 this.currentDMPeer = null;
                 dossierEl.style.display = 'none';
                 listEl.style.display = 'flex';
-                if (isFriends) {
-                    this.renderFriends();
-                } else {
-                    this.render();
-                }
+                this.render();
             });
             document.getElementById('dossier-trade-btn')?.addEventListener('click', () => this.openTradeWith(nick));
 
@@ -4563,7 +4408,7 @@ const Players = {
     //
     // HUD показывает только отслеживаемых игроков и даёт кнопку быстрого хила.
     // Источник списка по умолчанию — НАТИВНЫЕ друзья игры (/api/friends),
-    // свой локальный список Players.getFriendsList() больше не используется.
+    // локальный список «Друзья» из аддона удалён в 11.5.4.
     // Рендер дешёвый: тяжёлая часть (innerHTML) пересобирается только при
     // изменении данных боя.
     // ============================================================
@@ -7742,6 +7587,32 @@ const Players = {
     // 8. ИНИЦИАЛИЗАЦИЯ
     // ============================================================
     function boot() {
+        // 1. Защита от iframe и Document PiP.
+        // window.top в кросс-доменном iframe кидает SecurityError, поэтому try/catch:
+        // ошибка доступа сама по себе означает, что мы в чужом iframe.
+        let isIframe = false;
+        try { isIframe = window.self !== window.top; } catch (e) { isIframe = true; }
+
+        let isPiP = false;
+        try { isPiP = !!(window.documentPictureInPicture && window.documentPictureInPicture.window === window); } catch (e) { isPiP = false; }
+
+        // 2. Защита от legion-chat-window и других вторичных контекстов.
+        //   /site/ver      — служебные страницы сайта (без /c/<канал>/);
+        //   ?minechat      — окно чата шахты стороннего аддона;
+        //   window.name    — именованные popup-окна (lgChat у того же аддона);
+        //   не /c/...      — любой путь вне страницы канала игрой не является.
+        // В таких контекстах мы бы создали второй style/fabWrap — дубликат FAB-меню.
+        const isLegionChat =
+            location.pathname.startsWith('/site/ver') ||
+            location.search.includes('minechat') ||
+            window.name === 'lgChat' ||
+            !location.pathname.startsWith('/c/');
+
+        if (isIframe || isPiP || isLegionChat) {
+            dbg('Скрипт запущен во вторичном контексте (iframe / PiP / legion-chat-window), инициализация отменена.');
+            return;
+        }
+
         const style = document.createElement('style');
         style.textContent = STYLES;
         document.head.appendChild(style);
@@ -7828,10 +7699,6 @@ const Players = {
             _booted: true,
             shutdown: () => {
                 PriestAssistant.destroy();
-                if (Players._badgeTimer) {
-                    clearInterval(Players._badgeTimer);
-                    Players._badgeTimer = null;
-                }
                 if (Miner.abortController) {
                     try { Miner.abortController.abort(); } catch(e) {}
                     Miner.abortController = null;

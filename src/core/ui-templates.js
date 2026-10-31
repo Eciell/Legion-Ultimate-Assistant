@@ -49,7 +49,6 @@
                     </div>
                     <div class="fab-section-body">
                         <button class="fab-menu-item" id="${d.btnPlayers}">👥 Игроки (Разведка)</button>
-                        <button class="fab-menu-item" id="${d.btnFriends}">🤝 Друзья <span id="${d.friendsBadge}" style="display:none; background:#28a745; color:#fff; font-size:11px; padding:1px 6px; border-radius:10px; font-weight:bold; margin-left:auto;">0</span></button>
                         <button class="fab-menu-item" id="${d.btnPopout}">📺 Вынести чат <span class="${d.chatBadge}" id="${d.chatBadge}">0</span></button>
                     </div>
                 </div>
