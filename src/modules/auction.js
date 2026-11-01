@@ -17,6 +17,17 @@
         currentPage: 0,
         pageSize: 50,
 
+        // 11.5.5: оповещения о выгодных лотах. alertThreshold — минимальная
+        // скидка в процентах, при которой показываем тост и играем сигнал.
+        alertThreshold: 50,
+        // Звук можно выключить чекбоксом «Звук» в фильтрах; выбор живёт в
+        // localStorage. Чтение обёрнуто в try: в приватном режиме/при
+        // запрете хранилища getItem бросает исключение и ронял бы модуль.
+        alertSoundEnabled: (() => {
+            try { return localStorage.getItem('LEGION_AUC_SOUND') !== 'false'; }
+            catch (e) { return true; }
+        })(),
+
         init() {
             (document.getElementById(DOM_IDS.btnAuctionScan) || document.getElementById('btn-auction-scan'))?.addEventListener('click', () => this.open());
         },
@@ -153,6 +164,37 @@
             return G.ME?.hero || G.ME?.me || null;
         },
 
+        // 11.5.5: короткий сигнал о выгодном лоте через Web Audio API —
+        // без внешних файлов и без <audio>. Контекст живёт только на время
+        // сигнала: браузер разрешает всего несколько AudioContext на страницу,
+        // поэтому после osc.stop() дожидаемся onended и закрываем ctx.
+        playAlertSound() {
+            try {
+                const AC = window.AudioContext || window.webkitAudioContext;
+                if (!AC) return;
+                // 1. Узлы сигнала: осциллятор -> усиление -> колонки
+                const ctx = new AC();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                // 2. Форма: синус 880 Гц, громкость 0.1 -> 0.01 за 0.5 с
+                // (exponentialRampToValueAtTime не принимает 0, минимум 0.0001)
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(880, ctx.currentTime);
+                gain.gain.setValueAtTime(0.1, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.5);
+                // 3. Освобождаем контекст, иначе за сессию накопится лимит
+                osc.onended = () => { try { ctx.close(); } catch (e) {} };
+            } catch (e) {
+                // Нет AudioContext / запрещён автоплей — просто молчим:
+                // оповещение в тосте уже показано.
+                dbg('[AUCTION] звук недоступен:', e);
+            }
+        },
+
         async open() {
             UI.showModal(`<h2>🔍 Сканер Аукциона <button class="custom-close" id="custom-close-btn">✖</button></h2><div class="loader">Считаем цены...</div>`);
             try {
@@ -177,6 +219,8 @@
                     return UI.showModal('<h2>Аукцион пуст <button class="custom-close" id="custom-close-btn">✖</button></h2>');
                 }
                 const itemsMap = res.items || res.body?.items || (res.data && res.data.items) || {};
+                // 11.5.5: история последних цен по предметам — { id: [[цена, заточка], …] }.
+                const histMap = res.hist || res.body?.hist || {};
 
                 // Новый скан витрины — всегда с первой страницы.
                 this.currentPage = 0;
@@ -245,6 +289,15 @@
                     });
                 }
 
+                // 11.5.5: оповещение о лотах с большой скидкой. Считаем по всем
+                // обработанным лотам (не по текущей странице и не по фильтрам):
+                // смысл сигнала — «на витрине есть выгодное», а не «на экране».
+                const goodDeals = processed.filter(l => l.discount >= this.alertThreshold);
+                if (goodDeals.length > 0) {
+                    UI.showToast(`🔥 Найдено выгодных лотов: ${goodDeals.length}!`, false);
+                    if (this.alertSoundEnabled) this.playAlertSound();
+                }
+
                 UI.showModal(`
                     <h2>🔍 Сканер Аукциона <button class="custom-close" id="custom-close-btn">✖</button></h2>
 
@@ -285,6 +338,10 @@
 
                         <label style="display:flex; align-items:center; gap:5px; cursor:pointer; color:#ffcf6a; font-weight:bold; font-size:14px; margin-left:auto;">
                             <input type="checkbox" id="auction-only-deals" style="width:16px; height:16px; accent-color:#caa55c;"> Только выгодные
+                        </label>
+
+                        <label style="display:flex; align-items:center; gap:5px; cursor:pointer; color:#ffcf6a; font-weight:bold; font-size:14px;">
+                            <input type="checkbox" id="auction-sound" ${this.alertSoundEnabled ? 'checked' : ''} style="width:16px; height:16px; accent-color:#caa55c;"> Звук
                         </label>
 
                         <div style="display:flex; gap:10px; align-items:center; margin-left:10px;">
@@ -386,8 +443,20 @@
                         const color = rarityColors[l.metaRarity] || '#fff';
                         const rarityBadge = l.metaRarity ? `<span style="color:${color}; font-size:10px; border:1px solid ${color}; border-radius:4px; padding:0 4px; margin-left:5px; text-transform:capitalize;">${Utils.escapeHtml(l.metaRarity)}</span>` : '';
 
+                        // 11.5.5: история цен из /api/auction (hist) — по предмету,
+                        // записи вида [цена, заточка]. Показываем 📊 с полной
+                        // историей в title: строк много, в ячейку они не влезут.
+                        const histArr = Array.isArray(histMap[l.id]) ? histMap[l.id] : null;
+                        let histIcon = '';
+                        if (histArr && histArr.length > 0) {
+                            const tooltip = histArr
+                                .map(h => `${Utils.formatMoney(h[0])} (заточка +${h[1] || 0})`)
+                                .join('\n');
+                            histIcon = `<span title="${Utils.escapeHtml(tooltip)}" style="cursor:help; margin-left:5px; font-size:12px;">📊</span>`;
+                        }
+
                         html += `<tr data-lot-id="${Utils.escapeHtml(l.id || '')}" data-lot-name="${Utils.escapeHtml(l.name || '')}">
-                            <td>${l.icon ? `<img src="${Utils.safeUrl(l.icon)}" style="width:20px;vertical-align:middle;margin-right:5px;">` : ''}<b>${Utils.escapeHtml(l.name)}</b>${rarityBadge}</td>
+                            <td>${l.icon ? `<img src="${Utils.safeUrl(l.icon)}" style="width:20px;vertical-align:middle;margin-right:5px;">` : ''}<b>${Utils.escapeHtml(l.name)}</b>${rarityBadge}${histIcon}</td>
                             <td>${qtyStr}</td>
                             <td style="color:#ffcf6a; font-weight:bold;">${totalPriceStr}</td>
                             <td style="font-weight:bold;">${Utils.formatMoney(l.unitPrice)}</td>
@@ -509,6 +578,17 @@
                     if (this.currentPage + 1 >= lastTotalPages) return;
                     this.currentPage++;
                     update();
+                });
+
+                // Настройка звука оповещений: сохраняем в localStorage, чтобы
+                // выбор жил между сканами (по умолчанию звук включён).
+                document.getElementById('auction-sound')?.addEventListener('change', (e) => {
+                    this.alertSoundEnabled = e.target.checked;
+                    try {
+                        localStorage.setItem('LEGION_AUC_SOUND', String(this.alertSoundEnabled));
+                    } catch (err) {
+                        dbg('[AUCTION] не удалось сохранить настройку звука:', err);
+                    }
                 });
 
                 let t;
