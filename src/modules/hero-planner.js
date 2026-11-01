@@ -28,9 +28,22 @@
 
         // Округление подтверждено живой игрой: и статы, и цена считаются через
         // Math.round. Все вызовы идут сюда — если поведение изменится, правим здесь.
-        enchantStat(base, en) {
+        enchantStat(base, en, statKey) {
             const bonus = GAME_DATA.ENCHANT_MULTIPLIERS[Math.min(15, +en || 0)] || 0;
-            return Math.round(base * (1 + bonus / 100));
+            // Для xstat-ов (crit, dodge, pierce и т.д.) бонус заточки делится на 4
+            // (enchK=0.25 из game-data.js xstats.enchK). См. app.js:1393 enchStatsN.
+            const effective = GAME_DATA.XSTAT_KEYS.has(statKey) ? bonus * GAME_DATA.ENCHANT_K : bonus;
+            return Math.round(base * (1 + effective / 100));
+        },
+
+        // Обратный вычет заточки (когда сервер не отдал stats0): восстанавливаем
+        // базу делением на тот же эффективный множитель, что и в enchantStat,
+        // иначе для xstat-ов база получалась бы заниженной в 4 раза.
+        enchantBase(stat, en, statKey) {
+            const bonus = GAME_DATA.ENCHANT_MULTIPLIERS[Math.min(15, +en || 0)] || 0;
+            const effective = GAME_DATA.XSTAT_KEYS.has(statKey) ? bonus * GAME_DATA.ENCHANT_K : bonus;
+            const divisor = 1 + effective / 100;
+            return divisor > 0 ? Math.round(stat / divisor) : stat;
         },
 
         enchantCost(itemV, level) {
@@ -175,10 +188,11 @@
                     if (hasStats0) {
                         baseStats = item.stats0;
                     } else {
-                        const curBonus = GAME_DATA.ENCHANT_MULTIPLIERS[Math.min(15, curEn)] || 0;
-                        const divisor = 1 + curBonus / 100;
+                        // Обратный вычет заточки. Для xstat-ов (crit, dodge, pierce…)
+                        // эффективный процент вчетверо меньше (enchK=0.25), поэтому
+                        // считаем через enchantBase, а не общим делителем.
                         for (const [k, v] of Object.entries(item.stats || {})) {
-                            baseStats[k] = Math.round(v / divisor);
+                            baseStats[k] = this.enchantBase(v, curEn, k);
                         }
                     }
 
@@ -214,7 +228,7 @@
                             : Utils.formatMoney(cumulativeIdeal);
 
                         const statsLine = Object.entries(baseStats).map(([k, base]) => {
-                            const final = this.enchantStat(base, lv);
+                            const final = this.enchantStat(base, lv, k);  // передаем ключ
                             return `${BuildSim.statNames[k] || k}: ${final}`;
                         }).join(' · ') || '—';
 
@@ -264,11 +278,13 @@
                         ${isExpected
                             ? `<div style="margin-top:10px; font-size:11px; color:#888; line-height:1.5;">
                             ⭐ Звезда: +25% к шансу, +300 к цене. 🌐 Сфера: защита от поломки, +900 к цене.<br>
-                            «Суммарно» = стоимость всех попыток с +1 до +N с учетом выбранных вами ресурсов.
+                            «Суммарно» = стоимость всех попыток с +1 до +N с учетом выбранных вами ресурсов.<br>
+                            Расширенные статы (крит, уклонение, пробивание и пр.) получают ¼ бонуса заточки (enchK = 0.25).
                         </div>`
                             : `<div style="margin-top:10px; font-size:11px; color:#888; line-height:1.5;">
                             Стоимость = <code>max(10, round(v × price% / 100))</code>. Округление статов — <code>Math.round</code> (подтверждено игрой).<br>
-                            <b>«Суммарно до +N»</b> = сумма всех базовых стоимостей с +1 до +N (без учета шансов и поломок, «идеальная» стоимость).
+                            <b>«Суммарно до +N»</b> = сумма всех базовых стоимостей с +1 до +N (без учета шансов и поломок, «идеальная» стоимость).<br>
+                            Расширенные статы (крит, уклонение, пробивание и пр.) получают ¼ бонуса заточки (enchK = 0.25).
                         </div>`}
                     `;
 

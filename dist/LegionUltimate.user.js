@@ -93,7 +93,12 @@
     const GAME_DATA = {
         // Прирост характеристик предмета от уровня заточки, %:
         // индекс массива = уровень заточки (0..15), значение — процент.
-        ENCHANT_MULTIPLIERS: [0, 4, 9, 15, 22, 31, 42, 56, 74, 97, 125, 160, 200, 250, 310, 400]
+        ENCHANT_MULTIPLIERS: [0, 4, 9, 15, 22, 31, 42, 56, 74, 97, 125, 160, 200, 250, 310, 400],
+
+        // Расширенные характеристики (xstats) из game-data.js.
+        // Заточка для них применяется с множителем enchK = 0.25 (÷4).
+        XSTAT_KEYS: new Set(['crit', 'critDmg', 'dodge', 'pierce', 'healPow', 'luck', 'resist']),
+        ENCHANT_K: 0.25
     };
 
     // Единый объект утилит: наполняется модулями utils-* сразу после
@@ -2148,7 +2153,7 @@
         _currentBuildName: '', // имя последнего сохранённого/загруженного билда (для будущих фич UI)
         _currentBuildNames: {}, // { [clsId]: name } — активный билд каждого класса (нужен для кнопки «Удалить»)
 
-        statNames: { hp: 'Макс. HP', atk: 'Физ. урон', mag: 'Магия', def: 'Броня', crit: 'Крит %', dodge: 'Уклонение', pierce: 'Пробивание', resist: 'Сопротивление' },
+        statNames: { hp: 'Макс. HP', atk: 'Физ. урон', mag: 'Магия', def: 'Броня', crit: 'Крит %', critDmg: 'Сила крита', dodge: 'Уклонение', pierce: 'Пробивание', healPow: 'Сила лечения', luck: 'Удача', resist: 'Сопротивление' },
         fxNames: { melee: 'Физ. урон %', magic: 'Магия %', hp: 'Макс. HP %', def: 'Броня', healPow: 'Сила лечения %', healIn: 'Вх. лечение %', crit: 'Крит %', critDmg: 'Сила крита', skel: 'Урон скелетов %', skelT: 'Время скелетов', leech: 'Вампиризм %', block: 'Снижение урона %', dodge: 'Уклонение %', lead: 'Урон по боссам %', first: 'Урон 1-й ход %', dmg: 'Весь урон %', pierce: 'Пробивание %', resist: 'Сопротивление', healCrit: 'Крит лечения %', regen: 'Регенерация %', low: 'Урон при низком HP %', a_siyanie: 'Сияние +%', a_obereg: 'Оберег +%', a_dlan: 'Длань +%', a_aura: 'Аура +%', aura: 'Аура −урон %', a_svet: 'Свет +%', a_vspyshka: 'Вспышка +%', a_oznob: 'Озноб +%', a_pricel: 'Прицел +%', a_grad: 'Град +%', a_natisk: 'Натиск +%', a_stoyka: 'Стойка +%', a_vspinu: 'Вспину +%', a_yad: 'Яд +%', a_vytyanut: 'Вытянуть +%', a_podnyat: 'Поднять +%', poison: 'Отрава %', steal: 'Кража %', loot: 'Добыча %', skelN: 'Скелетов +', volley: 'Залп +%', shieldBlock: 'Щит блок %', trapDodge: 'Ловушки %', steady: 'Промах→удар %', cleave: 'Замах %', cleaveBoss: 'Замах по боссу %', penBoss: 'Бронебой по боссу %', drain: 'Вытягивание %', hex: 'Проклятие +%', holy: 'По нежити +%', poisonT: 'Время отравы' },
         classNames: { recruit: '🐱 Новобранец', legionary: '🛡️ Легионер', archer: '🏹 Лучник', mage: '🔮 Маг', priest: '✨ Жрец', rogue: '🗡️ Разбойник', necromancer: '💀 Некромант', paladin: '🔨 Паладин' },
         nodeIcons: {
@@ -2732,9 +2737,22 @@
 
         // Округление подтверждено живой игрой: и статы, и цена считаются через
         // Math.round. Все вызовы идут сюда — если поведение изменится, правим здесь.
-        enchantStat(base, en) {
+        enchantStat(base, en, statKey) {
             const bonus = GAME_DATA.ENCHANT_MULTIPLIERS[Math.min(15, +en || 0)] || 0;
-            return Math.round(base * (1 + bonus / 100));
+            // Для xstat-ов (crit, dodge, pierce и т.д.) бонус заточки делится на 4
+            // (enchK=0.25 из game-data.js xstats.enchK). См. app.js:1393 enchStatsN.
+            const effective = GAME_DATA.XSTAT_KEYS.has(statKey) ? bonus * GAME_DATA.ENCHANT_K : bonus;
+            return Math.round(base * (1 + effective / 100));
+        },
+
+        // Обратный вычет заточки (когда сервер не отдал stats0): восстанавливаем
+        // базу делением на тот же эффективный множитель, что и в enchantStat,
+        // иначе для xstat-ов база получалась бы заниженной в 4 раза.
+        enchantBase(stat, en, statKey) {
+            const bonus = GAME_DATA.ENCHANT_MULTIPLIERS[Math.min(15, +en || 0)] || 0;
+            const effective = GAME_DATA.XSTAT_KEYS.has(statKey) ? bonus * GAME_DATA.ENCHANT_K : bonus;
+            const divisor = 1 + effective / 100;
+            return divisor > 0 ? Math.round(stat / divisor) : stat;
         },
 
         enchantCost(itemV, level) {
@@ -2879,10 +2897,11 @@
                     if (hasStats0) {
                         baseStats = item.stats0;
                     } else {
-                        const curBonus = GAME_DATA.ENCHANT_MULTIPLIERS[Math.min(15, curEn)] || 0;
-                        const divisor = 1 + curBonus / 100;
+                        // Обратный вычет заточки. Для xstat-ов (crit, dodge, pierce…)
+                        // эффективный процент вчетверо меньше (enchK=0.25), поэтому
+                        // считаем через enchantBase, а не общим делителем.
                         for (const [k, v] of Object.entries(item.stats || {})) {
-                            baseStats[k] = Math.round(v / divisor);
+                            baseStats[k] = this.enchantBase(v, curEn, k);
                         }
                     }
 
@@ -2918,7 +2937,7 @@
                             : Utils.formatMoney(cumulativeIdeal);
 
                         const statsLine = Object.entries(baseStats).map(([k, base]) => {
-                            const final = this.enchantStat(base, lv);
+                            const final = this.enchantStat(base, lv, k);  // передаем ключ
                             return `${BuildSim.statNames[k] || k}: ${final}`;
                         }).join(' · ') || '—';
 
@@ -2968,11 +2987,13 @@
                         ${isExpected
                             ? `<div style="margin-top:10px; font-size:11px; color:#888; line-height:1.5;">
                             ⭐ Звезда: +25% к шансу, +300 к цене. 🌐 Сфера: защита от поломки, +900 к цене.<br>
-                            «Суммарно» = стоимость всех попыток с +1 до +N с учетом выбранных вами ресурсов.
+                            «Суммарно» = стоимость всех попыток с +1 до +N с учетом выбранных вами ресурсов.<br>
+                            Расширенные статы (крит, уклонение, пробивание и пр.) получают ¼ бонуса заточки (enchK = 0.25).
                         </div>`
                             : `<div style="margin-top:10px; font-size:11px; color:#888; line-height:1.5;">
                             Стоимость = <code>max(10, round(v × price% / 100))</code>. Округление статов — <code>Math.round</code> (подтверждено игрой).<br>
-                            <b>«Суммарно до +N»</b> = сумма всех базовых стоимостей с +1 до +N (без учета шансов и поломок, «идеальная» стоимость).
+                            <b>«Суммарно до +N»</b> = сумма всех базовых стоимостей с +1 до +N (без учета шансов и поломок, «идеальная» стоимость).<br>
+                            Расширенные статы (крит, уклонение, пробивание и пр.) получают ¼ бонуса заточки (enchK = 0.25).
                         </div>`}
                     `;
 
