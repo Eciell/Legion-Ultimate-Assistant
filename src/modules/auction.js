@@ -6,6 +6,17 @@
         cityStockLoaded: false,
         cityStockLoading: null,
 
+        // 11.5.5: уровень героя и порог торговли (hero.tml — минимальный
+        // уровень, с которого сервер разрешает покупку/обмен у игроков).
+        // Пока /api/me не ответил, считаем, что ограничений нет.
+        myLevel: 1,
+        tradeMinLevel: 0,
+
+        // 11.5.5: пагинация витрины вместо жёсткого среза в 100 строк.
+        // currentPage — индекс страницы с нуля, pageSize — строк на страницу.
+        currentPage: 0,
+        pageSize: 50,
+
         init() {
             (document.getElementById(DOM_IDS.btnAuctionScan) || document.getElementById('btn-auction-scan'))?.addEventListener('click', () => this.open());
         },
@@ -126,6 +137,22 @@
         // чтобы не было цикла utils-art.getItemName -> Auction.getItemName:
         //    Auction.getItemName(id, itemsMap) -> Utils.getItemName(id, itemsMap)
         //    Auction.getItemMeta(id, rarityHint) -> Utils.getItemMeta(id, rarityHint)
+
+        // 11.5.5: состояние героя для проверки уровня торговли.
+        // /api/me — основной источник (hero.level, hero.tml); снимок страницы
+        // G.ME.hero — резерв, чтобы сканер работал и при молчащем API.
+        async fetchHeroState() {
+            try {
+                const res = await Utils.fetchApi('/api/me');
+                const hero = res?.hero || res?.body?.hero || null;
+                if (hero) return hero;
+            } catch (e) {
+                dbg('[AUCTION] /api/me недоступен:', e);
+            }
+            // ME живёт в page-context: в песочнице Tampermonkey только через G.
+            return G.ME?.hero || G.ME?.me || null;
+        },
+
         async open() {
             UI.showModal(`<h2>🔍 Сканер Аукциона <button class="custom-close" id="custom-close-btn">✖</button></h2><div class="loader">Считаем цены...</div>`);
             try {
@@ -138,12 +165,21 @@
                         dbg('[AUCTION] Цены магазинов недоступны — считаем без них');
                     }
                 }
+                // 11.5.5: витрину и состояние героя тянем параллельно — уровень
+                // (hero.level) и порог обмена (hero.tml) нужны до первой отрисовки.
+                const heroPromise = this.fetchHeroState();
                 const res = await Utils.fetchApi('/api/auction');
+                const hero = await heroPromise.catch(() => null);
+                this.myLevel = +hero?.level || 1;
+                this.tradeMinLevel = +hero?.tml || 0;
                 const lots = res.lots || res.body?.lots;
                 if (!lots || !Array.isArray(lots) || !lots.length) {
                     return UI.showModal('<h2>Аукцион пуст <button class="custom-close" id="custom-close-btn">✖</button></h2>');
                 }
                 const itemsMap = res.items || res.body?.items || (res.data && res.data.items) || {};
+
+                // Новый скан витрины — всегда с первой страницы.
+                this.currentPage = 0;
 
                 const groups = {};
                 lots.forEach(l => {
@@ -200,7 +236,11 @@
                             metaRarity: meta.rarity,
                             metaRole: meta.role,
                             sourceType: ev.sourceType,
-                            lotId: l.id
+                            lotId: l.id,
+                            // 11.5.5: ru — время окончания розыгрыша (0/undefined у
+                            // обычного лота), wn — число заявок «Хочу» в розыгрыше.
+                            ru: l.ru || null,
+                            wn: +l.wn || 0
                         });
                     });
                 }
@@ -246,6 +286,12 @@
                         <label style="display:flex; align-items:center; gap:5px; cursor:pointer; color:#ffcf6a; font-weight:bold; font-size:14px; margin-left:auto;">
                             <input type="checkbox" id="auction-only-deals" style="width:16px; height:16px; accent-color:#caa55c;"> Только выгодные
                         </label>
+
+                        <div style="display:flex; gap:10px; align-items:center; margin-left:10px;">
+                            <button id="auction-prev" title="Предыдущая страница" style="background:#2a2030; border:1px solid #caa55c; color:#caa55c; padding:4px 10px; border-radius:4px; cursor:pointer; font-weight:bold;">◀</button>
+                            <span id="auction-page-info" style="color:#aaa; font-size:12px;">Стр. 1 из 1</span>
+                            <button id="auction-next" title="Следующая страница" style="background:#2a2030; border:1px solid #caa55c; color:#caa55c; padding:4px 10px; border-radius:4px; cursor:pointer; font-weight:bold;">▶</button>
+                        </div>
                     </div>
 
                     <div class="table-container">
@@ -265,9 +311,11 @@
                         </table>
                     </div>
                     <div style="margin-top:10px; font-size:12px; color:#888; text-align:right;">
-                        Показаны первые 100 лотов из <span id="auction-count">0</span>
+                        Всего лотов: <span id="auction-count">0</span> · на странице до ${this.pageSize}
                     </div>`);
 
+                // Сколько страниц было в последней отрисовке (для кнопки ▶).
+                let lastTotalPages = 1;
                 const renderTable = (data) => {
                     const tbody = document.getElementById('auction-body');
                     const countEl = document.getElementById('auction-count');
@@ -275,18 +323,64 @@
 
                     countEl.textContent = data.length;
 
+                    // Пагинация: totalPages считается по отфильтрованному списку,
+                    // поэтому смена фильтра/поиска сразу пересчитывает и её.
+                    lastTotalPages = Math.max(1, Math.ceil(data.length / this.pageSize));
+                    const pageInfo = document.getElementById('auction-page-info');
+                    if (pageInfo) pageInfo.textContent = `Стр. ${this.currentPage + 1} из ${lastTotalPages}`;
+                    const prevBtn = document.getElementById('auction-prev');
+                    const nextBtn = document.getElementById('auction-next');
+                    if (prevBtn) {
+                        const off = this.currentPage <= 0;
+                        prevBtn.disabled = off;
+                        prevBtn.style.opacity = off ? '0.4' : '1';
+                        prevBtn.style.cursor = off ? 'not-allowed' : 'pointer';
+                    }
+                    if (nextBtn) {
+                        const off = this.currentPage + 1 >= lastTotalPages;
+                        nextBtn.disabled = off;
+                        nextBtn.style.opacity = off ? '0.4' : '1';
+                        nextBtn.style.cursor = off ? 'not-allowed' : 'pointer';
+                    }
+
                     if (!data.length) {
                         tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color:#888; padding:20px;">Ничего не найдено по заданным фильтрам.</td></tr>';
                         return;
                     }
 
-                    const displayList = data.slice(0, 100);
+                    const start = this.currentPage * this.pageSize;
+                    const displayList = data.slice(start, start + this.pageSize);
                     let html = '';
 
                     displayList.forEach(l => {
                         const cls = l.discount >= 20 ? 'deal-great' : (l.discount >= 10 ? 'deal-good' : (l.discount < 0 ? 'deal-bad' : 'stat-eq'));
                         const qtyStr = l.qty > 1 ? `<b>${l.qty}</b>` : '1';
                         const totalPriceStr = l.qty > 1 ? `${Utils.formatMoney(l.totalPrice)} <small style="color:#888">(${Utils.formatMoney(l.unitPrice)})</small>` : Utils.formatMoney(l.totalPrice);
+
+                        // 11.5.5: розыгрыш идёт, пока не истекло время ru;
+                        // порог tml блокирует покупку у игроков на низком уровне.
+                        const isRaffle = l.ru && l.ru > Date.now();
+                        const isLowLevel = this.myLevel < this.tradeMinLevel;
+
+                        let btnText = 'Купить';
+                        let btnColor = '#28a745';
+                        let btnDisabled = false;
+
+                        if (isLowLevel) {
+                            btnText = `Ур. < ${this.tradeMinLevel}`;
+                            btnColor = '#555';
+                            btnDisabled = true;
+                        } else if (isRaffle) {
+                            btnText = `🎲 Хочу (${l.wn})`;
+                            btnColor = '#e0a800';
+                        }
+
+                        // В колонке «Осталось» у розыгрыша бейдж вместо таймера:
+                        // обычный formatTimeLeft(l.u) показывал бы конец торгов,
+                        // а не конец розыгрыша.
+                        const timeStr = isRaffle
+                            ? '<span style="color:#e0a800;">🎲 Розыгрыш</span>'
+                            : Utils.escapeHtml(l.timeLeft);
 
                         const rarityColors = { common: '#c9ccd6', uncommon: '#4cc95a', rare: '#4aa3ff', epic: '#b06bff', legendary: '#ffb83d' };
                         const color = rarityColors[l.metaRarity] || '#fff';
@@ -299,10 +393,10 @@
                             <td style="font-weight:bold;">${Utils.formatMoney(l.unitPrice)}</td>
                             <td>${Utils.formatMoney(l.median)}</td>
                             <td class="${cls}">${l.discount > 0 ? '-' : '+'}${Math.abs(l.discount)}%</td>
-                            <td style="color:#888;">${Utils.escapeHtml(l.timeLeft)}</td>
+                            <td style="color:#888;">${timeStr}</td>
                             <td>${Utils.escapeHtml(l.seller || '')}</td>
                             <td style="text-align:center;">
-                                <button class="auc-buy-btn" data-buy-lot="${l.lotId || l.id}" data-price="${l.totalPrice}" data-name="${Utils.escapeHtml(l.name)}">Купить</button>
+                                <button class="auc-buy-btn" data-buy-lot="${l.lotId || l.id}" data-price="${l.totalPrice}" data-name="${Utils.escapeHtml(l.name)}" data-raffle="${!!isRaffle}" data-raffle-end="${l.ru || 0}" style="background:${btnColor}; color:#fff; border:none; padding:4px 8px; border-radius:4px; cursor:${btnDisabled ? 'not-allowed' : 'pointer'}; font-size:12px; width:100%;" ${btnDisabled ? 'disabled' : ''}>${btnText}</button>
                             </td>
                         </tr>`;
                     });
@@ -321,14 +415,32 @@
                         const lotId = btn.getAttribute('data-buy-lot');
                         const price = Number(btn.getAttribute('data-price'));
                         const name = btn.getAttribute('data-name') || 'предмет';
+                        // 11.5.5: розыгрыш помечается на кнопке при отрисовке.
+                        const isRaffle = btn.getAttribute('data-raffle') === 'true';
+                        const raffleEnd = Number(btn.getAttribute('data-raffle-end')) || 0;
                         if (!lotId) {
                             alert('Не удалось определить ID лота');
                             return;
                         }
-
-                        if (!window.confirm(`Вы уверены, что хотите купить ${name} за ${Utils.formatMoney(price)}?`)) {
+                        // Защита от ложных покупок: цена/уровень могли измениться
+                        // после отрисовки таблицы — проверяем ещё раз перед запросом.
+                        if (!Number.isFinite(price) || price <= 0) {
+                            alert('Некорректная цена лота — обновите список');
                             return;
                         }
+                        if (this.myLevel < this.tradeMinLevel) {
+                            alert(`Обмен и передача доступны с ${this.tradeMinLevel} уровня (сейчас у тебя ${this.myLevel}-й)`);
+                            return;
+                        }
+                        // Розыгрыш закончился между отрисовкой и кликом: без этого
+                        // «Хочу» улетал бы как покупка по старой цене.
+                        if (isRaffle && raffleEnd && raffleEnd <= Date.now()) {
+                            alert('Розыгрыш уже завершён — обновите список');
+                            return;
+                        }
+
+                        const actionText = isRaffle ? 'подать заявку на розыгрыш' : 'купить';
+                        if (!window.confirm(`Вы уверены, что хотите ${actionText} ${name} за ${Utils.formatMoney(price)}?`)) return;
 
                         btn.disabled = true;
                         const origText = btn.textContent;
@@ -338,16 +450,17 @@
                             const res = await Utils.fetchApi('/api/aucBuy', { lot: String(lotId), price: Number(price) });
                             const data = res?.body || res;
                             if (data && (data.ok || data.success || !data.error)) {
-                                alert(`Успешно куплено: ${name}!`);
-                                Auction.open();
+                                const successMsg = isRaffle ? 'Заявка на розыгрыш подана!' : `Успешно куплено: ${name}!`;
+                                alert(successMsg);
+                                Auction.open(); // перезагрузить список
                             } else {
                                 const errMsg = data?.error || data?.msg || data?.err || 'Не удалось купить лот';
-                                alert(`Ошибка покупки: ${errMsg}`);
+                                alert(isRaffle ? `Ошибка заявки: ${errMsg}` : `Ошибка покупки: ${errMsg}`);
                                 btn.disabled = false;
                                 btn.textContent = origText;
                             }
                         } catch (err) {
-                            alert(`Ошибка покупки: ${err.message || err}`);
+                            alert(isRaffle ? `Ошибка заявки: ${err.message || err}` : `Ошибка покупки: ${err.message || err}`);
                             btn.disabled = false;
                             btn.textContent = origText;
                         }
@@ -375,11 +488,28 @@
                         return true;
                     });
 
+                    // Пагинация: после смены фильтров страниц может стать меньше,
+                    // поэтому currentPage прижимаем к последней существующей.
+                    const totalPages = Math.ceil(filtered.length / this.pageSize);
+                    if (this.currentPage >= totalPages) this.currentPage = Math.max(0, totalPages - 1);
                     renderTable(filtered);
                 };
 
                 current.sort((a, b) => b.discount - a.discount);
                 update();
+
+                // Кнопки страниц переключают this.currentPage и перерисовывают
+                // таблицу через update() — фильтры и сортировка сохраняются.
+                document.getElementById('auction-prev')?.addEventListener('click', () => {
+                    if (this.currentPage <= 0) return;
+                    this.currentPage--;
+                    update();
+                });
+                document.getElementById('auction-next')?.addEventListener('click', () => {
+                    if (this.currentPage + 1 >= lastTotalPages) return;
+                    this.currentPage++;
+                    update();
+                });
 
                 let t;
                 document.getElementById('auction-search').addEventListener('input', () => { clearTimeout(t); t = setTimeout(update, 300); });
