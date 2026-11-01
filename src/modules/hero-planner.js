@@ -5,13 +5,12 @@
     const HeroPlanner = {
         // Таблица заточки (05_Mechanics.md). TODO: переключить источник на
         // hero.crafts / API в v1.1, если игра начнёт отдавать таблицу.
-        // Бонус заточки (проценты по уровням) — общий: GAME_DATA.ENCHANT_MULTIPLIERS
-        // в core/constants.js, чтобы не дублировать его с auction.js.
+        // Бонус заточки (ENCHANT_MULTIPLIERS) и цены попыток (ENCHANT_PRICES /
+        // ENCHANT_PRICE_MIN) — общие: GAME_DATA в core/constants.js, чтобы не
+        // дублировать их с auction.js.
         ENCH: {
             max: 15,
             chance: [0, 95, 90, 80, 70, 55, 42, 30, 20, 12, 7, 4, 2, 1, 0.5, 0],
-            price:  [0, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5.5, 7.5, 10, 13, 17, 22, 28, 35],
-            priceMin: 10,
             slots: ['weapon', 'shield', 'armor', 'helmet', 'trinket']
         },
 
@@ -47,8 +46,8 @@
         },
 
         enchantCost(itemV, level) {
-            const pct = this.ENCH.price[Math.min(15, +level || 0)] || 0;
-            return Math.max(this.ENCH.priceMin, Math.round(itemV * pct / 100));
+            const pct = GAME_DATA.ENCHANT_PRICES[Math.min(15, +level || 0)] || 0;
+            return Math.max(GAME_DATA.ENCHANT_PRICE_MIN, Math.round(itemV * pct / 100));
         },
 
         // Шанс успеха, % (без способов, обычная заточка)

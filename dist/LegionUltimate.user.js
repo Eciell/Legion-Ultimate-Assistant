@@ -95,6 +95,12 @@
         // индекс массива = уровень заточки (0..15), значение — процент.
         ENCHANT_MULTIPLIERS: [0, 4, 9, 15, 22, 31, 42, 56, 74, 97, 125, 160, 200, 250, 310, 400],
 
+        // Цена попытки заточки в % от стоимости предмета (из 05_Mechanics.md).
+        // ВНИМАНИЕ: это идеальная (минимальная) стоимость без учёта шансов —
+        // считается, что все попытки успешны с первой. Индекс = уровень.
+        ENCHANT_PRICES: [0, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5.5, 7.5, 10, 13, 17, 22, 28, 35],
+        ENCHANT_PRICE_MIN: 10,
+
         // Расширенные характеристики (xstats) из game-data.js.
         // Заточка для них применяется с множителем enchK = 0.25 (÷4).
         XSTAT_KEYS: new Set(['crit', 'critDmg', 'dodge', 'pierce', 'healPow', 'luck', 'resist']),
@@ -2714,13 +2720,12 @@
     const HeroPlanner = {
         // Таблица заточки (05_Mechanics.md). TODO: переключить источник на
         // hero.crafts / API в v1.1, если игра начнёт отдавать таблицу.
-        // Бонус заточки (проценты по уровням) — общий: GAME_DATA.ENCHANT_MULTIPLIERS
-        // в core/constants.js, чтобы не дублировать его с auction.js.
+        // Бонус заточки (ENCHANT_MULTIPLIERS) и цены попыток (ENCHANT_PRICES /
+        // ENCHANT_PRICE_MIN) — общие: GAME_DATA в core/constants.js, чтобы не
+        // дублировать их с auction.js.
         ENCH: {
             max: 15,
             chance: [0, 95, 90, 80, 70, 55, 42, 30, 20, 12, 7, 4, 2, 1, 0.5, 0],
-            price:  [0, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5.5, 7.5, 10, 13, 17, 22, 28, 35],
-            priceMin: 10,
             slots: ['weapon', 'shield', 'armor', 'helmet', 'trinket']
         },
 
@@ -2756,8 +2761,8 @@
         },
 
         enchantCost(itemV, level) {
-            const pct = this.ENCH.price[Math.min(15, +level || 0)] || 0;
-            return Math.max(this.ENCH.priceMin, Math.round(itemV * pct / 100));
+            const pct = GAME_DATA.ENCHANT_PRICES[Math.min(15, +level || 0)] || 0;
+            return Math.max(GAME_DATA.ENCHANT_PRICE_MIN, Math.round(itemV * pct / 100));
         },
 
         // Шанс успеха, % (без способов, обычная заточка)
@@ -3178,6 +3183,38 @@
             catch (e) { return true; }
         })(),
 
+        // 11.5.5: «Мои лоты» и «Избранное». favorites — Set id ПРЕДМЕТОВ
+        // (в processed поле id — это id предмета, id лота живёт в lotId):
+        // звезда стоит рядом с названием, история цен и фильтры тоже по
+        // предмету. Список хранится в localStorage как JSON-массив.
+        showMyLotsOnly: false,
+        myNick: '',
+        favorites: (() => {
+            try {
+                const arr = JSON.parse(localStorage.getItem('LEGION_AUC_FAVS') || '[]');
+                return new Set(Array.isArray(arr) ? arr : []);
+            } catch (e) {
+                // Битый JSON или запрещённое хранилище — стартуем с пустого.
+                return new Set();
+            }
+        })(),
+        showFavoritesOnly: false,
+
+        // Конфиг аукциона канала из /api/auction (feePct/feeMin/com/maxLots/hours).
+        // Нужен справке (showInfo), чтобы не показывать чужие числа.
+        cfg: null,
+
+        // Базовая ценность (v) по редкости — фолбэк, если сервер не прислал
+        // items[id].v (ивентовые и новые предметы). Значения из game-data.js
+        // (RARITY_LIST) и применяются напрямую, без множителей по слоту.
+        RARITY_BASE_V: {
+            common: 200,
+            uncommon: 3000,
+            rare: 10000,
+            epic: 40000,
+            legendary: 200000
+        },
+
         init() {
             (document.getElementById(DOM_IDS.btnAuctionScan) || document.getElementById('btn-auction-scan'))?.addEventListener('click', () => this.open());
         },
@@ -3245,6 +3282,47 @@
             return this.cityStockLoading;
         },
 
+        // 11.5.5: базовая стоимость предмета (v) для расчёта «Вложено».
+        // Порядок источников: vals[id] -> def.v -> лавка NPC -> медиана аналогов
+        // (тот же слот + редкость) -> ценность по редкости (RARITY_BASE_V).
+        // def — описание предмета из items[id] (может быть null/без slot/rarity).
+        resolveItemV(id, def, auctionData) {
+            // 1. Сервер прислал v напрямую
+            if (auctionData && auctionData.vals && auctionData.vals[id]) {
+                return auctionData.vals[id];
+            }
+            if (def && def.v) {
+                return def.v;
+            }
+            // 1.5. Цена в лавке NPC: для товаров магазина это точная база,
+            // а в vals её обычно нет (иначе бы сработал шаг 1).
+            if (this.cityStockMap && this.cityStockMap.has(id)) {
+                const npcPrice = this.cityStockMap.get(id);
+                if (npcPrice > 0) return npcPrice;
+            }
+            const slot = def && def.slot ? String(def.slot).toLowerCase() : '';
+            const rarity = def && def.rarity ? String(def.rarity).toLowerCase() : '';
+            // 2. Медиана по аналогам (тот же слот + редкость)
+            if (auctionData && auctionData.items && auctionData.vals && (slot || rarity)) {
+                const peers = Object.entries(auctionData.items)
+                    .filter(([peerId, peerDef]) => {
+                        if (!peerDef || !auctionData.vals[peerId]) return false;
+                        const pSlot = peerDef.slot ? String(peerDef.slot).toLowerCase() : '';
+                        const pRarity = peerDef.rarity ? String(peerDef.rarity).toLowerCase() : '';
+                        return pSlot === slot && pRarity === rarity;
+                    })
+                    .map(([peerId]) => auctionData.vals[peerId])
+                    .sort((a, b) => a - b);
+
+                if (peers.length > 0) {
+                    return peers[Math.floor(peers.length / 2)];
+                }
+            }
+            // 3. Фолбэк по редкости: игра применяет RARITY_LIST напрямую,
+            // без множителей по слоту (для epic это 40000).
+            return this.RARITY_BASE_V[rarity] || this.RARITY_BASE_V.common;
+        },
+
         getLotEvaluation(lot, data = null, activeMap = null) {
             const en = +lot.e || +lot.en || 0;
             const n = Math.max(1, +lot.n || +lot.qty || 1);
@@ -3253,24 +3331,43 @@
 
             // 1. Поиск базовой цены в кэше магазинов
             const shopPrice = this.cityStockMap ? (this.cityStockMap.get(lot.i) || 0) : 0;
-            const bonus = en > 0 ? (GAME_DATA.ENCHANT_MULTIPLIERS[Math.min(15, en)] || 0) : 0;
+            let invested = 0;
+            if (en > 0) {
+                let itemV = 0;
+                const def = (data && data.items) ? data.items[lot.i] : null;
+                if (def) {
+                    itemV = this.resolveItemV(lot.i, def, data);
+                } else if (this.cityStockMap && this.cityStockMap.has(lot.i)) {
+                    // Предмета нет в items, но он есть в лавке NPC — берём
+                    // точную цену магазина, чтобы не потерять базу (было до refactor'а).
+                    itemV = this.cityStockMap.get(lot.i) || 0;
+                }
+
+                if (itemV > 0) {
+                    for (let lv = 1; lv <= en; lv++) {
+                        const pct = GAME_DATA.ENCHANT_PRICES[lv] || 0;
+                        invested += Math.max(GAME_DATA.ENCHANT_PRICE_MIN, Math.round(itemV * pct / 100));
+                    }
+                }
+            }
 
             let fairUnit = 0;
             let sourceType = 'none';
 
             if (shopPrice > 0) {
-                // Если shopPrice > 0, то fairUnit = shopPrice * (1 + bonus / 100)
+                // 11.5.5: выгода считается от БАЗОВОЙ цены NPC — заточка больше
+                // не добавляет «справедливую цену» (её стоимость видна в «Вложено»).
                 sourceType = 'shop';
-                fairUnit = Math.max(1, Math.round(shopPrice * (1 + bonus / 100)));
+                fairUnit = shopPrice;
             } else if (data && data.vals && data.vals[lot.i]) {
                 sourceType = 'val';
-                fairUnit = Math.max(1, Math.round(data.vals[lot.i] * (1 + bonus / 100)));
+                fairUnit = data.vals[lot.i];
             } else if (activeMap && activeMap.has(lot.i)) {
                 const arr = activeMap.get(lot.i);
                 if (arr && arr.length >= 2) {
                     const sorted = arr.slice().sort((a, b) => a - b);
                     const med = sorted[Math.floor(sorted.length / 2)];
-                    fairUnit = Math.round(med * (1 + bonus / 100));
+                    fairUnit = med;
                     sourceType = 'market';
                 }
             }
@@ -3290,7 +3387,8 @@
                 fairTotal,
                 discount,
                 sourceType,
-                shopPrice
+                shopPrice,
+                invested
             };
         },
 
@@ -3299,19 +3397,25 @@
         //    Auction.getItemName(id, itemsMap) -> Utils.getItemName(id, itemsMap)
         //    Auction.getItemMeta(id, rarityHint) -> Utils.getItemMeta(id, rarityHint)
 
-        // 11.5.5: состояние героя для проверки уровня торговли.
-        // /api/me — основной источник (hero.level, hero.tml); снимок страницы
-        // G.ME.hero — резерв, чтобы сканер работал и при молчащем API.
-        async fetchHeroState() {
+        // 11.5.5: состояние героя для проверки уровня торговли и фильтра
+        // «Мои лоты». /api/me — основной источник (hero.level, hero.tml,
+        // user.login); снимок страницы G.ME — резерв, чтобы сканер работал
+        // и при молчащем API. Возвращает { hero, login }.
+        async fetchMeState() {
             try {
                 const res = await Utils.fetchApi('/api/me');
                 const hero = res?.hero || res?.body?.hero || null;
-                if (hero) return hero;
+                const login = res?.user?.login || res?.body?.user?.login || hero?.login || '';
+                if (hero || login) return { hero, login: String(login || '') };
             } catch (e) {
                 dbg('[AUCTION] /api/me недоступен:', e);
             }
             // ME живёт в page-context: в песочнице Tampermonkey только через G.
-            return G.ME?.hero || G.ME?.me || null;
+            const me = G.ME || null;
+            const hero = me?.hero || me?.me || null;
+            const login = me?.user?.login || hero?.login
+                || (typeof Chat !== 'undefined' ? Chat.myNick : '') || '';
+            return { hero, login: String(login || '') };
         },
 
         // 11.5.5: короткий сигнал о выгодном лоте через Web Audio API —
@@ -3345,6 +3449,95 @@
             }
         },
 
+        // 11.5.5: справка «i» в шапке сканера. Числа берём из cfg канала
+        // (/api/auction), а если сервер их не прислал — из игровых значений по
+        // умолчанию (reference: game-data.js → auction): сбор 1% (мин. 10 меди),
+        // комиссия 5%, лимит 10 лотов, сроки 24/48/72 ч. Стоимость заточки — из
+        // GAME_DATA.ENCHANT_PRICES (идеальная, без учёта шансов).
+        showInfo() {
+            const c = this.cfg || {};
+            const feePct = c.feePct != null ? c.feePct : 1;
+            const feeMin = c.feeMin != null ? c.feeMin : 10;
+            const comPct = c.com != null ? c.com : 5;
+            const maxLots = c.maxLots != null ? c.maxLots : 10;
+            const hours = Array.isArray(c.hours) && c.hours.length ? c.hours : [24, 48, 72];
+            const tmlNote = this.tradeMinLevel > 1
+                ? `сейчас у тебя порог ${this.tradeMinLevel}-го уровня`
+                : 'в этом канале ограничения нет';
+
+            // Колонки: [заголовок, пояснение]. Массив вместо десяти <tr> —
+            // справку проще править, когда колонок станет больше.
+            const cols = [
+                ['Вещь', 'Название, редкость, 📊 — история цен, ★/☆ — избранное'],
+                ['Кол-во', 'Сколько штук в лоте (если стак)'],
+                ['Цена (общая)', 'Стоимость всего лота'],
+                ['Цена за 1 шт', 'Цена одной штуки (для стаков)'],
+                ['Медиана', 'Ориентир цены: базовая цена лавки NPC → базовая ценность предмета → медиана активных лотов. Заточка в ориентир НЕ входит'],
+                ['Магазин', 'Цена NPC в официальной лавке (голубая). Строки дешевле магазина подсвечены зелёным'],
+                ['Вложено', 'Идеальная (минимальная) стоимость заточки до текущего +N: сумма цен уровней без учёта шансов'],
+                ['Выгода', 'На сколько % цена лота ниже ориентира (зелёный = выгодно, красный = дорого)'],
+                ['Осталось', 'До конца лота. Если идёт розыгрыш — бейдж 🎲 Розыгрыш'],
+                ['Продавец', 'Ник игрока, выставившего лот'],
+                ['Действие', 'Купить / 🎲 Хочу (заявка) / Ваш лот / Ур. < N (низкий уровень торговли)']
+            ];
+            const colsHtml = cols.map(([title, desc], i) => {
+                const border = i === cols.length - 1 ? '' : ' border-bottom:1px solid #3d2f44;';
+                return `<tr style="${border.trim()}"><td style="padding:6px 8px; color:#ffcf6a; font-weight:bold; width:100px;">${title}</td><td style="padding:6px 8px;">${desc}</td></tr>`;
+            }).join('');
+
+            // Внутренний блок скроллится сам: у .modal-compact max-height 65vh,
+            // поэтому нужен flex:1 + min-height:0, иначе контент вылезает за рамку.
+            UI.showModal(`
+                <h2 style="display:flex; align-items:center; gap:10px;">
+                    ℹ️ Справка по Аукциону
+                    <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+                        <button id="info-back-btn" style="background:#2a2030; border:1px solid #caa55c; color:#caa55c; padding:4px 10px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:12px;">← К витрине</button>
+                        <button class="custom-close" id="custom-close-btn">✖</button>
+                    </div>
+                </h2>
+                <div style="flex:1; min-height:0; overflow-y:auto; padding:5px 10px; font-size:13px; line-height:1.6; color:#ccc;">
+
+                    <h3 style="color:#ffcf6a; font-size:14px; margin-top:15px;">🏛 Как работает аукцион</h3>
+                    <p>Аукцион — общий рынок между всеми игроками канала. Ты можешь выставлять свои предметы и покупать чужие.</p>
+                    <ul style="margin:8px 0; padding-left:20px;">
+                        <li><b>Сбор за выставление:</b> <code>max(${feeMin} меди, ${feePct}% от цены)</code>. Списывается сразу и не возвращается, даже если лот снять.</li>
+                        <li><b>Комиссия при продаже:</b> <code>${comPct}% от финальной цены</code>. Списывается при получении денег за проданный лот.</li>
+                        <li><b>Сроки:</b> ${hours.join(' / ')} ч — по истечении лот снимается с витрины.</li>
+                        <li><b>Максимум лотов:</b> ${maxLots} одновременно.</li>
+                        <li><b>Минимальный уровень торговли:</b> поле <code>hero.tml</code> — ${tmlNote}.</li>
+                    </ul>
+
+                    <h3 style="color:#ffcf6a; font-size:14px; margin-top:15px;">📊 Что показывают колонки</h3>
+                    <table style="width:100%; border-collapse:collapse; margin-top:8px; font-size:12px;">${colsHtml}</table>
+
+                    <h3 style="color:#ffcf6a; font-size:14px; margin-top:15px;">🎲 Розыгрыш (Raffle)</h3>
+                    <p>Свежие лоты не покупаются мгновенно, а разыгрываются. Если видишь кнопку <b style="color:#e0a800;">🎲 Хочу (N)</b> — нажми, чтобы подать заявку; N — сколько заявок уже подано. Монеты спишутся, только если ты выиграешь розыгрыш.</p>
+
+                    <h3 style="color:#ffcf6a; font-size:14px; margin-top:15px;">⭐ Фильтры и функции</h3>
+                    <ul style="margin:8px 0; padding-left:20px;">
+                        <li><b>⭐ Избранное:</b> звёздочка рядом с предметом добавляет его в отслеживаемые (список ведётся по предмету и хранится в браузере). Галочка «⭐ Избранное» показывает только их.</li>
+                        <li><b>Мои лоты:</b> только то, что выставил ты сам (золотой фон, кнопка «Ваш лот»).</li>
+                        <li><b>Только выгодные:</b> лоты с выгодой ≥ 10%.</li>
+                        <li><b>Звук:</b> при открытии сканера — тост и сигнал, если на витрине есть лоты со скидкой от ${this.alertThreshold}%.</li>
+                        <li><b>📊 История:</b> последние цены продаж предмета с учётом заточки (наведи курсор на иконку).</li>
+                        <li><b>Пагинация:</b> по ${this.pageSize} лотов на страницу (кнопки ◀ и ▶); счётчик внизу — всего лотов.</li>
+                    </ul>
+
+                    <h3 style="color:#ffcf6a; font-size:14px; margin-top:15px;">⚔️ Заточка и цена</h3>
+                    <p>Заточка (поле <code>en</code>) БОЛЬШЕ не увеличивает «справедливую цену»: выгода считается от базовой цены NPC/рынка. Вместо этого в колонке <b>«Вложено»</b> показана идеальная (минимальная) стоимость заточки до +N — сумма цен уровней из <code>GAME_DATA.ENCHANT_PRICES</code> (с минимумом ${GAME_DATA.ENCHANT_PRICE_MIN} меди за попытку, без учёта шансов).</p>
+                </div>
+            `, { compact: true });
+
+            // 11.5.5: «← К витрине» — возврат из справки к сканеру. showModal в
+            // начале сам вызывает closeModals(), поэтому просто перерисовываем
+            // витрину заново (Auction.open()).
+            document.getElementById('info-back-btn')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                UI.closeModals();
+                this.open();
+            });
+        },
+
         async open() {
             UI.showModal(`<h2>🔍 Сканер Аукциона <button class="custom-close" id="custom-close-btn">✖</button></h2><div class="loader">Считаем цены...</div>`);
             try {
@@ -3358,12 +3551,14 @@
                     }
                 }
                 // 11.5.5: витрину и состояние героя тянем параллельно — уровень
-                // (hero.level) и порог обмена (hero.tml) нужны до первой отрисовки.
-                const heroPromise = this.fetchHeroState();
+                // (hero.level), порог обмена (hero.tml) и логин (user.login) нужны
+                // до первой отрисовки (фильтр «Мои лоты» сравнивает с продавцом).
+                const mePromise = this.fetchMeState();
                 const res = await Utils.fetchApi('/api/auction');
-                const hero = await heroPromise.catch(() => null);
-                this.myLevel = +hero?.level || 1;
-                this.tradeMinLevel = +hero?.tml || 0;
+                const me = await mePromise.catch(() => null);
+                this.myLevel = +me?.hero?.level || 1;
+                this.tradeMinLevel = +me?.hero?.tml || 0;
+                this.myNick = String(me?.login || '').toLowerCase();
                 const lots = res.lots || res.body?.lots;
                 if (!lots || !Array.isArray(lots) || !lots.length) {
                     return UI.showModal('<h2>Аукцион пуст <button class="custom-close" id="custom-close-btn">✖</button></h2>');
@@ -3371,6 +3566,8 @@
                 const itemsMap = res.items || res.body?.items || (res.data && res.data.items) || {};
                 // 11.5.5: история последних цен по предметам — { id: [[цена, заточка], …] }.
                 const histMap = res.hist || res.body?.hist || {};
+                // Конфиг канала: сбор за выставление, комиссия, сроки, лимит лотов.
+                this.cfg = res.cfg || res.body?.cfg || null;
 
                 // Новый скан витрины — всегда с первой страницы.
                 this.currentPage = 0;
@@ -3426,6 +3623,9 @@
                             discount: disc,
                             timeLeft: Utils.formatTimeLeft(l.u),
                             seller: l.sn || l.s || '—',
+                            // 11.5.5: логин продавца отдельно от отображаемого имени:
+                            // «Мои лоты» сравнивают именно логин (me.user.login).
+                            sellerLogin: l.s || '',
                             metaSlot: meta.slot,
                             metaRarity: meta.rarity,
                             metaRole: meta.role,
@@ -3434,7 +3634,13 @@
                             // 11.5.5: ru — время окончания розыгрыша (0/undefined у
                             // обычного лота), wn — число заявок «Хочу» в розыгрыше.
                             ru: l.ru || null,
-                            wn: +l.wn || 0
+                            wn: +l.wn || 0,
+                            // 11.5.5: цена этого предмета в магазинах NPC
+                            // (/api/city/stock). 0 — в магазинах не продаётся.
+                            npcPrice: this.cityStockMap.get(l.i) || 0,
+                            // 11.5.5: идеальная (минимальная) стоимость заточки
+                            // до текущего +N — для колонки «Вложено».
+                            invested: ev.invested || 0
                         });
                     });
                 }
@@ -3449,7 +3655,11 @@
                 }
 
                 UI.showModal(`
-                    <h2>🔍 Сканер Аукциона <button class="custom-close" id="custom-close-btn">✖</button></h2>
+                    <h2 style="display:flex; align-items:center; gap:10px;">
+                        🔍 Сканер Аукциона
+                        <button id="auction-info-btn" title="Справка по аукциону" style="width:26px; height:26px; border-radius:50%; background:rgba(202,165,92,0.15); border:1px solid #caa55c; color:#caa55c; font-weight:bold; font-size:16px; font-family:serif; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all 0.2s;">i</button>
+                        <button class="custom-close" id="custom-close-btn" style="margin-left:auto;">✖</button>
+                    </h2>
 
                     <div style="display:flex; gap:10px; margin-bottom:15px; flex-wrap:wrap; align-items:center;">
                         <input type="text" id="auction-search" class="search-bar" style="margin:0; flex:1; min-width:200px;" placeholder="Поиск по названию...">
@@ -3486,7 +3696,15 @@
                             <option value="paladin">Паладин</option>
                         </select>
 
-                        <label style="display:flex; align-items:center; gap:5px; cursor:pointer; color:#ffcf6a; font-weight:bold; font-size:14px; margin-left:auto;">
+                        <label style="display:flex; align-items:center; gap:5px; cursor:pointer; color:#ffcf6a; font-weight:bold; font-size:14px;">
+                            <input type="checkbox" id="auction-my-lots" ${this.showMyLotsOnly ? 'checked' : ''} style="width:16px; height:16px; accent-color:#caa55c;"> Мои лоты
+                        </label>
+
+                        <label style="display:flex; align-items:center; gap:5px; cursor:pointer; color:#ffcf6a; font-weight:bold; font-size:14px;">
+                            <input type="checkbox" id="auction-favs" ${this.showFavoritesOnly ? 'checked' : ''} style="width:16px; height:16px; accent-color:#caa55c;"> ⭐ Избранное
+                        </label>
+
+                        <label style="display:flex; align-items:center; gap:5px; cursor:pointer; color:#ffcf6a; font-weight:bold; font-size:14px;">
                             <input type="checkbox" id="auction-only-deals" style="width:16px; height:16px; accent-color:#caa55c;"> Только выгодные
                         </label>
 
@@ -3494,7 +3712,7 @@
                             <input type="checkbox" id="auction-sound" ${this.alertSoundEnabled ? 'checked' : ''} style="width:16px; height:16px; accent-color:#caa55c;"> Звук
                         </label>
 
-                        <div style="display:flex; gap:10px; align-items:center; margin-left:10px;">
+                        <div style="display:flex; gap:10px; align-items:center; margin-left:auto;">
                             <button id="auction-prev" title="Предыдущая страница" style="background:#2a2030; border:1px solid #caa55c; color:#caa55c; padding:4px 10px; border-radius:4px; cursor:pointer; font-weight:bold;">◀</button>
                             <span id="auction-page-info" style="color:#aaa; font-size:12px;">Стр. 1 из 1</span>
                             <button id="auction-next" title="Следующая страница" style="background:#2a2030; border:1px solid #caa55c; color:#caa55c; padding:4px 10px; border-radius:4px; cursor:pointer; font-weight:bold;">▶</button>
@@ -3509,6 +3727,8 @@
                                 <th data-sort="totalPrice">Цена (общая)</th>
                                 <th data-sort="unitPrice">Цена за 1 шт</th>
                                 <th data-sort="median">Медиана</th>
+                                <th data-sort="npcPrice">Магазин</th>
+                                <th data-sort="invested">Вложено</th>
                                 <th data-sort="discount">Выгода</th>
                                 <th data-sort="u">Осталось</th>
                                 <th>Продавец</th>
@@ -3520,6 +3740,13 @@
                     <div style="margin-top:10px; font-size:12px; color:#888; text-align:right;">
                         Всего лотов: <span id="auction-count">0</span> · на странице до ${this.pageSize}
                     </div>`);
+
+                // Кнопка «i» в шапке: UI.showModal в начале зовёт closeModals(),
+                // поэтому справка просто заменяет витрину (клик по витрине не нужен).
+                document.getElementById('auction-info-btn')?.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.showInfo();
+                });
 
                 // Сколько страниц было в последней отрисовке (для кнопки ▶).
                 let lastTotalPages = 1;
@@ -3551,7 +3778,7 @@
                     }
 
                     if (!data.length) {
-                        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color:#888; padding:20px;">Ничего не найдено по заданным фильтрам.</td></tr>';
+                        tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; color:#888; padding:20px;">Ничего не найдено по заданным фильтрам.</td></tr>';
                         return;
                     }
 
@@ -3569,11 +3796,40 @@
                         const isRaffle = l.ru && l.ru > Date.now();
                         const isLowLevel = this.myLevel < this.tradeMinLevel;
 
+                        // 11.5.5: «свой» лот (продавец = логин из /api/me) и цена
+                        // того же предмета в магазинах NPC. NPC торгует за 1 шт.,
+                        // поэтому сравниваем с ценой лота за штуку, а не с общей.
+                        const isCur = !!this.myNick && (
+                            String(l.sellerLogin || '').toLowerCase() === this.myNick
+                            || String(l.seller || '').toLowerCase() === this.myNick
+                        );
+                        const npcPrice = +l.npcPrice || this.cityStockMap.get(l.id) || 0;
+                        const npcHtml = npcPrice > 0
+                            ? `<span style="color:#8fd3ff;">${Utils.formatMoney(npcPrice)}</span>`
+                            : '<span style="color:#555;">—</span>';
+                        const isCheap = npcPrice > 0 && l.unitPrice < npcPrice;
+
+                        // 11.5.5: «Вложено» — идеальная (минимальная) стоимость
+                        // заточки до +N (см. getLotEvaluation). У незаточенных — «—».
+                        const investedHtml = l.invested > 0
+                            ? `<span style="color:#ffcf6a;">${Utils.formatMoney(l.invested)}</span>`
+                            : `<span style="color:#555;">—</span>`;
+
+                        // Приоритет подсветки: дешевле магазина > мой лот.
+                        const rowStyle = isCheap
+                            ? 'background: rgba(76, 201, 90, 0.1);'
+                            : (isCur ? 'background:rgba(202,165,92,0.12);' : '');
+
                         let btnText = 'Купить';
                         let btnColor = '#28a745';
                         let btnDisabled = false;
 
-                        if (isLowLevel) {
+                        if (isCur) {
+                            // Свой лот сервер всё равно не даст купить — не шлём запрос.
+                            btnText = 'Ваш лот';
+                            btnColor = '#555';
+                            btnDisabled = true;
+                        } else if (isLowLevel) {
                             btnText = `Ур. < ${this.tradeMinLevel}`;
                             btnColor = '#555';
                             btnDisabled = true;
@@ -3605,12 +3861,19 @@
                             histIcon = `<span title="${Utils.escapeHtml(tooltip)}" style="cursor:help; margin-left:5px; font-size:12px;">📊</span>`;
                         }
 
-                        html += `<tr data-lot-id="${Utils.escapeHtml(l.id || '')}" data-lot-name="${Utils.escapeHtml(l.name || '')}">
-                            <td>${l.icon ? `<img src="${Utils.safeUrl(l.icon)}" style="width:20px;vertical-align:middle;margin-right:5px;">` : ''}<b>${Utils.escapeHtml(l.name)}</b>${rarityBadge}${histIcon}</td>
+                        // 11.5.5: ★/☆ — «Избранное». Хранится по id предмета,
+                        // поэтому звезда одинакова у всех лотов этого предмета.
+                        const isFav = this.favorites.has(l.id);
+                        const starHtml = `<span class="auc-fav-btn" data-id="${Utils.escapeHtml(l.id || '')}" title="${isFav ? 'Убрать из избранного' : 'В избранное'}" style="cursor:pointer; font-size:16px; margin-left:5px; color:${isFav ? '#ffd700' : '#555'};">${isFav ? '★' : '☆'}</span>`;
+
+                        html += `<tr data-lot-id="${Utils.escapeHtml(l.id || '')}" data-lot-name="${Utils.escapeHtml(l.name || '')}" style="${rowStyle}">
+                            <td>${l.icon ? `<img src="${Utils.safeUrl(l.icon)}" style="width:20px;vertical-align:middle;margin-right:5px;">` : ''}<b>${Utils.escapeHtml(l.name)}</b>${rarityBadge}${histIcon}${starHtml}</td>
                             <td>${qtyStr}</td>
                             <td style="color:#ffcf6a; font-weight:bold;">${totalPriceStr}</td>
                             <td style="font-weight:bold;">${Utils.formatMoney(l.unitPrice)}</td>
                             <td>${Utils.formatMoney(l.median)}</td>
+                            <td>${npcHtml}</td>
+                            <td style="color:#d8c9a8;">${investedHtml}</td>
                             <td class="${cls}">${l.discount > 0 ? '-' : '+'}${Math.abs(l.discount)}%</td>
                             <td style="color:#888;">${timeStr}</td>
                             <td>${Utils.escapeHtml(l.seller || '')}</td>
@@ -3704,6 +3967,17 @@
                         if (fRole && l.metaRole && l.metaRole !== fRole) return false;
 
                         if (onlyDeals && l.discount < 10) return false;
+                        // 11.5.5: «Мои лоты» — продавец совпадает с логином из /api/me.
+                        // Сравниваем и логин, и отображаемое имя: сервер отдаёт их
+                        // раздельно (s / sn), а имя героя может не совпадать с логином.
+                        // Без логина фильтр бесполезен — список остаётся пустым.
+                        if (this.showMyLotsOnly) {
+                            const byLogin = String(l.sellerLogin || '').toLowerCase() === this.myNick;
+                            const byName = String(l.seller || '').toLowerCase() === this.myNick;
+                            if (!this.myNick || (!byLogin && !byName)) return false;
+                        }
+                        // «Избранное» — по id предмета (см. комментарий у favorites).
+                        if (this.showFavoritesOnly && !this.favorites.has(l.id)) return false;
                         return true;
                     });
 
@@ -3740,6 +4014,44 @@
                         dbg('[AUCTION] не удалось сохранить настройку звука:', err);
                     }
                 });
+
+                // 11.5.5: чекбоксы «Мои лоты» / «Избранное». После смены фильтра
+                // возвращаемся на первую страницу: иначе можно остаться на
+                // «Стр. 3 из 1» с пустой таблицей.
+                document.getElementById('auction-my-lots')?.addEventListener('change', (e) => {
+                    this.showMyLotsOnly = e.target.checked;
+                    this.currentPage = 0;
+                    update();
+                });
+                document.getElementById('auction-favs')?.addEventListener('change', (e) => {
+                    this.showFavoritesOnly = e.target.checked;
+                    this.currentPage = 0;
+                    update();
+                });
+
+                // 11.5.5: клик по ★/☆ (делегирование). Слушатель отдельный от
+                // кнопки покупки: звезда лежит в ячейке имени, а не в кнопке,
+                // поэтому обработчик .auc-buy-btn её игнорирует.
+                if (tbody) {
+                    tbody.addEventListener('click', (e) => {
+                        const star = e.target.closest('.auc-fav-btn');
+                        if (!star) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const id = star.getAttribute('data-id');
+                        if (!id) return;
+                        if (this.favorites.has(id)) this.favorites.delete(id);
+                        else this.favorites.add(id);
+                        try {
+                            localStorage.setItem('LEGION_AUC_FAVS', JSON.stringify([...this.favorites]));
+                        } catch (err) {
+                            dbg('[AUCTION] не удалось сохранить избранное:', err);
+                        }
+                        // Перерисовка: при включённом фильтре снятая звезда
+                        // сразу убирает строку из таблицы.
+                        update();
+                    });
+                }
 
                 let t;
                 document.getElementById('auction-search').addEventListener('input', () => { clearTimeout(t); t = setTimeout(update, 300); });
