@@ -7,6 +7,7 @@
         savedBuilds: {}, // { [clsId]: [{ name, skills }] } — сохранённые в localStorage билды по классам
         _currentBuildName: '', // имя последнего сохранённого/загруженного билда (для будущих фич UI)
         _currentBuildNames: {}, // { [clsId]: name } — активный билд каждого класса (нужен для кнопки «Удалить»)
+        _autoLoadClass: null, // класс, чей билд пришёл ссылкой #build=… (вкладку открываем после создания табов)
 
         statNames: { hp: 'Макс. HP', atk: 'Физ. урон', mag: 'Магия', def: 'Броня', crit: 'Крит %', critDmg: 'Сила крита', dodge: 'Уклонение', pierce: 'Пробивание', healPow: 'Сила лечения', luck: 'Удача', resist: 'Сопротивление' },
         fxNames: { melee: 'Физ. урон %', magic: 'Магия %', hp: 'Макс. HP %', def: 'Броня', healPow: 'Сила лечения %', healIn: 'Вх. лечение %', crit: 'Крит %', critDmg: 'Сила крита', skel: 'Урон скелетов %', skelT: 'Время скелетов', leech: 'Вампиризм %', block: 'Снижение урона %', dodge: 'Уклонение %', lead: 'Урон по боссам %', first: 'Урон 1-й ход %', dmg: 'Весь урон %', pierce: 'Пробивание %', resist: 'Сопротивление', healCrit: 'Крит лечения %', regen: 'Регенерация %', low: 'Урон при низком HP %', a_siyanie: 'Сияние +%', a_obereg: 'Оберег +%', a_dlan: 'Длань +%', a_aura: 'Аура +%', aura: 'Аура −урон %', a_svet: 'Свет +%', a_vspyshka: 'Вспышка +%', a_oznob: 'Озноб +%', a_pricel: 'Прицел +%', a_grad: 'Град +%', a_natisk: 'Натиск +%', a_stoyka: 'Стойка +%', a_vspinu: 'Вспину +%', a_yad: 'Яд +%', a_vytyanut: 'Вытянуть +%', a_podnyat: 'Поднять +%', poison: 'Отрава %', steal: 'Кража %', loot: 'Добыча %', skelN: 'Скелетов +', volley: 'Залп +%', shieldBlock: 'Щит блок %', trapDodge: 'Ловушки %', steady: 'Промах→удар %', cleave: 'Замах %', cleaveBoss: 'Замах по боссу %', penBoss: 'Бронебой по боссу %', drain: 'Вытягивание %', hex: 'Проклятие +%', holy: 'По нежити +%', poisonT: 'Время отравы' },
@@ -66,6 +67,13 @@
 
         async mount(container) {
             if (!container) return;
+            // Ссылка вида …#build=<код> — обмен билдами без сервера. Код читаем
+            // сразу, а ПРИМЕНЯЕМ ниже, после сброса simulatedSkills: иначе
+            // импортированные навыки затёрлись бы пустым объектом.
+            // Посторонний хэш (не от билда) игнорируем — иначе показывали бы
+            // ложное «неверный формат кода».
+            const hash = window.location.hash || '';
+            const hashBuildCode = hash.includes('#build=') ? this._extractBuildCode(hash) : '';
             // Сохранённые билды поднимаем до парсинга /api/me и /api/skills,
             // чтобы UI успел отрисовать список «Мои билды» при первом renderTree.
             this.loadSavedBuilds();
@@ -82,6 +90,16 @@
                 if (!this.skillsCache || !this.skillsCache.classes) throw new Error('Нет данных о навыках');
 
                 this.simulatedSkills = {};
+                // Билд из ссылки применяем поверх пустой симуляции (код прочитан
+                // в начале mount — до сброса применять было нельзя).
+                if (hashBuildCode) {
+                    this._autoLoadClass = this.decodeBuild(hashBuildCode);
+                    if (this._autoLoadClass) UI.showToast('📥 Билд загружен из ссылки!');
+                    else UI.showToast('❌ Неверный формат кода билда', true);
+                    // Хэш убираем: иначе перезагрузка страницы снова перезапишет
+                    // текущую симуляцию тем же билдом.
+                    try { history.replaceState(null, '', window.location.pathname + window.location.search); } catch (e) {}
+                }
                 const h = me.hero;
                 const equipped = h.items.filter(x => x.on);
                 const bag = h.items.filter(x => !x.on && x.wearable);
@@ -125,18 +143,32 @@
                         <div class="tab-content" id="tab-${c.id}">
                             <div class="sim-tree-wrap">
                                 <div class="sim-tree-inner">
-                                    <div class="sim-top-bar" style="display: flex; flex-direction: column; gap: 12px; background: #1e1724; padding: 12px; border-radius: 8px; border: 1px solid #3d2f44; margin-bottom: 15px;">
-                                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                                            <div class="sim-free-pts" style="font-size: 14px; color: #eee;">Свободно очков: <span id="free-${c.id}" style="color: #caa55c; font-weight: bold; font-size: 18px;">0</span> <span style="color: #888;">/ ${MAX_POINTS}</span></div>
-                                            <button class="sim-reset-btn" data-reset="${c.id}" style="background: rgba(255, 90, 122, 0.1); color: #ff5a7a; border: 1px solid #ff5a7a; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s;">Сбросить всё</button>
+                                    <div class="sim-top-bar" style="display: flex; flex-direction: column; gap: 15px; background: #1e1724; padding: 15px; border-radius: 8px; border: 1px solid #3d2f44; margin-bottom: 15px;">
+                                        <!-- Верхняя строка: очки и сброс -->
+                                        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #3d2f44; padding-bottom: 12px;">
+                                            <div class="sim-free-pts" style="font-size: 14px; color: #eee;">Свободно очков: <span id="free-${c.id}" style="color: #caa55c; font-weight: bold; font-size: 20px; margin: 0 4px;">0</span> <span style="color: #888;">/ ${MAX_POINTS}</span></div>
+                                            <button class="sim-reset-btn" data-reset="${c.id}" style="background: rgba(255, 90, 122, 0.1); color: #ff5a7a; border: 1px solid #ff5a7a; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 12px; transition: 0.2s;">Сбросить всё</button>
                                         </div>
+                                        <!-- Средняя строка: сохранение и загрузка -->
+                                        <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                                            <!-- Блок «Сохранить» -->
+                                            <div style="display: flex; gap: 8px; flex: 1; min-width: 250px;">
+                                                <input type="text" id="save-name-${c.id}" class="search-bar" style="margin:0; padding:8px 12px; font-size:12px; flex:1; background:#0f0f15; border:1px solid #3d2f44; color:#fff; border-radius:6px; outline:none;" placeholder="Название нового билда...">
+                                                <button class="sim-save-btn" data-save="${c.id}" style="background: #caa55c; color: #1d1620; border: none; border-radius: 6px; padding: 8px 16px; font-size: 12px; font-weight: bold; cursor: pointer; white-space: nowrap;">💾 Сохранить</button>
+                                            </div>
+                                            <!-- Блок «Загрузить» -->
+                                            <div style="display: flex; gap: 8px; align-items: center;">
+                                                <select id="load-select-${c.id}" class="search-bar" style="margin:0; padding:8px 12px; font-size:12px; width:180px; background:#0f0f15; border:1px solid #3d2f44; color:#fff; border-radius:6px; cursor:pointer; outline:none;">
+                                                    <option value="">— Мои билды —</option>
+                                                </select>
+                                                <button class="sim-del-btn" data-del="${c.id}" style="background: transparent; color: #ff5a7a; border: 1px solid #ff5a7a; border-radius: 6px; padding: 8px 12px; font-size: 12px; cursor: pointer;" title="Удалить выбранный билд">🗑️</button>
+                                            </div>
+                                        </div>
+                                        <!-- Нижняя строка: обмен -->
                                         <div style="display: flex; gap: 8px; align-items: center; border-top: 1px solid #3d2f44; padding-top: 12px;">
-                                            <input type="text" id="save-name-${c.id}" class="search-bar" style="margin:0; padding:8px 12px; font-size:12px; flex:1; background:#0f0f15; border:1px solid #3d2f44; color:#fff; border-radius:6px; outline:none;" placeholder="Название нового билда...">
-                                            <button class="sim-save-btn" data-save="${c.id}" style="background: #28a745; color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 12px; font-weight: bold; cursor: pointer;">💾 Сохранить</button>
-                                            <select id="load-select-${c.id}" class="search-bar" style="margin:0; padding:8px 12px; font-size:12px; width:180px; background:#0f0f15; border:1px solid #3d2f44; color:#fff; border-radius:6px; cursor:pointer; outline:none;">
-                                                <option value="">— Мои билды —</option>
-                                            </select>
-                                            <button class="sim-del-btn" data-del="${c.id}" style="background: #3a2028; color: #ff5a7a; border: 1px solid #ff5a7a; border-radius: 6px; padding: 8px 12px; font-size: 12px; cursor: pointer;" title="Удалить выбранный билд">🗑️</button>
+                                            <span style="font-size: 11px; color: #888; text-transform: uppercase; margin-right: 10px;">Обмен:</span>
+                                            <button class="sim-share-btn" data-share="${c.id}" style="background: transparent; color: #caa55c; border: 1px solid #caa55c; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s;" title="Поделиться билдом">📤 Поделиться</button>
+                                            <button class="sim-import-btn" data-import="${c.id}" style="background: transparent; color: #caa55c; border: 1px solid #caa55c; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s;" title="Импортировать билд">📥 Импорт</button>
                                         </div>
                                     </div>
                                     <div class="sim-branches" id="tree-${c.id}"></div>
@@ -168,6 +200,14 @@
                 container.querySelectorAll('[data-reset]').forEach(btn => {
                     btn.addEventListener('click', () => this.resetBuild(btn.dataset.reset));
                 });
+
+                // Билд из ссылки: программно открываем вкладку его класса, чтобы
+                // симуляция сразу отрисовалась (клик по табу зовёт renderTree).
+                if (this._autoLoadClass) {
+                    const autoTab = container.querySelector(`.modal-tab[data-tab="${this._autoLoadClass}"]`);
+                    this._autoLoadClass = null;
+                    if (autoTab) autoTab.click();
+                }
             } catch (err) {
                 dbg('[BUILD SIM] Ошибка монтирования:', err);
                 container.innerHTML = `<div style="color:#ff5a7a; text-align:center; padding:20px;">Ошибка: ${err.message}</div>`;
@@ -261,6 +301,135 @@
             }
             this.deleteBuild(clsId, idx);
             return true;
+        },
+
+        // ------------------------------------------------------------
+        // Обмен билдами без сервера: код в Base64 + ссылка #build=<код>.
+        // Формат: { cls: '<класс>', sk: { <nodeId>: <ранг> } } → JSON →
+        // encodeURIComponent (гарантирует ASCII, иначе btoa бросит исключение)
+        // → Base64 → URL-safe: '+' → '-', '/' → '_', паддинг '=' срезан.
+        // ------------------------------------------------------------
+        encodeBuild(clsId) {
+            const skills = this.simulatedSkills[clsId] || {};
+            try {
+                const json = JSON.stringify({ cls: clsId, sk: skills });
+                return btoa(encodeURIComponent(json)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            } catch (e) {
+                dbg('[BUILD SIM] Ошибка кодирования билда:', e);
+                return '';
+            }
+        },
+
+        // Код приходит извне (ссылка от другого игрока), поэтому декодируем
+        // с проверками: известный класс, целые ранги в пределах node.max,
+        // сумма очков не больше MAX_POINTS.
+        // Возвращает id класса, к которому относится билд, либо null.
+        decodeBuild(code) {
+            if (!code || typeof code !== 'string') return null;
+            try {
+                let b64 = code.trim().replace(/-/g, '+').replace(/_/g, '/').replace(/\s+/g, '');
+                // В ссылке паддинг срезан, а atob в части окружений требует
+                // длину, кратную 4 — восстанавливаем.
+                const pad = b64.length % 4;
+                if (pad) b64 += '='.repeat(4 - pad);
+
+                const data = JSON.parse(decodeURIComponent(atob(b64)));
+                if (!data || typeof data !== 'object') return null;
+                const cls = data.cls;
+                const sk = data.sk;
+                if (typeof cls !== 'string' || !sk || typeof sk !== 'object' || Array.isArray(sk)) return null;
+
+                // Класс обязан быть в /api/skills — чужой код не подсунет произвольный clsId.
+                const classes = (this.skillsCache && Array.isArray(this.skillsCache.classes)) ? this.skillsCache.classes : [];
+                const clsData = classes.find(c => c.id === cls);
+                if (!clsData) return null;
+
+                // Допустимые узлы и максимумы рангов — из дерева этого класса.
+                const nodeMax = new Map();
+                (clsData.branches || []).forEach(b => (b.nodes || []).forEach(n => nodeMax.set(n.id, n.max || 1)));
+
+                const clean = {};
+                let total = 0;
+                Object.entries(sk).forEach(([nodeId, rank]) => {
+                    const max = nodeMax.get(nodeId);
+                    if (!max) return;                  // узел не из этого дерева — пропускаем
+                    const r = Math.floor(Number(rank));
+                    if (!Number.isFinite(r) || r <= 0) return;
+                    clean[nodeId] = Math.min(r, max);
+                    total += clean[nodeId];
+                });
+
+                // «Перекачанный» билд (больше очков, чем даёт игра) не принимаем.
+                if (total > MAX_POINTS) return null;
+
+                this.simulatedSkills[cls] = clean;
+                // Импорт — не сохранённый билд: «🗑️» не должен целиться
+                // в запись из localStorage с тем же именем.
+                this._setCurrentBuild(cls, '');
+                return cls;
+            } catch (e) {
+                return null;
+            }
+        },
+
+        // Достаём код из ссылки (#build=…), «голого» кода или текста с ссылкой.
+        _extractBuildCode(input) {
+            const raw = String(input || '').trim();
+            const marker = '#build=';
+            const idx = raw.indexOf(marker);
+            // После кода в хэше могут идти другие параметры: #build=<код>&a=b
+            return idx >= 0 ? raw.slice(idx + marker.length).split(/[&#\s]/)[0] : raw;
+        },
+
+        // «📤 Поделиться»: собираем ссылку с кодом билда и копируем в буфер.
+        shareBuild(clsId) {
+            const skills = this.simulatedSkills[clsId] || {};
+            if (!Object.keys(skills).length) {
+                UI.showToast('Сначала распределите очки навыков', true);
+                return;
+            }
+            const code = this.encodeBuild(clsId);
+            if (!code) { UI.showToast('Не удалось создать код билда', true); return; }
+
+            // Код кладём в хэш: такой адрес не уходит на сервер игры и не
+            // ломает SPA-роутинг (в отличие от query-параметра).
+            const url = `${location.origin}${location.pathname}#build=${code}`;
+            // clipboard.writeText доступен только в secure context и может быть
+            // запрещён настройками браузера — тогда показываем окно для копирования.
+            const fallback = () => window.prompt('Скопируйте ссылку на билд:', url);
+            try {
+                if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                    navigator.clipboard.writeText(url)
+                        .then(() => UI.showToast('📋 Ссылка на билд скопирована в буфер'))
+                        .catch(fallback);
+                } else {
+                    fallback();
+                }
+            } catch (e) {
+                fallback();
+            }
+        },
+
+        // «📥 Импорт»: принимаем и ссылку целиком, и «голый» код.
+        importBuild(clsId) {
+            const input = window.prompt('Вставьте ссылку или код билда:');
+            if (!input) return;
+
+            const loadedCls = this.decodeBuild(this._extractBuildCode(input));
+            if (!loadedCls) { UI.showToast('❌ Неверный формат кода билда', true); return; }
+
+            UI.showToast('📥 Билд успешно импортирован!');
+            if (loadedCls !== clsId) {
+                // Билд другого класса — открываем его вкладку (клик сам зовёт
+                // renderTree). Ищем внутри модалки планировщика: .modal-tab
+                // используется и другими окнами аддона (аукцион, симулятор).
+                const root = document.getElementById('buildsim-modal-body') || document;
+                const tab = root.querySelector(`.modal-tab[data-tab="${loadedCls}"]`);
+                if (tab) tab.click();
+                else this.renderTree(loadedCls);
+            } else {
+                this.renderTree(clsId);
+            }
         },
 
         yFor(req) {
@@ -494,6 +663,15 @@
                     }
                 };
             }
+
+            // --- Обмен билдами: «📤 Поделиться» / «📥 Импорт» ---
+            // Кнопки статичны в .sim-top-bar (вне #tree-…), поэтому .onclick
+            // переназначаем идемпотентно — как у кнопок сохранения выше.
+            const shareBtn = document.querySelector(`.sim-share-btn[data-share="${clsId}"]`);
+            if (shareBtn) shareBtn.onclick = () => this.shareBuild(clsId);
+
+            const importBtn = document.querySelector(`.sim-import-btn[data-import="${clsId}"]`);
+            if (importBtn) importBtn.onclick = () => this.importBuild(clsId);
         },
 
         showNodeCard(clsId, nodeId, event) {

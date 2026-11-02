@@ -286,9 +286,6 @@
                         } else {
                             menu.classList.remove('open-down');
                         }
-                        if (typeof Players !== 'undefined' && Players.updateFriendsBadge) {
-                            Players.updateFriendsBadge();
-                        }
                     } else {
                         menu.classList.remove('open-down');
                     }
@@ -322,10 +319,130 @@
             });
         },
 
+        // Текущая локация героя для HUD «👤 Профиль»: { text, color }.
+        //   Шахта — по разметке нативного модуля (.mn-world/.mn-screen) либо по URL;
+        //   Поход — по состоянию LGQuest (q.on). Состояние читаем у PriestAssistant:
+        //   его _readQuest() берёт сырые пакеты из hooks.js (без задержки стрима q.dl),
+        //   LGQuest._view() — запасной вариант, если модуль жреца ещё не объявлен.
+        _detectHudLocation() {
+            const inMine = !!document.querySelector('.mn-world') ||
+                           !!document.querySelector('.mn-screen') ||
+                           location.search.includes('sid=') ||
+                           location.pathname.includes('/mine') ||
+                           (typeof Chat !== 'undefined' && Chat.isInMine && Chat.isInMine());
+            if (inMine) return { text: '⛏️ Шахта', color: '#4cc95a' };
+
+            let inQuest = false;
+            try {
+                if (typeof PriestAssistant !== 'undefined' && typeof PriestAssistant._readQuest === 'function') {
+                    const q = PriestAssistant._readQuest();
+                    inQuest = !!(q && q.on);
+                } else if (G.LGQuest && typeof G.LGQuest._view === 'function') {
+                    const q = G.LGQuest._view();
+                    inQuest = !!(q && q.on);
+                }
+            } catch (e) {}
+            if (inQuest) return { text: '🚩 Поход', color: '#ff9900' };
+
+            return { text: '🏙️ Город', color: '#8fd3ff' };
+        },
+
+        // Опыт внутри уровня: { xp, xpNext }.
+        // Игра отдаёт готовые поля xpInLevel / xpToNext (docs/API.md, GET /api/me).
+        // В старых снимках их нет — считаем от абсолютных порогов, как это делает
+        // сам клиент игры: набрано = xp - prevXp, нужно = next - prevXp.
+        _heroXp(hero) {
+            if (!hero) return { xp: 0, xpNext: 1 };
+            const own = hero.xpInLevel !== undefined && hero.xpInLevel !== null;
+            const prevXp = Math.max(0, Number(hero.prevXp) || 0);
+            const xp = own
+                ? Math.max(0, Number(hero.xpInLevel) || 0)
+                : Math.max(0, (Number(hero.xp) || 0) - prevXp);
+            const needRaw = own ? hero.xpToNext : hero.next;
+            // Максимум уровня неизвестен (нет поля) — считаем полосу полной.
+            const xpNext = (needRaw === undefined || needRaw === null)
+                ? Math.max(1, xp)
+                : Math.max(1, (Number(needRaw) || 0) - (own ? 0 : prevXp));
+            return { xp, xpNext };
+        },
+
+        // ------------------------------------------------------------
+        // HUD профиля (v11.5.6): настройки блоков, баффы и статус героя.
+        // ------------------------------------------------------------
+
+        // Какие блоки показывать в HUD. Ключ LEGION_HUD_SETTINGS общий для
+        // всех персонажей. Битый/отсутствующий JSON не должен ломать HUD —
+        // в этом случае возвращаем дефолты (всё включено).
+        getHudSettings() {
+            const defaults = { showLoc: true, showXp: true, showStats: true, showBuffs: true };
+            try {
+                const raw = localStorage.getItem('LEGION_HUD_SETTINGS');
+                if (raw) return { ...defaults, ...JSON.parse(raw) };
+            } catch (e) {}
+            return defaults;
+        },
+
+        // Остаток времени баффа строкой: минуты, а в последнюю минуту — секунды,
+        // иначе подпись «1м» висела бы до самого исчезновения эффекта.
+        _hudTimeLeft(ms) {
+            if (ms <= 60000) return `${Math.max(1, Math.ceil(ms / 1000))}с`;
+            return `${Math.ceil(ms / 60000)}м`;
+        },
+
+        // Активные эффекты героя: сытость (eatUntil) и свиток (scrollUntil).
+        // Оба поля — метки времени окончания действия в мс (см. клиент игры:
+        // reference/LegionFrontSRC/site/city.js — h.eatUntil > Date.now()).
+        _hudBuffs(hero) {
+            const out = [];
+            if (!hero) return out;
+            const now = Date.now();
+            const add = (until, icon, title) => {
+                const ts = Number(until) || 0;
+                if (ts > now) out.push({ icon, title, time: this._hudTimeLeft(ts - now), until: ts });
+            };
+            add(hero.eatUntil, '🍗', 'Сытость');
+            add(hero.scrollUntil, '📜', 'Свиток');
+            return out;
+        },
+
+        // Статус героя для бейджа в шапке HUD (docs/API.md, раздел «Герой»):
+        //   мёртв   — hpNow <= 0 либо активен таймер deadUntil;
+        //   призрак — hero.ghost (в клиенте игры призрак не переодевается);
+        //   занят   — hero.busy (идёт бой на стриме).
+        _hudStatus(hero) {
+            if (!hero) return null;
+            const now = Date.now();
+            const deadUntil = Number(hero.deadUntil) || 0;
+            const hpNow = Number(hero.hpNow);
+            const isDead = hero.dead === true || (Number.isFinite(hpNow) && hpNow <= 0) || deadUntil > now;
+            if (isDead) {
+                const left = deadUntil > now ? ` ${this._hudTimeLeft(deadUntil - now)}` : '';
+                return { text: `💀 Мертв${left}`, color: '#ff5a7a' };
+            }
+            if (hero.ghost) return { text: '👻 Призрак', color: '#8fd3ff' };
+            if (hero.busy) return { text: '⚔️ Занят', color: '#ffcf6a' };
+            return null;
+        },
+
+        // Подпись состояния HUD: по ней интервал в togglePlayerHud() понимает,
+        // что набор баффов/статус изменился и карточку нужно перерисовать.
+        _hudSignature(hero) {
+            if (!hero) return '';
+            const dead = (Number(hero.hpNow) <= 0) ? 1 : 0;
+            return [
+                hero.busy ? 1 : 0,
+                hero.ghost ? 1 : 0,
+                Number(hero.deadUntil) || 0,
+                Number(hero.eatUntil) || 0,
+                Number(hero.scrollUntil) || 0,
+                dead
+            ].join('|');
+        },
+
         renderPlayerHudContent(hud, hero) {
             if (!hud) return;
-            // LG_CH/ME — объекты page-context, в песочнице доступны только через G
-            // (глобальный G объявлен в core/constants.js, здесь не дублируем).
+            // Глобальный G (core/constants.js) — это unsafeWindow: LG_CH/ME/LGQuest
+            // живут в контексте страницы и в песочнице напрямую не видны.
             const name = hero?.name || hero?.n || G.LG_CH?.name || (G.ME?.user?.name) || 'Игрок';
             const rawClass = hero?.class || hero?.c || hero?.sk?.c || 'recruit';
             const className = (typeof BuildSim !== 'undefined' && BuildSim.classNames?.[rawClass]) || rawClass;
@@ -338,17 +455,38 @@
             // Монеты: hero.money
             const moneyVal = hero?.money !== undefined ? hero.money : (hero?.coins !== undefined ? hero.coins : (hero?.gold !== undefined ? hero.gold : 0));
 
-            const inMine = !!document.querySelector('.mn-world') ||
-                           location.search.includes('sid=') ||
-                           location.pathname.includes('/mine') ||
-                           !!document.querySelector('.mn-screen') ||
-                           (typeof Chat !== 'undefined' && Chat.isInMine && Chat.isInMine());
-            const locText = inMine ? '⛏️ Шахта' : '🏙️ Город';
-            const locColor = inMine ? '#4cc95a' : '#8fd3ff';
+            // Опыт и локация — общими хелперами (их же использует интервал ниже).
+            const { xp, xpNext } = this._heroXp(hero);
+            const loc = this._detectHudLocation();
+
+            // Настройки HUD + расширенные данные (v11.5.6).
+            const settings = this.getHudSettings();
+            const buffs = this._hudBuffs(hero);
+            const status = this._hudStatus(hero);
+
+            // Статы: atk/mag/def клиент отдаёт в hero.stats, крит — в hero.xs
+            // (реже в hero.stats.crit), поэтому набор нормализуем здесь.
+            const hudStats = hero ? {
+                atk: hero.stats ? hero.stats.atk : undefined,
+                mag: hero.stats ? hero.stats.mag : undefined,
+                def: hero.stats ? hero.stats.def : undefined,
+                crit: (hero.stats && hero.stats.crit !== undefined) ? hero.stats.crit : (hero.xs ? hero.xs.crit : undefined)
+            } : null;
 
             // Разметка HUD — в core/ui-templates.js (UITemplates.playerHud):
             // шаблон сам экранирует ник/класс и форматирует монеты.
-            hud.innerHTML = UITemplates.playerHud(name, className, lvl, { now: hpNow, max: hpMax }, moneyVal, { text: locText, color: locColor });
+            hud.innerHTML = UITemplates.playerHud(name, className, lvl, { now: hpNow, max: hpMax }, moneyVal, loc, xp, xpNext, {
+                settings,
+                stats: hudStats,
+                buffs,
+                status
+            });
+
+            // Метки для интервала в togglePlayerHud(): hudReady отличает готовую
+            // карточку от заглушки «Загрузка профиля...», hudSig — набор
+            // баффов/статуса (при изменении карточка перерисовывается).
+            hud.dataset.hudReady = '1';
+            hud.dataset.hudSig = this._hudSignature(hero);
 
             hud.querySelector('#player-hud-close-btn')?.addEventListener('click', () => {
                 hud.style.display = 'none';
@@ -357,12 +495,33 @@
                     UI._hudTimer = null;
                 }
             });
+
+            // ⚙️ Настройки отображаемых блоков профиля (11.5.6).
+            hud.querySelector('#player-hud-settings-btn')?.addEventListener('click', () => {
+                const currentSettings = this.getHudSettings();
+                UI.showModal(UITemplates.hudSettingsModal(currentSettings), { compact: true });
+                // showModal() синхронно вставляет модалку в body — кнопка уже доступна.
+                document.getElementById('hud-set-save')?.addEventListener('click', () => {
+                    const newSettings = {
+                        showLoc: !!document.getElementById('hud-set-loc')?.checked,
+                        showXp: !!document.getElementById('hud-set-xp')?.checked,
+                        showStats: !!document.getElementById('hud-set-stats')?.checked,
+                        showBuffs: !!document.getElementById('hud-set-buffs')?.checked
+                    };
+                    try {
+                        localStorage.setItem('LEGION_HUD_SETTINGS', JSON.stringify(newSettings));
+                    } catch (e) {}
+                    UI.closeModals();
+                    // Перерисовываем карточку с новым набором блоков.
+                    this.renderPlayerHudContent(hud, hero);
+                });
+            });
         },
 
         setupPlayerHudDrag(hud) {
             let dragging = false, offX = 0, offY = 0;
             hud.addEventListener('pointerdown', (e) => {
-                if (e.target.closest('#player-hud-close-btn') || !e.target.closest('#player-hud-drag-handle')) return;
+                if (e.target.closest('#player-hud-close-btn') || e.target.closest('#player-hud-settings-btn') || !e.target.closest('#player-hud-drag-handle')) return;
                 dragging = true;
                 hud.setPointerCapture(e.pointerId);
                 const r = hud.getBoundingClientRect();
@@ -429,6 +588,10 @@
             } else {
                 // Заглушка до ответа /api/me — тоже из шаблонов.
                 hud.innerHTML = UITemplates.playerHudLoading();
+                // Метки готовой карточки снимаем: интервал дорисует HUD,
+                // когда герой появится (проверка hudReady ниже).
+                delete hud.dataset.hudReady;
+                delete hud.dataset.hudSig;
                 hud.querySelector('#player-hud-close-btn')?.addEventListener('click', () => {
                     hud.style.display = 'none';
                     if (UI._hudTimer) {
@@ -444,7 +607,7 @@
                 this._hudTimer = null;
             }
 
-            // Динамическая локация и показатели каждые 1000 мс (§ Задача 1)
+            // Живое обновление HUD: локация, HP, монеты и опыт каждые 1000 мс
             this._hudTimer = setInterval(() => {
                 if (!hud || hud.style.display === 'none') {
                     if (this._hudTimer) {
@@ -453,29 +616,71 @@
                     }
                     return;
                 }
-                const locEl = hud.querySelector('#player-hud-loc');
-                if (locEl) {
-                    const inMine = !!document.querySelector('.mn-world') ||
-                                   location.search.includes('sid=') ||
-                                   location.pathname.includes('/mine') ||
-                                   !!document.querySelector('.mn-screen') ||
-                                   (typeof Chat !== 'undefined' && Chat.isInMine && Chat.isInMine());
-                    locEl.textContent = inMine ? '⛏️ Шахта' : '🏙️ Город';
-                    locEl.style.color = inMine ? '#4cc95a' : '#8fd3ff';
-                }
 
                 const currentHero = G.ME?.hero || G.ME?.me || window.__lgHero;
+
+                // Герой появился позже (HUD ещё показывает заглушку «Загрузка
+                // профиля...») — дорисовываем карточку целиком и выходим.
+                // Проверяем метку готовности, а не #player-hud-xp-text: полосу
+                // опыта можно отключить в настройках, и HUD перерисовывался бы
+                // каждую секунду.
+                if (currentHero && hud.dataset.hudReady !== '1') {
+                    this.renderPlayerHudContent(hud, currentHero);
+                    return;
+                }
+
+                // Изменился набор баффов или статус (поел, выпил свиток, умер,
+                // начался бой) — перерисовываем карточку: состав элементов другой.
+                if (currentHero && hud.dataset.hudSig !== this._hudSignature(currentHero)) {
+                    this.renderPlayerHudContent(hud, currentHero);
+                    return;
+                }
+
+                // Локация: Город / Шахта / Поход
+                const locEl = hud.querySelector('#player-hud-loc');
+                if (locEl) {
+                    const loc = this._detectHudLocation();
+                    locEl.textContent = loc.text;
+                    locEl.style.color = loc.color;
+                }
+
                 if (currentHero) {
+                    // HP: иконка ❤️ живёт в подписи шаблона, значение — только цифры.
                     const hpEl = hud.querySelector('#player-hud-hp');
                     if (hpEl) {
                         const curHp = currentHero.hpNow !== undefined ? currentHero.hpNow : (currentHero.hp !== undefined ? currentHero.hp : '—');
                         const mHp = currentHero.stats?.hp !== undefined ? currentHero.stats.hp : (currentHero.hpMax !== undefined ? currentHero.hpMax : (currentHero.maxHp || currentHero.mhp || '—'));
-                        hpEl.textContent = `❤️ ${curHp} / ${mHp}`;
+                        hpEl.textContent = (mHp !== null && mHp !== undefined) ? `${curHp} / ${mHp}` : curHp;
                     }
                     const moneyEl = hud.querySelector('#player-hud-money');
                     if (moneyEl) {
                         const mon = currentHero.money !== undefined ? currentHero.money : (currentHero.coins !== undefined ? currentHero.coins : (currentHero.gold !== undefined ? currentHero.gold : 0));
-                        moneyEl.textContent = `🪙 ${Utils.formatMoney(mon)}`;
+                        moneyEl.textContent = Utils.formatMoney(mon);
+                    }
+                    // Опыт: цифры и полоса прогресса уровня
+                    const xpEl = hud.querySelector('#player-hud-xp-text');
+                    const xpBar = hud.querySelector('#player-hud-xp-bar');
+                    if (xpEl && xpBar) {
+                        const { xp, xpNext } = this._heroXp(currentHero);
+                        xpEl.textContent = `${xp} / ${xpNext}`;
+                        // Math.max(1, …) — защита от деления на 0; 100 — потолок полосы.
+                        xpBar.style.width = `${Math.min(100, Math.round((xp / Math.max(1, xpNext)) * 100))}%`;
+                    }
+
+                    // Баффы: пересчитываем подписи по data-until (см. ui-templates.js),
+                    // чтобы таймер тикал без полной перерисовки HUD. Просроченные
+                    // чипы убираем — на следующем тике hudSig перерисует карточку.
+                    const buffsEl = hud.querySelector('#player-hud-buffs');
+                    if (buffsEl) {
+                        buffsEl.querySelectorAll('[data-until]').forEach(el => {
+                            const until = Number(el.dataset.until) || 0;
+                            const left = until - Date.now();
+                            if (left > 0) {
+                                el.textContent = `${el.dataset.icon || ''} ${this._hudTimeLeft(left)}`.trim();
+                            } else {
+                                el.remove();
+                            }
+                        });
                     }
                 }
             }, 1000);

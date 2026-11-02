@@ -309,13 +309,6 @@
                 checkObject(raw);
             }
 
-            if (updated) {
-                try {
-                    if (typeof Players !== 'undefined' && Players.onOnlinePlayersUpdated) {
-                        Players.onOnlinePlayersUpdated();
-                    }
-                } catch(e) {}
-            }
             return updated;
         },
     };

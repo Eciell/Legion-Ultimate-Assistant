@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Legion: Ultimate Assistant (Chat, Auction, Pocket City)
 // @namespace    http://tampermonkey.net/
-// @version      11.5.5
+// @version      11.5.6
 // @description  QoL-аддон для Легиона: Умный чат, Сканер аукциона, Разведка, Планировщик, Карманный город. Без авто-копания.
 // @connect      7tv.io
 // @connect      cdn.7tv.app
@@ -942,13 +942,6 @@
                 checkObject(raw);
             }
 
-            if (updated) {
-                try {
-                    if (typeof Players !== 'undefined' && Players.onOnlinePlayersUpdated) {
-                        Players.onOnlinePlayersUpdated();
-                    }
-                } catch(e) {}
-            }
             return updated;
         },
     };
@@ -1543,46 +1536,141 @@
 
         /**
          * Карточка профиля игрока (HUD «👤 Профиль»).
-         * id элементов (#player-hud-hp / -money / -loc / -close-btn) читает
-         * интервал обновления и обработчик закрытия в core/ui.js.
+         * id элементов (#player-hud-hp / -money / -loc / -xp-text / -xp-bar /
+         * -close-btn) читают интервал обновления и обработчик закрытия в core/ui.js.
          *
          * @param {string} name      ник игрока (экранируется)
          * @param {string} className название класса (экранируется)
          * @param {number} level     уровень
-         * @param {object|string} hp { now, max } либо готовый текст здоровья
+         * @param {object|string} hp { now, max } либо готовое здоровье
          * @param {number} money     монеты (форматируется Utils.formatMoney)
          * @param {object|string} loc { text, color } либо готовый текст локации
+         * @param {number} xp        опыт, набранный в текущем уровне (xpInLevel)
+         * @param {number} xpNext    сколько опыта нужно до следующего уровня (xpToNext)
+         * @param {object} extra     дополнительные блоки HUD (v11.5.6):
+         *   settings { showLoc, showXp, showStats, showBuffs } — что показывать;
+         *   stats    { atk, mag, def, crit }                 — базовые статы;
+         *   buffs    [{ icon, title, time, until }]          — еда / свиток;
+         *   status   { text, color } | null                  — мёртв / занят.
          */
-        playerHud(name, className, level, hp, money, loc) {
-            const hpText = (hp && typeof hp === 'object')
-                ? `${hp.now ?? '—'} / ${hp.max ?? '—'}`
-                : (hp ?? '—');
+        playerHud(name, className, level, hp, money, loc, xp = 0, xpNext = 1, extra = {}) {
+            const safeName = Utils.escapeHtml(name || 'Игрок');
+            const safeClass = Utils.escapeHtml(className || '—');
+
+            // Настройки отображения: без extra (старые вызовы) показываем всё.
+            const s = extra.settings || {};
+            const showLoc = s.showLoc !== false;
+            const showXp = s.showXp !== false;
+            const showStats = s.showStats !== false;
+            const showBuffs = s.showBuffs !== false;
+
+            // hp приходит либо парой { now, max }, либо готовой строкой/числом.
+            const hpNow = (hp && typeof hp === 'object') ? (hp.now ?? '—') : (hp ?? '—');
+            const hpMax = (hp && typeof hp === 'object') ? hp.max : null;
+            const hpStr = (hpMax !== null && hpMax !== undefined) ? `${hpNow} / ${hpMax}` : hpNow;
+
             const locText = (loc && typeof loc === 'object') ? (loc.text || '🏙️ Город') : (loc || '🏙️ Город');
             const locColor = (loc && typeof loc === 'object' && loc.color) ? loc.color : '#8fd3ff';
+            const moneyVal = Utils.formatMoney(money);
+
+            // Прогресс уровня в процентах: xp / xpNext.
+            // Math.max(1, …) защищает от деления на ноль (xpToNext бывает 0/undefined),
+            // 100 — потолок полосы (на максимуме уровня опыт может «перелиться»).
+            const xpPct = Math.min(100, Math.round((xp / Math.max(1, xpNext)) * 100));
+
+            // Статус героя (мёртв / в бою / призрак) — бейдж в шапке карточки.
+            // Цвет приходит из UI; всё, что не похоже на hex, отбрасываем,
+            // чтобы в style не попала произвольная строка.
+            const status = extra.status || null;
+            const statusColor = (status && /^#[0-9a-fA-F]{3,8}$/.test(status.color || '')) ? status.color : '#ff5a7a';
+            const statusHtml = (status && status.text)
+                ? `<span id="player-hud-status" style="font-size:10px; padding:1px 6px; border-radius:4px; background:rgba(255,90,122,0.12); border:1px solid ${statusColor}; color:${statusColor}; white-space:nowrap;">${Utils.escapeHtml(status.text)}</span>`
+                : '';
+
+            // Базовые статы. Number(...) — безопасный способ вставить числа
+            // в innerHTML: строка с разметкой превратится в NaN, а затем в 0.
+            let statsHtml = '';
+            if (showStats && extra.stats) {
+                const st = extra.stats;
+                const atk = Number(st.atk) || 0;
+                const mag = Number(st.mag) || 0;
+                const def = Number(st.def) || 0;
+                const crit = Number(st.crit) || 0;
+                const cells = [];
+                if (atk) cells.push(`<div style="color:#ffcf6a;">⚔️ Атака: ${atk}</div>`);
+                if (mag) cells.push(`<div style="color:#b06bff;">✨ Магия: ${mag}</div>`);
+                if (def) cells.push(`<div style="color:#4aa3ff;">🛡️ Броня: ${def}</div>`);
+                if (crit) cells.push(`<div style="color:#ff5a7a;">💥 Крит: ${crit}%</div>`);
+                if (cells.length) {
+                    statsHtml = `<div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:11px; background:#16121a; padding:6px; border-radius:4px; margin-top:4px;">${cells.join('')}</div>`;
+                }
+            }
+
+            // Активные эффекты (🍗 сытость / 📜 свиток). data-until и data-icon
+            // читает интервал в core/ui.js: он тикает таймер каждую секунду,
+            // не перерисовывая карточку целиком (иначе сбивался бы drag).
+            let buffsHtml = '';
+            if (showBuffs && Array.isArray(extra.buffs) && extra.buffs.length) {
+                const chips = extra.buffs.map(b => {
+                    const icon = Utils.escapeHtml(b.icon || '✨');
+                    const title = Utils.escapeHtml(b.title || '');
+                    const time = Utils.escapeHtml(b.time || '');
+                    const until = Number(b.until) || 0;
+                    return `<span data-until="${until}" data-icon="${icon}" style="background:rgba(202,165,92,0.2); border:1px solid #caa55c; color:#ffcf6a; font-size:10px; padding:2px 6px; border-radius:4px;" title="${title}">${icon} ${time}</span>`;
+                });
+                buffsHtml = `<div id="player-hud-buffs" style="display:flex; gap:4px; flex-wrap:wrap; margin-top:4px;">${chips.join('')}</div>`;
+            }
+
+            // Локация и полоса опыта прячутся настройками (v11.5.6).
+            // id #player-hud-loc / -xp-* по-прежнему читает интервал обновления.
+            const locHtml = showLoc
+                ? `<div style="display:flex; justify-content:space-between; align-items:center; font-size:12px;">
+                        <span style="color:#aaa;">📍 Локация:</span>
+                        <span id="player-hud-loc" style="color:${Utils.escapeHtml(locColor)}; font-weight:bold;">${Utils.escapeHtml(locText)}</span>
+                    </div>`
+                : '';
+
+            const xpHtml = showXp
+                ? `<!-- Полоса опыта -->
+                    <div style="margin-top: 4px;">
+                        <div style="display:flex; justify-content:space-between; font-size:10px; color:#aaa; margin-bottom:3px;">
+                            <span>Опыт</span>
+                            <span id="player-hud-xp-text">${xp} / ${xpNext}</span>
+                        </div>
+                        <div style="height:8px; background:#111; border-radius:4px; overflow:hidden; border:1px solid #333;">
+                            <div id="player-hud-xp-bar" style="height:100%; width:${xpPct}%; background:linear-gradient(90deg, #caa55c, #ffcf6a); transition: width 0.3s;"></div>
+                        </div>
+                    </div>`
+                : '';
+
             return `
                 <div class="player-hud-header" id="player-hud-drag-handle">
-                    <span style="font-weight:bold; color:#ffcf6a; font-size:12px; display:flex; align-items:center; gap:4px;">
-                        <span>👤</span> <span>${Utils.escapeHtml(name || 'Игрок')}</span>
+                    <span style="font-weight:bold; color:#ffcf6a; font-size:12px; display:flex; align-items:center; gap:4px; min-width:0;">
+                        <span>👤</span> <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safeName}</span>
                     </span>
-                    <button class="player-hud-close" id="player-hud-close-btn" title="Закрыть">✖</button>
+                    <span style="display:flex; align-items:center; gap:6px;">
+                        ${statusHtml}
+                        <button class="player-hud-close" id="player-hud-settings-btn" title="Настройки профиля" style="color:#caa55c;">⚙️</button>
+                        <button class="player-hud-close" id="player-hud-close-btn" title="Закрыть">✖</button>
+                    </span>
                 </div>
-                <div class="player-hud-body">
-                    <div class="player-hud-row">
-                        <span class="player-hud-label">Класс:</span>
-                        <span class="player-hud-val" style="color:#f7d794;">${Utils.escapeHtml(className)} (ур. ${level})</span>
+                <div class="player-hud-body" style="padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px;">
+                        <span style="color:#aaa;">Класс:</span>
+                        <span style="color:#f7d794; font-weight:bold;">${safeClass} (ур. ${level})</span>
                     </div>
-                    <div class="player-hud-row">
-                        <span class="player-hud-label">Здоровье:</span>
-                        <span class="player-hud-val" id="player-hud-hp" style="color:#ff5a7a;">❤️ ${hpText}</span>
+                    <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px;">
+                        <span style="color:#aaa;">❤️ HP:</span>
+                        <span id="player-hud-hp" style="color:#ff5a7a; font-weight:bold;">${hpStr}</span>
                     </div>
-                    <div class="player-hud-row">
-                        <span class="player-hud-label">Монеты:</span>
-                        <span class="player-hud-val" id="player-hud-money" style="color:#ffcf6a;">🪙 ${Utils.formatMoney(money)}</span>
+                    <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px;">
+                        <span style="color:#aaa;">🪙 Монеты:</span>
+                        <span id="player-hud-money" style="color:#ffcf6a; font-weight:bold;">${moneyVal}</span>
                     </div>
-                    <div class="player-hud-row">
-                        <span class="player-hud-label">Локация:</span>
-                        <span class="player-hud-val" id="player-hud-loc" style="color:${locColor};">${locText}</span>
-                    </div>
+                    ${locHtml}
+                    ${statsHtml}
+                    ${buffsHtml}
+                    ${xpHtml}
                 </div>
             `;
         },
@@ -1647,6 +1735,35 @@
                         <span>Звездочёт</span>
                         <small style="color:#8899aa; font-size:10px; font-weight:normal;">Зелья/Свитки</small>
                     </button>
+                </div>
+            `;
+        },
+
+        /**
+         * Модалка настроек HUD «👤 Профиль» (v11.5.6): какие блоки показывать.
+         * Кнопку «Сохранить» (#hud-set-save) обрабатывает core/ui.js —
+         * он же пишет выбор в localStorage (ключ LEGION_HUD_SETTINGS).
+         *
+         * @param {object} settings { showLoc, showXp, showStats, showBuffs }
+         */
+        hudSettingsModal(settings) {
+            const s = settings || {};
+            return `
+                <h2>⚙️ Настройки Профиля <button class="custom-close" id="custom-close-btn">✖</button></h2>
+                <div style="padding: 10px; display: flex; flex-direction: column; gap: 12px;">
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:#eee;">
+                        <input type="checkbox" id="hud-set-loc" ${s.showLoc ? 'checked' : ''} style="width:16px; height:16px; accent-color:#caa55c;"> 📍 Локация
+                    </label>
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:#eee;">
+                        <input type="checkbox" id="hud-set-xp" ${s.showXp ? 'checked' : ''} style="width:16px; height:16px; accent-color:#caa55c;"> 📊 Опыт (полоса)
+                    </label>
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:#eee;">
+                        <input type="checkbox" id="hud-set-stats" ${s.showStats ? 'checked' : ''} style="width:16px; height:16px; accent-color:#caa55c;"> ⚔️ Базовые статы (Атака, Магия, Броня)
+                    </label>
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:#eee;">
+                        <input type="checkbox" id="hud-set-buffs" ${s.showBuffs ? 'checked' : ''} style="width:16px; height:16px; accent-color:#caa55c;"> 🍗 Активные эффекты (еда/свитки)
+                    </label>
+                    <button id="hud-set-save" style="margin-top:10px; background:#caa55c; color:#1d1620; border:none; border-radius:6px; padding:10px; font-weight:bold; cursor:pointer;">Сохранить</button>
                 </div>
             `;
         }
@@ -1941,9 +2058,6 @@
                         } else {
                             menu.classList.remove('open-down');
                         }
-                        if (typeof Players !== 'undefined' && Players.updateFriendsBadge) {
-                            Players.updateFriendsBadge();
-                        }
                     } else {
                         menu.classList.remove('open-down');
                     }
@@ -1977,10 +2091,130 @@
             });
         },
 
+        // Текущая локация героя для HUD «👤 Профиль»: { text, color }.
+        //   Шахта — по разметке нативного модуля (.mn-world/.mn-screen) либо по URL;
+        //   Поход — по состоянию LGQuest (q.on). Состояние читаем у PriestAssistant:
+        //   его _readQuest() берёт сырые пакеты из hooks.js (без задержки стрима q.dl),
+        //   LGQuest._view() — запасной вариант, если модуль жреца ещё не объявлен.
+        _detectHudLocation() {
+            const inMine = !!document.querySelector('.mn-world') ||
+                           !!document.querySelector('.mn-screen') ||
+                           location.search.includes('sid=') ||
+                           location.pathname.includes('/mine') ||
+                           (typeof Chat !== 'undefined' && Chat.isInMine && Chat.isInMine());
+            if (inMine) return { text: '⛏️ Шахта', color: '#4cc95a' };
+
+            let inQuest = false;
+            try {
+                if (typeof PriestAssistant !== 'undefined' && typeof PriestAssistant._readQuest === 'function') {
+                    const q = PriestAssistant._readQuest();
+                    inQuest = !!(q && q.on);
+                } else if (G.LGQuest && typeof G.LGQuest._view === 'function') {
+                    const q = G.LGQuest._view();
+                    inQuest = !!(q && q.on);
+                }
+            } catch (e) {}
+            if (inQuest) return { text: '🚩 Поход', color: '#ff9900' };
+
+            return { text: '🏙️ Город', color: '#8fd3ff' };
+        },
+
+        // Опыт внутри уровня: { xp, xpNext }.
+        // Игра отдаёт готовые поля xpInLevel / xpToNext (docs/API.md, GET /api/me).
+        // В старых снимках их нет — считаем от абсолютных порогов, как это делает
+        // сам клиент игры: набрано = xp - prevXp, нужно = next - prevXp.
+        _heroXp(hero) {
+            if (!hero) return { xp: 0, xpNext: 1 };
+            const own = hero.xpInLevel !== undefined && hero.xpInLevel !== null;
+            const prevXp = Math.max(0, Number(hero.prevXp) || 0);
+            const xp = own
+                ? Math.max(0, Number(hero.xpInLevel) || 0)
+                : Math.max(0, (Number(hero.xp) || 0) - prevXp);
+            const needRaw = own ? hero.xpToNext : hero.next;
+            // Максимум уровня неизвестен (нет поля) — считаем полосу полной.
+            const xpNext = (needRaw === undefined || needRaw === null)
+                ? Math.max(1, xp)
+                : Math.max(1, (Number(needRaw) || 0) - (own ? 0 : prevXp));
+            return { xp, xpNext };
+        },
+
+        // ------------------------------------------------------------
+        // HUD профиля (v11.5.6): настройки блоков, баффы и статус героя.
+        // ------------------------------------------------------------
+
+        // Какие блоки показывать в HUD. Ключ LEGION_HUD_SETTINGS общий для
+        // всех персонажей. Битый/отсутствующий JSON не должен ломать HUD —
+        // в этом случае возвращаем дефолты (всё включено).
+        getHudSettings() {
+            const defaults = { showLoc: true, showXp: true, showStats: true, showBuffs: true };
+            try {
+                const raw = localStorage.getItem('LEGION_HUD_SETTINGS');
+                if (raw) return { ...defaults, ...JSON.parse(raw) };
+            } catch (e) {}
+            return defaults;
+        },
+
+        // Остаток времени баффа строкой: минуты, а в последнюю минуту — секунды,
+        // иначе подпись «1м» висела бы до самого исчезновения эффекта.
+        _hudTimeLeft(ms) {
+            if (ms <= 60000) return `${Math.max(1, Math.ceil(ms / 1000))}с`;
+            return `${Math.ceil(ms / 60000)}м`;
+        },
+
+        // Активные эффекты героя: сытость (eatUntil) и свиток (scrollUntil).
+        // Оба поля — метки времени окончания действия в мс (см. клиент игры:
+        // reference/LegionFrontSRC/site/city.js — h.eatUntil > Date.now()).
+        _hudBuffs(hero) {
+            const out = [];
+            if (!hero) return out;
+            const now = Date.now();
+            const add = (until, icon, title) => {
+                const ts = Number(until) || 0;
+                if (ts > now) out.push({ icon, title, time: this._hudTimeLeft(ts - now), until: ts });
+            };
+            add(hero.eatUntil, '🍗', 'Сытость');
+            add(hero.scrollUntil, '📜', 'Свиток');
+            return out;
+        },
+
+        // Статус героя для бейджа в шапке HUD (docs/API.md, раздел «Герой»):
+        //   мёртв   — hpNow <= 0 либо активен таймер deadUntil;
+        //   призрак — hero.ghost (в клиенте игры призрак не переодевается);
+        //   занят   — hero.busy (идёт бой на стриме).
+        _hudStatus(hero) {
+            if (!hero) return null;
+            const now = Date.now();
+            const deadUntil = Number(hero.deadUntil) || 0;
+            const hpNow = Number(hero.hpNow);
+            const isDead = hero.dead === true || (Number.isFinite(hpNow) && hpNow <= 0) || deadUntil > now;
+            if (isDead) {
+                const left = deadUntil > now ? ` ${this._hudTimeLeft(deadUntil - now)}` : '';
+                return { text: `💀 Мертв${left}`, color: '#ff5a7a' };
+            }
+            if (hero.ghost) return { text: '👻 Призрак', color: '#8fd3ff' };
+            if (hero.busy) return { text: '⚔️ Занят', color: '#ffcf6a' };
+            return null;
+        },
+
+        // Подпись состояния HUD: по ней интервал в togglePlayerHud() понимает,
+        // что набор баффов/статус изменился и карточку нужно перерисовать.
+        _hudSignature(hero) {
+            if (!hero) return '';
+            const dead = (Number(hero.hpNow) <= 0) ? 1 : 0;
+            return [
+                hero.busy ? 1 : 0,
+                hero.ghost ? 1 : 0,
+                Number(hero.deadUntil) || 0,
+                Number(hero.eatUntil) || 0,
+                Number(hero.scrollUntil) || 0,
+                dead
+            ].join('|');
+        },
+
         renderPlayerHudContent(hud, hero) {
             if (!hud) return;
-            // LG_CH/ME — объекты page-context, в песочнице доступны только через G
-            // (глобальный G объявлен в core/constants.js, здесь не дублируем).
+            // Глобальный G (core/constants.js) — это unsafeWindow: LG_CH/ME/LGQuest
+            // живут в контексте страницы и в песочнице напрямую не видны.
             const name = hero?.name || hero?.n || G.LG_CH?.name || (G.ME?.user?.name) || 'Игрок';
             const rawClass = hero?.class || hero?.c || hero?.sk?.c || 'recruit';
             const className = (typeof BuildSim !== 'undefined' && BuildSim.classNames?.[rawClass]) || rawClass;
@@ -1993,17 +2227,38 @@
             // Монеты: hero.money
             const moneyVal = hero?.money !== undefined ? hero.money : (hero?.coins !== undefined ? hero.coins : (hero?.gold !== undefined ? hero.gold : 0));
 
-            const inMine = !!document.querySelector('.mn-world') ||
-                           location.search.includes('sid=') ||
-                           location.pathname.includes('/mine') ||
-                           !!document.querySelector('.mn-screen') ||
-                           (typeof Chat !== 'undefined' && Chat.isInMine && Chat.isInMine());
-            const locText = inMine ? '⛏️ Шахта' : '🏙️ Город';
-            const locColor = inMine ? '#4cc95a' : '#8fd3ff';
+            // Опыт и локация — общими хелперами (их же использует интервал ниже).
+            const { xp, xpNext } = this._heroXp(hero);
+            const loc = this._detectHudLocation();
+
+            // Настройки HUD + расширенные данные (v11.5.6).
+            const settings = this.getHudSettings();
+            const buffs = this._hudBuffs(hero);
+            const status = this._hudStatus(hero);
+
+            // Статы: atk/mag/def клиент отдаёт в hero.stats, крит — в hero.xs
+            // (реже в hero.stats.crit), поэтому набор нормализуем здесь.
+            const hudStats = hero ? {
+                atk: hero.stats ? hero.stats.atk : undefined,
+                mag: hero.stats ? hero.stats.mag : undefined,
+                def: hero.stats ? hero.stats.def : undefined,
+                crit: (hero.stats && hero.stats.crit !== undefined) ? hero.stats.crit : (hero.xs ? hero.xs.crit : undefined)
+            } : null;
 
             // Разметка HUD — в core/ui-templates.js (UITemplates.playerHud):
             // шаблон сам экранирует ник/класс и форматирует монеты.
-            hud.innerHTML = UITemplates.playerHud(name, className, lvl, { now: hpNow, max: hpMax }, moneyVal, { text: locText, color: locColor });
+            hud.innerHTML = UITemplates.playerHud(name, className, lvl, { now: hpNow, max: hpMax }, moneyVal, loc, xp, xpNext, {
+                settings,
+                stats: hudStats,
+                buffs,
+                status
+            });
+
+            // Метки для интервала в togglePlayerHud(): hudReady отличает готовую
+            // карточку от заглушки «Загрузка профиля...», hudSig — набор
+            // баффов/статуса (при изменении карточка перерисовывается).
+            hud.dataset.hudReady = '1';
+            hud.dataset.hudSig = this._hudSignature(hero);
 
             hud.querySelector('#player-hud-close-btn')?.addEventListener('click', () => {
                 hud.style.display = 'none';
@@ -2012,12 +2267,33 @@
                     UI._hudTimer = null;
                 }
             });
+
+            // ⚙️ Настройки отображаемых блоков профиля (11.5.6).
+            hud.querySelector('#player-hud-settings-btn')?.addEventListener('click', () => {
+                const currentSettings = this.getHudSettings();
+                UI.showModal(UITemplates.hudSettingsModal(currentSettings), { compact: true });
+                // showModal() синхронно вставляет модалку в body — кнопка уже доступна.
+                document.getElementById('hud-set-save')?.addEventListener('click', () => {
+                    const newSettings = {
+                        showLoc: !!document.getElementById('hud-set-loc')?.checked,
+                        showXp: !!document.getElementById('hud-set-xp')?.checked,
+                        showStats: !!document.getElementById('hud-set-stats')?.checked,
+                        showBuffs: !!document.getElementById('hud-set-buffs')?.checked
+                    };
+                    try {
+                        localStorage.setItem('LEGION_HUD_SETTINGS', JSON.stringify(newSettings));
+                    } catch (e) {}
+                    UI.closeModals();
+                    // Перерисовываем карточку с новым набором блоков.
+                    this.renderPlayerHudContent(hud, hero);
+                });
+            });
         },
 
         setupPlayerHudDrag(hud) {
             let dragging = false, offX = 0, offY = 0;
             hud.addEventListener('pointerdown', (e) => {
-                if (e.target.closest('#player-hud-close-btn') || !e.target.closest('#player-hud-drag-handle')) return;
+                if (e.target.closest('#player-hud-close-btn') || e.target.closest('#player-hud-settings-btn') || !e.target.closest('#player-hud-drag-handle')) return;
                 dragging = true;
                 hud.setPointerCapture(e.pointerId);
                 const r = hud.getBoundingClientRect();
@@ -2084,6 +2360,10 @@
             } else {
                 // Заглушка до ответа /api/me — тоже из шаблонов.
                 hud.innerHTML = UITemplates.playerHudLoading();
+                // Метки готовой карточки снимаем: интервал дорисует HUD,
+                // когда герой появится (проверка hudReady ниже).
+                delete hud.dataset.hudReady;
+                delete hud.dataset.hudSig;
                 hud.querySelector('#player-hud-close-btn')?.addEventListener('click', () => {
                     hud.style.display = 'none';
                     if (UI._hudTimer) {
@@ -2099,7 +2379,7 @@
                 this._hudTimer = null;
             }
 
-            // Динамическая локация и показатели каждые 1000 мс (§ Задача 1)
+            // Живое обновление HUD: локация, HP, монеты и опыт каждые 1000 мс
             this._hudTimer = setInterval(() => {
                 if (!hud || hud.style.display === 'none') {
                     if (this._hudTimer) {
@@ -2108,29 +2388,71 @@
                     }
                     return;
                 }
-                const locEl = hud.querySelector('#player-hud-loc');
-                if (locEl) {
-                    const inMine = !!document.querySelector('.mn-world') ||
-                                   location.search.includes('sid=') ||
-                                   location.pathname.includes('/mine') ||
-                                   !!document.querySelector('.mn-screen') ||
-                                   (typeof Chat !== 'undefined' && Chat.isInMine && Chat.isInMine());
-                    locEl.textContent = inMine ? '⛏️ Шахта' : '🏙️ Город';
-                    locEl.style.color = inMine ? '#4cc95a' : '#8fd3ff';
-                }
 
                 const currentHero = G.ME?.hero || G.ME?.me || window.__lgHero;
+
+                // Герой появился позже (HUD ещё показывает заглушку «Загрузка
+                // профиля...») — дорисовываем карточку целиком и выходим.
+                // Проверяем метку готовности, а не #player-hud-xp-text: полосу
+                // опыта можно отключить в настройках, и HUD перерисовывался бы
+                // каждую секунду.
+                if (currentHero && hud.dataset.hudReady !== '1') {
+                    this.renderPlayerHudContent(hud, currentHero);
+                    return;
+                }
+
+                // Изменился набор баффов или статус (поел, выпил свиток, умер,
+                // начался бой) — перерисовываем карточку: состав элементов другой.
+                if (currentHero && hud.dataset.hudSig !== this._hudSignature(currentHero)) {
+                    this.renderPlayerHudContent(hud, currentHero);
+                    return;
+                }
+
+                // Локация: Город / Шахта / Поход
+                const locEl = hud.querySelector('#player-hud-loc');
+                if (locEl) {
+                    const loc = this._detectHudLocation();
+                    locEl.textContent = loc.text;
+                    locEl.style.color = loc.color;
+                }
+
                 if (currentHero) {
+                    // HP: иконка ❤️ живёт в подписи шаблона, значение — только цифры.
                     const hpEl = hud.querySelector('#player-hud-hp');
                     if (hpEl) {
                         const curHp = currentHero.hpNow !== undefined ? currentHero.hpNow : (currentHero.hp !== undefined ? currentHero.hp : '—');
                         const mHp = currentHero.stats?.hp !== undefined ? currentHero.stats.hp : (currentHero.hpMax !== undefined ? currentHero.hpMax : (currentHero.maxHp || currentHero.mhp || '—'));
-                        hpEl.textContent = `❤️ ${curHp} / ${mHp}`;
+                        hpEl.textContent = (mHp !== null && mHp !== undefined) ? `${curHp} / ${mHp}` : curHp;
                     }
                     const moneyEl = hud.querySelector('#player-hud-money');
                     if (moneyEl) {
                         const mon = currentHero.money !== undefined ? currentHero.money : (currentHero.coins !== undefined ? currentHero.coins : (currentHero.gold !== undefined ? currentHero.gold : 0));
-                        moneyEl.textContent = `🪙 ${Utils.formatMoney(mon)}`;
+                        moneyEl.textContent = Utils.formatMoney(mon);
+                    }
+                    // Опыт: цифры и полоса прогресса уровня
+                    const xpEl = hud.querySelector('#player-hud-xp-text');
+                    const xpBar = hud.querySelector('#player-hud-xp-bar');
+                    if (xpEl && xpBar) {
+                        const { xp, xpNext } = this._heroXp(currentHero);
+                        xpEl.textContent = `${xp} / ${xpNext}`;
+                        // Math.max(1, …) — защита от деления на 0; 100 — потолок полосы.
+                        xpBar.style.width = `${Math.min(100, Math.round((xp / Math.max(1, xpNext)) * 100))}%`;
+                    }
+
+                    // Баффы: пересчитываем подписи по data-until (см. ui-templates.js),
+                    // чтобы таймер тикал без полной перерисовки HUD. Просроченные
+                    // чипы убираем — на следующем тике hudSig перерисует карточку.
+                    const buffsEl = hud.querySelector('#player-hud-buffs');
+                    if (buffsEl) {
+                        buffsEl.querySelectorAll('[data-until]').forEach(el => {
+                            const until = Number(el.dataset.until) || 0;
+                            const left = until - Date.now();
+                            if (left > 0) {
+                                el.textContent = `${el.dataset.icon || ''} ${this._hudTimeLeft(left)}`.trim();
+                            } else {
+                                el.remove();
+                            }
+                        });
                     }
                 }
             }, 1000);
@@ -2158,6 +2480,7 @@
         savedBuilds: {}, // { [clsId]: [{ name, skills }] } — сохранённые в localStorage билды по классам
         _currentBuildName: '', // имя последнего сохранённого/загруженного билда (для будущих фич UI)
         _currentBuildNames: {}, // { [clsId]: name } — активный билд каждого класса (нужен для кнопки «Удалить»)
+        _autoLoadClass: null, // класс, чей билд пришёл ссылкой #build=… (вкладку открываем после создания табов)
 
         statNames: { hp: 'Макс. HP', atk: 'Физ. урон', mag: 'Магия', def: 'Броня', crit: 'Крит %', critDmg: 'Сила крита', dodge: 'Уклонение', pierce: 'Пробивание', healPow: 'Сила лечения', luck: 'Удача', resist: 'Сопротивление' },
         fxNames: { melee: 'Физ. урон %', magic: 'Магия %', hp: 'Макс. HP %', def: 'Броня', healPow: 'Сила лечения %', healIn: 'Вх. лечение %', crit: 'Крит %', critDmg: 'Сила крита', skel: 'Урон скелетов %', skelT: 'Время скелетов', leech: 'Вампиризм %', block: 'Снижение урона %', dodge: 'Уклонение %', lead: 'Урон по боссам %', first: 'Урон 1-й ход %', dmg: 'Весь урон %', pierce: 'Пробивание %', resist: 'Сопротивление', healCrit: 'Крит лечения %', regen: 'Регенерация %', low: 'Урон при низком HP %', a_siyanie: 'Сияние +%', a_obereg: 'Оберег +%', a_dlan: 'Длань +%', a_aura: 'Аура +%', aura: 'Аура −урон %', a_svet: 'Свет +%', a_vspyshka: 'Вспышка +%', a_oznob: 'Озноб +%', a_pricel: 'Прицел +%', a_grad: 'Град +%', a_natisk: 'Натиск +%', a_stoyka: 'Стойка +%', a_vspinu: 'Вспину +%', a_yad: 'Яд +%', a_vytyanut: 'Вытянуть +%', a_podnyat: 'Поднять +%', poison: 'Отрава %', steal: 'Кража %', loot: 'Добыча %', skelN: 'Скелетов +', volley: 'Залп +%', shieldBlock: 'Щит блок %', trapDodge: 'Ловушки %', steady: 'Промах→удар %', cleave: 'Замах %', cleaveBoss: 'Замах по боссу %', penBoss: 'Бронебой по боссу %', drain: 'Вытягивание %', hex: 'Проклятие +%', holy: 'По нежити +%', poisonT: 'Время отравы' },
@@ -2217,6 +2540,13 @@
 
         async mount(container) {
             if (!container) return;
+            // Ссылка вида …#build=<код> — обмен билдами без сервера. Код читаем
+            // сразу, а ПРИМЕНЯЕМ ниже, после сброса simulatedSkills: иначе
+            // импортированные навыки затёрлись бы пустым объектом.
+            // Посторонний хэш (не от билда) игнорируем — иначе показывали бы
+            // ложное «неверный формат кода».
+            const hash = window.location.hash || '';
+            const hashBuildCode = hash.includes('#build=') ? this._extractBuildCode(hash) : '';
             // Сохранённые билды поднимаем до парсинга /api/me и /api/skills,
             // чтобы UI успел отрисовать список «Мои билды» при первом renderTree.
             this.loadSavedBuilds();
@@ -2233,6 +2563,16 @@
                 if (!this.skillsCache || !this.skillsCache.classes) throw new Error('Нет данных о навыках');
 
                 this.simulatedSkills = {};
+                // Билд из ссылки применяем поверх пустой симуляции (код прочитан
+                // в начале mount — до сброса применять было нельзя).
+                if (hashBuildCode) {
+                    this._autoLoadClass = this.decodeBuild(hashBuildCode);
+                    if (this._autoLoadClass) UI.showToast('📥 Билд загружен из ссылки!');
+                    else UI.showToast('❌ Неверный формат кода билда', true);
+                    // Хэш убираем: иначе перезагрузка страницы снова перезапишет
+                    // текущую симуляцию тем же билдом.
+                    try { history.replaceState(null, '', window.location.pathname + window.location.search); } catch (e) {}
+                }
                 const h = me.hero;
                 const equipped = h.items.filter(x => x.on);
                 const bag = h.items.filter(x => !x.on && x.wearable);
@@ -2276,18 +2616,32 @@
                         <div class="tab-content" id="tab-${c.id}">
                             <div class="sim-tree-wrap">
                                 <div class="sim-tree-inner">
-                                    <div class="sim-top-bar" style="display: flex; flex-direction: column; gap: 12px; background: #1e1724; padding: 12px; border-radius: 8px; border: 1px solid #3d2f44; margin-bottom: 15px;">
-                                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                                            <div class="sim-free-pts" style="font-size: 14px; color: #eee;">Свободно очков: <span id="free-${c.id}" style="color: #caa55c; font-weight: bold; font-size: 18px;">0</span> <span style="color: #888;">/ ${MAX_POINTS}</span></div>
-                                            <button class="sim-reset-btn" data-reset="${c.id}" style="background: rgba(255, 90, 122, 0.1); color: #ff5a7a; border: 1px solid #ff5a7a; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s;">Сбросить всё</button>
+                                    <div class="sim-top-bar" style="display: flex; flex-direction: column; gap: 15px; background: #1e1724; padding: 15px; border-radius: 8px; border: 1px solid #3d2f44; margin-bottom: 15px;">
+                                        <!-- Верхняя строка: очки и сброс -->
+                                        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #3d2f44; padding-bottom: 12px;">
+                                            <div class="sim-free-pts" style="font-size: 14px; color: #eee;">Свободно очков: <span id="free-${c.id}" style="color: #caa55c; font-weight: bold; font-size: 20px; margin: 0 4px;">0</span> <span style="color: #888;">/ ${MAX_POINTS}</span></div>
+                                            <button class="sim-reset-btn" data-reset="${c.id}" style="background: rgba(255, 90, 122, 0.1); color: #ff5a7a; border: 1px solid #ff5a7a; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 12px; transition: 0.2s;">Сбросить всё</button>
                                         </div>
+                                        <!-- Средняя строка: сохранение и загрузка -->
+                                        <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                                            <!-- Блок «Сохранить» -->
+                                            <div style="display: flex; gap: 8px; flex: 1; min-width: 250px;">
+                                                <input type="text" id="save-name-${c.id}" class="search-bar" style="margin:0; padding:8px 12px; font-size:12px; flex:1; background:#0f0f15; border:1px solid #3d2f44; color:#fff; border-radius:6px; outline:none;" placeholder="Название нового билда...">
+                                                <button class="sim-save-btn" data-save="${c.id}" style="background: #caa55c; color: #1d1620; border: none; border-radius: 6px; padding: 8px 16px; font-size: 12px; font-weight: bold; cursor: pointer; white-space: nowrap;">💾 Сохранить</button>
+                                            </div>
+                                            <!-- Блок «Загрузить» -->
+                                            <div style="display: flex; gap: 8px; align-items: center;">
+                                                <select id="load-select-${c.id}" class="search-bar" style="margin:0; padding:8px 12px; font-size:12px; width:180px; background:#0f0f15; border:1px solid #3d2f44; color:#fff; border-radius:6px; cursor:pointer; outline:none;">
+                                                    <option value="">— Мои билды —</option>
+                                                </select>
+                                                <button class="sim-del-btn" data-del="${c.id}" style="background: transparent; color: #ff5a7a; border: 1px solid #ff5a7a; border-radius: 6px; padding: 8px 12px; font-size: 12px; cursor: pointer;" title="Удалить выбранный билд">🗑️</button>
+                                            </div>
+                                        </div>
+                                        <!-- Нижняя строка: обмен -->
                                         <div style="display: flex; gap: 8px; align-items: center; border-top: 1px solid #3d2f44; padding-top: 12px;">
-                                            <input type="text" id="save-name-${c.id}" class="search-bar" style="margin:0; padding:8px 12px; font-size:12px; flex:1; background:#0f0f15; border:1px solid #3d2f44; color:#fff; border-radius:6px; outline:none;" placeholder="Название нового билда...">
-                                            <button class="sim-save-btn" data-save="${c.id}" style="background: #28a745; color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 12px; font-weight: bold; cursor: pointer;">💾 Сохранить</button>
-                                            <select id="load-select-${c.id}" class="search-bar" style="margin:0; padding:8px 12px; font-size:12px; width:180px; background:#0f0f15; border:1px solid #3d2f44; color:#fff; border-radius:6px; cursor:pointer; outline:none;">
-                                                <option value="">— Мои билды —</option>
-                                            </select>
-                                            <button class="sim-del-btn" data-del="${c.id}" style="background: #3a2028; color: #ff5a7a; border: 1px solid #ff5a7a; border-radius: 6px; padding: 8px 12px; font-size: 12px; cursor: pointer;" title="Удалить выбранный билд">🗑️</button>
+                                            <span style="font-size: 11px; color: #888; text-transform: uppercase; margin-right: 10px;">Обмен:</span>
+                                            <button class="sim-share-btn" data-share="${c.id}" style="background: transparent; color: #caa55c; border: 1px solid #caa55c; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s;" title="Поделиться билдом">📤 Поделиться</button>
+                                            <button class="sim-import-btn" data-import="${c.id}" style="background: transparent; color: #caa55c; border: 1px solid #caa55c; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s;" title="Импортировать билд">📥 Импорт</button>
                                         </div>
                                     </div>
                                     <div class="sim-branches" id="tree-${c.id}"></div>
@@ -2319,6 +2673,14 @@
                 container.querySelectorAll('[data-reset]').forEach(btn => {
                     btn.addEventListener('click', () => this.resetBuild(btn.dataset.reset));
                 });
+
+                // Билд из ссылки: программно открываем вкладку его класса, чтобы
+                // симуляция сразу отрисовалась (клик по табу зовёт renderTree).
+                if (this._autoLoadClass) {
+                    const autoTab = container.querySelector(`.modal-tab[data-tab="${this._autoLoadClass}"]`);
+                    this._autoLoadClass = null;
+                    if (autoTab) autoTab.click();
+                }
             } catch (err) {
                 dbg('[BUILD SIM] Ошибка монтирования:', err);
                 container.innerHTML = `<div style="color:#ff5a7a; text-align:center; padding:20px;">Ошибка: ${err.message}</div>`;
@@ -2412,6 +2774,135 @@
             }
             this.deleteBuild(clsId, idx);
             return true;
+        },
+
+        // ------------------------------------------------------------
+        // Обмен билдами без сервера: код в Base64 + ссылка #build=<код>.
+        // Формат: { cls: '<класс>', sk: { <nodeId>: <ранг> } } → JSON →
+        // encodeURIComponent (гарантирует ASCII, иначе btoa бросит исключение)
+        // → Base64 → URL-safe: '+' → '-', '/' → '_', паддинг '=' срезан.
+        // ------------------------------------------------------------
+        encodeBuild(clsId) {
+            const skills = this.simulatedSkills[clsId] || {};
+            try {
+                const json = JSON.stringify({ cls: clsId, sk: skills });
+                return btoa(encodeURIComponent(json)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            } catch (e) {
+                dbg('[BUILD SIM] Ошибка кодирования билда:', e);
+                return '';
+            }
+        },
+
+        // Код приходит извне (ссылка от другого игрока), поэтому декодируем
+        // с проверками: известный класс, целые ранги в пределах node.max,
+        // сумма очков не больше MAX_POINTS.
+        // Возвращает id класса, к которому относится билд, либо null.
+        decodeBuild(code) {
+            if (!code || typeof code !== 'string') return null;
+            try {
+                let b64 = code.trim().replace(/-/g, '+').replace(/_/g, '/').replace(/\s+/g, '');
+                // В ссылке паддинг срезан, а atob в части окружений требует
+                // длину, кратную 4 — восстанавливаем.
+                const pad = b64.length % 4;
+                if (pad) b64 += '='.repeat(4 - pad);
+
+                const data = JSON.parse(decodeURIComponent(atob(b64)));
+                if (!data || typeof data !== 'object') return null;
+                const cls = data.cls;
+                const sk = data.sk;
+                if (typeof cls !== 'string' || !sk || typeof sk !== 'object' || Array.isArray(sk)) return null;
+
+                // Класс обязан быть в /api/skills — чужой код не подсунет произвольный clsId.
+                const classes = (this.skillsCache && Array.isArray(this.skillsCache.classes)) ? this.skillsCache.classes : [];
+                const clsData = classes.find(c => c.id === cls);
+                if (!clsData) return null;
+
+                // Допустимые узлы и максимумы рангов — из дерева этого класса.
+                const nodeMax = new Map();
+                (clsData.branches || []).forEach(b => (b.nodes || []).forEach(n => nodeMax.set(n.id, n.max || 1)));
+
+                const clean = {};
+                let total = 0;
+                Object.entries(sk).forEach(([nodeId, rank]) => {
+                    const max = nodeMax.get(nodeId);
+                    if (!max) return;                  // узел не из этого дерева — пропускаем
+                    const r = Math.floor(Number(rank));
+                    if (!Number.isFinite(r) || r <= 0) return;
+                    clean[nodeId] = Math.min(r, max);
+                    total += clean[nodeId];
+                });
+
+                // «Перекачанный» билд (больше очков, чем даёт игра) не принимаем.
+                if (total > MAX_POINTS) return null;
+
+                this.simulatedSkills[cls] = clean;
+                // Импорт — не сохранённый билд: «🗑️» не должен целиться
+                // в запись из localStorage с тем же именем.
+                this._setCurrentBuild(cls, '');
+                return cls;
+            } catch (e) {
+                return null;
+            }
+        },
+
+        // Достаём код из ссылки (#build=…), «голого» кода или текста с ссылкой.
+        _extractBuildCode(input) {
+            const raw = String(input || '').trim();
+            const marker = '#build=';
+            const idx = raw.indexOf(marker);
+            // После кода в хэше могут идти другие параметры: #build=<код>&a=b
+            return idx >= 0 ? raw.slice(idx + marker.length).split(/[&#\s]/)[0] : raw;
+        },
+
+        // «📤 Поделиться»: собираем ссылку с кодом билда и копируем в буфер.
+        shareBuild(clsId) {
+            const skills = this.simulatedSkills[clsId] || {};
+            if (!Object.keys(skills).length) {
+                UI.showToast('Сначала распределите очки навыков', true);
+                return;
+            }
+            const code = this.encodeBuild(clsId);
+            if (!code) { UI.showToast('Не удалось создать код билда', true); return; }
+
+            // Код кладём в хэш: такой адрес не уходит на сервер игры и не
+            // ломает SPA-роутинг (в отличие от query-параметра).
+            const url = `${location.origin}${location.pathname}#build=${code}`;
+            // clipboard.writeText доступен только в secure context и может быть
+            // запрещён настройками браузера — тогда показываем окно для копирования.
+            const fallback = () => window.prompt('Скопируйте ссылку на билд:', url);
+            try {
+                if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                    navigator.clipboard.writeText(url)
+                        .then(() => UI.showToast('📋 Ссылка на билд скопирована в буфер'))
+                        .catch(fallback);
+                } else {
+                    fallback();
+                }
+            } catch (e) {
+                fallback();
+            }
+        },
+
+        // «📥 Импорт»: принимаем и ссылку целиком, и «голый» код.
+        importBuild(clsId) {
+            const input = window.prompt('Вставьте ссылку или код билда:');
+            if (!input) return;
+
+            const loadedCls = this.decodeBuild(this._extractBuildCode(input));
+            if (!loadedCls) { UI.showToast('❌ Неверный формат кода билда', true); return; }
+
+            UI.showToast('📥 Билд успешно импортирован!');
+            if (loadedCls !== clsId) {
+                // Билд другого класса — открываем его вкладку (клик сам зовёт
+                // renderTree). Ищем внутри модалки планировщика: .modal-tab
+                // используется и другими окнами аддона (аукцион, симулятор).
+                const root = document.getElementById('buildsim-modal-body') || document;
+                const tab = root.querySelector(`.modal-tab[data-tab="${loadedCls}"]`);
+                if (tab) tab.click();
+                else this.renderTree(loadedCls);
+            } else {
+                this.renderTree(clsId);
+            }
         },
 
         yFor(req) {
@@ -2645,6 +3136,15 @@
                     }
                 };
             }
+
+            // --- Обмен билдами: «📤 Поделиться» / «📥 Импорт» ---
+            // Кнопки статичны в .sim-top-bar (вне #tree-…), поэтому .onclick
+            // переназначаем идемпотентно — как у кнопок сохранения выше.
+            const shareBtn = document.querySelector(`.sim-share-btn[data-share="${clsId}"]`);
+            if (shareBtn) shareBtn.onclick = () => this.shareBuild(clsId);
+
+            const importBtn = document.querySelector(`.sim-import-btn[data-import="${clsId}"]`);
+            if (importBtn) importBtn.onclick = () => this.importBuild(clsId);
         },
 
         showNodeCard(clsId, nodeId, event) {
@@ -6325,11 +6825,6 @@ const Players = {
                                     info.ts = now - 200000; // больше TTL_CITY (180000)
                                 }
                             }
-                        }
-
-                        // Триггерим перерисовку списка игроков, если он открыт
-                        if (typeof Players !== 'undefined' && Players.onOnlinePlayersUpdated) {
-                            try { Players.onOnlinePlayersUpdated(); } catch(e) {}
                         }
 
                         startPollingFallback();

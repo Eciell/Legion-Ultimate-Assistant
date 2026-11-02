@@ -264,11 +264,6 @@
                             }
                         }
 
-                        // Триггерим перерисовку списка игроков, если он открыт
-                        if (typeof Players !== 'undefined' && Players.onOnlinePlayersUpdated) {
-                            try { Players.onOnlinePlayersUpdated(); } catch(e) {}
-                        }
-
                         startPollingFallback();
                     };
                 } else {
