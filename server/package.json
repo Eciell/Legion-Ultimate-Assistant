@@ -1,0 +1,8 @@
+{
+  "name": "legion-party-server",
+  "type": "module",
+  "scripts": {
+    "start": "bun run index.js",
+    "dev": "bun --watch index.js"
+  }
+}

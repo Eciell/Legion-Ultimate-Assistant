@@ -35,6 +35,8 @@
         btnChatToggle: `${RAND_ID}-btn-chat-toggle`,
         btnPopout: `${RAND_ID}-btn-popout`,
         btnPocketCity: `${RAND_ID}-btn-pocket-city`,
+        // v11.6.0: «Пати» (modules/party.js) — кнопка в блоке «Социальное».
+        btnParty: `${RAND_ID}-btn-party`,
         btnProfile: `${RAND_ID}-btn-profile`,
         chkChatDisable: `${RAND_ID}-chk-chat-disable`,
         externalChatStatus: `${RAND_ID}-external-chat-status`,

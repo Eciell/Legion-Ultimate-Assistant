@@ -13,7 +13,7 @@
     //   core/ui-templates.js -> UITemplates (HTML: FAB-меню, модалки, HUD)
     //   core/ui.js     -> UI
     //   modules/*      -> BuildSim, HeroPlanner, Auction, Players, PriestAssistant,
-    //                     PocketCity, Miner, Chat
+    //                     PocketCity, Party, Miner, Chat
     // ============================================================
 
     // 5.3. Защита от повторного запуска (single-instance guard)
@@ -110,6 +110,8 @@
         PriestAssistant.init(); // HUD Жреца в Походе (window.__lgQuestContext)
         Auction.init();
         Players.init();
+        // 🎉 Пати: кнопка в FAB-меню, клиент сервера из server/ (шаг 1).
+        Party.init();
         Chat.init();
 
         Chat.interceptEventSource();
@@ -134,6 +136,7 @@
             Players,
             PriestAssistant,
             PocketCity,
+            Party,
             Chat,
             DOM_IDS,
             RAND_ID,

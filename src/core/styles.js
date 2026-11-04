@@ -12,6 +12,9 @@
         .${DOM_IDS.customModal} ::-webkit-scrollbar-thumb:hover, .custom-modal ::-webkit-scrollbar-thumb:hover { background: #caa55c; }
         .custom-close { background: none; border: none; color: #ff8fa3; font-size: 24px; cursor: pointer; transition: color 0.2s; user-select: none; }
         .custom-close:hover { color: #fff; }
+        /* Пати: компактный крестик в правом верхнем углу заголовка (v11.6.0a). */
+        .party-close { border-radius: 5px; transition: color 0.2s, background 0.2s; }
+        .party-close:hover { color: #fff; background: rgba(255, 143, 163, 0.14); }
         .modal-tabs { display: flex; gap: 10px; margin-bottom: 15px; border-bottom: 1px solid #444; padding-bottom: 10px; flex-wrap: wrap; }
         .modal-tab { background: #2a2030; border: 1px solid #555; color: #ccc; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: all 0.2s; }
         .modal-tab:hover { background: #3a2c40; color: #fff; }
