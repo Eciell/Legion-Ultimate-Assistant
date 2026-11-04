@@ -202,9 +202,11 @@
         // Вынесены из FAB-меню в модалку, чтобы меню не разрасталось.
         openSettings() {
             const chatDisabled = (typeof Chat !== 'undefined') ? !!Chat.disabled : false;
+            // 11.6.0g-4: состояние тумблера подсветки ников (дефолт — включено).
+            const addonHighlight = (typeof Chat !== 'undefined') ? Chat.addonHighlight !== false : true;
 
             // Разметка модалки — в core/ui-templates.js (UITemplates.settingsModal).
-            const modal = this.showModal(UITemplates.settingsModal(chatDisabled), { compact: true });
+            const modal = this.showModal(UITemplates.settingsModal(chatDisabled, addonHighlight), { compact: true });
 
             if (!modal) return;
 
@@ -218,6 +220,13 @@
             modal.querySelector('#modal-chk-chat')?.addEventListener('change', (e) => {
                 if (typeof Chat !== 'undefined' && typeof Chat.setDisabled === 'function') {
                     Chat.setDisabled(e.target.checked);
+                }
+            });
+
+            // 11.6.0g-4: подсветка ников Legion — сохраняем и перерисовываем чат.
+            modal.querySelector('#modal-chk-addon-hl')?.addEventListener('change', (e) => {
+                if (typeof Chat !== 'undefined' && typeof Chat.setAddonHighlight === 'function') {
+                    Chat.setAddonHighlight(e.target.checked);
                 }
             });
         },

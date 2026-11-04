@@ -82,9 +82,10 @@
          * Модалка служебных настроек аддона (открывается из FAB-меню).
          * Обработчики кнопок навешивает UI.openSettings().
          *
-         * @param {boolean} chatDisabled перехват чата отключён
+         * @param {boolean} chatDisabled    перехват чата отключён
+         * @param {boolean} addonHighlight  подсветка ников Legion включена (11.6.0g-4)
          */
-        settingsModal(chatDisabled) {
+        settingsModal(chatDisabled, addonHighlight = true) {
             return `
                 <h2>⚙️ Настройки аддона <button class="custom-close" id="custom-close-btn">✖</button></h2>
                 <div style="display:flex; flex-direction:column; gap:15px; padding:10px;">
@@ -92,6 +93,11 @@
                     <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer;">
                         <span>🚫 Отключить перехват чата</span>
                         <input type="checkbox" id="modal-chk-chat" style="width:16px; height:16px; accent-color:#ff5a7a;" ${chatDisabled ? 'checked' : ''}>
+                    </label>
+                    <!-- v11.6.0g-4: подсветка ников пользователей аддона в чате -->
+                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
+                        <span>⚡ Подсветка ников Legion</span>
+                        <input type="checkbox" id="modal-chk-addon-hl" style="width:16px; height:16px; accent-color:#00f0ff;" ${addonHighlight ? 'checked' : ''}>
                     </label>
                 </div>
             `;

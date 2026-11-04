@@ -15,6 +15,11 @@
         badge: null,
         unreadCount: 0,
         disabled: localStorage.getItem('LEGION_CHAT_DISABLED') === 'true',
+        // v11.6.0g-4: подсветка ников пользователей аддона (⚡ + бирюзовый
+        // цвет). По умолчанию включена: ключа нет -> true; выключение пишет
+        // строку 'false' (паттерн LEGION_AUC_SOUND). Настройка живёт в
+        // localStorage, т.к. это UI-предпочтение, а не серверные данные.
+        addonHighlight: localStorage.getItem('LEGION_ADDON_HIGHLIGHT') !== 'false',
         _inited: false,
         messages: [], // Массив всех сообщений
         activeMainTab: 'city',
@@ -38,6 +43,10 @@
          * как в игре — поэтому сравниваем нормализованно.
          */
         isAddonUser(nick) {
+            // Единый гейт подсветки (11.6.0g-4): выключенный тумблер отключает
+            // и нативный чат (ChatNet.highlightNativeChat), и PiP-рендер
+            // (ChatPip.renderMessages) — оба спрашивают именно этот метод.
+            if (this.addonHighlight === false) return false;
             if (!nick || this.addonUsers.size === 0) return false;
             return this.addonUsers.has(String(nick).trim().toLowerCase());
         },
@@ -92,6 +101,25 @@
                 UI.showToast('💬 Перехват чата включен');
                 this.startBackgroundLiveListener();
             }
+        },
+
+        /**
+         * Тумблер «⚡ Подсветка ников Legion» (ТЗ 11.6.0g-4).
+         *
+         * Сохраняем выбор и сразу перерисовываем уже отрисованное: без этого
+         * выключенная подсветка жила бы до следующего тика поллинга (30 с),
+         * а классы/бейджи ⚡ оставались бы на экране.
+         *
+         * highlightNativeChat() — снимает/навешивает классы в нативной ленте
+         * (idempotent); renderMessages() нужен только для открытого PiP-чата.
+         */
+        setAddonHighlight(val) {
+            this.addonHighlight = !!val;
+            try {
+                localStorage.setItem('LEGION_ADDON_HIGHLIGHT', String(this.addonHighlight));
+            } catch (e) {}
+            this.highlightNativeChat(document);
+            if (this.isOpen()) this.renderMessages();
         },
 
         // v11.5.3: встроенный виджет чата удалён — его заменил сторонний плагин
