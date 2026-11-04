@@ -8,22 +8,24 @@
     //
     // Хранилище — GM_setValue/GM_getValue (@grant в шапке):
     //   lgPartyBaseUrl — адрес сервера (по умолчанию https://legion.ctrlfree.host, см. v11.6.0e/f);
-    //   lgParty        — {groupId, inviteToken, sessionId, login};
+    //   lgParty        — {groupId, inviteToken, sessionId, login}
+    //                    (inviteToken — техническое имя поля сервера,
+    //                     в интерфейсе это «Код приглашения»);
     //   lgPartyOwner   — создал ли этот клиент пати.
     // Если GM-хранилище недоступно (старая версия скрипта без @grant),
     // молча падаем на localStorage, иначе модуль падал бы на первом клике.
     //
     // Шаг 1 = только auth/token-gate: create/join/leave/rotate/kick/members.
-    // v11.6.0a: вход — по inviteToken (POST /party/join), memberId отдельно от
-    // sessionId, серверный leave и lowercase-логины. Ник читается из игры
-    // ТОЛЬКО в момент клика «Создать»/«Присоединиться».
+    // v11.6.0a: вход — по коду приглашения (inviteToken, POST /party/join),
+    // memberId отдельно от sessionId, серверный leave и lowercase-логины.
+    // Ник читается из игры ТОЛЬКО в момент клика «Создать»/«Присоединиться».
     // v11.6.0a.2: ник и HP берутся из GET /api/me (user.login / hero.hpNow),
     // LG_CH.login — только фолбэк: в песочнице он бывает пустым.
     // v11.6.0a.3: пустое состояние рисуется синхронно, поэтому при первом
     // открытии «Вы: …» показывал фолбэк LG_CH.login (логин Twitch-канала).
     // Теперь open() дозапрашивает /api/me в фоне и обновляет ТОЛЬКО текстовый
     // узел ника (.party-self-nick): полная перерисовка сбила бы фокус в поле
-    // inviteToken.
+    // кода приглашения.
     // v11.6.0b: HP-панель. Раз в 3 с (только когда мы в пати) клиент шлёт
     // POST /party/:id/state и перерисовывает список из GET /party/:id/state.
     // v11.6.0c: журнал боя. В том же тике сравниваем снимки /api/me и шлём
@@ -32,21 +34,30 @@
     // v11.6.0d: взаимный хил. В строке HP-панели у раненого союзника появляется
     // кнопка «❤» -> _healMember() -> POST /c/<канал>/api/qact
     // {k:'b', a:'sk', w:'лечение', t:<ник>}. Успех пишется в журнал типом
-    // heal_cast. Кнопка только если цель не мы, цель ранена и свой герой в
-    // походе (вне похода игра отклоняет запрос).
+    // heal_cast. Кнопка только если цель не мы, цель ранена, свой герой в
+    // походе (вне похода игра отклоняет запрос) и наш класс — жрец
+    // (v11.6.0g-2: _prevMe.role === 'priest').
     // Под HP-панелью — блок «Журнал» с ленивой догрузкой GET .../log?since=.
+    // v11.6.0g-2: UI-патч. В интерфейсе «inviteToken» называется «Код
+    // приглашения»; модалка переведена на классы core/styles.js (тёмный фон,
+    // золотистые акценты, hover как у «Создать пати»); HP-панель и журнал
+    // живут в общем контейнере .party-hud-container и перетаскиваются за
+    // заголовки, позиция — GM_setValue('lgPartyHudPos').
     // ============================================================
     const Party = {
         BASE_URL_KEY: 'lgPartyBaseUrl',
         STATE_KEY: 'lgParty',
         OWNER_KEY: 'lgPartyOwner',
+        // Позиция HUD {left, top} после перетаскивания (v11.6.0g-2).
+        DRAG_KEY: 'lgPartyHudPos',
         DEFAULT_BASE_URL: 'https://legion.ctrlfree.host',
         REQUEST_TIMEOUT: 12000,
         // Период синхронизации HP (ТЗ 11.6.0b: раз в 3 секунды).
         HP_SYNC_MS: 3000,
         // Сервер хранит ник только в нижнем регистре (server/index.js).
         LOGIN_RE: /^[a-z0-9_]{1,32}$/,
-        // inviteToken = 16 случайных байт = 32 hex-символа (server/db.js).
+        // Код приглашения (inviteToken) = 16 случайных байт = 32 hex-символа
+        // (server/db.js).
         INVITE_RE: /^[a-f0-9]{32}$/i,
 
         // Журнал боя (ТЗ 11.6.0c).
@@ -72,6 +83,10 @@
         // Промис фонового /api/me для .party-self-nick: повторные open() не
         // должны плодить одинаковые запросы, пока первый ещё в полёте.
         _selfNickFetch: null,
+        // Контейнер HUD (v11.6.0g-2): HP-панель и журнал — его дети, поэтому
+        // перетаскивание за заголовок двигает оба блока сразу.
+        HUD_ID: `${RAND_ID}-party-hud`,
+        _hudResizeBound: false, // слушатель resize навешен (clamp при смене размера)
         // id панели с префиксом RAND_ID: чужие page-стили не должны её зацепить.
         PANEL_ID: `${RAND_ID}-party-hp-panel`,
 
@@ -88,16 +103,16 @@
         _logReady: false,    // первичная загрузка (limit=100) выполнена
         _logBodyEl: null,    // .party-log-body — кэш, чтобы не искать каждый тик
 
-        // Инлайн-стили: у модалок аддона нет готовых классов для форм,
-        // а заводить их в core/styles.js ради одного окна — лишнее.
-        INPUT_STYLE: 'width:100%; box-sizing:border-box; background:#222; border:1px solid #444; color:#fff; padding:8px 10px; border-radius:6px; font-size:13px; outline:none;',
-        BTN_STYLE: 'padding:8px 12px; background:#2a2030; border:1px solid #caa55c; color:#ffcf6a; border-radius:6px; cursor:pointer; font-size:13px; white-space:nowrap;',
-        DANGER_BTN_STYLE: 'padding:4px 8px; background:#3a1f28; border:1px solid #ff5a7a; color:#ff5a7a; border-radius:5px; cursor:pointer; font-size:11px; white-space:nowrap;',
-        // Кнопка «❤» в строке HP-панели (v11.6.0d). pointer-events:auto обязателен:
-        // сама панель — pointer-events:none, чтобы не перехватывать клики по игре,
-        // но потомок с auto снова становится кликабельным.
-        HEAL_BTN_STYLE: 'flex:none; pointer-events:auto; padding:0 5px; background:#22352a; border:1px solid #5fd987; color:#5fd987; border-radius:4px; font-size:10px; line-height:15px; cursor:pointer;',
-        MUTED_STYLE: 'font-size:11px; color:#888; text-transform:uppercase; margin-bottom:6px;',
+        // v11.6.0g-2: инлайн-стили форм заменены классами из core/styles.js —
+        // только так работают hover/focus-эффекты (inline :hover невозможен).
+        // Кнопка «❤»: pointer-events:auto обязателен, сама панель —
+        // pointer-events:none, чтобы не перехватывать клики по игре.
+        INPUT_CLASS: 'party-input',
+        TOKEN_INPUT_CLASS: 'party-input party-token',
+        BTN_CLASS: 'party-btn',
+        DANGER_BTN_CLASS: 'party-btn party-btn-danger',
+        HEAL_BTN_CLASS: 'party-heal-btn',
+        MUTED_CLASS: 'party-muted',
 
         /* ---------------------------------------------------------- */
         /* Хранилище                                                   */
@@ -216,14 +231,18 @@
          * сравнивать такой снимок с предыдущим нельзя, иначе пропавший
          * /api/me выглядел бы как «вышел из похода» + «воскрес».
          *
+         * v11.6.0g-2: добавлен role (hero.role) — кнопка «❤» рисуется только
+         * жрецу, а роль видна только из /api/me.
+         *
          * @returns {Promise<{login: string, hp: number|null, maxHp: number|null,
-         *                    quest: object|null, ghost: boolean, live: boolean}>}
+         *                    quest: object|null, ghost: boolean, role: string,
+         *                    live: boolean}>}
          */
         async _fetchMe() {
             const channel = this._channelLogin();
             if (!channel) {
                 console.warn('[PARTY] LG_CH.login недоступен — /api/me не запросить');
-                return { login: '', hp: null, maxHp: null, quest: null, ghost: false, live: false };
+                return { login: '', hp: null, maxHp: null, quest: null, ghost: false, role: 'unknown', live: false };
             }
 
             try {
@@ -241,6 +260,9 @@
                 // (docs/API.md, §GET /api/me; в игре hpNow ?? stats.hp).
                 const hp = Number(data.hero?.hpNow);
                 const maxHp = Number(data.hero?.stats?.hp);
+                // Класс героя (docs/API.md, §GET /api/me: "role": "priest").
+                // 'unknown' — когда поля нет: хил тогда недоступен.
+                const role = data.hero?.role || 'unknown';
 
                 // ql — объект состояния похода (docs/API.md, §ql). При on:false
                 // похода нет, поэтому нормализуем в null: детектору журнала
@@ -254,6 +276,7 @@
                     maxHp: Number.isFinite(maxHp) ? maxHp : null,
                     quest,
                     ghost: data.hero?.ghost === true,
+                    role,
                     live: true
                 };
                 this._cachedLogin = me.login;
@@ -261,7 +284,7 @@
             } catch (e) {
                 console.warn('[PARTY] /api/me недоступен, берём LG_CH.login:', e);
                 this._cachedLogin = channel;
-                return { login: channel, hp: null, maxHp: null, quest: null, ghost: false, live: false };
+                return { login: channel, hp: null, maxHp: null, quest: null, ghost: false, role: 'unknown', live: false };
             }
         },
 
@@ -298,10 +321,10 @@
         _errorText(status, data, fallback) {
             const map = {
                 bad_login: 'Ник: 1–32 символа, только a–z, 0–9 и _',
-                bad_invite: 'Неверный инвайт-токен',
-                bad_invite_token: 'Некорректный инвайт-токен',
+                bad_invite: 'Неверный код приглашения',
+                bad_invite_token: 'Некорректный код приглашения',
                 login_taken: 'Этот ник уже занят в пати',
-                party_not_found: 'Пати с таким токеном не найдена — проверьте inviteToken',
+                party_not_found: 'Пати с таким кодом приглашения не найдена — проверьте код',
                 unauthorized: 'Сессия недействительна — войдите в пати заново',
                 not_owner: 'Действие доступно только владельцу пати',
                 not_member: 'Эта сессия не принадлежит пати',
@@ -419,16 +442,16 @@
         },
 
         /**
-         * POST /party/join — войти по инвайт-токену.
+         * POST /party/join — войти по коду приглашения.
          * groupId на клиенте не нужен: сервер находит пати по токену и
          * возвращает groupId в ответе.
-         * @param {string} inviteToken 32 hex-символа (пробелы обрезаются)
+         * @param {string} inviteToken код приглашения: 32 hex-символа (пробелы обрезаются)
          * @returns {Promise<{groupId: string, inviteToken: string, sessionId: string, login: string}>}
          */
         async partyJoin(inviteToken) {
             const token = String(inviteToken ?? '').trim();
-            if (!token) throw new Error('Укажите inviteToken');
-            if (!this.INVITE_RE.test(token)) throw new Error('Токен: 32 hex-символа');
+            if (!token) throw new Error('Укажите код приглашения');
+            if (!this.INVITE_RE.test(token)) throw new Error('Код приглашения: 32 hex-символа');
             const nick = await this._currentLogin();
 
             const res = await this._request(
@@ -498,16 +521,16 @@
         },
 
         /**
-         * POST /party/:id/rotate — перевыпустить инвайт-токен (только владелец).
-         * @returns {Promise<string>} новый токен
+         * POST /party/:id/rotate — перевыпустить код приглашения (только владелец).
+         * @returns {Promise<string>} новый код приглашения
          */
         async partyRotateToken() {
             const state = this._readState();
             if (!state) throw new Error('Вы не в пати');
-            if (!this._isOwner()) throw new Error('Токен может перевыпустить только владелец пати');
+            if (!this._isOwner()) throw new Error('Код приглашения может перевыпустить только владелец пати');
 
             const res = await this._request('POST', this._partyPath('rotate'), { body: {} });
-            if (!res?.inviteToken) throw new Error('Сервер не вернул новый inviteToken');
+            if (!res?.inviteToken) throw new Error('Сервер не вернул новый код приглашения');
 
             this._writeState({ ...state, inviteToken: res.inviteToken }, true);
             return res.inviteToken;
@@ -543,31 +566,183 @@
         /* HP-панель и синхронизация состояния (шаг 2, v11.6.0b)      */
         /* ---------------------------------------------------------- */
 
+        /* ---------------------------------------------------------- */
+        /* HUD: контейнер, перетаскивание, clamp (v11.6.0g-2)          */
+        /* ---------------------------------------------------------- */
+
         /**
-         * Элемент панели создаётся лениво и живёт до перезагрузки страницы.
-         * Вариант «а» из ТЗ: fixed/right/top, тёмный фон и скругления как у FAB.
-         * pointer-events:none — панель не должна перехватывать клики по игре.
+         * Контейнер HUD: HP-панель и журнал — его дети, поэтому drag за любой
+         * заголовок двигает оба блока сразу (ТЗ 11.6.0g-2 п.1).
+         * Позиция берётся из GM_setValue('lgPartyHudPos'); пока её нет —
+         * работает CSS-якорь top/right из core/styles.js.
+         * pointer-events:none у контейнера: клики по игре не перехватываются,
+         * интерактивные узлы возвращают auto в CSS (.party-drag-handle и др.).
+         */
+        _ensureHud() {
+            let hud = document.getElementById(this.HUD_ID);
+            if (hud && hud.isConnected) return hud;
+
+            hud = document.createElement('div');
+            hud.id = this.HUD_ID;
+            hud.className = 'party-hud-container';
+            document.body.appendChild(hud);
+
+            // Сохранённую позицию применяем сразу; clamp внутри проверит
+            // размеры — пока панели display:none, rect нулевой и он no-op.
+            this._applyHudPosition(hud);
+
+            // Смена размера окна: панель могла уехать за границы (п.6).
+            if (!this._hudResizeBound) {
+                this._hudResizeBound = true;
+                window.addEventListener('resize', () => this._clampHud());
+            }
+            return hud;
+        },
+
+        /**
+         * Применяет сохранённую позицию HUD {left, top}. Вызывается при
+         * создании контейнера и на каждом рендере панели (ТЗ 11.6.0g-2 п.4).
+         * Позиции нет — возвращаем CSS-якорь (right:20px, top:20px).
+         */
+        _applyHudPosition(hud = null) {
+            const el = hud || document.getElementById(this.HUD_ID);
+            if (!el) return;
+            // Пока тащат, сохранённую позицию не навязываем: рендер раз в 3 с
+            // иначе дёргал бы панель из-под курсора.
+            if (el.classList.contains('party-dragging')) return;
+
+            const pos = this._gmGet(this.DRAG_KEY, null);
+            const left = Number(pos?.left);
+            const top = Number(pos?.top);
+            if (!Number.isFinite(left) || !Number.isFinite(top)) {
+                el.style.left = '';
+                el.style.top = '';
+                el.style.right = '20px';
+                el.style.bottom = '';
+                return;
+            }
+
+            el.style.left = `${Math.round(left)}px`;
+            el.style.top = `${Math.round(top)}px`;
+            el.style.right = 'auto';
+            el.style.bottom = 'auto';
+            this._clampHud(el);
+        },
+
+        /**
+         * Возвращает HUD в пределы окна (ТЗ 11.6.0g-2 п.6): left/top
+         * ограничиваются так, чтобы правый/нижний край не выходил за экран.
+         * Скрытые панели имеют нулевые размеры — их не трогаем.
+         */
+        _clampHud(hud = null) {
+            const el = hud || document.getElementById(this.HUD_ID);
+            if (!el || !el.isConnected) return;
+
+            const left = parseFloat(el.style.left);
+            const top = parseFloat(el.style.top);
+            // Панель ещё на CSS-якоре (right:20px) — двигать нечего.
+            if (!Number.isFinite(left) || !Number.isFinite(top)) return;
+
+            const rect = el.getBoundingClientRect();
+            if (!rect.width && !rect.height) return; // оба блока скрыты
+
+            const maxLeft = Math.max(0, (window.innerWidth || 0) - rect.width);
+            const maxTop = Math.max(0, (window.innerHeight || 0) - rect.height);
+            el.style.left = `${Math.round(Math.min(Math.max(0, left), maxLeft))}px`;
+            el.style.top = `${Math.round(Math.min(Math.max(0, top), maxTop))}px`;
+            el.style.right = 'auto';
+            el.style.bottom = 'auto';
+        },
+
+        /**
+         * Перетаскивание за заголовок (ТЗ 11.6.0g-2 п.2–3).
+         * pointerdown/move/up покрывают и мышь, и тач (touch-action:none в CSS).
+         * В GM-хранилище позиция пишется ТОЛЬКО на отпускании: запись на
+         * каждый pointermove — лишние обращения к хранилищу Tampermonkey.
+         * @param {HTMLElement|null} handle заголовок панели или журнала
+         */
+        _bindHudDrag(handle) {
+            if (!handle || handle.dataset.partyDragBound === '1') return;
+            handle.dataset.partyDragBound = '1';
+
+            let drag = null;
+
+            const onMove = (e) => {
+                if (!drag) return;
+                const hud = document.getElementById(this.HUD_ID);
+                if (!hud) return;
+                const rect = hud.getBoundingClientRect();
+                const maxLeft = Math.max(0, (window.innerWidth || 0) - rect.width);
+                const maxTop = Math.max(0, (window.innerHeight || 0) - rect.height);
+                const left = Math.min(Math.max(0, drag.left + (e.clientX - drag.startX)), maxLeft);
+                const top = Math.min(Math.max(0, drag.top + (e.clientY - drag.startY)), maxTop);
+                hud.style.left = `${Math.round(left)}px`;
+                hud.style.top = `${Math.round(top)}px`;
+                hud.style.right = 'auto';
+                hud.style.bottom = 'auto';
+                if (e.cancelable) e.preventDefault();
+            };
+
+            const onUp = () => {
+                if (!drag) return;
+                drag = null;
+                window.removeEventListener('pointermove', onMove);
+                window.removeEventListener('pointerup', onUp);
+                window.removeEventListener('pointercancel', onUp);
+
+                const hud = document.getElementById(this.HUD_ID);
+                if (!hud) return;
+                hud.classList.remove('party-dragging');
+
+                const left = parseFloat(hud.style.left);
+                const top = parseFloat(hud.style.top);
+                if (Number.isFinite(left) && Number.isFinite(top)) {
+                    this._gmSet(this.DRAG_KEY, { left: Math.round(left), top: Math.round(top) });
+                }
+            };
+
+            handle.addEventListener('pointerdown', (e) => {
+                // Только ЛКМ/касание; кнопки внутри заголовка (▾ журнала) не тащат.
+                if (e.button) return;
+                if (e.target && typeof e.target.closest === 'function' && e.target.closest('button')) return;
+
+                const hud = document.getElementById(this.HUD_ID);
+                if (!hud) return;
+                const rect = hud.getBoundingClientRect();
+                // Стартовые left/top — реальные координаты контейнера: он мог
+                // стоять на CSS-якоре right:20px, а тащим уже в left/top.
+                drag = { startX: e.clientX, startY: e.clientY, left: rect.left, top: rect.top };
+                hud.classList.add('party-dragging');
+                window.addEventListener('pointermove', onMove);
+                window.addEventListener('pointerup', onUp);
+                window.addEventListener('pointercancel', onUp);
+                e.preventDefault();
+            });
+        },
+
+        /**
+         * HP-панель создаётся лениво внутри HUD-контейнера (v11.6.0g-2) и
+         * живёт до перезагрузки страницы. Тёмный фон и скругления — класс
+         * .party-panel из core/styles.js; заголовок «ПАТИ · HP» получает
+         * .party-drag-handle (pointer-events:auto, cursor:grab).
          */
         _ensurePanel() {
+            const hud = this._ensureHud();
             let el = document.getElementById(this.PANEL_ID);
             if (el && el.isConnected) {
+                // После повторной инъекции скрипта панель могла остаться в body.
+                if (el.parentElement !== hud) hud.appendChild(el);
                 this._bindPanelClick(el);
+                this._bindHudDrag(el.querySelector('.party-panel-title'));
+                this._applyHudPosition(hud);
                 return el;
             }
 
             el = document.createElement('div');
             el.id = this.PANEL_ID;
+            el.className = 'party-panel';
             el.setAttribute('role', 'status');
-            el.style.cssText = [
-                'position:fixed', 'top:20px', 'right:20px', 'z-index:9999',
-                'min-width:150px', 'max-width:260px',
-                'background:rgba(20,16,26,0.92)', 'border:1px solid #3a3040',
-                'border-radius:10px', 'padding:8px 10px',
-                'box-shadow:0 6px 18px rgba(0,0,0,0.45)',
-                'font:12px/1.4 system-ui,"Segoe UI",sans-serif', 'color:#e8e8ea',
-                'display:none', 'pointer-events:none'
-            ].join(';') + ';';
-            document.body.appendChild(el);
+            hud.appendChild(el);
             this._bindPanelClick(el);
             return el;
         },
@@ -602,6 +777,8 @@
          * Перерисовка списка «ник: hp/maxHp» с цветовой полоской:
          * зелёный > 50%, жёлтый 20–50%, красный < 20% HP.
          * v11.6.0d: у раненого союзника в строке есть кнопка «❤» (_healMember).
+         * v11.6.0g-2: кнопка — только жрецу (this._prevMe.role === 'priest');
+         * заголовок панели стал drag-handle для перетаскивания HUD.
          * @param {Array<{login: string, hp: number, maxHp: number}>} states
          */
         _renderPanel(states) {
@@ -615,6 +792,9 @@
             // _prevMe появляется после первого «живого» снимка /api/me в _hpTick();
             // пока его нет, кнопку не рисуем (заведомо провальный запрос).
             const inQuest = !!this._prevMe?.quest;
+            // v11.6.0g-2: класс героя. Роль приходит из /api/me (hero.role) и
+            // кэшируется в _prevMe; у остальных классов кнопки «❤» нет вообще.
+            const isPriest = this._prevMe?.role === 'priest';
 
             const rows = list.map((s) => {
                 const nick = String(s.login || '?');
@@ -628,20 +808,17 @@
                 // Ровно 50% — уже не «зелёный» (ТЗ: зелёный строго > 50%).
                 const color = pct > 50 ? '#5fd987' : (pct < 20 ? '#ff5a7a' : '#ffcf6a');
 
-                // Кнопка «Хил» (ТЗ 11.6.0d) — только если: это не мы, цель
-                // ранена (hp < maxHp) и свой герой в походе.
+                // Кнопка «Хил» (ТЗ 11.6.0d) — только если: мы жрец, цель не мы,
+                // цель ранена (hp < maxHp) и свой герой в походе.
                 const busy = this._healBusy.has(nick.toLowerCase());
-                const showHeal = inQuest
+                const showHeal = isPriest
+                    && inQuest
                     && nick.toLowerCase() !== selfLogin
                     && rawMax > 0
                     && rawHp < rawMax;
-                const healStyle = busy
-                    ? `${this.HEAL_BTN_STYLE} cursor:default; opacity:0.6;`
-                    : this.HEAL_BTN_STYLE;
                 const healBtn = showHeal
-                    ? `<button type="button" data-party-heal="${login}"`
-                        + ` title="Лечить ${login}"${busy ? ' disabled' : ''}`
-                        + ` style="${healStyle}">${busy ? '...' : '❤'}</button>`
+                    ? `<button type="button" class="${this.HEAL_BTN_CLASS}" data-party-heal="${login}"`
+                        + ` title="Лечить ${login}"${busy ? ' disabled' : ''}>${busy ? '...' : '❤'}</button>`
                     : '';
 
                 return `<div style="margin-bottom:6px;">
@@ -658,13 +835,23 @@
                 </div>`;
             }).join('');
 
-            el.innerHTML = '<div style="font-size:10px; letter-spacing:0.06em;'
-                + ' text-transform:uppercase; color:#888; margin-bottom:6px;">Пати · HP</div>'
+            // Заголовок — drag-handle (ТЗ 11.6.0g-2 п.2): .party-drag-handle
+            // даёт pointer-events:auto и cursor:grab, т.к. сама панель
+            // pointer-events:none и клики по игре не перехватывает.
+            el.innerHTML = '<div class="party-panel-title party-drag-handle" title="Перетащить панель">'
+                + '<span>Пати · HP</span></div>'
                 + (rows || '<div style="color:#888;">Нет данных</div>');
             el.style.display = 'block';
 
-            // Журнал живёт отдельным блоком под HP-панелью (она не
-            // flex-column), поэтому позицию пересчитываем после каждого рендера.
+            // innerHTML пересоздал заголовок — слушатель drag вешаем заново
+            // (dataset-флаг не даёт задвоить его на одном и том же узле).
+            this._bindHudDrag(el.querySelector('.party-panel-title'));
+
+            // Позиция из хранилища применяется на каждом рендере (п.4).
+            this._applyHudPosition();
+
+            // Журнал — сосед по HUD-контейнеру; его видимость и догрузку
+            // синхронизируем на каждом тике.
             this._syncLogPanel();
         },
 
@@ -687,61 +874,56 @@
         },
 
         /**
-         * Панель журнала создаётся лениво: отдельный fixed-блок под HP-панелью
-         * с отступом 8px (ТЗ 11.6.0c). Живёт до перезагрузки страницы.
+         * Панель журнала создаётся лениво внутри HUD-контейнера (v11.6.0g-2):
+         * раньше это был отдельный fixed-блок, который _positionLogPanel()
+         * ставил вручную под HP-панель. Теперь оба блока — соседи по
+         * flex-column с gap 8px, поэтому отступы считает CSS.
          */
         _ensureLogPanel() {
+            const hud = this._ensureHud();
             let el = document.getElementById(this.LOG_PANEL_ID);
             if (el && el.isConnected) {
+                if (el.parentElement !== hud) hud.appendChild(el);
                 this._logBodyEl = el.querySelector('.party-log-body');
+                this._bindHudDrag(el.querySelector('.party-log-head'));
                 return el;
             }
 
             el = document.createElement('div');
             el.id = this.LOG_PANEL_ID;
             el.className = 'party-log-panel';
-            el.style.cssText = [
-                'position:fixed', 'right:20px', 'top:120px', 'z-index:9999',
-                'min-width:150px', 'max-width:260px', 'box-sizing:border-box',
-                'background:rgba(20,16,26,0.92)', 'border:1px solid #3a3040',
-                'border-radius:10px', 'padding:8px 10px',
-                'box-shadow:0 6px 18px rgba(0,0,0,0.45)',
-                'font:12px/1.4 system-ui,"Segoe UI",sans-serif', 'color:#e8e8ea',
-                'display:none', 'pointer-events:auto'
-            ].join(';') + ';';
 
             // Заголовок статичный — innerHTML допустим. Строки событий
             // вставляются только через textContent (текст от других игроков).
-            el.innerHTML = '<div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">'
-                + '<span style="font-size:10px; letter-spacing:0.06em; text-transform:uppercase; color:#888;">Журнал</span>'
-                + '<button type="button" class="party-log-toggle" title="Свернуть журнал"'
-                + ' style="background:none; border:none; padding:0 2px; color:#ffcf6a; cursor:pointer; font-size:12px; line-height:1;">▾</button>'
+            // .party-log-head — drag-handle: тянем за «Журнал», кнопка ▾
+            // остаётся кликабельной (pointerdown по button игнорируется).
+            el.innerHTML = '<div class="party-log-head party-drag-handle" title="Перетащить панель">'
+                + '<span>Журнал</span>'
+                + '<button type="button" class="party-log-toggle" title="Свернуть журнал">▾</button>'
                 + '</div>'
-                + '<div class="party-log-body" style="max-height:150px; overflow-y:auto; margin-top:6px;">'
+                + '<div class="party-log-body">'
                 + '<div class="party-log-empty" style="color:#888;">Пока пусто</div>'
                 + '</div>';
-            document.body.appendChild(el);
+            hud.appendChild(el);
 
             el.querySelector('.party-log-toggle')?.addEventListener('click', () => {
                 this._setLogOpen(!this._logOpen);
             });
+            this._bindHudDrag(el.querySelector('.party-log-head'));
 
             this._logBodyEl = el.querySelector('.party-log-body');
             return el;
         },
 
-        /** Ставит журнал вплотную под HP-панелью: отступ 8px (ТЗ 11.6.0c). */
+        /**
+         * Раньше ставил журнал вплотную под HP-панелью вручную (top из
+         * getBoundingClientRect). С v11.6.0g-2 оба блока лежат в общем
+         * контейнере .party-hud-container (flex-column, gap 8px), поэтому
+         * раскладку считает CSS. Метод оставлен ради вызова из
+         * _syncLogPanel(): здесь применяем сохранённую позицию всего HUD.
+         */
         _positionLogPanel() {
-            const hp = document.getElementById(this.PANEL_ID);
-            const el = this._ensureLogPanel();
-            const rect = hp && hp.isConnected && hp.style.display !== 'none'
-                ? hp.getBoundingClientRect()
-                : null;
-
-            // HP-панель ещё не отрисована — держим журнал ниже её штатного
-            // top:20px, чтобы блок не наехал на FAB-кнопки.
-            el.style.top = `${rect && rect.height > 0 ? Math.round(rect.bottom + 8) : 120}px`;
-            if (rect && rect.width > 0) el.style.width = `${Math.round(rect.width)}px`;
+            this._applyHudPosition();
         },
 
         /**
@@ -922,8 +1104,8 @@
          * prev === null (первый тик после входа в пати) событий не даёт:
          * состояние «до» неизвестно, а quest_start на входе в пати был бы ложным.
          *
-         * @param {{hp: number|null, quest: object|null, ghost: boolean}|null} prev
-         * @param {{hp: number|null, quest: object|null, ghost: boolean}} cur
+         * @param {{hp: number|null, quest: object|null, ghost: boolean, role: string}|null} prev
+         * @param {{hp: number|null, quest: object|null, ghost: boolean, role: string}} cur
          * @returns {Array<{type: string, text: string}>}
          */
         _detectLogEvents(prev, cur) {
@@ -1016,7 +1198,7 @@
                     }
                     // _prevMe обновляем даже при ошибке сети: иначе одно и то же
                     // событие отправлялось бы каждый тик.
-                    this._prevMe = { hp: me.hp, quest: me.quest, ghost: me.ghost };
+                    this._prevMe = { hp: me.hp, quest: me.quest, ghost: me.ghost, role: me.role };
                     // 401 внутри POST уже сбросил локальное состояние.
                     if (!this._readState()) return;
                 }
@@ -1152,9 +1334,9 @@
         },
 
         /**
-         * Копирование токена. navigator.clipboard требует secure context и
-         * разрешения — при отказе выделяем текст в поле, чтобы пользователь
-         * скопировал его вручную (Ctrl+C).
+         * Копирование кода приглашения. navigator.clipboard требует secure
+         * context и разрешения — при отказе выделяем текст в поле, чтобы
+         * пользователь скопировал его вручную (Ctrl+C).
          */
         async _copy(text, fallbackEl = null) {
             const value = String(text ?? '');
@@ -1199,7 +1381,7 @@
             const state = this.partyState();
 
             if (!state.party) {
-                const modal = UI.showModal(this._modalHtmlEmpty(), { compact: true });
+                const modal = UI.showModal(this._modalHtmlEmpty(), { compact: true, customClass: 'party-modal' });
                 if (!modal) return;
                 this._bindEmpty(modal);
                 // Ник отрисован синхронно (мог уйти в фолбэк LG_CH.login):
@@ -1208,7 +1390,7 @@
                 return;
             }
 
-            const modal = UI.showModal(this._modalHtmlParty(state.party, state.isOwner), { compact: true });
+            const modal = UI.showModal(this._modalHtmlParty(state.party, state.isOwner), { compact: true, customClass: 'party-modal' });
             if (!modal) return;
             this._bindParty(modal, state.party);
             // Список участников — отдельным запросом: модалка открывается
@@ -1227,7 +1409,7 @@
          * textContent узла .party-self-nick.
          *
          * Полная перерисовка модалки запрещена: пользователь может уже
-         * печатать inviteToken, innerHTML-рендер собьёт фокус и каретку.
+         * печатать код приглашения, innerHTML-рендер собьёт фокус и каретку.
          *
          * Пока запрос в полёте, повторный open() его переиспользует
          * (_selfNickFetch), а если ник уже кэширован — сеть не трогаем.
@@ -1279,7 +1461,7 @@
         /** Секция «УЧАСТНИКИ»: список заполняет _refreshMembers(). */
         _membersSection() {
             return `<div>
-                <div style="${this.MUTED_STYLE}">Участники</div>
+                <div class="${this.MUTED_CLASS}">Участники</div>
                 <div id="party-members" style="display:flex; flex-direction:column; max-height:180px; overflow-y:auto;">
                     <div style="font-size:12px; color:#888;">Загрузка…</div>
                 </div>
@@ -1296,7 +1478,7 @@
             // Кик — только у владельца и только для чужих строк. memberId
             // храним в data-атрибуте: sessionId клиенту больше не приходит.
             const kick = (canKick && !member.self && member.memberId)
-                ? `<button data-party-kick="${Utils.escapeHtml(member.memberId)}" style="${this.DANGER_BTN_STYLE}">Кикнуть</button>`
+                ? `<button data-party-kick="${Utils.escapeHtml(member.memberId)}" class="${this.DANGER_BTN_CLASS} party-btn-sm">Кикнуть</button>`
                 : '';
 
             return `<div style="display:flex; align-items:center; gap:8px; padding:4px 0; font-size:13px;">
@@ -1305,7 +1487,7 @@
                     </div>`;
         },
 
-        /** Состояние «нет пати»: создать либо присоединиться по inviteToken. */
+        /** Состояние «нет пати»: создать либо присоединиться по коду приглашения. */
         _modalHtmlEmpty() {
             const nick = this._defaultNick();
             const safeNick = Utils.escapeHtml(nick || '—');
@@ -1314,30 +1496,30 @@
                 <h2>👥 Пати ${this._closeBtn()}</h2>
                 <div style="display:flex; flex-direction:column; gap:14px; padding:6px 2px;">
                     <div>
-                        <div style="${this.MUTED_STYLE}">Создать пати</div>
+                        <div class="${this.MUTED_CLASS}">Создать пати</div>
                         <div style="display:flex; align-items:center; gap:8px;">
                             <div style="flex:1; min-width:0; font-size:13px; color:#ccc; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                                Вы: <b class="party-self-nick" style="color:#ffcf6a;">${safeNick}</b>
+                                Вы: <b class="party-self-nick">${safeNick}</b>
                             </div>
-                            <button id="party-create-btn" style="${this.BTN_STYLE}">Создать</button>
+                            <button id="party-create-btn" class="${this.BTN_CLASS}">Создать</button>
                         </div>
                     </div>
-                    <div style="border-top:1px solid #3a3040; padding-top:14px;">
-                        <div style="${this.MUTED_STYLE}">Присоединиться</div>
-                        <div style="display:flex; gap:6px;">
+                    <div class="party-sep">
+                        <div class="${this.MUTED_CLASS}">Код приглашения</div>
+                        <div class="party-field">
                             <input id="party-join-token" type="text" autocomplete="off" spellcheck="false"
-                                placeholder="inviteToken" style="${this.INPUT_STYLE}">
-                            <button id="party-join-btn" style="${this.BTN_STYLE}">Присоединиться</button>
+                                placeholder="Вставьте код приглашения" class="${this.INPUT_CLASS}">
+                            <button id="party-join-btn" class="${this.BTN_CLASS}">Присоединиться</button>
                         </div>
                     </div>
-                    <div id="party-error" style="display:none; color:#ff8fa3; font-size:12px; line-height:1.35;"></div>
+                    <div id="party-error" class="party-error"></div>
                 </div>
             `;
         },
 
         /**
-         * Состояние «в пати». owner видит полный токен, ротацию и кик;
-         * member — только состав и выход.
+         * Состояние «в пати». owner видит полный код приглашения, ротацию и
+         * кик; member — только состав и выход.
          */
         _modalHtmlParty(party, isOwner) {
             const safeLogin = Utils.escapeHtml(party.login || '—');
@@ -1345,16 +1527,16 @@
 
             const tokenBlock = isOwner ? `
                     <div>
-                        <div style="${this.MUTED_STYLE}">Invite token</div>
-                        <div style="display:flex; gap:6px;">
+                        <div class="${this.MUTED_CLASS}">Код приглашения</div>
+                        <div class="party-field">
                             <input id="party-token-input" type="text" readonly value="${Utils.escapeHtml(party.inviteToken || '')}"
-                                style="${this.INPUT_STYLE} font-size:11px; font-family:monospace;">
-                            <button id="party-copy-token" style="${this.BTN_STYLE}">Копировать</button>
+                                class="${this.TOKEN_INPUT_CLASS}">
+                            <button id="party-copy-token" class="${this.BTN_CLASS}">Копировать</button>
                         </div>
                     </div>` : '';
 
             const rotateBtn = isOwner
-                ? `<button id="party-rotate-btn" style="${this.BTN_STYLE}">Перевыпустить токен</button>`
+                ? `<button id="party-rotate-btn" class="${this.BTN_CLASS}">Перевыпустить код</button>`
                 : '';
 
             return `
@@ -1366,12 +1548,12 @@
                     </div>
                     ${tokenBlock}
                     ${this._membersSection()}
-                    <div style="display:flex; gap:8px; flex-wrap:wrap; border-top:1px solid #3a3040; padding-top:12px;">
-                        <button id="party-refresh-btn" style="${this.BTN_STYLE}">Обновить</button>
+                    <div class="party-sep" style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <button id="party-refresh-btn" class="${this.BTN_CLASS}">Обновить</button>
                         ${rotateBtn}
-                        <button id="party-leave-btn" style="${this.DANGER_BTN_STYLE} padding:8px 12px; font-size:13px;">Покинуть пати</button>
+                        <button id="party-leave-btn" class="${this.DANGER_BTN_CLASS} party-btn-lg">Покинуть пати</button>
                     </div>
-                    <div id="party-error" style="display:none; color:#ff8fa3; font-size:12px; line-height:1.35;"></div>
+                    <div id="party-error" class="party-error"></div>
                 </div>
             `;
         },
@@ -1463,7 +1645,7 @@
                 const input = modal.querySelector('#party-token-input');
                 const ok = await this._copy(party.inviteToken || '', input);
                 UI.showToast(
-                    ok ? 'Инвайт-токен скопирован' : 'Скопируйте токен вручную (Ctrl+C)',
+                    ok ? 'Код приглашения скопирован' : 'Скопируйте код вручную (Ctrl+C)',
                     !ok
                 );
             });
@@ -1476,8 +1658,8 @@
             const rotateBtn = modal.querySelector('#party-rotate-btn');
             rotateBtn?.addEventListener('click', () => this._runAction(rotateBtn, errorBox, async () => {
                 await this.partyRotateToken();
-                UI.showToast('Инвайт-токен перевыпущен');
-                // В модалке показан сам токен — перерисовываем её целиком.
+                UI.showToast('Код приглашения перевыпущен');
+                // В модалке показан сам код — перерисовываем её целиком.
                 await this.open();
             }));
 

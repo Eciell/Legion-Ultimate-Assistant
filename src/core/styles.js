@@ -255,6 +255,50 @@
         .player-hud-row { display: flex; justify-content: space-between; align-items: center; }
         .player-hud-label { color: #aaa; }
         .player-hud-val { font-weight: bold; }
+        /* ── Пати (v11.6.0g-2): модалка, HP-панель и журнал ──
+           Раньше формы окна «Пати» рисовались инлайном (серые рамки #444) —
+           теперь это классы: тёмный фон, золотистые акценты #caa55c/#ffcf6a
+           и hover-эффекты как у кнопки «Создать пати». */
+        .party-modal h2 { border-bottom-color: #3a3040; }
+        .party-muted { font-size: 11px; color: #c9b184; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+        .party-input { width: 100%; box-sizing: border-box; background: #16121a; border: 1px solid #4a3c56; color: #f7eadf; padding: 8px 10px; border-radius: 6px; font-size: 13px; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
+        .party-input::placeholder { color: #7d7189; }
+        .party-input:focus { border-color: #caa55c; box-shadow: 0 0 0 2px rgba(202, 165, 92, 0.15); }
+        .party-input.party-token { font-family: monospace; font-size: 11px; }
+        .party-btn { padding: 8px 12px; background: #2a2030; border: 1px solid #caa55c; color: #ffcf6a; border-radius: 6px; cursor: pointer; font-size: 13px; white-space: nowrap; transition: background 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s; }
+        .party-btn:hover:not(:disabled) { background: #caa55c; color: #1d1620; border-color: #e0bb6b; box-shadow: 0 0 10px rgba(202, 165, 92, 0.35); }
+        .party-btn:active:not(:disabled) { transform: translateY(1px); }
+        .party-btn:disabled { opacity: 0.55; cursor: default; }
+        .party-btn-sm { padding: 4px 8px; border-radius: 5px; font-size: 11px; }
+        .party-btn-lg { padding: 8px 12px; font-size: 13px; }
+        .party-btn-danger { background: #3a1f28; border-color: #ff5a7a; color: #ff5a7a; }
+        .party-btn-danger:hover:not(:disabled) { background: #ff5a7a; border-color: #ff8fa3; color: #1d1620; box-shadow: 0 0 10px rgba(255, 90, 122, 0.35); }
+        .party-sep { border-top: 1px solid #3a3040; padding-top: 12px; }
+        .party-field { display: flex; gap: 6px; }
+        .party-self-nick { color: #ffcf6a; }
+        /* Ошибка модалки: пустой блок не занимает места (раньше он всегда
+           висел с display:none и текст ошибки был не виден). */
+        .party-error { color: #ff8fa3; font-size: 12px; line-height: 1.35; }
+        .party-error:empty { display: none; }
+
+        /* HUD пати: HP-панель и журнал в одном контейнере, перетаскивание
+           за заголовки. Контейнер и панели — pointer-events:none, чтобы не
+           перехватывать клики по игре; интерактивные узлы возвращают auto. */
+        .party-hud-container { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; align-items: stretch; box-sizing: border-box; pointer-events: none; }
+        .party-panel, .party-log-panel { display: none; position: relative; box-sizing: border-box; min-width: 150px; max-width: 260px; background: rgba(20, 16, 26, 0.92); border: 1px solid #3a3040; border-radius: 10px; padding: 8px 10px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); font: 12px/1.4 system-ui, "Segoe UI", sans-serif; color: #e8e8ea; pointer-events: none; }
+        .party-drag-handle { pointer-events: auto; cursor: grab; user-select: none; -webkit-user-select: none; touch-action: none; }
+        .party-drag-handle:active, .party-hud-container.party-dragging .party-drag-handle { cursor: grabbing; }
+        .party-panel-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #c9b184; margin-bottom: 6px; }
+        .party-log-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .party-log-body { pointer-events: auto; max-height: 150px; overflow-y: auto; margin-top: 6px; }
+        .party-log-body::-webkit-scrollbar { width: 6px; }
+        .party-log-body::-webkit-scrollbar-thumb { background: #44374a; border-radius: 4px; }
+        .party-log-body::-webkit-scrollbar-thumb:hover { background: #caa55c; }
+        .party-log-toggle { pointer-events: auto; background: none; border: none; padding: 0 2px; color: #ffcf6a; cursor: pointer; font-size: 12px; line-height: 1; }
+        .party-log-toggle:hover { color: #fff; }
+        .party-heal-btn { pointer-events: auto; flex: none; padding: 0 5px; background: #22352a; border: 1px solid #5fd987; color: #5fd987; border-radius: 4px; font-size: 10px; line-height: 15px; cursor: pointer; transition: background 0.15s, color 0.15s; }
+        .party-heal-btn:hover:not(:disabled) { background: #5fd987; color: #16121a; }
+        .party-heal-btn:disabled { opacity: 0.6; cursor: default; }
         /* 7TV-смайлики: размер задаётся переменной --t7-h (S/M/L/XL из настроек чата) */
         .t7-emote { height: var(--t7-h, 1.9em); vertical-align: middle; margin: 0 2px; }
     `;
