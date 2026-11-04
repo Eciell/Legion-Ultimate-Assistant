@@ -7,7 +7,7 @@
     // и CSP страницы `connect-src 'self'`).
     //
     // Хранилище — GM_setValue/GM_getValue (@grant в шапке):
-    //   lgPartyBaseUrl — адрес сервера (по умолчанию https://addon.legion.com, см. v11.6.0e);
+    //   lgPartyBaseUrl — адрес сервера (по умолчанию https://legion.ctrlfree.host, см. v11.6.0e/f);
     //   lgParty        — {groupId, inviteToken, sessionId, login};
     //   lgPartyOwner   — создал ли этот клиент пати.
     // Если GM-хранилище недоступно (старая версия скрипта без @grant),
@@ -40,7 +40,7 @@
         BASE_URL_KEY: 'lgPartyBaseUrl',
         STATE_KEY: 'lgParty',
         OWNER_KEY: 'lgPartyOwner',
-        DEFAULT_BASE_URL: 'https://addon.legion.com',
+        DEFAULT_BASE_URL: 'https://legion.ctrlfree.host',
         REQUEST_TIMEOUT: 12000,
         // Период синхронизации HP (ТЗ 11.6.0b: раз в 3 секунды).
         HP_SYNC_MS: 3000,

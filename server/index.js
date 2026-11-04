@@ -41,7 +41,7 @@ import {
     upsertState
 } from './db.js';
 
-// v11.6.0e: платформа (addon.legion.com) пробрасывает СВОЙ порт в CTRLFREE_PORT,
+// v11.6.0e: платформа (legion.ctrlfree.host) пробрасывает СВОЙ порт в CTRLFREE_PORT,
 // поэтому он приоритетнее локального PORT. hostname обязателен: без 0.0.0.0
 // сервер слушает только loopback и снаружи (из платформы и клиентов аддона)
 // недоступен.
