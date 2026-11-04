@@ -321,9 +321,8 @@
 
         // Текущая локация героя для HUD «👤 Профиль»: { text, color }.
         //   Шахта — по разметке нативного модуля (.mn-world/.mn-screen) либо по URL;
-        //   Поход — по состоянию LGQuest (q.on). Состояние читаем у PriestAssistant:
-        //   его _readQuest() берёт сырые пакеты из hooks.js (без задержки стрима q.dl),
-        //   LGQuest._view() — запасной вариант, если модуль жреца ещё не объявлен.
+        //   Поход — по состоянию LGQuest (q.on) через штатный геттер игры
+        //   LGQuest._view() (данные с задержкой стрима q.dl).
         _detectHudLocation() {
             const inMine = !!document.querySelector('.mn-world') ||
                            !!document.querySelector('.mn-screen') ||
@@ -334,10 +333,7 @@
 
             let inQuest = false;
             try {
-                if (typeof PriestAssistant !== 'undefined' && typeof PriestAssistant._readQuest === 'function') {
-                    const q = PriestAssistant._readQuest();
-                    inQuest = !!(q && q.on);
-                } else if (G.LGQuest && typeof G.LGQuest._view === 'function') {
+                if (G.LGQuest && typeof G.LGQuest._view === 'function') {
                     const q = G.LGQuest._view();
                     inQuest = !!(q && q.on);
                 }

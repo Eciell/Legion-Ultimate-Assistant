@@ -37,7 +37,6 @@
                         <button class="fab-menu-item" id="${d.btnBuildSim}">⚙️ Планировщик Героя</button>
                         <button class="fab-menu-item" id="${d.btnAuctionScan}">🔍 Сканер Аукциона</button>
                         <button class="fab-menu-item" id="${d.btnPocketCity}">🏰 Карманный Город</button>
-                        <button class="fab-menu-item" id="btn-priest-panel">✨ Панель Жреца</button>
                     </div>
                 </div>
 

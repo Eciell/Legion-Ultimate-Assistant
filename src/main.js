@@ -12,7 +12,7 @@
     //   core/hooks.js  -> перехватчики LGCity / LGAuction / LGQuest / LGMine
     //   core/ui-templates.js -> UITemplates (HTML: FAB-меню, модалки, HUD)
     //   core/ui.js     -> UI
-    //   modules/*      -> BuildSim, HeroPlanner, Auction, Players, PriestAssistant,
+    //   modules/*      -> BuildSim, HeroPlanner, Auction, Players,
     //                     PocketCity, Party, Miner, Chat
     // ============================================================
 
@@ -107,7 +107,6 @@
         Miner.init();
         BuildSim.init();        // без кнопки — регистрирует только глобальный клик для .sim-card
         HeroPlanner.init();     // кнопка FAB ведёт сюда
-        PriestAssistant.init(); // HUD Жреца в Походе (window.__lgQuestContext)
         Auction.init();
         Players.init();
         // 🎉 Пати: кнопка в FAB-меню, клиент сервера из server/ (шаг 1).
@@ -134,7 +133,6 @@
             HeroPlanner,
             Auction,
             Players,
-            PriestAssistant,
             PocketCity,
             Party,
             Chat,
@@ -142,7 +140,6 @@
             RAND_ID,
             _booted: true,
             shutdown: () => {
-                PriestAssistant.destroy();
                 if (Miner.abortController) {
                     try { Miner.abortController.abort(); } catch(e) {}
                     Miner.abortController = null;

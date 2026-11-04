@@ -82,7 +82,6 @@ const SHARED_MODULES = [
     'modules/hero-planner.js',
     'modules/auction.js',
     'modules/players.js',
-    'modules/priest-assistant.js',
     // v11.6.0: логика «Карманного города» вынесена из ui.js в отдельный модуль.
     // Модули грузятся после core/ui.js, поэтому UI/UITemplates уже объявлены.
     'modules/pocket-city.js',
