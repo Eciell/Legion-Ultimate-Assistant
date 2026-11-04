@@ -1,11 +1,12 @@
 /**
- * HTTP-сервер «Пати» для Legion Ultimate Assistant — шаг 1.
+ * HTTP-сервер «Пати» для Legion Ultimate Assistant.
  *
  * Запуск: bun run dev (см. server/README.md).
  *
- * В шаге 1 есть только каркас: создание пати, вход по инвайт-токену,
- * список участников, кик, выход и ротация токена. Синхронизация состояния,
- * журнал и хил живут в шаге 2 — эндпоинтов под них здесь намеренно нет.
+ * Шаг 1: создание пати, вход по инвайт-токену, список участников, кик,
+ * выход и ротация токена.
+ * Шаг 2 (v11.6.0b): состояние участников — POST/GET /party/:id/state
+ * (HP-панель клиента). Журнал и хил по-прежнему живут в шаге 3+.
  *
  * v11.6.0a: вход только через POST /party/join (inviteToken — первичный
  * ключ), memberId отдельно от sessionId, DELETE /party/:id/leave, логины
@@ -24,13 +25,15 @@ import {
     getSession,
     getSessionByLogin,
     getSessionByMemberId,
+    getStates,
     isConstraintError,
     kickSession,
     listSessions,
     newInviteToken,
     newSessionId,
     removeSession,
-    rotateToken
+    rotateToken,
+    upsertState
 } from './db.js';
 
 const PORT = Number(process.env.PORT || 8787);
@@ -46,6 +49,10 @@ const JOIN_WINDOW_MS = 60_000;
 
 // Тело запроса больше 4 КБ в этом API не бывает — отсекаем мусор.
 const MAX_BODY_BYTES = 4096;
+
+// Верхняя граница HP: защита от мусора/переполнения INTEGER в SQLite
+// (реальные значения в игре — сотни, не миллионы).
+const MAX_HP = 1_000_000;
 
 /**
  * Ошибка, которую можно безопасно отдать клиенту как JSON.
@@ -106,6 +113,18 @@ function normalizeLogin(value) {
         throw new HttpError(400, 'bad_login', 'Ник: 1–32 символа, только a-z, 0-9 и _');
     }
     return login;
+}
+
+/**
+ * HP из тела state-запроса: целое в диапазоне 0..MAX_HP.
+ * Возвращает null, если значение не число или вне диапазона —
+ * обработчик превращает это в 400 bad_hp.
+ */
+function toHpInt(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    const int = Math.trunc(n);
+    return (int < 0 || int > MAX_HP) ? null : int;
 }
 
 /* ------------------------------------------------------------------ */
@@ -312,6 +331,49 @@ async function handleMembers(req, partyId) {
     return json({ members });
 }
 
+/*
+ * POST /party/:id/state {hp, maxHp}
+ *
+ * member_id и login берутся из сессии (authenticate), а не из тела: иначе
+ * любой участник мог бы перезаписать чужую строку party_states.
+ * Ответ короткий ({ok:true}): клиент не ждёт данных, он сразу делает GET.
+ */
+async function handleStatePost(req, partyId) {
+    const session = authenticate(req);
+    const party = requireParty(partyId);
+    requireMember(session, party);
+
+    const body = await readJson(req);
+    const hp = toHpInt(body.hp);
+    const maxHp = toHpInt(body.maxHp);
+    if (hp === null || maxHp === null || maxHp <= 0) {
+        throw new HttpError(400, 'bad_hp', 'hp и maxHp: целые числа, maxHp > 0');
+    }
+
+    // Защита от рассинхрона: игра может отдать hpNow больше максимума
+    // (бафф/хил в момент опроса) — храним в пределах maxHp, иначе полоска
+    // в панели уехала бы за 100%.
+    upsertState({
+        partyId: party.id,
+        memberId: session.memberId,
+        login: session.login,
+        hp: Math.min(hp, maxHp),
+        maxHp
+    });
+
+    return json({ ok: true });
+}
+
+// GET /party/:id/state -> {states: [{login, hp, maxHp, updatedAt}]}
+// member_id не отдаётся: наружу светим только ник и HP (ТЗ 11.6.0b).
+async function handleStateGet(req, partyId) {
+    const session = authenticate(req);
+    const party = requireParty(partyId);
+    requireMember(session, party);
+
+    return json({ states: getStates(party.id) });
+}
+
 // DELETE /party/:id/leave
 async function handleLeave(req, partyId) {
     const session = authenticate(req);
@@ -393,6 +455,16 @@ const server = Bun.serve({
                     throw new HttpError(405, 'method_not_allowed', 'Ожидается GET /party/:id/members');
                 }
                 return await handleMembers(req, partyId);
+            }
+            // Состояние участников (v11.6.0b): POST — свой hp/maxHp, GET — все.
+            if (action === 'state') {
+                if (req.method === 'POST') {
+                    return await handleStatePost(req, partyId);
+                }
+                if (req.method === 'GET') {
+                    return await handleStateGet(req, partyId);
+                }
+                throw new HttpError(405, 'method_not_allowed', 'Ожидается GET или POST /party/:id/state');
             }
 
             throw new HttpError(404, 'not_found', 'Неизвестный маршрут');

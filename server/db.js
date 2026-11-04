@@ -46,6 +46,26 @@ CREATE INDEX IF NOT EXISTS idx_party_sessions ON sessions(party_id);
 `);
 
 /*
+ * party_states (v11.6.0b) — последнее известное HP каждого участника.
+ *
+ * PK (party_id, member_id), а не login: member_id публичный и неизменный,
+ * а ник в пати теоретически может быть пересоздан. Колонка login хранится
+ * для отдачи в GET /party/:id/state — member_id наружу не отдаём (ТЗ 11.6.0b),
+ * поэтому JOIN с sessions даёт актуальный ник без раскрытия идентификатора.
+ */
+db.exec(`
+CREATE TABLE IF NOT EXISTS party_states (
+  party_id TEXT NOT NULL,
+  member_id TEXT NOT NULL,
+  login TEXT NOT NULL,
+  hp INTEGER NOT NULL,
+  max_hp INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (party_id, member_id)
+);
+`);
+
+/*
  * Миграция v11.6.0a: member_id отдельно от session_id.
  *
  * session_id — bearer-креденшл клиента, его нельзя отдавать никому (даже
@@ -120,6 +140,37 @@ const deletePartyStmt = db.query('DELETE FROM parties WHERE id = $id');
 const updateTokenStmt = db.query(
     'UPDATE parties SET invite_token = $token WHERE id = $id'
 );
+// UPSERT по PK (party_id, member_id): один участник = одна строка.
+const upsertStateStmt = db.query(
+    `INSERT INTO party_states (party_id, member_id, login, hp, max_hp, updated_at)
+     VALUES ($party, $member, $login, $hp, $maxHp, $updated)
+     ON CONFLICT(party_id, member_id) DO UPDATE SET
+       login = excluded.login,
+       hp = excluded.hp,
+       max_hp = excluded.max_hp,
+       updated_at = excluded.updated_at`
+);
+// JOIN с sessions отсекает стейты ушедших/кикнутых участников: их строки
+// удаляются ниже, но JOIN гарантирует корректность даже на старых базах.
+const selectStatesStmt = db.query(
+    `SELECT st.login AS login,
+            st.hp AS hp,
+            st.max_hp AS max_hp,
+            st.updated_at AS updated_at
+       FROM party_states st
+       JOIN sessions s
+         ON s.party_id = st.party_id AND s.member_id = st.member_id
+      WHERE st.party_id = $party
+      ORDER BY s.joined_at ASC`
+);
+// member_id резолвится из session_id здесь же: клиент присылает только bearer.
+const deleteSessionStateStmt = db.query(
+    `DELETE FROM party_states
+      WHERE party_id = $party
+        AND member_id = (SELECT member_id FROM sessions
+                          WHERE party_id = $party AND session_id = $session)`
+);
+const deletePartyStatesStmt = db.query('DELETE FROM party_states WHERE party_id = $party');
 
 /* ------------------------------------------------------------------ */
 /* Маппинг строк БД -> camelCase для HTTP-слоя                         */
@@ -144,6 +195,17 @@ function mapSession(row) {
         partyId: row.party_id,
         login: row.login,
         joinedAt: row.joined_at
+    };
+}
+
+/** Строка party_states -> camelCase. member_id намеренно не отдаётся. */
+function mapState(row) {
+    if (!row) return null;
+    return {
+        login: row.login,
+        hp: row.hp,
+        maxHp: row.max_hp,
+        updatedAt: row.updated_at
     };
 }
 
@@ -281,7 +343,11 @@ export function listSessions(partyId) {
 
 /** @returns {boolean} true, если сессия действительно была удалена. */
 export function kickSession(partyId, sessionId) {
-    const res = deleteSessionStmt.run({ $party: String(partyId), $session: String(sessionId) });
+    const params = { $party: String(partyId), $session: String(sessionId) };
+    // Сначала стейт (member_id резолвится из ещё живой сессии), потом саму
+    // сессию: иначе подзапрос вернёт NULL и строка party_states останется.
+    deleteSessionStateStmt.run(params);
+    const res = deleteSessionStmt.run(params);
     return res.changes > 0;
 }
 
@@ -293,6 +359,7 @@ export function removeSession(partyId, sessionId) {
 // Владелец уходит — пати перестаёт существовать. Сначала sessions, потом
 // parties: обратный порядок нарушил бы FOREIGN KEY sessions -> parties.
 const deletePartyTx = db.transaction((partyId) => {
+    deletePartyStatesStmt.run({ $party: partyId });
     deletePartySessionsStmt.run({ $party: partyId });
     deletePartyStmt.run({ $id: partyId });
 });
@@ -301,4 +368,39 @@ const deletePartyTx = db.transaction((partyId) => {
 export function deleteParty(partyId) {
     deletePartyTx(String(partyId));
     return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* Состояние участников (шаг 2, v11.6.0b)                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Сохраняет последнее известное HP участника (UPSERT по party_id+member_id).
+ *
+ * member_id и login берёт HTTP-слой из сессии (auth middleware), а не из
+ * тела запроса: иначе клиент мог бы перезаписать чужую строку.
+ *
+ * @param {{partyId: string, memberId: string, login: string, hp: number, maxHp: number}} row
+ * @returns {{login: string, hp: number, maxHp: number, updatedAt: number}}
+ */
+export function upsertState({ partyId, memberId, login, hp, maxHp }) {
+    const updatedAt = Date.now();
+    upsertStateStmt.run({
+        $party: String(partyId),
+        $member: String(memberId),
+        $login: String(login),
+        $hp: Math.trunc(hp),
+        $maxHp: Math.trunc(maxHp),
+        $updated: updatedAt
+    });
+    return { login: String(login), hp: Math.trunc(hp), maxHp: Math.trunc(maxHp), updatedAt };
+}
+
+/**
+ * Все стейты пати в порядке присоединения (см. ORDER BY в selectStatesStmt).
+ * member_id в ответ не попадает — клиенту он не нужен.
+ * @returns {Array<{login: string, hp: number, maxHp: number, updatedAt: number}>}
+ */
+export function getStates(partyId) {
+    return selectStatesStmt.all({ $party: String(partyId) }).map(mapState);
 }
