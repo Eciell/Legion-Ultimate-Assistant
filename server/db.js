@@ -86,6 +86,27 @@ CREATE INDEX IF NOT EXISTS idx_log_party ON party_log(party_id, id);
 `);
 
 /*
+ * active_users (v11.6.0g-3) — «кто сейчас играет с аддоном».
+ *
+ * Клиент раз в 30 с шлёт POST /heartbeat {login}, сервер переписывает
+ * last_seen. GET /users отдаёт только тех, кто отметился за последние
+ * ACTIVE_WINDOW_MS (15 минут), а строки старше окна удаляет
+ * cleanupActiveUsers(). PRIMARY KEY по login: один игрок = одна строка,
+ * история визитов здесь не нужна.
+ */
+db.exec(`
+CREATE TABLE IF NOT EXISTS active_users (
+  login TEXT PRIMARY KEY,
+  last_seen INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_active_seen ON active_users(last_seen);
+`);
+
+// Окно «онлайн»: heartbeat реже (30 с), так что 15 минут прощает до 30
+// пропущенных тиков (сон ноутбука, лаг вкладки, перезагрузка страницы).
+const ACTIVE_WINDOW_MS = 15 * 60 * 1000;
+
+/*
  * Миграция v11.6.0a: member_id отдельно от session_id.
  *
  * session_id — bearer-креденшл клиента, его нельзя отдавать никому (даже
@@ -225,6 +246,20 @@ const trimLogStmt = db.query(
              ORDER BY id DESC
              LIMIT $max
         )`
+);
+
+// --- Пользователи аддона (v11.6.0g-3) -------------------------------
+// INSERT OR REPLACE по PK login: повторный heartbeat просто обновляет время.
+const upsertActiveUserStmt = db.query(
+    'INSERT OR REPLACE INTO active_users (login, last_seen) VALUES ($login, $seen)'
+);
+// Строго `>`: строка, которой ровно 15 минут, уже считается протухшей
+// (cleanupActiveUsers удаляет её тем же условием `<=`).
+const selectActiveUsersStmt = db.query(
+    'SELECT login FROM active_users WHERE last_seen > $threshold ORDER BY login ASC'
+);
+const deleteStaleActiveUsersStmt = db.query(
+    'DELETE FROM active_users WHERE last_seen <= $threshold'
 );
 
 /* ------------------------------------------------------------------ */
@@ -536,4 +571,45 @@ export function getLog(partyId, sinceId = 0, limit = 100) {
 export function trimLog(partyId, maxRows = 500) {
     const max = Math.max(1, Math.trunc(Number(maxRows) || 500));
     return trimLogStmt.run({ $party: String(partyId), $max: max }).changes;
+}
+
+/* ------------------------------------------------------------------ */
+/* Пользователи аддона (v11.6.0g-3)                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Отметка «я в игре с аддоном» (POST /heartbeat).
+ *
+ * login приходит из HTTP-слоя уже нормализованным (trim + toLowerCase),
+ * поэтому здесь только приведение к строке: БД не угадывает формат.
+ *
+ * @param {string} login
+ * @returns {number} записанный last_seen (Date.now() сервера)
+ */
+export function updateHeartbeat(login) {
+    const seen = Date.now();
+    upsertActiveUserStmt.run({ $login: String(login), $seen: seen });
+    return seen;
+}
+
+/**
+ * Логины, отметившиеся за последние ACTIVE_WINDOW_MS (15 минут).
+ * Порядок алфавитный (ORDER BY login) — клиенту стабильнее сравнивать наборы.
+ *
+ * @returns {string[]}
+ */
+export function getActiveUsers() {
+    return selectActiveUsersStmt
+        .all({ $threshold: Date.now() - ACTIVE_WINDOW_MS })
+        .map((row) => row.login);
+}
+
+/**
+ * Удаляет протухшие отметки (last_seen <= now - 15 мин).
+ * Вызывается из GET /users перед выборкой, чтобы таблица не росла.
+ *
+ * @returns {number} сколько строк удалено
+ */
+export function cleanupActiveUsers() {
+    return deleteStaleActiveUsersStmt.run({ $threshold: Date.now() - ACTIVE_WINDOW_MS }).changes;
 }

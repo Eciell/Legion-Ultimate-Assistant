@@ -837,8 +837,6 @@
                     ).join('');
                 }
 
-                const authorNick = m.author || '';
-
                 // Бейдж титула (aw) перед ником автора
                 let awardBadge = '';
                 const aw = m.aw;
@@ -853,7 +851,12 @@
                     ? `<span class="chat-mod-badge" title="Модератор" style="display:inline-block; background:rgba(255, 207, 106, 0.15); border:1px solid #caa55c; color:#ffcf6a; font-size:10px; font-weight:bold; padding:1px 5px; border-radius:4px; margin-right:4px; vertical-align:middle;">⚖️ Модер</span>`
                     : '';
 
-                const authorHtml = `<span class="chat-author nick-clickable" data-nick="${Utils.escapeHtml(authorNick)}" title="Кликните, чтобы упомянуть" style="color: ${meta.color || '#ffcf6a'} !important; cursor: pointer;">${Utils.escapeHtml(authorNick)}</span>`;
+                const authorNick = m.author || '';
+                const isAddon = this.isAddonUser(authorNick);
+                const addonBadge = isAddon ? `<span class="legion-addon-badge" title="Пользователь Legion Ultimate">⚡</span>` : '';
+                const addonClass = isAddon ? ' legion-addon-user' : '';
+                const authorColor = isAddon ? '#00f0ff' : (meta.color || '#ffcf6a');
+                const authorHtml = `${addonBadge}<span class="chat-author nick-clickable${addonClass}" data-nick="${Utils.escapeHtml(authorNick)}" title="Кликните, чтобы упомянуть" style="color: ${authorColor} !important; cursor: pointer;">${Utils.escapeHtml(authorNick)}</span>`;
 
                 if (m.k === 'dm') {
                     div.innerHTML = `

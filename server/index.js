@@ -10,6 +10,9 @@
  * Шаг 3 (v11.6.0c): журнал боя — POST/GET /party/:id/log (панель «Журнал»,
  * ретеншн 500 строк на пати).
  *
+ * v11.6.0g-3: POST /heartbeat и GET /users — кто играет с аддоном
+ * (подсветка ников в чате; окно «онлайн» — 15 минут, Bearer не нужен).
+ *
  * v11.6.0a: вход только через POST /party/join (inviteToken — первичный
  * ключ), memberId отдельно от sessionId, DELETE /party/:id/leave, логины
  * в нижнем регистре.
@@ -21,8 +24,10 @@
 import {
     addLog,
     bindSession,
+    cleanupActiveUsers,
     createParty,
     deleteParty,
+    getActiveUsers,
     getLog,
     getParty,
     getPartyByInvite,
@@ -38,6 +43,7 @@ import {
     removeSession,
     rotateToken,
     trimLog,
+    updateHeartbeat,
     upsertState
 } from './db.js';
 
@@ -501,6 +507,38 @@ async function handleLeave(req, partyId) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Пользователи аддона (v11.6.0g-3)                                    */
+/* ------------------------------------------------------------------ */
+
+/*
+ * POST /heartbeat {login}
+ *
+ * Отметка «я в игре с аддоном». Bearer не нужен: эндпоинт общий, к пати
+ * отношения не имеет. Ник валидируется тем же normalizeLogin, что и при
+ * создании пати (trim + toLowerCase + /^[a-z0-9_]{1,32}$/), поэтому в БД и
+ * в GET /users попадает одна форма ника. Ответ короткий: клиенту нечего
+ * показывать, список он берёт отдельным GET /users.
+ */
+async function handleHeartbeat(req) {
+    const body = await readJson(req);
+    const login = normalizeLogin(body.login);
+    const lastSeen = updateHeartbeat(login);
+    return json({ ok: true, lastSeen });
+}
+
+/*
+ * GET /users -> {users: ["nick1", "nick2"]}
+ *
+ * Сначала чистим протухшие отметки (last_seen <= now - 15 мин), затем
+ * отдаём живые. Чистка именно здесь, а не отдельным таймером: запрос
+ * приходит от клиентов раз в 30 с, так что таблица не растёт бесконтрольно.
+ */
+async function handleActiveUsers() {
+    cleanupActiveUsers();
+    return json({ users: getActiveUsers() });
+}
+
+/* ------------------------------------------------------------------ */
 /* Роутер                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -511,6 +549,21 @@ const server = Bun.serve({
         try {
             const url = new URL(req.url);
             const parts = url.pathname.split('/').filter(Boolean);
+
+            // Пользователи аддона (v11.6.0g-3): /heartbeat и /users живут
+            // вне /party — они общие для всех клиентов аддона, без Bearer.
+            if (url.pathname === '/heartbeat') {
+                if (req.method !== 'POST') {
+                    throw new HttpError(405, 'method_not_allowed', 'Ожидается POST /heartbeat');
+                }
+                return await handleHeartbeat(req);
+            }
+            if (url.pathname === '/users') {
+                if (req.method !== 'GET') {
+                    throw new HttpError(405, 'method_not_allowed', 'Ожидается GET /users');
+                }
+                return await handleActiveUsers();
+            }
 
             if (parts[0] !== 'party') {
                 throw new HttpError(404, 'not_found', 'Неизвестный маршрут');

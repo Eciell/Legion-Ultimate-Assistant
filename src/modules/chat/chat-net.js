@@ -6,6 +6,10 @@
     // /api/live и разбор входящих в общий Chat.handleIncoming().
     // this внутри методов — это Chat (Object.assign в chat/chat.js).
 
+    // v11.6.0g-3: период поллинга «кто играет с аддоном» (ТЗ — раз в 30 с).
+    // Один тик = POST /heartbeat + GET /users, окно онлайна на сервере 15 мин.
+    const ADDON_USERS_POLL_MS = 30000;
+
     const ChatNet = {
         // id текущей шахты (обновляется из /api/mine/* и /api/live).
         currentMineId: 'home',
@@ -592,5 +596,213 @@
             try { wrappedFetch.__lgChatProxied = true; } catch (e) {}
             try { pageWin.fetch = wrappedFetch; } catch (e) {}
             if (pageWin !== window) { try { window.fetch = wrappedFetch; } catch (e) {} }
-        }
+        },
+
+        /* ---------------------------------------------------------- */
+        /* Подсветка пользователей аддона (v11.6.0g-3)                 */
+        /* ---------------------------------------------------------- */
+
+        // Таймер поллинга /heartbeat + /users.
+        _addonPollTimer: null,
+        // MutationObserver нативной ленты и узел, который он слушает.
+        _addonObserver: null,
+        _addonObserved: null,
+        // Дебаунс перерисовки подсветки: игра перестраивает ленту пачкой.
+        _addonHlTimer: null,
+
+        /**
+         * База сервера аддона: сначала адрес пати (Party.getBaseUrl), затем
+         * прод-домен. Party объявлен раньше чата (build.js: SHARED_MODULES
+         * идут до CHAT_MODULES), но проверка на undefined оставлена — чат не
+         * должен падать, если модуль пати когда-нибудь исключат из сборки.
+         */
+        _addonBaseUrl() {
+            try {
+                if (typeof Party !== 'undefined' && Party && typeof Party.getBaseUrl === 'function') {
+                    const base = Party.getBaseUrl();
+                    if (base) return String(base).trim().replace(/\/+$/, '');
+                }
+            } catch (e) {}
+            return 'https://legion.ctrlfree.host';
+        },
+
+        /**
+         * Запрос к серверу аддона через GM_xmlhttpRequest: домен чужой для
+         * игры, обычный fetch упёрся бы в CORS и CSP `connect-src 'self'`
+         * (см. AGENTS.md §3). Разбираем только JSON и только 2xx.
+         */
+        _addonRequest(method, url, body = null) {
+            return new Promise((resolve, reject) => {
+                if (typeof GM_xmlhttpRequest !== 'function') {
+                    reject(new Error('GM_xmlhttpRequest недоступен: проверьте @grant в шапке'));
+                    return;
+                }
+                GM_xmlhttpRequest({
+                    method,
+                    url,
+                    headers: { 'Content-Type': 'application/json' },
+                    data: body ? JSON.stringify(body) : undefined,
+                    timeout: 8000,
+                    onload: (res) => {
+                        if (res.status < 200 || res.status >= 300) {
+                            reject(new Error(`HTTP ${res.status}: ${url}`));
+                            return;
+                        }
+                        try {
+                            resolve(res.responseText ? JSON.parse(res.responseText) : null);
+                        } catch (e) {
+                            reject(new Error(`Некорректный JSON от ${url}`));
+                        }
+                    },
+                    onerror: () => reject(new Error(`Сервер аддона недоступен: ${url}`)),
+                    ontimeout: () => reject(new Error(`Сервер аддона не ответил за 8 с: ${url}`)),
+                    onabort: () => reject(new Error('Запрос к серверу аддона отменён'))
+                });
+            });
+        },
+
+        /**
+         * Отметка «я онлайн» + обновление списка пользователей аддона.
+         *
+         * POST /heartbeat {login} — чтобы нас видели другие; GET /users —
+         * чтобы увидели мы. Ошибки сети не всплывают тостом: сервер аддона
+         * может быть недоступен, подсветка просто остаётся на прошлом наборе.
+         */
+        async syncAddonUsers() {
+            const nick = this.myNick ? String(this.myNick).trim() : '';
+            // Ник ещё не пришёл (/api/me в пути) — отправим на следующем тике.
+            if (!nick) return;
+
+            const base = this._addonBaseUrl();
+
+            try {
+                await this._addonRequest('POST', base + '/heartbeat', { login: nick });
+                const data = await this._addonRequest('GET', base + '/users');
+                const list = (data && Array.isArray(data.users)) ? data.users : [];
+
+                const next = new Set();
+                list.forEach((login) => {
+                    const norm = String(login || '').trim().toLowerCase();
+                    if (norm) next.add(norm);
+                });
+                // Свой ник добавляем локально: heartbeat уже ушёл, а снимок
+                // /users мог быть собран сервером до нашей вставки.
+                next.add(nick.toLowerCase());
+
+                const prev = this.addonUsers || new Set();
+                const changed = next.size !== prev.size || Array.from(next).some((n) => !prev.has(n));
+                this.addonUsers = next;
+
+                this.highlightNativeChat();
+                // Свой PiP-чат перерисовываем только при изменении состава:
+                // innerHTML каждые 30 с сбивал бы выделение текста у читающего.
+                if (changed && this.isOpen()) this.renderMessages();
+            } catch (e) {
+                dbg('[CHAT] подсветка аддона: синхронизация не удалась:', e && e.message ? e.message : e);
+            }
+        },
+
+        /**
+         * Красит ники пользователей аддона в нативном чате игры.
+         *
+         * Нативная лента рисует автора как <b data-nick="login"> внутри
+         * .cy-chat-l (reference/LegionFrontSRC/lib/site-chat.js, chatLi).
+         * Её inline style="color:..." перебивается только нашим CSS
+         * !important (см. .legion-addon-user в core/styles.js).
+         *
+         * @param {Document|Element} [root] где искать ники (по умолчанию document)
+         */
+        highlightNativeChat(root = document) {
+            const scope = (root && typeof root.querySelectorAll === 'function') ? root : document;
+            const nodes = scope.querySelectorAll('.cy-chat-l [data-nick], .cy-chat-p [data-nick]');
+
+            nodes.forEach((el) => {
+                const nick = String(el.getAttribute('data-nick') || '').trim().toLowerCase();
+                const isAddon = !!nick && this.isAddonUser(nick);
+
+                if (!isAddon) {
+                    // Ник вышел из окна онлайна — снимаем подсветку и бейдж.
+                    el.classList.remove('legion-addon-user');
+                    const staleBadge = el.previousElementSibling;
+                    if (staleBadge && staleBadge.getAttribute('data-legion-addon-badge') === '1') staleBadge.remove();
+                    return;
+                }
+
+                el.classList.add('legion-addon-user');
+
+                // Бейдж ставим ровно один раз: нас зовёт и таймер, и
+                // MutationObserver — второй ⚡ перед ником был бы дублем.
+                const prev = el.previousElementSibling;
+                if (prev && prev.getAttribute('data-legion-addon-badge') === '1') return;
+
+                const badge = (el.ownerDocument || document).createElement('span');
+                badge.className = 'legion-addon-badge';
+                badge.setAttribute('data-legion-addon-badge', '1');
+                badge.title = 'Пользователь Legion Ultimate';
+                badge.textContent = '⚡';
+                if (el.parentNode) el.parentNode.insertBefore(badge, el);
+            });
+        },
+
+        /**
+         * MutationObserver на нативную ленту: chatRender() переписывает
+         * innerHTML при каждом новом сообщении, и наши классы/бейджи
+         * исчезают — наблюдатель возвращает их после перерисовки.
+         *
+         * Игра пересоздаёт .cy-chat при переходе город <-> шахта, поэтому
+         * метод переподключает наблюдателя, если узел сменился. Вызывается
+         * из startAddonUsersPolling() на каждом тике.
+         */
+        initNativeChatObserver() {
+            const list = document.querySelector('.cy-chat-l');
+            if (!list) return; // ленты нет (другая страница) — ждём следующего тика
+            if (this._addonObserver && this._addonObserved === list) return;
+
+            if (this._addonObserver) {
+                try { this._addonObserver.disconnect(); } catch (e) {}
+                this._addonObserver = null;
+            }
+
+            this._addonObserved = list;
+            this._addonObserver = new MutationObserver(() => {
+                // Рендер идёт пачкой — склеиваем мутации в один проход.
+                if (this._addonHlTimer) return;
+                this._addonHlTimer = setTimeout(() => {
+                    this._addonHlTimer = null;
+                    this.highlightNativeChat();
+                }, 150);
+            });
+            this._addonObserver.observe(list, { childList: true, subtree: true });
+        },
+
+        /** Запуск поллинга /heartbeat + /users (раз в 30 с, идемпотентно). */
+        startAddonUsersPolling() {
+            if (this._addonPollTimer) return;
+
+            // Первый тик сразу: ждать полминуты до первой подсветки незачем.
+            this.initNativeChatObserver();
+            this.syncAddonUsers();
+
+            this._addonPollTimer = setInterval(() => {
+                this.initNativeChatObserver();
+                this.syncAddonUsers();
+            }, ADDON_USERS_POLL_MS);
+        },
+
+        /** Остановка поллинга и отключение MutationObserver (Chat.destroy). */
+        stopAddonUsersPolling() {
+            if (this._addonPollTimer) {
+                clearInterval(this._addonPollTimer);
+                this._addonPollTimer = null;
+            }
+            if (this._addonHlTimer) {
+                clearTimeout(this._addonHlTimer);
+                this._addonHlTimer = null;
+            }
+            if (this._addonObserver) {
+                try { this._addonObserver.disconnect(); } catch (e) {}
+                this._addonObserver = null;
+            }
+            this._addonObserved = null;
+        },
     };

@@ -27,6 +27,21 @@
         currentMineId: 'home',
         SevenTV: ChatEmotes.SevenTV, // тот же объект, что и const SevenTV
 
+        // v11.6.0g-3: ники, которые прямо сейчас играют с аддоном, в нижнем
+        // регистре. Источник — GET /users сервера пати; наполняет
+        // ChatNet.syncAddonUsers(). Пустой Set = подсветки нет.
+        addonUsers: new Set(),
+
+        /**
+         * Есть ли ник в списке пользователей аддона.
+         * Сервер отдаёт ники в нижнем регистре, а в сообщениях автор приходит
+         * как в игре — поэтому сравниваем нормализованно.
+         */
+        isAddonUser(nick) {
+            if (!nick || this.addonUsers.size === 0) return false;
+            return this.addonUsers.has(String(nick).trim().toLowerCase());
+        },
+
         get activeTab() {
             if (this.activeMainTab === 'mine' || this.activeMainTab === 'dm') return this.activeMainTab;
             return this.activeSubTab;
@@ -109,6 +124,11 @@
 
             this.syncMe();
             this.detectExternalChat();
+
+            // v11.6.0g-3: подсветка ников пользователей аддона. Поллинг сам
+            // шлёт POST /heartbeat (мы тоже в списке) и раз в 30 с обновляет
+            // набор из GET /users; сеть и наблюдатель — в chat-net.js.
+            this.startAddonUsersPolling();
         },
 
         // Детектор стороннего чата (Legion7TV, плагин ProCto_Fliy).
@@ -285,6 +305,18 @@
                 return;
             }
             this.popoutChat();
+        },
+
+        /**
+         * Остановка фоновых задач чата (ТЗ 11.6.0g-3).
+         *
+         * Вызывается из legionApi.shutdown() в main.js при перезапуске скрипта.
+         * Живой поток /api/live гасит сам shutdown (stopBackgroundLiveListener);
+         * здесь — только поллинг /heartbeat + /users, его таймер и
+         * MutationObserver нативной ленты чата.
+         */
+        destroy() {
+            this.stopAddonUsersPolling();
         },
     };
 

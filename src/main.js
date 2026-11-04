@@ -154,6 +154,10 @@
                     Chat._popoutWin = null;
                 }
                 Chat.stopBackgroundLiveListener();
+                // ТЗ 11.6.0g-3: гасим поллинг /heartbeat + /users и
+                // MutationObserver нативной ленты (иначе после перезапуска
+                // скрипта остались бы два интервала).
+                Chat.destroy();
                 document.querySelectorAll('.' + DOM_IDS.customModal + ', .sim-card, .' + DOM_IDS.chatWidget + ', .float-btns, .' + DOM_IDS.fabWrap + ', #' + DOM_IDS.playerHud + ', .' + DOM_IDS.hudLog + ', #' + DOM_IDS.hudLog + ', .hud-log, .custom-modal, .chat-widget, .legion-fab-wrap, #legion-player-hud').forEach(el => el.remove());
                 legionApi._booted = false;
             }
