@@ -93,6 +93,21 @@
             return this._gmGet(this.OWNER_KEY, false) === true;
         },
 
+        /**
+         * Локальный сброс пати: чистит хранилище и перерисовывает модалку в
+         * состояние «нет пати». Отдельного рендера не нужно: open() при
+         * пустом состоянии сам показывает _modalHtmlEmpty().
+         *
+         * Используется и при выходе (partyLeave), и при 401 от сервера
+         * (сессию убили киком или выходом владельца).
+         */
+        _resetLocalState() {
+            this._gmSet(this.STATE_KEY, null);
+            this._gmSet(this.OWNER_KEY, false);
+            // open() синхронно закроет текущую модалку и вставит новую.
+            this.open().catch((e) => dbg('[PARTY] перерисовать модалку не удалось:', e));
+        },
+
         /** База сервера без хвостовых слэшей. */
         getBaseUrl() {
             const saved = this._gmGet(this.BASE_URL_KEY, '');
@@ -223,9 +238,20 @@
                             return;
                         }
 
+                        // 401 на bearer-эндпоинте = сессия мертва (кик, выход
+                        // владельца, удалённая пати). POST /party и
+                        // POST /party/join идут с auth:false и сюда не попадают.
+                        // Локальное состояние чистим сразу, иначе клиент
+                        // застрянет в «пати», которой уже нет.
+                        if (res.status === 401 && auth) {
+                            this._resetLocalState();
+                            if (state) UI.showToast('Сессия истекла — вы вне пати', true);
+                        }
+
                         const err = new Error(this._errorText(res.status, payload, `HTTP ${res.status}`));
                         err.status = res.status;
                         err.code = payload?.error || null;
+                        err.sessionExpired = payload?.code === 'session_expired';
                         reject(err);
                     },
                     onerror: () => reject(new Error(`Сервер пати недоступен: ${url}`)),
@@ -292,34 +318,38 @@
         },
 
         /**
-         * DELETE /party/:id/leave, затем чистка локального состояния.
+         * DELETE /party/:id/leave, затем локальный сброс состояния.
          *
          * Владелец удаляет пати целиком (сервер вернёт deleted: "party"),
          * участник — только свою сессию (deleted: "self"). Если сервер
-         * недоступен, локальное состояние всё равно чистим, иначе клиент
-         * застрял бы в «пати», которой уже нет; пользователь получает
-         * предупреждение, что ник мог остаться занятым.
+         * недоступен, локальное состояние всё равно чистим через
+         * _resetLocalState(), иначе клиент застрял бы в «пати», которой уже
+         * нет; пользователь получает предупреждение, что ник мог остаться
+         * занятым.
          *
          * @returns {Promise<boolean>} true, если сервер подтвердил выход
          */
         async partyLeave() {
             const state = this._readState();
             let serverFailed = false;
+            let alreadyReset = false;
 
             if (state) {
                 try {
                     await this._request('DELETE', `/party/${encodeURIComponent(state.groupId)}/leave`);
                 } catch (e) {
+                    const status = Number(e?.status) || 0;
                     // 401/404 — сессии или пати уже нет (кик, чужой выход):
                     // локальная чистка как раз то, что нужно, без пугалки.
-                    const status = Number(e?.status) || 0;
-                    if (status !== 401 && status !== 404) serverFailed = true;
+                    // При 401 _request() уже вызвал _resetLocalState().
+                    if (status === 401) alreadyReset = true;
+                    else if (status !== 404) serverFailed = true;
                     dbg('[PARTY] leave на сервере не удался:', e);
                 }
             }
 
-            this._gmSet(this.STATE_KEY, null);
-            this._gmSet(this.OWNER_KEY, false);
+            // Единственная точка очистки: и здесь, и в 401-обработчике.
+            if (!alreadyReset) this._resetLocalState();
 
             if (serverFailed) {
                 UI.showToast(
@@ -670,9 +700,9 @@
             const leaveBtn = modal.querySelector('#party-leave-btn');
             leaveBtn?.addEventListener('click', () => this._runAction(leaveBtn, errorBox, async () => {
                 const serverOk = await this.partyLeave();
-                // При недоступном сервере partyLeave уже показал предупреждение.
+                // Модалку в «нет пати» уже перерисовал _resetLocalState().
+                // При недоступном сервере partyLeave показал предупреждение.
                 if (serverOk) UI.showToast('Вы вышли из пати');
-                await this.open();
             }));
         }
     };

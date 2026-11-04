@@ -32,7 +32,6 @@ import {
     removeSession,
     rotateToken
 } from './db.js';
-import { createHash, timingSafeEqual } from 'node:crypto';
 
 const PORT = Number(process.env.PORT || 8787);
 
@@ -48,12 +47,18 @@ const JOIN_WINDOW_MS = 60_000;
 // Тело запроса больше 4 КБ в этом API не бывает — отсекаем мусор.
 const MAX_BODY_BYTES = 4096;
 
-/** Ошибка, которую можно безопасно отдать клиенту как JSON. */
+/**
+ * Ошибка, которую можно безопасно отдать клиенту как JSON.
+ *
+ * extra — дополнительные поля тела ответа (например, {code:'session_expired'}
+ * у 401), чтобы клиент мог отличить протухшую сессию от прочих ошибок.
+ */
 class HttpError extends Error {
-    constructor(status, code, message) {
+    constructor(status, code, message, extra = null) {
         super(message);
         this.status = status;
         this.code = code;
+        this.extra = extra;
     }
 }
 
@@ -86,23 +91,6 @@ async function readJson(req) {
         throw new HttpError(400, 'bad_json', 'Тело запроса должно быть JSON-объектом');
     }
     return parsed;
-}
-
-/**
- * Сравнение секретов за постоянное время.
- *
- * timingSafeEqual требует буферы одинаковой длины, а длины токенов от
- * пользователя могут отличаться, поэтому сравниваем SHA-256 от значений:
- * хэш всегда 32 байта, и утечки длины через тайминг не происходит.
- *
- * TODO: REMOVE — после перехода join на поиск по UNIQUE-индексу
- * (POST /party/join) функция больше не вызывается. Оставлена по правилу
- * «не удалять код без разрешения»; удалить вместе с импортом node:crypto.
- */
-function safeEqual(a, b) {
-    const ha = createHash('sha256').update(String(a ?? ''), 'utf8').digest();
-    const hb = createHash('sha256').update(String(b ?? ''), 'utf8').digest();
-    return timingSafeEqual(ha, hb);
 }
 
 /**
@@ -156,14 +144,18 @@ function checkJoinRate(ip) {
 
 /** Читает Authorization: Bearer <sessionId> и возвращает сессию. */
 function authenticate(req) {
+    // code:'session_expired' — сигнал клиенту, что bearer больше не валиден
+    // (кик, выход владельца, удалённая пати): локальное состояние надо сбросить.
+    const expired = { code: 'session_expired' };
+
     const header = req.headers.get('authorization') || '';
     const match = /^Bearer\s+(\S+)$/i.exec(header.trim());
     if (!match) {
-        throw new HttpError(401, 'unauthorized', 'Нужен заголовок Authorization: Bearer <sessionId>');
+        throw new HttpError(401, 'unauthorized', 'Нужен заголовок Authorization: Bearer <sessionId>', expired);
     }
     const session = getSession(match[1]);
     if (!session) {
-        throw new HttpError(401, 'unauthorized', 'Сессия не найдена — войдите в пати заново');
+        throw new HttpError(401, 'unauthorized', 'Сессия не найдена — войдите в пати заново', expired);
     }
     return session;
 }
@@ -406,7 +398,7 @@ const server = Bun.serve({
             throw new HttpError(404, 'not_found', 'Неизвестный маршрут');
         } catch (err) {
             if (err instanceof HttpError) {
-                return json({ error: err.code, message: err.message }, err.status);
+                return json({ error: err.code, message: err.message, ...(err.extra || {}) }, err.status);
             }
             console.error('[legion-party] Необработанная ошибка:', err);
             return json({ error: 'internal', message: 'Внутренняя ошибка сервера' }, 500);
