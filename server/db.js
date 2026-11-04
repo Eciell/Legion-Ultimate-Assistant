@@ -487,7 +487,7 @@ export function getStates(partyId) {
  *
  * @param {string} partyId
  * @param {string} login
- * @param {string} type  quest_start|quest_end|death|heal|drop|system|chat
+ * @param {string} type  quest_start|quest_end|death|heal|heal_cast|damage|drop|system|chat
  * @param {string} text  1–500 символов
  * @returns {number} id вставленной строки
  */

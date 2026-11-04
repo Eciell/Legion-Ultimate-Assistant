@@ -6208,8 +6208,13 @@ const Players = {
     // POST /party/:id/state и перерисовывает список из GET /party/:id/state.
     // v11.6.0c: журнал боя. В том же тике сравниваем снимки /api/me и шлём
     // события в POST /party/:id/log (quest_start/quest_end/death/heal).
+    // v11.6.0c.1: добавлен тип damage («HP -N») — урон уменьшением hp.
+    // v11.6.0d: взаимный хил. В строке HP-панели у раненого союзника появляется
+    // кнопка «❤» -> _healMember() -> POST /c/<канал>/api/qact
+    // {k:'b', a:'sk', w:'лечение', t:<ник>}. Успех пишется в журнал типом
+    // heal_cast. Кнопка только если цель не мы, цель ранена и свой герой в
+    // походе (вне похода игра отклоняет запрос).
     // Под HP-панелью — блок «Журнал» с ленивой догрузкой GET .../log?since=.
-    // Хил (кнопка) — по-прежнему шаг 4+.
     // ============================================================
     const Party = {
         BASE_URL_KEY: 'lgPartyBaseUrl',
@@ -6228,7 +6233,16 @@ const Players = {
         LOG_LIMIT: 100,      // размер страницы догрузки (сервер: default 100, max 200)
         LOG_DOM_MAX: 500,    // столько же строк хранит сервер (trimLog, maxRows=500)
         // Цвет строки по типу события; остальные — обычный цвет текста панели.
-        LOG_COLORS: { death: '#ff5a7a', heal: '#5fd987', drop: '#ffcf6a', system: '#888' },
+        // damage — оранжевый, чтобы отличать урон от death (розовый);
+        // heal_cast (хил по кнопке, v11.6.0d) — тот же зелёный, что и heal.
+        LOG_COLORS: {
+            damage: '#ff9a5a',
+            heal_cast: '#5fd987',
+            death: '#ff5a7a',
+            heal: '#5fd987',
+            drop: '#ffcf6a',
+            system: '#888'
+        },
         LOG_DEFAULT_COLOR: '#e8e8ea',
 
         // Рантайм-поля. Объявлены явно, чтобы в отладке не ловить undefined.
@@ -6244,6 +6258,10 @@ const Players = {
         // Журнал боя: панель и состояние догрузки.
         LOG_PANEL_ID: `${RAND_ID}-party-log-panel`,
         _prevMe: null,       // предыдущий снимок /api/me для детектора событий
+        // v11.6.0d: логины, по которым прямо сейчас идёт POST /api/qact.
+        // Панель перерисовывается раз в 3 с, и без этого набора двойной клик
+        // (или клик сразу после рендера) отправил бы второй запрос лечения.
+        _healBusy: new Set(),
         _logOpen: true,      // панель развёрнута (свёрнутая не опрашивает сервер)
         _logBusy: false,     // GET/POST журнала уже в полёте
         _logSince: 0,        // nextSince с сервера (id последней известной строки)
@@ -6255,6 +6273,10 @@ const Players = {
         INPUT_STYLE: 'width:100%; box-sizing:border-box; background:#222; border:1px solid #444; color:#fff; padding:8px 10px; border-radius:6px; font-size:13px; outline:none;',
         BTN_STYLE: 'padding:8px 12px; background:#2a2030; border:1px solid #caa55c; color:#ffcf6a; border-radius:6px; cursor:pointer; font-size:13px; white-space:nowrap;',
         DANGER_BTN_STYLE: 'padding:4px 8px; background:#3a1f28; border:1px solid #ff5a7a; color:#ff5a7a; border-radius:5px; cursor:pointer; font-size:11px; white-space:nowrap;',
+        // Кнопка «❤» в строке HP-панели (v11.6.0d). pointer-events:auto обязателен:
+        // сама панель — pointer-events:none, чтобы не перехватывать клики по игре,
+        // но потомок с auto снова становится кликабельным.
+        HEAL_BTN_STYLE: 'flex:none; pointer-events:auto; padding:0 5px; background:#22352a; border:1px solid #5fd987; color:#5fd987; border-radius:4px; font-size:10px; line-height:15px; cursor:pointer;',
         MUTED_STYLE: 'font-size:11px; color:#888; text-transform:uppercase; margin-bottom:6px;',
 
         /* ---------------------------------------------------------- */
@@ -6708,7 +6730,10 @@ const Players = {
          */
         _ensurePanel() {
             let el = document.getElementById(this.PANEL_ID);
-            if (el && el.isConnected) return el;
+            if (el && el.isConnected) {
+                this._bindPanelClick(el);
+                return el;
+            }
 
             el = document.createElement('div');
             el.id = this.PANEL_ID;
@@ -6723,7 +6748,29 @@ const Players = {
                 'display:none', 'pointer-events:none'
             ].join(';') + ';';
             document.body.appendChild(el);
+            this._bindPanelClick(el);
             return el;
+        },
+
+        /**
+         * Делегированный клик по кнопке «Хил» (v11.6.0d).
+         *
+         * Слушатель живёт на самой панели, а не на кнопках: _renderPanel()
+         * переписывает innerHTML каждые 3 с, и отдельные обработчики текли бы/
+         * терялись. dataset-флаг не даёт навесить второй такой же слушатель,
+         * если панель уже существовала в DOM (перезапуск скрипта на странице).
+         */
+        _bindPanelClick(el) {
+            if (!el || el.dataset.partyHealBound === '1') return;
+            el.dataset.partyHealBound = '1';
+            el.addEventListener('click', (e) => {
+                const target = e.target;
+                const btn = (target && typeof target.closest === 'function')
+                    ? target.closest('[data-party-heal]')
+                    : null;
+                if (!btn || btn.disabled) return;
+                this._healMember(btn.getAttribute('data-party-heal'), btn);
+            });
         },
 
         _hidePanel() {
@@ -6734,14 +6781,24 @@ const Players = {
         /**
          * Перерисовка списка «ник: hp/maxHp» с цветовой полоской:
          * зелёный > 50%, жёлтый 20–50%, красный < 20% HP.
+         * v11.6.0d: у раненого союзника в строке есть кнопка «❤» (_healMember).
          * @param {Array<{login: string, hp: number, maxHp: number}>} states
          */
         _renderPanel(states) {
             const el = this._ensurePanel();
             const list = Array.isArray(states) ? states : [];
 
+            // Свой ник берём из локального состояния: GET /party/:id/state
+            // отдаёт только {login, hp, maxHp, updatedAt}, поля self там нет.
+            const selfLogin = String(this._readState()?.login || '').toLowerCase();
+            // Лечить можно только из похода — вне похода игра отклоняет запрос.
+            // _prevMe появляется после первого «живого» снимка /api/me в _hpTick();
+            // пока его нет, кнопку не рисуем (заведомо провальный запрос).
+            const inQuest = !!this._prevMe?.quest;
+
             const rows = list.map((s) => {
-                const login = Utils.escapeHtml(s.login || '?');
+                const nick = String(s.login || '?');
+                const login = Utils.escapeHtml(nick);
                 const rawMax = Math.max(0, Number(s.maxHp) || 0);
                 const rawHp = Math.max(0, Number(s.hp) || 0);
                 // hp не может быть больше максимума; при maxHp = 0 (битые
@@ -6751,10 +6808,29 @@ const Players = {
                 // Ровно 50% — уже не «зелёный» (ТЗ: зелёный строго > 50%).
                 const color = pct > 50 ? '#5fd987' : (pct < 20 ? '#ff5a7a' : '#ffcf6a');
 
+                // Кнопка «Хил» (ТЗ 11.6.0d) — только если: это не мы, цель
+                // ранена (hp < maxHp) и свой герой в походе.
+                const busy = this._healBusy.has(nick.toLowerCase());
+                const showHeal = inQuest
+                    && nick.toLowerCase() !== selfLogin
+                    && rawMax > 0
+                    && rawHp < rawMax;
+                const healStyle = busy
+                    ? `${this.HEAL_BTN_STYLE} cursor:default; opacity:0.6;`
+                    : this.HEAL_BTN_STYLE;
+                const healBtn = showHeal
+                    ? `<button type="button" data-party-heal="${login}"`
+                        + ` title="Лечить ${login}"${busy ? ' disabled' : ''}`
+                        + ` style="${healStyle}">${busy ? '...' : '❤'}</button>`
+                    : '';
+
                 return `<div style="margin-bottom:6px;">
-                    <div style="display:flex; justify-content:space-between; gap:8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
                         <span style="color:#ffcf6a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${login}:</span>
-                        <span style="color:#ccc; white-space:nowrap;">${hp}/${rawMax}</span>
+                        <span style="display:flex; align-items:center; gap:4px; white-space:nowrap;">
+                            <span style="color:#ccc;">${hp}/${rawMax}</span>
+                            ${healBtn}
+                        </span>
                     </div>
                     <div style="height:3px; margin-top:2px; border-radius:2px; background:#2a2030;">
                         <div style="height:3px; width:${pct.toFixed(1)}%; border-radius:2px; background:${color};"></div>
@@ -7020,7 +7096,8 @@ const Players = {
          *   • quest null -> объект => quest_start;
          *   • quest объект -> null => quest_end;
          *   • ghost false -> true ИЛИ hp стал 0 => death (ровно одно событие);
-         *   • hp вырос => heal с дельтой.
+         *   • hp вырос => heal с дельтой;
+         *   • hp уменьшился => damage с дельтой (v11.6.0c.1).
          *
          * prev === null (первый тик после входа в пати) событий не даёт:
          * состояние «до» неизвестно, а quest_start на входе в пати был бы ложным.
@@ -7052,6 +7129,18 @@ const Players = {
 
             if (prevHp !== null && hp !== null && hp > prevHp) {
                 events.push({ type: 'heal', text: `HP +${hp - prevHp}` });
+            }
+
+            // Урон (ТЗ 11.6.0c.1). Игра пошаговая: урон — дискретное событие,
+            // поэтому «HP -N» соответствует одному удару, спама быть не должно.
+            // Не логируем:
+            //   • prevHp === 0 — смерть/призрак уже описаны событием death;
+            //   • prev.ghost — первый тик после воскрешения: игра сбрасывает hp
+            //     с 0 на боевое значение, это не боевой урон.
+            // Летальный удар (hp > 0 -> 0) даёт damage + death: так в журнале
+            // видно и величину последнего удара, и сам факт гибели.
+            if (!prev.ghost && prevHp !== null && hp !== null && prevHp > hp && prevHp > 0) {
+                events.push({ type: 'damage', text: `HP -${prevHp - hp}` });
             }
 
             return events;
@@ -7138,6 +7227,86 @@ const Players = {
                 if (Number(e?.status) === 401) this.stopHpSync();
             } finally {
                 this._hpBusy = false;
+            }
+        },
+
+        /* ---------------------------------------------------------- */
+        /* Взаимный хил (шаг 4, v11.6.0d)                              */
+        /* ---------------------------------------------------------- */
+
+        /**
+         * Лечение союзника: POST /c/<канал>/api/qact.
+         *
+         * Тело — «кнопка» похода: k:'b' (button), a:'sk' (навык), w:'лечение'
+         * (подпись кнопки), t:<ник цели>. Запрос идёт с того же origin, что и
+         * страница игры, поэтому обычный fetch с credentials:'include' (CORS
+         * тут не при чём), а не Utils.fetchApi — это не /api/… путь пати.
+         *
+         * Ответ {ok:true, id} = «действие встало в очередь» (AGENTS.md §3):
+         * игра применит хил не сразу, поэтому HP-панель обновляем с задержкой
+         * 1 с, иначе GET state вернёт ещё старое HP.
+         *
+         * Ошибки игры (нет похода, кулдаун, цель умерла/вне зоны) приходят как
+         * {ok:false, error} или не-2xx — показываем их тостом через _runAction.
+         *
+         * @param {string} targetLogin ник цели из data-party-heal
+         * @param {HTMLButtonElement|null} button кнопка (блокируется на время запроса)
+         */
+        async _healMember(targetLogin, button) {
+            const target = String(targetLogin || '').trim();
+            if (!target) return;
+
+            const key = target.toLowerCase();
+            // Клик пришёл, пока предыдущий запрос по этой же цели в полёте:
+            // второй POST не нужен (панель перерисовывается раз в 3 с).
+            if (this._healBusy.has(key)) return;
+            this._healBusy.add(key);
+
+            try {
+                await this._runAction(button, null, async () => {
+                    try {
+                        const channel = this._channelLogin();
+                        if (!channel) throw new Error('игра не загрузилась');
+
+                        const url = `/c/${encodeURIComponent(channel)}/api/qact`;
+                        const body = { k: 'b', a: 'sk', w: 'лечение', t: target };
+
+                        const res = await fetch(url, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify(body)
+                        });
+                        const data = await res.json().catch(() => ({}));
+
+                        if (!res.ok || data.ok === false) {
+                            // Ошибка игры: нет похода, кулдаун, цель умерла и т.д.
+                            throw new Error(data.error || `HTTP ${res.status}`);
+                        }
+
+                        // Успех: пишем в журнал пати. Сбой журнала не отменяет хил
+                        // (_postLogEvent возвращает false, а не бросает).
+                        await this._postLogEvent('heal_cast', `Лечит ${target}`);
+
+                        // Принудительно обновить HP-панель через 1 с (ждём, пока
+                        // игра применит хил). _hpTick(), а не _runTick(): в этом
+                        // модуле такт синхронизации называется именно _hpTick().
+                        setTimeout(() => { this._hpTick(); }, 1000);
+                    } catch (err) {
+                        // Тост показывает сам _runAction (errorBox = null),
+                        // поэтому префикс из ТЗ добавляем ровно один раз — здесь.
+                        throw new Error(`Не удалось: ${err?.message || err}`);
+                    }
+                }, '...');
+            } finally {
+                this._healBusy.delete(key);
+                // Кнопку могла перерисовать панель, пока шёл запрос: busy-флаг
+                // уже снят, но узел в DOM вернём в исходный вид (в _runAction
+                // prevText мог оказаться '...' от busy-рендера).
+                if (button && button.isConnected) {
+                    button.disabled = false;
+                    button.textContent = '❤';
+                }
             }
         },
 

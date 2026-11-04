@@ -60,7 +60,8 @@ const MAX_BODY_BYTES = 4096;
 const MAX_HP = 1_000_000;
 
 // Журнал боя (v11.6.0c): только эти типы событий попадают в БД.
-const LOG_TYPES = ['quest_start', 'quest_end', 'death', 'heal', 'damage', 'drop', 'system', 'chat'];
+// heal_cast — хил по кнопке HP-панели (v11.6.0d), damage — урон (v11.6.0c.1).
+const LOG_TYPES = ['quest_start', 'quest_end', 'death', 'heal', 'heal_cast', 'damage', 'drop', 'system', 'chat'];
 const LOG_TYPES_SET = new Set(LOG_TYPES);
 const LOG_TEXT_MAX = 500;
 const LOG_DEFAULT_LIMIT = 100;
