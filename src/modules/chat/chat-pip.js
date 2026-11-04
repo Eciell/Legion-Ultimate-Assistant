@@ -450,6 +450,9 @@
                         try { existing.focus(); } catch (e) {}
                         this._popoutWin = existing;
                         this._pipDoc = existing.document;
+                        // v11.6.0h.2: PiP мог остаться от прошлого запуска
+                        // скрипта — правил подсветки в нём тогда нет.
+                        this._applyAddonStylesToPip(this._pipDoc);
                         // Если DOM чата в окне почему-то потерялся — собираем заново.
                         if (!this._pipRoot()) {
                             try { existing.document.body.appendChild(this._buildWidget(existing.document)); } catch (e) {}
@@ -490,6 +493,11 @@
                 try {
                     [...document.styleSheets].forEach(sheet => {
                         try {
+                            // v11.6.0h.2: простыню подсветки ников не копируем —
+                            // в PiP её генерирует _applyAddonStylesToPip().
+                            // Иначе в окне остался бы «снимок» старых правил,
+                            // который нельзя погасить тумблером.
+                            if (sheet.ownerNode && sheet.ownerNode.id === 'lg-addon-hl-styles') return;
                             if (sheet.href) {
                                 const link = win.document.createElement('link');
                                 link.rel = 'stylesheet';
@@ -507,6 +515,8 @@
 
                     document.querySelectorAll('style').forEach(s => {
                         try {
+                            // Наша простыня подсветки — тоже мимо (см. выше).
+                            if (s.id === 'lg-addon-hl-styles') return;
                             const style = win.document.createElement('style');
                             style.textContent = s.textContent;
                             win.document.head.appendChild(style);
@@ -557,6 +567,11 @@
                 } catch (e) {
                     dbg('Error copying styles to popout window:', e);
                 }
+
+                // v11.6.0h.2: CSS-подсветка ников для документа PiP-окна.
+                // Своя простыня нужна отдельно: document-правила из основной
+                // страницы на другой документ не действуют.
+                this._applyAddonStylesToPip(win.document);
 
                 // Размер смайлов 7TV задаётся CSS-переменной — переносим её в PiP.
                 SevenTV.applySize();
@@ -853,9 +868,12 @@
 
                 const authorNick = m.author || '';
                 const isAddon = this.isAddonUser(authorNick);
-                // data-legion-addon-badge — маркер для ChatNet.highlightNativeChat():
-                // по нему видно, что PiP-бейдж уже нарисован (второй ⚡ не нужен).
-                const addonBadge = isAddon ? `<span class="legion-addon-badge" data-legion-addon-badge="1" title="Пользователь Legion Ultimate">⚡</span>` : '';
+                // v11.6.0h.3: бейдж ⚡ рисует CSS — фоновая SVG-картинка из
+                // ChatNet._buildAddonStylesCss(). В HTML его нет вообще, поэтому
+                // textContent узла остаётся чистым ником (выделение и упоминание
+                // по клику работают как в обычном чате).
+                // Класс .legion-addon-user оставляем: по нему core/styles.js
+                // даёт свечение, а динамическая простыня — иконку и обводку.
                 const addonClass = isAddon ? ' legion-addon-user' : '';
                 // v11.6.0h: бирюзовый #00f0ff больше не подставляется — у ника
                 // остаётся его родной цвет класса (meta.color), а свечение
@@ -865,7 +883,7 @@
                 // перекрасило бы их в белый, потеряв и цвет, и оттенок свечения.
                 const authorColor = meta.color || '#ffcf6a';
                 const styleColor = `color: ${authorColor} !important; `;
-                const authorHtml = `${addonBadge}<span class="chat-author nick-clickable${addonClass}" data-nick="${Utils.escapeHtml(authorNick)}" title="Кликните, чтобы упомянуть" style="${styleColor}cursor: pointer;">${Utils.escapeHtml(authorNick)}</span>`;
+                const authorHtml = `<span class="chat-author nick-clickable${addonClass}" data-nick="${Utils.escapeHtml(authorNick)}" title="Кликните, чтобы упомянуть" style="${styleColor}cursor: pointer;">${Utils.escapeHtml(authorNick)}</span>`;
 
                 if (m.k === 'dm') {
                     div.innerHTML = `

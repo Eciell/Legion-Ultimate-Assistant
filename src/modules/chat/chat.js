@@ -45,9 +45,10 @@
          * как в игре — поэтому сравниваем нормализованно.
          */
         isAddonUser(nick) {
-            // Единый гейт подсветки (11.6.0g-4): выключенный тумблер отключает
-            // и нативный чат (ChatNet.highlightNativeChat), и PiP-рендер
-            // (ChatPip.renderMessages) — оба спрашивают именно этот метод.
+            // Единый гейт подсветки. С v11.6.0h.2 нативную ленту красит CSS
+            // (ChatNet._buildAddonStylesCss смотрит на addonHighlight сам),
+            // а этот метод спрашивает PiP-рендер — по нему он ставит класс
+            // .legion-addon-user (свечение) на .chat-author.
             if (this.addonHighlight === false) return false;
             if (!nick || this.addonUsers.size === 0) return false;
             return this.addonUsers.has(String(nick).trim().toLowerCase());
@@ -106,15 +107,12 @@
         },
 
         /**
-         * Тумблер «⚡ Подсветка ников Legion» (ТЗ 11.6.0g-4, 11.6.0h).
+         * Тумблер «⚡ Подсветка ников Legion» (ТЗ 11.6.0g-4, 11.6.0h.2).
          *
-         * Сохраняем выбор и сразу перерисовываем уже отрисованное: без этого
-         * выключенная подсветка жила бы до следующего тика поллинга (30 с),
-         * а классы/бейджи ⚡ оставались бы на экране.
-         *
-         * highlightNativeChat() — снимает/навешивает классы в нативной ленте
-         * и синхронизирует PiP (idempotent); renderMessages() перерисовывает
-         * открытый PiP-чат, чтобы убрать/вернуть бейджи ⚡.
+         * Сохраняем выбор и сразу перегенерируем CSS: пустая простыня снимает
+         * подсветку со всех уже отрисованных ников мгновенно, без обхода DOM.
+         * renderMessages() нужен только PiP-чату — там класс .legion-addon-user
+         * ставит сам рендер.
          */
         setAddonHighlight(val) {
             this.addonHighlight = !!val;
@@ -129,22 +127,11 @@
                 try { localStorage.removeItem('LEGION_ADDON_USERS_CACHE'); } catch (e) {}
             }
 
-            // Маркеры data-legion-addon-applied хранят последнее применённое
-            // состояние: при переключении тумблера их надо сбросить, иначе
-            // highlightNativeChat() сочтёт ники «уже обработанными» и
-            // переключение не даст эффекта до следующей перерисовки ленты.
-            // Селектор совпадает с тем, что обходит highlightNativeChat().
-            document.querySelectorAll('.cy-chat-l [data-nick], .cy-chat-p [data-nick]').forEach((el) => {
-                delete el.dataset.legionAddonApplied;
-            });
-            if (this._pipDoc) {
-                this._pipDoc.querySelectorAll('.chat-author[data-nick]').forEach((el) => {
-                    delete el.dataset.legionAddonApplied;
-                });
-            }
-
-            this.highlightNativeChat(document);
-            if (this.isOpen()) this.renderMessages();
+            // ТЗ 11.6.0h.2: переключение = одна перезапись <style>. Маркеров
+            // data-legion-addon-applied в DOM больше нет — сбрасывать нечего.
+            this._applyAddonStyles();
+            if (this._pipDoc) this._applyAddonStylesToPip(this._pipDoc);
+            if (this.isOpen && this.isOpen()) this.renderMessages();
         },
 
         // v11.5.3: встроенный виджет чата удалён — его заменил сторонний плагин
@@ -195,15 +182,13 @@
 
             // v11.6.0g-3: подсветка ников пользователей аддона. Поллинг сам
             // шлёт POST /heartbeat (мы тоже в списке) и раз в 30 с обновляет
-            // набор из GET /users; сеть и наблюдатель — в chat-net.js.
+            // набор из GET /users; сеть и CSS-генератор — в chat-net.js.
             this.startAddonUsersPolling();
 
-            // Прогнать уже отрисованные сообщения (на случай, если чат успел
-            // отрисоваться до нас): подсветка из кэша навешивается сразу, без
-            // ожидания первого ответа /users.
-            if (typeof this.highlightNativeChat === 'function') {
-                this.highlightNativeChat(document);
-            }
+            // ТЗ 11.6.0h.2: подсветка из кэша применяется CSS-правилами, а не
+            // классами в DOM. Браузер применит их к уже отрисованной ленте в
+            // первом же кадре — ни флэша, ни ожидания ответа /users.
+            if (typeof this._applyAddonStyles === 'function') this._applyAddonStyles();
         },
 
         // Детектор стороннего чата (Legion7TV, плагин ProCto_Fliy).
@@ -387,8 +372,8 @@
          *
          * Вызывается из legionApi.shutdown() в main.js при перезапуске скрипта.
          * Живой поток /api/live гасит сам shutdown (stopBackgroundLiveListener);
-         * здесь — только поллинг /heartbeat + /users, его таймер и
-         * MutationObserver нативной ленты чата.
+         * здесь — только таймер поллинга /heartbeat + /users. DOM-наблюдатель
+         * нативной ленты удалён в 11.6.0h.2 (подсветку рисует CSS).
          */
         destroy() {
             this.stopAddonUsersPolling();

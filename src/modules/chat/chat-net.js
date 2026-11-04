@@ -603,10 +603,8 @@
         /* ---------------------------------------------------------- */
 
         // Таймер поллинга /heartbeat + /users.
+        // ТЗ 11.6.0h.2: DOM-наблюдатель удалён — подсветку рисует CSS.
         _addonPollTimer: null,
-        // MutationObserver нативной ленты и узел, который он слушает.
-        _addonObserver: null,
-        _addonObserved: null,
 
         /**
          * База сервера аддона: сначала адрес пати (Party.getBaseUrl), затем
@@ -702,7 +700,12 @@
                     }));
                 } catch (e) {}
 
-                this.highlightNativeChat();
+                // ТЗ 11.6.0h.2: вместо обхода DOM и DOM-наблюдателя — просто
+                // перегенерируем CSS-правила под новый список. Браузер применит
+                // их к уже существующим <b data-nick> и к тем, которые игра
+                // вставит позже, поэтому флэша при перерисовке ленты нет.
+                this._applyAddonStyles();
+                if (this._pipDoc) this._applyAddonStylesToPip(this._pipDoc);
                 // Свой PiP-чат перерисовываем только при изменении состава:
                 // innerHTML каждые 30 с сбивал бы выделение текста у читающего.
                 if (changed && this.isOpen()) this.renderMessages();
@@ -711,155 +714,112 @@
             }
         },
 
+        /* ---------------------------------------------------------- */
+        /* CSS-подсветка (ТЗ 11.6.0h.2)                               */
+        /* ---------------------------------------------------------- */
+        // DOM-наблюдатель, навешивание класса и вставка бейджа из JS удалены.
+        // Вместо этого на каждый список /users генерируется одна CSS-простыня:
+        // браузер сам применяет правила к любому <b data-nick="...">, даже если
+        // игра полностью пересоздала DOM. Класс навешивать не нужно, поэтому
+        // перерисовка ленты не может дать флэш «без подсветки».
+
         /**
-         * Красит ники пользователей аддона в нативном чате игры.
-         *
-         * Нативная лента рисует автора как <b data-nick="login"> внутри
-         * .cy-chat-l (reference/LegionFrontSRC/lib/site-chat.js, chatLi).
-         * Свой inline color мы НЕ перебиваем (ТЗ 11.6.0h): цвет остаётся
-         * игровым, а «аддонность» показывают класс .legion-addon-user
-         * (свечение через currentColor) и бейдж ⚡.
-         *
-         * @param {Document|Element} [root] где искать ники (по умолчанию document)
+         * Экранирование значения для строкового селектора атрибута.
+         * Обратный слэш обязателен первым: иначе он «съест» следующую кавычку.
          */
-        highlightNativeChat(root = document) {
-            const scope = (root && typeof root.querySelectorAll === 'function') ? root : document;
-            const nodes = scope.querySelectorAll('.cy-chat-l [data-nick], .cy-chat-p [data-nick]');
-
-            nodes.forEach((el) => this._syncAddonNickState(el, true));
-
-            // PiP-чат живёт в другом документе, поэтому document-проход его не
-            // задевает. Класс и бейдж там ставит сам renderMessages() при сборке
-            // HTML — здесь только синхронизируем класс/маркер, иначе вставка ⚡
-            // дала бы второй бейдж.
-            const pipDoc = this._pipDoc;
-            if (pipDoc && pipDoc !== scope && typeof pipDoc.querySelectorAll === 'function') {
-                pipDoc.querySelectorAll('.chat-author[data-nick]').forEach((el) => this._syncAddonNickState(el, false));
-            }
+        _cssAttrValue(nick) {
+            return String(nick).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         },
 
         /**
-         * Идемпотентно приводит ник к нужному состоянию подсветки.
+         * Собирает CSS для текущего набора addonUsers.
+         * Один источник и для основной страницы, и для PiP-документа.
          *
-         * Маркер data-legion-addon-applied (data-атрибут, а не поле объекта)
-         * переживает перерисовку самого узла и хранит последнее применённое
-         * состояние. Если оно совпадает с желаемым — узел не трогаем вообще:
-         * именно повторные classList.add/remove на каждом проходе (таймер 30 с
-         * + MutationObserver) и давали флэш при перерисовках ленты.
-         *
-         * @param {Element} el ник (b в нативной ленте либо .chat-author в PiP)
-         * @param {boolean} withBadge ставить ли бейдж ⚡ (в PiP его рисует рендер)
+         * Флаг `i` в [data-nick="..." i] обязателен: addonUsers хранится в
+         * нижнем регистре (сервер отдаёт логины нормализованными), а в
+         * разметке игры ник стоит как в профиле — например, «BlackWolf».
+         * Без `i` селектор не совпал бы и подсветки не было бы вообще.
          */
-        _syncAddonNickState(el, withBadge) {
-            const nick = String(el.getAttribute('data-nick') || '').trim().toLowerCase();
-            if (!nick) return;
+        _buildAddonStylesCss() {
+            const nicks = Array.from(this.addonUsers || []);
+            if (nicks.length === 0) return '';
 
-            const shouldBeAddon = this.isAddonUser(nick);
-            const wantState = shouldBeAddon ? '1' : '0';
-            if (el.dataset.legionAddonApplied === wantState) return; // уже в нужном состоянии
-            el.dataset.legionAddonApplied = wantState;
+            const esc = (n) => this._cssAttrValue(n);
+            // Нативная лента игры: <b data-nick="login"> (reference/.../site-chat.js).
+            const nativeSel = nicks.map(n => `b[data-nick="${esc(n)}" i]`).join(',');
+            // Наш PiP-чат: <span class="chat-author" data-nick="login">.
+            const pipSel = nicks.map(n => `.chat-author[data-nick="${esc(n)}" i]`).join(',');
 
-            if (!shouldBeAddon) {
-                // Ник вышел из окна онлайна (или подсветку выключили) —
-                // снимаем класс и осиротевший бейдж.
-                el.classList.remove('legion-addon-user');
-                const prev = el.previousElementSibling;
-                if (prev && prev.dataset && prev.dataset.legionAddonBadge === '1') prev.remove();
+            // v11.6.0h.3: «⚡» — не текст, а фоновая SVG-картинка. Псевдоэлемент
+            // ::before добавлял символ в textContent узла, из-за чего игра
+            // читала ник как "⚡nick": ломалось выделение текста и упоминание
+            // по клику. background-image в разметку вообще не вмешивается —
+            // textContent остаётся ровно "nick".
+            // В data URI диез обязан быть %23, иначе браузер обрежет url по «#».
+            return `
+            ${nativeSel} {
+                text-shadow: 0 0 4px currentColor, 0 0 10px currentColor !important;
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 16" width="12" height="16"><path d="M7 0L0 9h5v7l7-9H7z" fill="%23ffcf6a"/></svg>');
+                background-repeat: no-repeat;
+                background-position: left center;
+                background-size: 10px 13px;
+                padding-left: 14px !important;
+            }
+            ${pipSel} {
+                text-shadow: 0 0 4px currentColor, 0 0 10px currentColor !important;
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 16" width="12" height="16"><path d="M7 0L0 9h5v7l7-9H7z" fill="%23ffcf6a"/></svg>');
+                background-repeat: no-repeat;
+                background-position: left center;
+                background-size: 10px 13px;
+                padding-left: 14px !important;
+            }
+        `;
+        },
+
+        /**
+         * Создаёт/обновляет <style id="lg-addon-hl-styles"> в основной странице.
+         * Одна запись textContent — браузер пересчитывает правила ровно один
+         * раз за тик поллинга, а не на каждом узле ленты.
+         */
+        _applyAddonStyles() {
+            const on = this.addonHighlight !== false;
+            let style = document.getElementById('lg-addon-hl-styles');
+            if (!on || this.addonUsers.size === 0) {
+                // Тумблер выключен либо список пуст — простыня пустая,
+                // подсветка исчезает мгновенно на всех уже отрисованных никах.
+                if (style) style.textContent = '';
                 return;
             }
-
-            el.classList.add('legion-addon-user');
-            if (!withBadge) return;
-
-            // Бейдж ставим ровно один раз: нас зовёт и таймер, и MutationObserver —
-            // второй ⚡ перед ником был бы дублем.
-            const prev = el.previousElementSibling;
-            if (prev && prev.dataset && prev.dataset.legionAddonBadge === '1') return;
-
-            // Наши собственные вставки не должны считаться «перерисовкой ленты».
-            this._suppressObserver = true;
-            const badge = (el.ownerDocument || document).createElement('span');
-            badge.className = 'legion-addon-badge';
-            badge.dataset.legionAddonBadge = '1';
-            badge.title = 'Пользователь Legion Ultimate';
-            badge.textContent = '⚡';
-            if (el.parentNode) el.parentNode.insertBefore(badge, el);
-            this._suppressObserver = false;
-        },
-
-        /**
-         * MutationObserver на нативную ленту: chatRender() переписывает
-         * innerHTML при каждом новом сообщении, и наши классы/бейджи
-         * исчезают — наблюдатель возвращает их после перерисовки.
-         *
-         * Игра пересоздаёт .cy-chat при переходе город <-> шахта, поэтому
-         * метод переподключает наблюдателя, если узел сменился. Вызывается
-         * из startAddonUsersPolling() на каждом тике.
-         */
-        initNativeChatObserver() {
-            const list = document.querySelector('.cy-chat-l');
-            if (!list) return; // ленты нет (другая страница) — ждём следующего тика
-            if (this._addonObserver && this._addonObserved === list) return;
-
-            if (this._addonObserver) {
-                try { this._addonObserver.disconnect(); } catch (e) {}
-                this._addonObserver = null;
+            if (!style) {
+                style = document.createElement('style');
+                style.id = 'lg-addon-hl-styles';
+                (document.head || document.documentElement).appendChild(style);
             }
-
-            this._addonObserved = list;
-            this._addonObserver = new MutationObserver((mutations) => {
-                // Свои вставки/удаления бейджей не должны запускать повторный
-                // проход (иначе бесконечная рекурсия). Флаг ставится на время
-                // правки DOM в _syncAddonNickState(); записи наблюдатель отдаёт
-                // уже после возврата из него, поэтому рабочая защита — именно
-                // фильтр по содержимому пачки.
-                if (this._suppressObserver) return;
-
-                // ТЗ 11.6.0h.1: никакого debounce. Колбэк MutationObserver —
-                // это микротаск, он выполняется ДО paint, поэтому класс ⚡ и
-                // свечение попадают в тот же кадр, что и сам ник. Флэша нет
-                // не потому, что «быстро», а потому что отрисовать состояние
-                // без класса браузер физически не успевает.
-                mutations.forEach((mut) => {
-                    if (this._isBadgeOnlyMutation(mut)) return;
-                    if (!mut.addedNodes) return;
-                    mut.addedNodes.forEach((node) => this._highlightSubtree(node));
-                });
-            });
-            this._addonObserver.observe(list, { childList: true, subtree: true });
+            style.textContent = this._buildAddonStylesCss();
         },
 
         /**
-         * Синхронно обрабатывает добавленное поддерево: сам узел (если это ник)
-         * и все ники внутри. Ровно те же элементы, что обходит
-         * highlightNativeChat(), только без повторного querySelector по всей
-         * ленте — так новый ник обрабатывается в том же микротаске.
+         * То же самое для документа PiP-окна: у него свой DOM и свои стили.
+         * Вызывать после создания PiP-окна и при каждом обновлении addonUsers.
          *
-         * @param {Node} node узел из addedNodes MutationObserver
+         * @param {Document} pipDoc документ PiP-окна (Chat._pipDoc)
          */
-        _highlightSubtree(node) {
-            if (!node || node.nodeType !== 1) return; // текст/комментарии не интересны
-
-            // Сам добавленный узел может быть ником (<b data-nick>).
-            if (node.dataset && node.dataset.nick) this._syncAddonNickState(node, true);
-
-            if (typeof node.querySelectorAll === 'function') {
-                node.querySelectorAll('[data-nick]').forEach((el) => this._syncAddonNickState(el, true));
+        _applyAddonStylesToPip(pipDoc) {
+            if (!pipDoc || !pipDoc.head) return;
+            const on = this.addonHighlight !== false;
+            let style = typeof pipDoc.getElementById === 'function'
+                ? pipDoc.getElementById('lg-addon-hl-styles')
+                : null;
+            if (!on || this.addonUsers.size === 0) {
+                if (style) style.textContent = '';
+                return;
             }
-        },
-
-        /**
-         * Запись MutationObserver касается только наших бейджей ⚡?
-         * Такие мутации не требуют повторного прохода по ленте — именно они
-         * и вызывали лишние пересчёты (а с ними флэш) после каждой вставки.
-         */
-        _isBadgeOnlyMutation(mut) {
-            const isBadge = (node) => !!(node && node.nodeType === 1
-                && node.dataset && node.dataset.legionAddonBadge === '1');
-            const added = mut.addedNodes ? Array.from(mut.addedNodes) : [];
-            const removed = mut.removedNodes ? Array.from(mut.removedNodes) : [];
-            if (added.length === 0 && removed.length === 0) return false;
-            return added.every(isBadge) && removed.every(isBadge);
+            if (!style) {
+                style = pipDoc.createElement('style');
+                style.id = 'lg-addon-hl-styles';
+                pipDoc.head.appendChild(style);
+            }
+            style.textContent = this._buildAddonStylesCss();
         },
 
         /** Запуск поллинга /heartbeat + /users (раз в 30 с, идемпотентно). */
@@ -867,25 +827,20 @@
             if (this._addonPollTimer) return;
 
             // Первый тик сразу: ждать полминуты до первой подсветки незачем.
-            this.initNativeChatObserver();
+            // Наблюдателя за DOM здесь больше нет (ТЗ 11.6.0h.2) — подсветку
+            // рисует CSS, который syncAddonUsers() перегенерирует сам.
             this.syncAddonUsers();
 
             this._addonPollTimer = setInterval(() => {
-                this.initNativeChatObserver();
                 this.syncAddonUsers();
             }, ADDON_USERS_POLL_MS);
         },
 
-        /** Остановка поллинга и отключение MutationObserver (Chat.destroy). */
+        /** Остановка поллинга (Chat.destroy). DOM-наблюдатель удалён — гасить нечего. */
         stopAddonUsersPolling() {
             if (this._addonPollTimer) {
                 clearInterval(this._addonPollTimer);
                 this._addonPollTimer = null;
             }
-            if (this._addonObserver) {
-                try { this._addonObserver.disconnect(); } catch (e) {}
-                this._addonObserver = null;
-            }
-            this._addonObserved = null;
         },
     };
