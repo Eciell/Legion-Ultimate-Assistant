@@ -19,6 +19,11 @@
     // ТОЛЬКО в момент клика «Создать»/«Присоединиться».
     // v11.6.0a.2: ник и HP берутся из GET /api/me (user.login / hero.hpNow),
     // LG_CH.login — только фолбэк: в песочнице он бывает пустым.
+    // v11.6.0a.3: пустое состояние рисуется синхронно, поэтому при первом
+    // открытии «Вы: …» показывал фолбэк LG_CH.login (логин Twitch-канала).
+    // Теперь open() дозапрашивает /api/me в фоне и обновляет ТОЛЬКО текстовый
+    // узел ника (.party-self-nick): полная перерисовка сбила бы фокус в поле
+    // inviteToken.
     // v11.6.0b: HP-панель. Раз в 3 с (только когда мы в пати) клиент шлёт
     // POST /party/:id/state и перерисовывает список из GET /party/:id/state.
     // Журнал и хил — по-прежнему шаг 3+.
@@ -40,6 +45,9 @@
         _hpTimer: null,      // setInterval HP-синхронизации
         _hpBusy: false,      // тик уже в работе (медленная сеть)
         _cachedLogin: '',    // последний ник из /api/me — для синхронного рендера
+        // Промис фонового /api/me для .party-self-nick: повторные open() не
+        // должны плодить одинаковые запросы, пока первый ещё в полёте.
+        _selfNickFetch: null,
         // id панели с префиксом RAND_ID: чужие page-стили не должны её зацепить.
         PANEL_ID: `${RAND_ID}-party-hp-panel`,
 
@@ -698,6 +706,9 @@
                 const modal = UI.showModal(this._modalHtmlEmpty(), { compact: true });
                 if (!modal) return;
                 this._bindEmpty(modal);
+                // Ник отрисован синхронно (мог уйти в фолбэк LG_CH.login):
+                // дозапрашиваем /api/me в фоне и правим только текстовый узел.
+                this._refreshSelfNick(modal);
                 return;
             }
 
@@ -708,6 +719,52 @@
             // сразу, а members может ответить 401 (сессию убили) или упасть
             // по сети. Ошибка не должна ломать само окно.
             this._refreshMembers(modal).catch((e) => dbg('[PARTY] members:', e));
+        },
+
+        /**
+         * Догоняющий запрос ника для пустого состояния (ТЗ 11.6.0a.3).
+         *
+         * _modalHtmlEmpty() рендерится синхронно, а _fetchMe() асинхронный:
+         * при первом открытии _cachedLogin пуст, поэтому «Вы: …» показывал
+         * _channelLogin() — логин Twitch-канала вместо игрового ника. Здесь
+         * запускаем фоновый GET /api/me и, когда он ответит, меняем ТОЛЬКО
+         * textContent узла .party-self-nick.
+         *
+         * Полная перерисовка модалки запрещена: пользователь может уже
+         * печатать inviteToken, innerHTML-рендер собьёт фокус и каретку.
+         *
+         * Пока запрос в полёте, повторный open() его переиспользует
+         * (_selfNickFetch), а если ник уже кэширован — сеть не трогаем.
+         *
+         * @param {HTMLElement|null} modal окно, отрисованное в open()
+         */
+        _refreshSelfNick(modal = null) {
+            if (this._cachedLogin) return;     // ник уже известен — фетч не нужен
+            if (this._selfNickFetch) return;   // запрос уже в полёте
+
+            this._selfNickFetch = this._fetchMe()
+                .then((me) => {
+                    const nick = String(me?.login || '').trim();
+                    // И /api/me, и LG_CH.login молчат: оставляем то, что
+                    // отрисовано («—» или прежний фолбэк), не стираем ник.
+                    if (!nick) return;
+
+                    // Окно могли закрыть — тогда обновлять нечего (узла нет).
+                    // Если его успели открыть заново, новый рендер тоже
+                    // показал фолбэк, поэтому берём актуальный узел из DOM.
+                    const el = (modal && modal.isConnected)
+                        ? modal.querySelector('.party-self-nick')
+                        : document.querySelector('.party-self-nick');
+                    if (el) el.textContent = nick;
+                })
+                .catch((e) => {
+                    // _fetchMe() ловит свои ошибки сам (фолбэк LG_CH.login);
+                    // сюда попадаем только при неожиданном сбое внутри.
+                    console.warn('[PARTY] фоновый /api/me не ответил:', e);
+                })
+                .finally(() => {
+                    this._selfNickFetch = null;
+                });
         },
 
         /** Обрезка groupId для заголовка: первые 8 символов + «…». */
@@ -764,7 +821,7 @@
                         <div style="${this.MUTED_STYLE}">Создать пати</div>
                         <div style="display:flex; align-items:center; gap:8px;">
                             <div style="flex:1; min-width:0; font-size:13px; color:#ccc; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                                Вы: <b style="color:#ffcf6a;">${safeNick}</b>
+                                Вы: <b class="party-self-nick" style="color:#ffcf6a;">${safeNick}</b>
                             </div>
                             <button id="party-create-btn" style="${this.BTN_STYLE}">Создать</button>
                         </div>
