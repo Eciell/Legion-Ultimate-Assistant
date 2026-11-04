@@ -26,7 +26,10 @@
     // inviteToken.
     // v11.6.0b: HP-панель. Раз в 3 с (только когда мы в пати) клиент шлёт
     // POST /party/:id/state и перерисовывает список из GET /party/:id/state.
-    // Журнал и хил — по-прежнему шаг 3+.
+    // v11.6.0c: журнал боя. В том же тике сравниваем снимки /api/me и шлём
+    // события в POST /party/:id/log (quest_start/quest_end/death/heal).
+    // Под HP-панелью — блок «Журнал» с ленивой догрузкой GET .../log?since=.
+    // Хил (кнопка) — по-прежнему шаг 4+.
     // ============================================================
     const Party = {
         BASE_URL_KEY: 'lgPartyBaseUrl',
@@ -41,6 +44,13 @@
         // inviteToken = 16 случайных байт = 32 hex-символа (server/db.js).
         INVITE_RE: /^[a-f0-9]{32}$/i,
 
+        // Журнал боя (ТЗ 11.6.0c).
+        LOG_LIMIT: 100,      // размер страницы догрузки (сервер: default 100, max 200)
+        LOG_DOM_MAX: 500,    // столько же строк хранит сервер (trimLog, maxRows=500)
+        // Цвет строки по типу события; остальные — обычный цвет текста панели.
+        LOG_COLORS: { death: '#ff5a7a', heal: '#5fd987', drop: '#ffcf6a', system: '#888' },
+        LOG_DEFAULT_COLOR: '#e8e8ea',
+
         // Рантайм-поля. Объявлены явно, чтобы в отладке не ловить undefined.
         _hpTimer: null,      // setInterval HP-синхронизации
         _hpBusy: false,      // тик уже в работе (медленная сеть)
@@ -50,6 +60,15 @@
         _selfNickFetch: null,
         // id панели с префиксом RAND_ID: чужие page-стили не должны её зацепить.
         PANEL_ID: `${RAND_ID}-party-hp-panel`,
+
+        // Журнал боя: панель и состояние догрузки.
+        LOG_PANEL_ID: `${RAND_ID}-party-log-panel`,
+        _prevMe: null,       // предыдущий снимок /api/me для детектора событий
+        _logOpen: true,      // панель развёрнута (свёрнутая не опрашивает сервер)
+        _logBusy: false,     // GET/POST журнала уже в полёте
+        _logSince: 0,        // nextSince с сервера (id последней известной строки)
+        _logReady: false,    // первичная загрузка (limit=100) выполнена
+        _logBodyEl: null,    // .party-log-body — кэш, чтобы не искать каждый тик
 
         // Инлайн-стили: у модалок аддона нет готовых классов для форм,
         // а заводить их в core/styles.js ради одного окна — лишнее.
@@ -170,13 +189,19 @@
          * (ТЗ 11.6.0a.2). hp/maxHp в этом случае null, и HP-тик просто не
          * отправляет стейт, но панель продолжает работать по данным сервера.
          *
-         * @returns {Promise<{login: string, hp: number|null, maxHp: number|null}>}
+         * v11.6.0c: сюда же добавлены quest (ql из /api/me) и ghost — они
+         * нужны детектору событий журнала. live=false означает фолбэк:
+         * сравнивать такой снимок с предыдущим нельзя, иначе пропавший
+         * /api/me выглядел бы как «вышел из похода» + «воскрес».
+         *
+         * @returns {Promise<{login: string, hp: number|null, maxHp: number|null,
+         *                    quest: object|null, ghost: boolean, live: boolean}>}
          */
         async _fetchMe() {
             const channel = this._channelLogin();
             if (!channel) {
                 console.warn('[PARTY] LG_CH.login недоступен — /api/me не запросить');
-                return { login: '', hp: null, maxHp: null };
+                return { login: '', hp: null, maxHp: null, quest: null, ghost: false, live: false };
             }
 
             try {
@@ -194,17 +219,27 @@
                 // (docs/API.md, §GET /api/me; в игре hpNow ?? stats.hp).
                 const hp = Number(data.hero?.hpNow);
                 const maxHp = Number(data.hero?.stats?.hp);
+
+                // ql — объект состояния похода (docs/API.md, §ql). При on:false
+                // похода нет, поэтому нормализуем в null: детектору журнала
+                // нужен простой признак «был/не был», а не форма снимка.
+                const ql = data.ql;
+                const quest = (ql && typeof ql === 'object' && ql.on !== false) ? ql : null;
+
                 const me = {
                     login: String(login),
                     hp: Number.isFinite(hp) ? hp : null,
-                    maxHp: Number.isFinite(maxHp) ? maxHp : null
+                    maxHp: Number.isFinite(maxHp) ? maxHp : null,
+                    quest,
+                    ghost: data.hero?.ghost === true,
+                    live: true
                 };
                 this._cachedLogin = me.login;
                 return me;
             } catch (e) {
                 console.warn('[PARTY] /api/me недоступен, берём LG_CH.login:', e);
                 this._cachedLogin = channel;
-                return { login: channel, hp: null, maxHp: null };
+                return { login: channel, hp: null, maxHp: null, quest: null, ghost: false, live: false };
             }
         },
 
@@ -551,6 +586,220 @@
                 + ' text-transform:uppercase; color:#888; margin-bottom:6px;">Пати · HP</div>'
                 + (rows || '<div style="color:#888;">Нет данных</div>');
             el.style.display = 'block';
+
+            // Журнал живёт отдельным блоком под HP-панелью (она не
+            // flex-column), поэтому позицию пересчитываем после каждого рендера.
+            this._syncLogPanel();
+        },
+
+        /* ---------------------------------------------------------- */
+        /* Журнал боя (шаг 3, v11.6.0c)                               */
+        /* ---------------------------------------------------------- */
+
+        /**
+         * Скрыть и очистить журнал. Вызывается из stopHpSync() — то есть на
+         * leave и на 401: список прошлой пати после выхода показывать нельзя.
+         */
+        _hideLogPanel() {
+            const el = document.getElementById(this.LOG_PANEL_ID);
+            if (el) el.style.display = 'none';
+
+            this._clearLog();
+            this._logSince = 0;
+            this._logReady = false;
+            this._prevMe = null;
+        },
+
+        /**
+         * Панель журнала создаётся лениво: отдельный fixed-блок под HP-панелью
+         * с отступом 8px (ТЗ 11.6.0c). Живёт до перезагрузки страницы.
+         */
+        _ensureLogPanel() {
+            let el = document.getElementById(this.LOG_PANEL_ID);
+            if (el && el.isConnected) {
+                this._logBodyEl = el.querySelector('.party-log-body');
+                return el;
+            }
+
+            el = document.createElement('div');
+            el.id = this.LOG_PANEL_ID;
+            el.className = 'party-log-panel';
+            el.style.cssText = [
+                'position:fixed', 'right:20px', 'top:120px', 'z-index:9999',
+                'min-width:150px', 'max-width:260px', 'box-sizing:border-box',
+                'background:rgba(20,16,26,0.92)', 'border:1px solid #3a3040',
+                'border-radius:10px', 'padding:8px 10px',
+                'box-shadow:0 6px 18px rgba(0,0,0,0.45)',
+                'font:12px/1.4 system-ui,"Segoe UI",sans-serif', 'color:#e8e8ea',
+                'display:none', 'pointer-events:auto'
+            ].join(';') + ';';
+
+            // Заголовок статичный — innerHTML допустим. Строки событий
+            // вставляются только через textContent (текст от других игроков).
+            el.innerHTML = '<div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">'
+                + '<span style="font-size:10px; letter-spacing:0.06em; text-transform:uppercase; color:#888;">Журнал</span>'
+                + '<button type="button" class="party-log-toggle" title="Свернуть журнал"'
+                + ' style="background:none; border:none; padding:0 2px; color:#ffcf6a; cursor:pointer; font-size:12px; line-height:1;">▾</button>'
+                + '</div>'
+                + '<div class="party-log-body" style="max-height:150px; overflow-y:auto; margin-top:6px;">'
+                + '<div class="party-log-empty" style="color:#888;">Пока пусто</div>'
+                + '</div>';
+            document.body.appendChild(el);
+
+            el.querySelector('.party-log-toggle')?.addEventListener('click', () => {
+                this._setLogOpen(!this._logOpen);
+            });
+
+            this._logBodyEl = el.querySelector('.party-log-body');
+            return el;
+        },
+
+        /** Ставит журнал вплотную под HP-панелью: отступ 8px (ТЗ 11.6.0c). */
+        _positionLogPanel() {
+            const hp = document.getElementById(this.PANEL_ID);
+            const el = this._ensureLogPanel();
+            const rect = hp && hp.isConnected && hp.style.display !== 'none'
+                ? hp.getBoundingClientRect()
+                : null;
+
+            // HP-панель ещё не отрисована — держим журнал ниже её штатного
+            // top:20px, чтобы блок не наехал на FAB-кнопки.
+            el.style.top = `${rect && rect.height > 0 ? Math.round(rect.bottom + 8) : 120}px`;
+            if (rect && rect.width > 0) el.style.width = `${Math.round(rect.width)}px`;
+        },
+
+        /**
+         * Показывает журнал вместе с HP-панелью и запускает догрузку.
+         * Вызывается из _renderPanel() на каждом тике синхронизации.
+         */
+        _syncLogPanel() {
+            if (!this._readState()) return;
+            const el = this._ensureLogPanel();
+            this._positionLogPanel();
+            el.style.display = 'block';
+            this._applyLogOpenState();
+
+            // _pollLog() сам выберет режим: since=0 -> последние LOG_LIMIT,
+            // since>0 -> только новые строки.
+            if (this._logOpen) this._pollLog();
+        },
+
+        /** ▾/▸ и видимость тела журнала без полной перерисовки панели. */
+        _applyLogOpenState() {
+            const el = document.getElementById(this.LOG_PANEL_ID);
+            if (!el) return;
+            const body = el.querySelector('.party-log-body');
+            const btn = el.querySelector('.party-log-toggle');
+            if (body) body.style.display = this._logOpen ? 'block' : 'none';
+            if (btn) {
+                btn.textContent = this._logOpen ? '▾' : '▸';
+                btn.title = this._logOpen ? 'Свернуть журнал' : 'Развернуть журнал';
+            }
+        },
+
+        /**
+         * Свернуть/развернуть журнал. Свёрнутый не опрашивает сервер
+         * (экономия трафика), при разворачивании сразу догоняем пропущенное
+         * через since=_logSince.
+         */
+        _setLogOpen(open) {
+            this._logOpen = !!open;
+            this._applyLogOpenState();
+            if (this._logOpen) this._pollLog();
+        },
+
+        /**
+         * GET /party/:id/log: since=_logSince > 0 — догрузка новых строк,
+         * иначе первичная загрузка последних LOG_LIMIT (ТЗ 11.6.0c).
+         */
+        async _pollLog() {
+            if (!this._logOpen || this._logBusy) return;
+            const party = this._readState();
+            if (!party) return;
+
+            this._logBusy = true;
+            try {
+                const query = this._logSince > 0
+                    ? `?since=${this._logSince}&limit=${this.LOG_LIMIT}`
+                    : `?limit=${this.LOG_LIMIT}`;
+                const res = await this._request(
+                    'GET',
+                    `/party/${encodeURIComponent(party.groupId)}/log${query}`
+                );
+
+                // Пока ждали ответ, могли выйти или перезайти в другую пати:
+                // чужие события в очищенную панель не дописываем.
+                const cur = this._readState();
+                if (!cur || cur.groupId !== party.groupId) return;
+
+                // Первая порция заменяет плейсхолдер, следующие — дописываются.
+                if (!this._logReady) {
+                    this._clearLog();
+                    this._logReady = true;
+                }
+
+                const events = Array.isArray(res?.events) ? res.events : [];
+                this._appendLogEvents(events);
+
+                const next = Number(res?.nextSince);
+                if (Number.isFinite(next) && next > this._logSince) this._logSince = next;
+            } catch (e) {
+                console.warn('[PARTY] журнал: GET не удался:', e?.message || e);
+                // 401: _request() уже вызвал _resetLocalState() -> stopHpSync()
+                // -> _hideLogPanel(); здесь только страховка.
+                if (Number(e?.status) === 401) this._hideLogPanel();
+            } finally {
+                this._logBusy = false;
+            }
+        },
+
+        /** Плейсхолдер «Пока пусто» и сброс скролла. */
+        _clearLog() {
+            const body = this._logBodyEl
+                || document.getElementById(this.LOG_PANEL_ID)?.querySelector('.party-log-body');
+            if (!body) return;
+            body.innerHTML = '<div class="party-log-empty" style="color:#888;">Пока пусто</div>';
+            body.scrollTop = 0;
+        },
+
+        /** Дописывает события в конец; при переполнении — автоскролл вниз. */
+        _appendLogEvents(events) {
+            if (!Array.isArray(events) || !events.length) return;
+            const body = this._logBodyEl
+                || document.getElementById(this.LOG_PANEL_ID)?.querySelector('.party-log-body');
+            if (!body) return;
+
+            body.querySelector('.party-log-empty')?.remove();
+            for (const ev of events) body.appendChild(this._logRowEl(ev));
+
+            // Сервер хранит 500 строк (trimLog) — столько же держим в DOM,
+            // чтобы долгая сессия не раздувала страницу.
+            while (body.childElementCount > this.LOG_DOM_MAX) {
+                body.firstElementChild?.remove();
+            }
+
+            if (body.scrollHeight > body.clientHeight) body.scrollTop = body.scrollHeight;
+        },
+
+        /**
+         * Строка журнала: [HH:MM] login: text.
+         * textContent, а не innerHTML: текст приходит от других игроков.
+         */
+        _logRowEl(ev) {
+            const row = document.createElement('div');
+            row.className = 'party-log-row';
+            const color = this.LOG_COLORS[ev?.type] || this.LOG_DEFAULT_COLOR;
+            row.style.cssText = `font-size:11px; line-height:1.45; word-break:break-word; color:${color};`;
+            row.textContent = `[${this._formatLogTime(ev?.createdAt)}] ${ev?.login || '?'}: ${ev?.text || ''}`;
+            return row;
+        },
+
+        /** createdAt (ms) -> HH:MM в локальной зоне браузера. */
+        _formatLogTime(ts) {
+            const value = Number(ts);
+            const d = new Date(Number.isFinite(value) ? value : Date.now());
+            if (Number.isNaN(d.getTime())) return '--:--';
+            return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
         },
 
         /**
@@ -573,13 +822,75 @@
             this._hpTick();
         },
 
-        /** Остановить интервал и скрыть панель (выход, 401, перезапуск). */
+        /** Остановить интервал и скрыть панели (выход, 401, перезапуск). */
         stopHpSync() {
             if (this._hpTimer) {
                 clearInterval(this._hpTimer);
                 this._hpTimer = null;
             }
             this._hidePanel();
+            // leave/401: журнал прошлой пати очищается и прячется.
+            this._hideLogPanel();
+        },
+
+        /**
+         * Сравнивает два «живых» снимка /api/me и возвращает события журнала.
+         *
+         * Правила (ТЗ 11.6.0c):
+         *   • quest null -> объект => quest_start;
+         *   • quest объект -> null => quest_end;
+         *   • ghost false -> true ИЛИ hp стал 0 => death (ровно одно событие);
+         *   • hp вырос => heal с дельтой.
+         *
+         * prev === null (первый тик после входа в пати) событий не даёт:
+         * состояние «до» неизвестно, а quest_start на входе в пати был бы ложным.
+         *
+         * @param {{hp: number|null, quest: object|null, ghost: boolean}|null} prev
+         * @param {{hp: number|null, quest: object|null, ghost: boolean}} cur
+         * @returns {Array<{type: string, text: string}>}
+         */
+        _detectLogEvents(prev, cur) {
+            const events = [];
+            if (!prev || !cur) return events;
+
+            const prevQuest = prev.quest || null;
+            const curQuest = cur.quest || null;
+            if (!prevQuest && curQuest) {
+                events.push({ type: 'quest_start', text: 'Вошёл в поход' });
+            } else if (prevQuest && !curQuest) {
+                events.push({ type: 'quest_end', text: 'Вышел из похода' });
+            }
+
+            const prevHp = (typeof prev.hp === 'number' && Number.isFinite(prev.hp)) ? prev.hp : null;
+            const hp = (typeof cur.hp === 'number' && Number.isFinite(cur.hp)) ? cur.hp : null;
+
+            // Гибель: игра ставит ghost, но hp может прийти нулём раньше флага.
+            // Оба признака в одном тике дают ОДНО событие, а не два.
+            if ((!prev.ghost && cur.ghost) || (prevHp !== null && prevHp > 0 && hp === 0)) {
+                events.push({ type: 'death', text: 'Погиб' });
+            }
+
+            if (prevHp !== null && hp !== null && hp > prevHp) {
+                events.push({ type: 'heal', text: `HP +${hp - prevHp}` });
+            }
+
+            return events;
+        },
+
+        /**
+         * POST /party/:id/log. Возвращает false, если сессия мертва (401):
+         * дальше в этом тике отправлять события бессмысленно.
+         */
+        async _postLogEvent(type, text) {
+            // 401 предыдущего события мог уже сбросить состояние пати.
+            if (!this._readState()) return false;
+            try {
+                await this._request('POST', this._partyPath('log'), { body: { type, text } });
+                return true;
+            } catch (e) {
+                console.warn('[PARTY] журнал: POST не удался:', e?.message || e);
+                return Number(e?.status) !== 401;
+            }
         },
 
         /**
@@ -605,6 +916,22 @@
                 // 1. Свой HP из игры. Если /api/me недоступен — просто не
                 //    отправляем стейт, панель строится по данным сервера.
                 const me = await this._fetchMe();
+
+                // 1a. Детектор журнала — только по «живому» снимку /api/me.
+                //     Фолбэк (live:false) не должен выглядеть как quest_end/death.
+                if (me.live) {
+                    const events = this._detectLogEvents(this._prevMe, me);
+                    for (const ev of events) {
+                        // Последовательно: id в БД должны идти в порядке событий.
+                        if (!(await this._postLogEvent(ev.type, ev.text))) break;
+                    }
+                    // _prevMe обновляем даже при ошибке сети: иначе одно и то же
+                    // событие отправлялось бы каждый тик.
+                    this._prevMe = { hp: me.hp, quest: me.quest, ghost: me.ghost };
+                    // 401 внутри POST уже сбросил локальное состояние.
+                    if (!this._readState()) return;
+                }
+
                 if (me.hp !== null && me.maxHp !== null && me.maxHp > 0) {
                     try {
                         // 2. POST — тихо: ошибка не должна спамить пользователя.

@@ -66,6 +66,26 @@ CREATE TABLE IF NOT EXISTS party_states (
 `);
 
 /*
+ * party_log (v11.6.0c) — журнал боя пати.
+ *
+ * Отдельная таблица, а не JSON в parties: клиент догружает только новые
+ * строки (id > since), а индекс (party_id, id) делает эту выборку дешёвой.
+ * created_at — Date.now() сервера, клиент показывает по нему HH:MM.
+ * Ретеншн — trimLog(partyId, 500) после каждой вставки (ТЗ 11.6.0c).
+ */
+db.exec(`
+CREATE TABLE IF NOT EXISTS party_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  party_id TEXT NOT NULL,
+  login TEXT NOT NULL,
+  type TEXT NOT NULL,
+  text TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_log_party ON party_log(party_id, id);
+`);
+
+/*
  * Миграция v11.6.0a: member_id отдельно от session_id.
  *
  * session_id — bearer-креденшл клиента, его нельзя отдавать никому (даже
@@ -171,6 +191,41 @@ const deleteSessionStateStmt = db.query(
                           WHERE party_id = $party AND session_id = $session)`
 );
 const deletePartyStatesStmt = db.query('DELETE FROM party_states WHERE party_id = $party');
+const deletePartyLogStmt = db.query('DELETE FROM party_log WHERE party_id = $party');
+
+// --- Журнал боя (v11.6.0c) -----------------------------------------
+const insertLogStmt = db.query(
+    `INSERT INTO party_log (party_id, login, type, text, created_at)
+     VALUES ($party, $login, $type, $text, $created)`
+);
+// Инкрементальная догрузка: только строки новее since, в порядке появления.
+const selectLogSinceStmt = db.query(
+    `SELECT * FROM party_log
+      WHERE party_id = $party AND id > $since
+      ORDER BY id ASC
+      LIMIT $limit`
+);
+// Первичная загрузка: последние N строк, но отдаём их по возрастанию id,
+// иначе панель журнала отрисовалась бы «с конца».
+const selectLogLatestStmt = db.query(
+    `SELECT * FROM (
+        SELECT * FROM party_log
+         WHERE party_id = $party
+         ORDER BY id DESC
+         LIMIT $limit
+     ) ORDER BY id ASC`
+);
+// Ретеншн: оставляем max последних строк пати, остальное удаляем.
+const trimLogStmt = db.query(
+    `DELETE FROM party_log
+      WHERE party_id = $party
+        AND id NOT IN (
+            SELECT id FROM party_log
+             WHERE party_id = $party
+             ORDER BY id DESC
+             LIMIT $max
+        )`
+);
 
 /* ------------------------------------------------------------------ */
 /* Маппинг строк БД -> camelCase для HTTP-слоя                         */
@@ -206,6 +261,18 @@ function mapState(row) {
         hp: row.hp,
         maxHp: row.max_hp,
         updatedAt: row.updated_at
+    };
+}
+
+/** Строка party_log -> camelCase для HTTP-слоя. */
+function mapLog(row) {
+    if (!row) return null;
+    return {
+        id: row.id,
+        login: row.login,
+        type: row.type,
+        text: row.text,
+        createdAt: row.created_at
     };
 }
 
@@ -360,6 +427,9 @@ export function removeSession(partyId, sessionId) {
 // parties: обратный порядок нарушил бы FOREIGN KEY sessions -> parties.
 const deletePartyTx = db.transaction((partyId) => {
     deletePartyStatesStmt.run({ $party: partyId });
+    // party_log не связан FOREIGN KEY с parties (автоочистка не сработала бы),
+    // поэтому чистим явно — иначе журнал пережил бы удалённую пати.
+    deletePartyLogStmt.run({ $party: partyId });
     deletePartySessionsStmt.run({ $party: partyId });
     deletePartyStmt.run({ $id: partyId });
 });
@@ -403,4 +473,67 @@ export function upsertState({ partyId, memberId, login, hp, maxHp }) {
  */
 export function getStates(partyId) {
     return selectStatesStmt.all({ $party: String(partyId) }).map(mapState);
+}
+
+/* ------------------------------------------------------------------ */
+/* Журнал боя (шаг 3, v11.6.0c)                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Добавляет запись в журнал пати.
+ *
+ * login и type приходят из HTTP-слоя уже проверенными (login — из сессии,
+ * type — из белого списка): БД здесь ничего не угадывает.
+ *
+ * @param {string} partyId
+ * @param {string} login
+ * @param {string} type  quest_start|quest_end|death|heal|drop|system|chat
+ * @param {string} text  1–500 символов
+ * @returns {number} id вставленной строки
+ */
+export function addLog(partyId, login, type, text) {
+    const res = insertLogStmt.run({
+        $party: String(partyId),
+        $login: String(login),
+        $type: String(type),
+        $text: String(text),
+        $created: Date.now()
+    });
+    // bun:sqlite возвращает bigint для AUTOINCREMENT на больших id — наружу
+    // отдаём обычный number: JSON.stringify(BigInt) бросает исключение.
+    return Number(res.lastInsertRowid);
+}
+
+/**
+ * Записи пати новее sinceId (по возрастанию id).
+ * Если sinceId не задан (0/null/undefined) — последние `limit` строк:
+ * это первичная загрузка журнала (ТЗ 11.6.0c).
+ *
+ * @param {string} partyId
+ * @param {number} [sinceId]
+ * @param {number} [limit]
+ * @returns {Array<{id: number, login: string, type: string, text: string, createdAt: number}>}
+ */
+export function getLog(partyId, sinceId = 0, limit = 100) {
+    const max = Math.max(1, Math.trunc(Number(limit) || 100));
+    const since = Math.max(0, Math.trunc(Number(sinceId) || 0));
+
+    const rows = since > 0
+        ? selectLogSinceStmt.all({ $party: String(partyId), $since: since, $limit: max })
+        : selectLogLatestStmt.all({ $party: String(partyId), $limit: max });
+
+    return rows.map(mapLog);
+}
+
+/**
+ * Ретеншн журнала: оставляет `maxRows` последних записей пати.
+ * Вызывается после addLog (ТЗ: maxRows = 500).
+ *
+ * @param {string} partyId
+ * @param {number} [maxRows]
+ * @returns {number} сколько строк удалено
+ */
+export function trimLog(partyId, maxRows = 500) {
+    const max = Math.max(1, Math.trunc(Number(maxRows) || 500));
+    return trimLogStmt.run({ $party: String(partyId), $max: max }).changes;
 }

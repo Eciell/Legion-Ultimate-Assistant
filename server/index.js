@@ -6,7 +6,9 @@
  * Шаг 1: создание пати, вход по инвайт-токену, список участников, кик,
  * выход и ротация токена.
  * Шаг 2 (v11.6.0b): состояние участников — POST/GET /party/:id/state
- * (HP-панель клиента). Журнал и хил по-прежнему живут в шаге 3+.
+ * (HP-панель клиента).
+ * Шаг 3 (v11.6.0c): журнал боя — POST/GET /party/:id/log (панель «Журнал»,
+ * ретеншн 500 строк на пати).
  *
  * v11.6.0a: вход только через POST /party/join (inviteToken — первичный
  * ключ), memberId отдельно от sessionId, DELETE /party/:id/leave, логины
@@ -17,9 +19,11 @@
  * обрабатывать не нужно (и нечем: OPTIONS отдаст 405).
  */
 import {
+    addLog,
     bindSession,
     createParty,
     deleteParty,
+    getLog,
     getParty,
     getPartyByInvite,
     getSession,
@@ -33,6 +37,7 @@ import {
     newSessionId,
     removeSession,
     rotateToken,
+    trimLog,
     upsertState
 } from './db.js';
 
@@ -53,6 +58,14 @@ const MAX_BODY_BYTES = 4096;
 // Верхняя граница HP: защита от мусора/переполнения INTEGER в SQLite
 // (реальные значения в игре — сотни, не миллионы).
 const MAX_HP = 1_000_000;
+
+// Журнал боя (v11.6.0c): только эти типы событий попадают в БД.
+const LOG_TYPES = ['quest_start', 'quest_end', 'death', 'heal', 'drop', 'system', 'chat'];
+const LOG_TYPES_SET = new Set(LOG_TYPES);
+const LOG_TEXT_MAX = 500;
+const LOG_DEFAULT_LIMIT = 100;
+const LOG_MAX_LIMIT = 200;
+const LOG_MAX_ROWS = 500;
 
 /**
  * Ошибка, которую можно безопасно отдать клиенту как JSON.
@@ -125,6 +138,29 @@ function toHpInt(value) {
     if (!Number.isFinite(n)) return null;
     const int = Math.trunc(n);
     return (int < 0 || int > MAX_HP) ? null : int;
+}
+
+/**
+ * Текст записи журнала: strip HTML-тегов и управляющих символов, затем
+ * проверка длины 1..LOG_TEXT_MAX.
+ *
+ * Эмодзи сохраняются: Array.from идёт по code points, а не по UTF-16
+ * суррогатным парам, поэтому один эмодзи = один символ (ТЗ 11.6.0c).
+ * Переносы строк оставляем: системные сообщения могут быть многострочными.
+ *
+ * @returns {string|null} нормализованный текст либо null (невалидный)
+ */
+function normalizeLogText(value) {
+    if (typeof value !== 'string') return null;
+
+    const cleaned = value
+        .replace(/<[^>]*>/g, '')                                   // HTML-теги
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '') // управляющие
+        .trim();
+
+    const chars = Array.from(cleaned);
+    if (chars.length < 1 || chars.length > LOG_TEXT_MAX) return null;
+    return chars.join('');
 }
 
 /* ------------------------------------------------------------------ */
@@ -374,6 +410,72 @@ async function handleStateGet(req, partyId) {
     return json({ states: getStates(party.id) });
 }
 
+/*
+ * POST /party/:id/log {type, text}
+ *
+ * login берётся из сессии, а не из тела: клиент не должен уметь писать
+ * в журнал от чужого имени. type — только из белого списка, text —
+ * строка 1..500 символов после стрипа тегов (normalizeLogText).
+ */
+async function handleLogPost(req, partyId) {
+    const session = authenticate(req);
+    const party = requireParty(partyId);
+    requireMember(session, party);
+
+    const body = await readJson(req);
+
+    if (typeof body.type !== 'string' || !LOG_TYPES_SET.has(body.type)) {
+        throw new HttpError(400, 'bad_type', `type: один из ${LOG_TYPES.join(', ')}`);
+    }
+
+    const text = normalizeLogText(body.text);
+    if (text === null) {
+        throw new HttpError(400, 'bad_text', `text: строка 1–${LOG_TEXT_MAX} символов`);
+    }
+
+    const id = addLog(party.id, session.login, body.type, text);
+    // Ретеншн: журнал пати не растёт бесконечно (ТЗ 11.6.0c, 500 строк).
+    trimLog(party.id, LOG_MAX_ROWS);
+
+    return json({ ok: true, id });
+}
+
+/*
+ * GET /party/:id/log?since=<id>&limit=<n>
+ *
+ * nextSince — id последней отданной строки, чтобы клиент догружал только
+ * новое. Если новых событий нет, since не сдвигается (иначе клиент потерял
+ * бы строки, вставленные между запросами).
+ */
+async function handleLogGet(req, partyId, url) {
+    const session = authenticate(req);
+    const party = requireParty(partyId);
+    requireMember(session, party);
+
+    const rawSince = url.searchParams.get('since');
+    let since = 0;
+    if (rawSince !== null) {
+        since = Number(rawSince);
+        if (!Number.isFinite(since) || since < 0) {
+            throw new HttpError(400, 'bad_since', 'since: неотрицательное целое число');
+        }
+        since = Math.trunc(since);
+    }
+
+    const rawLimit = url.searchParams.get('limit');
+    let limit = rawLimit === null ? LOG_DEFAULT_LIMIT : Number(rawLimit);
+    if (!Number.isFinite(limit)) {
+        throw new HttpError(400, 'bad_limit', `limit: целое число 1..${LOG_MAX_LIMIT}`);
+    }
+    // Максимум 200 (ТЗ): клиент не должен вытянуть весь журнал одним запросом.
+    limit = Math.min(LOG_MAX_LIMIT, Math.max(1, Math.trunc(limit)));
+
+    const events = getLog(party.id, since, limit);
+    const nextSince = events.length ? Number(events[events.length - 1].id) : since;
+
+    return json({ events, nextSince });
+}
+
 // DELETE /party/:id/leave
 async function handleLeave(req, partyId) {
     const session = authenticate(req);
@@ -400,7 +502,8 @@ const server = Bun.serve({
     port: PORT,
     async fetch(req, srv) {
         try {
-            const parts = new URL(req.url).pathname.split('/').filter(Boolean);
+            const url = new URL(req.url);
+            const parts = url.pathname.split('/').filter(Boolean);
 
             if (parts[0] !== 'party') {
                 throw new HttpError(404, 'not_found', 'Неизвестный маршрут');
@@ -465,6 +568,16 @@ const server = Bun.serve({
                     return await handleStateGet(req, partyId);
                 }
                 throw new HttpError(405, 'method_not_allowed', 'Ожидается GET или POST /party/:id/state');
+            }
+            // Журнал боя (v11.6.0c): POST — запись, GET — догрузка по since.
+            if (action === 'log') {
+                if (req.method === 'POST') {
+                    return await handleLogPost(req, partyId);
+                }
+                if (req.method === 'GET') {
+                    return await handleLogGet(req, partyId, url);
+                }
+                throw new HttpError(405, 'method_not_allowed', 'Ожидается GET или POST /party/:id/log');
             }
 
             throw new HttpError(404, 'not_found', 'Неизвестный маршрут');
