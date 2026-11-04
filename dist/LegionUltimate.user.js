@@ -6197,8 +6197,19 @@ const Players = {
     // v11.6.0a: вход — по inviteToken (POST /party/join), memberId отдельно от
     // sessionId, серверный leave и lowercase-логины. Ник читается из игры
     // ТОЛЬКО в момент клика «Создать»/«Присоединиться».
-    // Синхронизация состояния, журнал и хил — шаг 2 (эндпоинтов под них
-    // на сервере пока нет).
+    // v11.6.0a.2: ник и HP берутся из GET /api/me (user.login / hero.hpNow),
+    // LG_CH.login — только фолбэк: в песочнице он бывает пустым.
+    // v11.6.0a.3: пустое состояние рисуется синхронно, поэтому при первом
+    // открытии «Вы: …» показывал фолбэк LG_CH.login (логин Twitch-канала).
+    // Теперь open() дозапрашивает /api/me в фоне и обновляет ТОЛЬКО текстовый
+    // узел ника (.party-self-nick): полная перерисовка сбила бы фокус в поле
+    // inviteToken.
+    // v11.6.0b: HP-панель. Раз в 3 с (только когда мы в пати) клиент шлёт
+    // POST /party/:id/state и перерисовывает список из GET /party/:id/state.
+    // v11.6.0c: журнал боя. В том же тике сравниваем снимки /api/me и шлём
+    // события в POST /party/:id/log (quest_start/quest_end/death/heal).
+    // Под HP-панелью — блок «Журнал» с ленивой догрузкой GET .../log?since=.
+    // Хил (кнопка) — по-прежнему шаг 4+.
     // ============================================================
     const Party = {
         BASE_URL_KEY: 'lgPartyBaseUrl',
@@ -6206,10 +6217,38 @@ const Players = {
         OWNER_KEY: 'lgPartyOwner',
         DEFAULT_BASE_URL: 'http://localhost:8787',
         REQUEST_TIMEOUT: 12000,
+        // Период синхронизации HP (ТЗ 11.6.0b: раз в 3 секунды).
+        HP_SYNC_MS: 3000,
         // Сервер хранит ник только в нижнем регистре (server/index.js).
         LOGIN_RE: /^[a-z0-9_]{1,32}$/,
         // inviteToken = 16 случайных байт = 32 hex-символа (server/db.js).
         INVITE_RE: /^[a-f0-9]{32}$/i,
+
+        // Журнал боя (ТЗ 11.6.0c).
+        LOG_LIMIT: 100,      // размер страницы догрузки (сервер: default 100, max 200)
+        LOG_DOM_MAX: 500,    // столько же строк хранит сервер (trimLog, maxRows=500)
+        // Цвет строки по типу события; остальные — обычный цвет текста панели.
+        LOG_COLORS: { death: '#ff5a7a', heal: '#5fd987', drop: '#ffcf6a', system: '#888' },
+        LOG_DEFAULT_COLOR: '#e8e8ea',
+
+        // Рантайм-поля. Объявлены явно, чтобы в отладке не ловить undefined.
+        _hpTimer: null,      // setInterval HP-синхронизации
+        _hpBusy: false,      // тик уже в работе (медленная сеть)
+        _cachedLogin: '',    // последний ник из /api/me — для синхронного рендера
+        // Промис фонового /api/me для .party-self-nick: повторные open() не
+        // должны плодить одинаковые запросы, пока первый ещё в полёте.
+        _selfNickFetch: null,
+        // id панели с префиксом RAND_ID: чужие page-стили не должны её зацепить.
+        PANEL_ID: `${RAND_ID}-party-hp-panel`,
+
+        // Журнал боя: панель и состояние догрузки.
+        LOG_PANEL_ID: `${RAND_ID}-party-log-panel`,
+        _prevMe: null,       // предыдущий снимок /api/me для детектора событий
+        _logOpen: true,      // панель развёрнута (свёрнутая не опрашивает сервер)
+        _logBusy: false,     // GET/POST журнала уже в полёте
+        _logSince: 0,        // nextSince с сервера (id последней известной строки)
+        _logReady: false,    // первичная загрузка (limit=100) выполнена
+        _logBodyEl: null,    // .party-log-body — кэш, чтобы не искать каждый тик
 
         // Инлайн-стили: у модалок аддона нет готовых классов для форм,
         // а заводить их в core/styles.js ради одного окна — лишнее.
@@ -6267,6 +6306,9 @@ const Players = {
         _writeState(party, isOwner) {
             this._gmSet(this.STATE_KEY, party);
             this._gmSet(this.OWNER_KEY, !!isOwner);
+            // В пати появились/обновились данные — поднимаем HP-синхронизацию.
+            // Повторный вызов безопасен: второй интервал не создаётся.
+            this.startHpSync();
         },
 
         _isOwner() {
@@ -6282,6 +6324,9 @@ const Players = {
          * (сессию убили киком или выходом владельца).
          */
         _resetLocalState() {
+            // Интервал HP живёт только при активной пати: гасим его и прячем
+            // панель до того, как перерисуем модалку (ТЗ 11.6.0b).
+            this.stopHpSync();
             this._gmSet(this.STATE_KEY, null);
             this._gmSet(this.OWNER_KEY, false);
             // open() синхронно закроет текущую модалку и вставит новую.
@@ -6300,38 +6345,103 @@ const Players = {
         },
 
         /**
-         * Ник из page-context. LG_CH живёт в контексте страницы, поэтому
-         * читаем строго через unsafeWindow (в песочнице TM window его не видит).
-         * Возвращает СЫРУЮ строку: приведение к lowercase — в _currentLogin().
-         * Только для отображения.
+         * Канал игры (LG_CH.login). LG_CH живёт в page-context, поэтому читаем
+         * строго через G (см. AGENTS.md §2). Нужен и для URL /api/me, и как
+         * фолбэк-ник, если запрос к игре не удался.
          */
-        _readGameLogin() {
+        _channelLogin() {
             try {
-                const page = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : null;
-                const nick = page?.LG_CH?.login
-                    || (typeof window !== 'undefined' ? window.LG_CH?.login : '')
-                    || '';
-                return String(nick || '').trim();
+                return String(G?.LG_CH?.login || '').trim();
             } catch (e) {
                 return '';
             }
         },
 
-        /** Ник для показа в «нет пати»: пустая строка, если игра не отдала логин. */
-        _defaultNick() {
-            return this._readGameLogin();
+        /**
+         * Ник и HP из игры: GET /c/<канал>/api/me (credentials: include).
+         *
+         * Источник истины для ника — user.login из ответа, а не LG_CH: в
+         * песочнице Tampermonkey LG_CH бывает недоступен/устарел, и сервер
+         * получал бы пустой логин. Запрос идёт обычным fetch: это тот же
+         * origin (страница игры), поэтому CORS не при чём.
+         *
+         * Фолбэк: если /api/me упал — берём G.LG_CH.login и пишем console.warn
+         * (ТЗ 11.6.0a.2). hp/maxHp в этом случае null, и HP-тик просто не
+         * отправляет стейт, но панель продолжает работать по данным сервера.
+         *
+         * v11.6.0c: сюда же добавлены quest (ql из /api/me) и ghost — они
+         * нужны детектору событий журнала. live=false означает фолбэк:
+         * сравнивать такой снимок с предыдущим нельзя, иначе пропавший
+         * /api/me выглядел бы как «вышел из похода» + «воскрес».
+         *
+         * @returns {Promise<{login: string, hp: number|null, maxHp: number|null,
+         *                    quest: object|null, ghost: boolean, live: boolean}>}
+         */
+        async _fetchMe() {
+            const channel = this._channelLogin();
+            if (!channel) {
+                console.warn('[PARTY] LG_CH.login недоступен — /api/me не запросить');
+                return { login: '', hp: null, maxHp: null, quest: null, ghost: false, live: false };
+            }
+
+            try {
+                const res = await fetch(`/c/${encodeURIComponent(channel)}/api/me`, {
+                    credentials: 'include',
+                    cache: 'no-store'
+                });
+                const data = await res.json().catch(() => null);
+                const login = data?.user?.login;
+                if (!res.ok || !login) {
+                    throw new Error(`HTTP ${res.status}: нет user.login`);
+                }
+
+                // hero.stats.hp — максимум здоровья, hero.hpNow — текущее
+                // (docs/API.md, §GET /api/me; в игре hpNow ?? stats.hp).
+                const hp = Number(data.hero?.hpNow);
+                const maxHp = Number(data.hero?.stats?.hp);
+
+                // ql — объект состояния похода (docs/API.md, §ql). При on:false
+                // похода нет, поэтому нормализуем в null: детектору журнала
+                // нужен простой признак «был/не был», а не форма снимка.
+                const ql = data.ql;
+                const quest = (ql && typeof ql === 'object' && ql.on !== false) ? ql : null;
+
+                const me = {
+                    login: String(login),
+                    hp: Number.isFinite(hp) ? hp : null,
+                    maxHp: Number.isFinite(maxHp) ? maxHp : null,
+                    quest,
+                    ghost: data.hero?.ghost === true,
+                    live: true
+                };
+                this._cachedLogin = me.login;
+                return me;
+            } catch (e) {
+                console.warn('[PARTY] /api/me недоступен, берём LG_CH.login:', e);
+                this._cachedLogin = channel;
+                return { login: channel, hp: null, maxHp: null, quest: null, ghost: false, live: false };
+            }
         },
 
         /**
-         * Ник для отправки на сервер. Читается ТОЛЬКО в момент клика, чтобы
-         * не зафиксировать пустой/устаревший логин при открытии модалки.
+         * Ник для показа в «нет пати». Синхронно (модалка рисуется сразу):
+         * последний известный из /api/me, иначе LG_CH.login, иначе пусто.
          */
-        _currentLogin() {
-            const raw = this._readGameLogin();
-            if (!raw) {
+        _defaultNick() {
+            return this._cachedLogin || this._channelLogin();
+        },
+
+        /**
+         * Ник для отправки на сервер: читается из /api/me в момент клика,
+         * чтобы не зафиксировать пустой/устаревший логин при открытии модалки.
+         * @returns {Promise<string>} lowercase-логин
+         */
+        async _currentLogin() {
+            const me = await this._fetchMe();
+            if (!me.login) {
                 throw new Error('Игра не загрузилась, попробуйте позже');
             }
-            return this._normalizeLogin(raw.toLowerCase());
+            return this._normalizeLogin(me.login);
         },
 
         _normalizeLogin(login) {
@@ -6451,7 +6561,7 @@ const Players = {
          * @returns {Promise<{groupId: string, inviteToken: string, sessionId: string, login: string}>}
          */
         async partyCreate() {
-            const nick = this._currentLogin();
+            const nick = await this._currentLogin();
             const res = await this._request('POST', '/party', { body: { login: nick }, auth: false });
             if (!res?.groupId || !res?.inviteToken || !res?.sessionId) {
                 throw new Error('Сервер вернул неполный ответ при создании пати');
@@ -6477,7 +6587,7 @@ const Players = {
             const token = String(inviteToken ?? '').trim();
             if (!token) throw new Error('Укажите inviteToken');
             if (!this.INVITE_RE.test(token)) throw new Error('Токен: 32 hex-символа');
-            const nick = this._currentLogin();
+            const nick = await this._currentLogin();
 
             const res = await this._request(
                 'POST',
@@ -6588,13 +6698,468 @@ const Players = {
         },
 
         /* ---------------------------------------------------------- */
+        /* HP-панель и синхронизация состояния (шаг 2, v11.6.0b)      */
+        /* ---------------------------------------------------------- */
+
+        /**
+         * Элемент панели создаётся лениво и живёт до перезагрузки страницы.
+         * Вариант «а» из ТЗ: fixed/right/top, тёмный фон и скругления как у FAB.
+         * pointer-events:none — панель не должна перехватывать клики по игре.
+         */
+        _ensurePanel() {
+            let el = document.getElementById(this.PANEL_ID);
+            if (el && el.isConnected) return el;
+
+            el = document.createElement('div');
+            el.id = this.PANEL_ID;
+            el.setAttribute('role', 'status');
+            el.style.cssText = [
+                'position:fixed', 'top:20px', 'right:20px', 'z-index:9999',
+                'min-width:150px', 'max-width:260px',
+                'background:rgba(20,16,26,0.92)', 'border:1px solid #3a3040',
+                'border-radius:10px', 'padding:8px 10px',
+                'box-shadow:0 6px 18px rgba(0,0,0,0.45)',
+                'font:12px/1.4 system-ui,"Segoe UI",sans-serif', 'color:#e8e8ea',
+                'display:none', 'pointer-events:none'
+            ].join(';') + ';';
+            document.body.appendChild(el);
+            return el;
+        },
+
+        _hidePanel() {
+            const el = document.getElementById(this.PANEL_ID);
+            if (el) el.style.display = 'none';
+        },
+
+        /**
+         * Перерисовка списка «ник: hp/maxHp» с цветовой полоской:
+         * зелёный > 50%, жёлтый 20–50%, красный < 20% HP.
+         * @param {Array<{login: string, hp: number, maxHp: number}>} states
+         */
+        _renderPanel(states) {
+            const el = this._ensurePanel();
+            const list = Array.isArray(states) ? states : [];
+
+            const rows = list.map((s) => {
+                const login = Utils.escapeHtml(s.login || '?');
+                const rawMax = Math.max(0, Number(s.maxHp) || 0);
+                const rawHp = Math.max(0, Number(s.hp) || 0);
+                // hp не может быть больше максимума; при maxHp = 0 (битые
+                // данные) показываем hp как есть, полоска остаётся пустой.
+                const hp = Math.min(rawMax > 0 ? rawMax : rawHp, rawHp);
+                const pct = rawMax > 0 ? Math.max(0, Math.min(100, (hp / rawMax) * 100)) : 0;
+                // Ровно 50% — уже не «зелёный» (ТЗ: зелёный строго > 50%).
+                const color = pct > 50 ? '#5fd987' : (pct < 20 ? '#ff5a7a' : '#ffcf6a');
+
+                return `<div style="margin-bottom:6px;">
+                    <div style="display:flex; justify-content:space-between; gap:8px;">
+                        <span style="color:#ffcf6a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${login}:</span>
+                        <span style="color:#ccc; white-space:nowrap;">${hp}/${rawMax}</span>
+                    </div>
+                    <div style="height:3px; margin-top:2px; border-radius:2px; background:#2a2030;">
+                        <div style="height:3px; width:${pct.toFixed(1)}%; border-radius:2px; background:${color};"></div>
+                    </div>
+                </div>`;
+            }).join('');
+
+            el.innerHTML = '<div style="font-size:10px; letter-spacing:0.06em;'
+                + ' text-transform:uppercase; color:#888; margin-bottom:6px;">Пати · HP</div>'
+                + (rows || '<div style="color:#888;">Нет данных</div>');
+            el.style.display = 'block';
+
+            // Журнал живёт отдельным блоком под HP-панелью (она не
+            // flex-column), поэтому позицию пересчитываем после каждого рендера.
+            this._syncLogPanel();
+        },
+
+        /* ---------------------------------------------------------- */
+        /* Журнал боя (шаг 3, v11.6.0c)                               */
+        /* ---------------------------------------------------------- */
+
+        /**
+         * Скрыть и очистить журнал. Вызывается из stopHpSync() — то есть на
+         * leave и на 401: список прошлой пати после выхода показывать нельзя.
+         */
+        _hideLogPanel() {
+            const el = document.getElementById(this.LOG_PANEL_ID);
+            if (el) el.style.display = 'none';
+
+            this._clearLog();
+            this._logSince = 0;
+            this._logReady = false;
+            this._prevMe = null;
+        },
+
+        /**
+         * Панель журнала создаётся лениво: отдельный fixed-блок под HP-панелью
+         * с отступом 8px (ТЗ 11.6.0c). Живёт до перезагрузки страницы.
+         */
+        _ensureLogPanel() {
+            let el = document.getElementById(this.LOG_PANEL_ID);
+            if (el && el.isConnected) {
+                this._logBodyEl = el.querySelector('.party-log-body');
+                return el;
+            }
+
+            el = document.createElement('div');
+            el.id = this.LOG_PANEL_ID;
+            el.className = 'party-log-panel';
+            el.style.cssText = [
+                'position:fixed', 'right:20px', 'top:120px', 'z-index:9999',
+                'min-width:150px', 'max-width:260px', 'box-sizing:border-box',
+                'background:rgba(20,16,26,0.92)', 'border:1px solid #3a3040',
+                'border-radius:10px', 'padding:8px 10px',
+                'box-shadow:0 6px 18px rgba(0,0,0,0.45)',
+                'font:12px/1.4 system-ui,"Segoe UI",sans-serif', 'color:#e8e8ea',
+                'display:none', 'pointer-events:auto'
+            ].join(';') + ';';
+
+            // Заголовок статичный — innerHTML допустим. Строки событий
+            // вставляются только через textContent (текст от других игроков).
+            el.innerHTML = '<div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">'
+                + '<span style="font-size:10px; letter-spacing:0.06em; text-transform:uppercase; color:#888;">Журнал</span>'
+                + '<button type="button" class="party-log-toggle" title="Свернуть журнал"'
+                + ' style="background:none; border:none; padding:0 2px; color:#ffcf6a; cursor:pointer; font-size:12px; line-height:1;">▾</button>'
+                + '</div>'
+                + '<div class="party-log-body" style="max-height:150px; overflow-y:auto; margin-top:6px;">'
+                + '<div class="party-log-empty" style="color:#888;">Пока пусто</div>'
+                + '</div>';
+            document.body.appendChild(el);
+
+            el.querySelector('.party-log-toggle')?.addEventListener('click', () => {
+                this._setLogOpen(!this._logOpen);
+            });
+
+            this._logBodyEl = el.querySelector('.party-log-body');
+            return el;
+        },
+
+        /** Ставит журнал вплотную под HP-панелью: отступ 8px (ТЗ 11.6.0c). */
+        _positionLogPanel() {
+            const hp = document.getElementById(this.PANEL_ID);
+            const el = this._ensureLogPanel();
+            const rect = hp && hp.isConnected && hp.style.display !== 'none'
+                ? hp.getBoundingClientRect()
+                : null;
+
+            // HP-панель ещё не отрисована — держим журнал ниже её штатного
+            // top:20px, чтобы блок не наехал на FAB-кнопки.
+            el.style.top = `${rect && rect.height > 0 ? Math.round(rect.bottom + 8) : 120}px`;
+            if (rect && rect.width > 0) el.style.width = `${Math.round(rect.width)}px`;
+        },
+
+        /**
+         * Показывает журнал вместе с HP-панелью и запускает догрузку.
+         * Вызывается из _renderPanel() на каждом тике синхронизации.
+         */
+        _syncLogPanel() {
+            if (!this._readState()) return;
+            const el = this._ensureLogPanel();
+            this._positionLogPanel();
+            el.style.display = 'block';
+            this._applyLogOpenState();
+
+            // _pollLog() сам выберет режим: since=0 -> последние LOG_LIMIT,
+            // since>0 -> только новые строки.
+            if (this._logOpen) this._pollLog();
+        },
+
+        /** ▾/▸ и видимость тела журнала без полной перерисовки панели. */
+        _applyLogOpenState() {
+            const el = document.getElementById(this.LOG_PANEL_ID);
+            if (!el) return;
+            const body = el.querySelector('.party-log-body');
+            const btn = el.querySelector('.party-log-toggle');
+            if (body) body.style.display = this._logOpen ? 'block' : 'none';
+            if (btn) {
+                btn.textContent = this._logOpen ? '▾' : '▸';
+                btn.title = this._logOpen ? 'Свернуть журнал' : 'Развернуть журнал';
+            }
+        },
+
+        /**
+         * Свернуть/развернуть журнал. Свёрнутый не опрашивает сервер
+         * (экономия трафика), при разворачивании сразу догоняем пропущенное
+         * через since=_logSince.
+         */
+        _setLogOpen(open) {
+            this._logOpen = !!open;
+            this._applyLogOpenState();
+            if (this._logOpen) this._pollLog();
+        },
+
+        /**
+         * GET /party/:id/log: since=_logSince > 0 — догрузка новых строк,
+         * иначе первичная загрузка последних LOG_LIMIT (ТЗ 11.6.0c).
+         */
+        async _pollLog() {
+            if (!this._logOpen || this._logBusy) return;
+            const party = this._readState();
+            if (!party) return;
+
+            this._logBusy = true;
+            try {
+                const query = this._logSince > 0
+                    ? `?since=${this._logSince}&limit=${this.LOG_LIMIT}`
+                    : `?limit=${this.LOG_LIMIT}`;
+                const res = await this._request(
+                    'GET',
+                    `/party/${encodeURIComponent(party.groupId)}/log${query}`
+                );
+
+                // Пока ждали ответ, могли выйти или перезайти в другую пати:
+                // чужие события в очищенную панель не дописываем.
+                const cur = this._readState();
+                if (!cur || cur.groupId !== party.groupId) return;
+
+                // Первая порция заменяет плейсхолдер, следующие — дописываются.
+                if (!this._logReady) {
+                    this._clearLog();
+                    this._logReady = true;
+                }
+
+                const events = Array.isArray(res?.events) ? res.events : [];
+                this._appendLogEvents(events);
+
+                const next = Number(res?.nextSince);
+                if (Number.isFinite(next) && next > this._logSince) this._logSince = next;
+            } catch (e) {
+                console.warn('[PARTY] журнал: GET не удался:', e?.message || e);
+                // 401: _request() уже вызвал _resetLocalState() -> stopHpSync()
+                // -> _hideLogPanel(); здесь только страховка.
+                if (Number(e?.status) === 401) this._hideLogPanel();
+            } finally {
+                this._logBusy = false;
+            }
+        },
+
+        /** Плейсхолдер «Пока пусто» и сброс скролла. */
+        _clearLog() {
+            const body = this._logBodyEl
+                || document.getElementById(this.LOG_PANEL_ID)?.querySelector('.party-log-body');
+            if (!body) return;
+            body.innerHTML = '<div class="party-log-empty" style="color:#888;">Пока пусто</div>';
+            body.scrollTop = 0;
+        },
+
+        /** Дописывает события в конец; при переполнении — автоскролл вниз. */
+        _appendLogEvents(events) {
+            if (!Array.isArray(events) || !events.length) return;
+            const body = this._logBodyEl
+                || document.getElementById(this.LOG_PANEL_ID)?.querySelector('.party-log-body');
+            if (!body) return;
+
+            body.querySelector('.party-log-empty')?.remove();
+            for (const ev of events) body.appendChild(this._logRowEl(ev));
+
+            // Сервер хранит 500 строк (trimLog) — столько же держим в DOM,
+            // чтобы долгая сессия не раздувала страницу.
+            while (body.childElementCount > this.LOG_DOM_MAX) {
+                body.firstElementChild?.remove();
+            }
+
+            if (body.scrollHeight > body.clientHeight) body.scrollTop = body.scrollHeight;
+        },
+
+        /**
+         * Строка журнала: [HH:MM] login: text.
+         * textContent, а не innerHTML: текст приходит от других игроков.
+         */
+        _logRowEl(ev) {
+            const row = document.createElement('div');
+            row.className = 'party-log-row';
+            const color = this.LOG_COLORS[ev?.type] || this.LOG_DEFAULT_COLOR;
+            row.style.cssText = `font-size:11px; line-height:1.45; word-break:break-word; color:${color};`;
+            row.textContent = `[${this._formatLogTime(ev?.createdAt)}] ${ev?.login || '?'}: ${ev?.text || ''}`;
+            return row;
+        },
+
+        /** createdAt (ms) -> HH:MM в локальной зоне браузера. */
+        _formatLogTime(ts) {
+            const value = Number(ts);
+            const d = new Date(Number.isFinite(value) ? value : Date.now());
+            if (Number.isNaN(d.getTime())) return '--:--';
+            return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        },
+
+        /**
+         * Запускает синхронизацию HP: раз в 3 с отправляем свой hp/maxHp и
+         * перерисовываем общую панель из GET /party/:id/state.
+         * Повторный вызов безопасен: второй интервал не создаётся.
+         * Вызывается из _writeState() (создали/вошли) и init() (перезагрузка).
+         */
+        startHpSync() {
+            if (!this._readState()) {
+                // Не в пати — панель не нужна.
+                this.stopHpSync();
+                return;
+            }
+            if (this._hpTimer) return;
+
+            this._ensurePanel();
+            this._hpTimer = setInterval(() => { this._hpTick(); }, this.HP_SYNC_MS);
+            // Первый тик — сразу, иначе панель пустует первые 3 секунды.
+            this._hpTick();
+        },
+
+        /** Остановить интервал и скрыть панели (выход, 401, перезапуск). */
+        stopHpSync() {
+            if (this._hpTimer) {
+                clearInterval(this._hpTimer);
+                this._hpTimer = null;
+            }
+            this._hidePanel();
+            // leave/401: журнал прошлой пати очищается и прячется.
+            this._hideLogPanel();
+        },
+
+        /**
+         * Сравнивает два «живых» снимка /api/me и возвращает события журнала.
+         *
+         * Правила (ТЗ 11.6.0c):
+         *   • quest null -> объект => quest_start;
+         *   • quest объект -> null => quest_end;
+         *   • ghost false -> true ИЛИ hp стал 0 => death (ровно одно событие);
+         *   • hp вырос => heal с дельтой.
+         *
+         * prev === null (первый тик после входа в пати) событий не даёт:
+         * состояние «до» неизвестно, а quest_start на входе в пати был бы ложным.
+         *
+         * @param {{hp: number|null, quest: object|null, ghost: boolean}|null} prev
+         * @param {{hp: number|null, quest: object|null, ghost: boolean}} cur
+         * @returns {Array<{type: string, text: string}>}
+         */
+        _detectLogEvents(prev, cur) {
+            const events = [];
+            if (!prev || !cur) return events;
+
+            const prevQuest = prev.quest || null;
+            const curQuest = cur.quest || null;
+            if (!prevQuest && curQuest) {
+                events.push({ type: 'quest_start', text: 'Вошёл в поход' });
+            } else if (prevQuest && !curQuest) {
+                events.push({ type: 'quest_end', text: 'Вышел из похода' });
+            }
+
+            const prevHp = (typeof prev.hp === 'number' && Number.isFinite(prev.hp)) ? prev.hp : null;
+            const hp = (typeof cur.hp === 'number' && Number.isFinite(cur.hp)) ? cur.hp : null;
+
+            // Гибель: игра ставит ghost, но hp может прийти нулём раньше флага.
+            // Оба признака в одном тике дают ОДНО событие, а не два.
+            if ((!prev.ghost && cur.ghost) || (prevHp !== null && prevHp > 0 && hp === 0)) {
+                events.push({ type: 'death', text: 'Погиб' });
+            }
+
+            if (prevHp !== null && hp !== null && hp > prevHp) {
+                events.push({ type: 'heal', text: `HP +${hp - prevHp}` });
+            }
+
+            return events;
+        },
+
+        /**
+         * POST /party/:id/log. Возвращает false, если сессия мертва (401):
+         * дальше в этом тике отправлять события бессмысленно.
+         */
+        async _postLogEvent(type, text) {
+            // 401 предыдущего события мог уже сбросить состояние пати.
+            if (!this._readState()) return false;
+            try {
+                await this._request('POST', this._partyPath('log'), { body: { type, text } });
+                return true;
+            } catch (e) {
+                console.warn('[PARTY] журнал: POST не удался:', e?.message || e);
+                return Number(e?.status) !== 401;
+            }
+        },
+
+        /**
+         * Один такт синхронизации: /api/me -> POST state -> GET state -> рендер.
+         *
+         * Ошибки сети и валидации намеренно «тихие» (console.warn): панель
+         * обновляется раз в 3 с, тосты каждые 3 с были бы невыносимы.
+         * Исключение — 401: он означает кик/удалённую пати, здесь нужен и
+         * тост, и полный локальный сброс (его делает _request()).
+         */
+        async _hpTick() {
+            // Предыдущий тик ещё ждёт сеть (медленный сервер) — второй не нужен.
+            if (this._hpBusy) return;
+            const party = this._readState();
+            if (!party) {
+                this.stopHpSync();
+                return;
+            }
+
+            const path = `/party/${encodeURIComponent(party.groupId)}/state`;
+            this._hpBusy = true;
+            try {
+                // 1. Свой HP из игры. Если /api/me недоступен — просто не
+                //    отправляем стейт, панель строится по данным сервера.
+                const me = await this._fetchMe();
+
+                // 1a. Детектор журнала — только по «живому» снимку /api/me.
+                //     Фолбэк (live:false) не должен выглядеть как quest_end/death.
+                if (me.live) {
+                    const events = this._detectLogEvents(this._prevMe, me);
+                    for (const ev of events) {
+                        // Последовательно: id в БД должны идти в порядке событий.
+                        if (!(await this._postLogEvent(ev.type, ev.text))) break;
+                    }
+                    // _prevMe обновляем даже при ошибке сети: иначе одно и то же
+                    // событие отправлялось бы каждый тик.
+                    this._prevMe = { hp: me.hp, quest: me.quest, ghost: me.ghost };
+                    // 401 внутри POST уже сбросил локальное состояние.
+                    if (!this._readState()) return;
+                }
+
+                if (me.hp !== null && me.maxHp !== null && me.maxHp > 0) {
+                    try {
+                        // 2. POST — тихо: ошибка не должна спамить пользователя.
+                        await this._request('POST', path, {
+                            body: { hp: me.hp, maxHp: me.maxHp }
+                        });
+                    } catch (e) {
+                        console.warn('[PARTY] не удалось отправить HP:', e?.message || e);
+                        // 401 уже обработан в _request(): стейт сброшен, панель
+                        // скрыта, тост показан — дальше GET бессмыслен.
+                        if (Number(e?.status) === 401) return;
+                    }
+                }
+
+                // 3. GET всех стейтов -> перерисовка панели.
+                const res = await this._request('GET', path);
+                // Пока ждали ответ, могли выйти из пати — тогда рендер не нужен.
+                if (!this._readState()) return;
+                this._renderPanel(res?.states);
+            } catch (e) {
+                console.warn('[PARTY] синхронизация HP:', e?.message || e);
+                // 401 = нас кикнули/пати удалена: _request() уже вызвал
+                // _resetLocalState() (там stopHpSync + тост), дублируем страховкой.
+                if (Number(e?.status) === 401) this.stopHpSync();
+            } finally {
+                this._hpBusy = false;
+            }
+        },
+
+        /* ---------------------------------------------------------- */
         /* UI                                                          */
         /* ---------------------------------------------------------- */
 
         /** Кнопка «Пати» в FAB-меню (modules/auction.js — тот же паттерн). */
         init() {
+            // Перезапуск скрипта (single-instance guard в main.js) не убивает
+            // таймеры старого инстанса: два интервала HP = двойной POST раз в 3 с.
+            const prev = G.__LEGION__?.Party;
+            if (prev && prev !== this) {
+                try { prev.stopHpSync?.(); } catch (e) {}
+            }
+
             const btn = document.getElementById(DOM_IDS.btnParty) || document.getElementById('btn-party');
             btn?.addEventListener('click', () => this.open());
+
+            // Скрипт мог загрузиться при уже активной пати (перезагрузка
+            // страницы, повторная инъекция): панель поднимаем сразу.
+            if (this._readState()) this.startHpSync();
         },
 
         /**
@@ -6648,6 +7213,9 @@ const Players = {
                 const modal = UI.showModal(this._modalHtmlEmpty(), { compact: true });
                 if (!modal) return;
                 this._bindEmpty(modal);
+                // Ник отрисован синхронно (мог уйти в фолбэк LG_CH.login):
+                // дозапрашиваем /api/me в фоне и правим только текстовый узел.
+                this._refreshSelfNick(modal);
                 return;
             }
 
@@ -6658,6 +7226,52 @@ const Players = {
             // сразу, а members может ответить 401 (сессию убили) или упасть
             // по сети. Ошибка не должна ломать само окно.
             this._refreshMembers(modal).catch((e) => dbg('[PARTY] members:', e));
+        },
+
+        /**
+         * Догоняющий запрос ника для пустого состояния (ТЗ 11.6.0a.3).
+         *
+         * _modalHtmlEmpty() рендерится синхронно, а _fetchMe() асинхронный:
+         * при первом открытии _cachedLogin пуст, поэтому «Вы: …» показывал
+         * _channelLogin() — логин Twitch-канала вместо игрового ника. Здесь
+         * запускаем фоновый GET /api/me и, когда он ответит, меняем ТОЛЬКО
+         * textContent узла .party-self-nick.
+         *
+         * Полная перерисовка модалки запрещена: пользователь может уже
+         * печатать inviteToken, innerHTML-рендер собьёт фокус и каретку.
+         *
+         * Пока запрос в полёте, повторный open() его переиспользует
+         * (_selfNickFetch), а если ник уже кэширован — сеть не трогаем.
+         *
+         * @param {HTMLElement|null} modal окно, отрисованное в open()
+         */
+        _refreshSelfNick(modal = null) {
+            if (this._cachedLogin) return;     // ник уже известен — фетч не нужен
+            if (this._selfNickFetch) return;   // запрос уже в полёте
+
+            this._selfNickFetch = this._fetchMe()
+                .then((me) => {
+                    const nick = String(me?.login || '').trim();
+                    // И /api/me, и LG_CH.login молчат: оставляем то, что
+                    // отрисовано («—» или прежний фолбэк), не стираем ник.
+                    if (!nick) return;
+
+                    // Окно могли закрыть — тогда обновлять нечего (узла нет).
+                    // Если его успели открыть заново, новый рендер тоже
+                    // показал фолбэк, поэтому берём актуальный узел из DOM.
+                    const el = (modal && modal.isConnected)
+                        ? modal.querySelector('.party-self-nick')
+                        : document.querySelector('.party-self-nick');
+                    if (el) el.textContent = nick;
+                })
+                .catch((e) => {
+                    // _fetchMe() ловит свои ошибки сам (фолбэк LG_CH.login);
+                    // сюда попадаем только при неожиданном сбое внутри.
+                    console.warn('[PARTY] фоновый /api/me не ответил:', e);
+                })
+                .finally(() => {
+                    this._selfNickFetch = null;
+                });
         },
 
         /** Обрезка groupId для заголовка: первые 8 символов + «…». */
@@ -6714,7 +7328,7 @@ const Players = {
                         <div style="${this.MUTED_STYLE}">Создать пати</div>
                         <div style="display:flex; align-items:center; gap:8px;">
                             <div style="flex:1; min-width:0; font-size:13px; color:#ccc; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                                Вы: <b style="color:#ffcf6a;">${safeNick}</b>
+                                Вы: <b class="party-self-nick" style="color:#ffcf6a;">${safeNick}</b>
                             </div>
                             <button id="party-create-btn" style="${this.BTN_STYLE}">Создать</button>
                         </div>
@@ -6798,9 +7412,19 @@ const Players = {
         /**
          * Обёртка для кнопок: блокирует её на время запроса и показывает
          * ошибку в блоке #party-error (он живёт до перерисовки модалки).
+         *
+         * @param {HTMLButtonElement|null} btn
+         * @param {HTMLElement|null} errorBox
+         * @param {() => Promise<void>} fn
+         * @param {string} [busyText] текст на время запроса (защита от двойного
+         *   клика: «Создать»/«Присоединиться» ждут /api/me, это до секунды)
          */
-        async _runAction(btn, errorBox, fn) {
-            if (btn) btn.disabled = true;
+        async _runAction(btn, errorBox, fn, busyText = '') {
+            const prevText = btn ? btn.textContent : '';
+            if (btn) {
+                btn.disabled = true;
+                if (busyText) btn.textContent = busyText;
+            }
             if (errorBox) errorBox.textContent = '';
             try {
                 await fn();
@@ -6810,7 +7434,10 @@ const Players = {
                 if (errorBox) errorBox.textContent = msg;
                 else UI.showToast(msg, true);
             } finally {
-                if (btn) btn.disabled = false;
+                if (btn) {
+                    btn.disabled = false;
+                    if (busyText) btn.textContent = prevText;
+                }
             }
         },
 
@@ -6821,12 +7448,13 @@ const Players = {
             const joinBtn = modal.querySelector('#party-join-btn');
 
             // Ник НЕ читается здесь: partyCreate()/partyJoin() сами берут его
-            // из LG_CH в момент клика (модалка может висеть часами).
+            // из /api/me в момент клика (модалка может висеть часами), а до
+            // ответа кнопка заблокирована и показывает «...».
             createBtn?.addEventListener('click', () => this._runAction(createBtn, errorBox, async () => {
                 const party = await this.partyCreate();
                 UI.showToast(`Пати создана: ${this._shortId(party.groupId)}`);
                 await this.open();
-            }));
+            }, '...'));
 
             joinBtn?.addEventListener('click', () => {
                 const token = (modal.querySelector('#party-join-token')?.value || '').trim();
@@ -6834,7 +7462,7 @@ const Players = {
                     const party = await this.partyJoin(token);
                     UI.showToast(`Вы вошли в пати как ${party.login}`);
                     await this.open();
-                });
+                }, '...');
             });
         },
 
