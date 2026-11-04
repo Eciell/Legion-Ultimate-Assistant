@@ -15,10 +15,12 @@
         badge: null,
         unreadCount: 0,
         disabled: localStorage.getItem('LEGION_CHAT_DISABLED') === 'true',
-        // v11.6.0g-4: подсветка ников пользователей аддона (⚡ + бирюзовый
-        // цвет). По умолчанию включена: ключа нет -> true; выключение пишет
+        // v11.6.0h: подсветка ников пользователей аддона (⚡ + свечение в
+        // родном цвете ника). Цвет НЕ перекрашивается — он остаётся игровым.
+        // По умолчанию включена: ключа нет -> true; выключение пишет
         // строку 'false' (паттерн LEGION_AUC_SOUND). Настройка живёт в
         // localStorage, т.к. это UI-предпочтение, а не серверные данные.
+
         addonHighlight: localStorage.getItem('LEGION_ADDON_HIGHLIGHT') !== 'false',
         _inited: false,
         messages: [], // Массив всех сообщений
@@ -104,20 +106,43 @@
         },
 
         /**
-         * Тумблер «⚡ Подсветка ников Legion» (ТЗ 11.6.0g-4).
+         * Тумблер «⚡ Подсветка ников Legion» (ТЗ 11.6.0g-4, 11.6.0h).
          *
          * Сохраняем выбор и сразу перерисовываем уже отрисованное: без этого
          * выключенная подсветка жила бы до следующего тика поллинга (30 с),
          * а классы/бейджи ⚡ оставались бы на экране.
          *
          * highlightNativeChat() — снимает/навешивает классы в нативной ленте
-         * (idempotent); renderMessages() нужен только для открытого PiP-чата.
+         * и синхронизирует PiP (idempotent); renderMessages() перерисовывает
+         * открытый PiP-чат, чтобы убрать/вернуть бейджи ⚡.
          */
         setAddonHighlight(val) {
             this.addonHighlight = !!val;
             try {
                 localStorage.setItem('LEGION_ADDON_HIGHLIGHT', String(this.addonHighlight));
             } catch (e) {}
+
+            // ТЗ 11.6.0h.1: подсветку выключили — persist-кэш списка не нужен
+            // (иначе после перезагрузки он бы «оживил» набор впустую). При
+            // включении кэш заново запишет ближайший syncAddonUsers().
+            if (!this.addonHighlight) {
+                try { localStorage.removeItem('LEGION_ADDON_USERS_CACHE'); } catch (e) {}
+            }
+
+            // Маркеры data-legion-addon-applied хранят последнее применённое
+            // состояние: при переключении тумблера их надо сбросить, иначе
+            // highlightNativeChat() сочтёт ники «уже обработанными» и
+            // переключение не даст эффекта до следующей перерисовки ленты.
+            // Селектор совпадает с тем, что обходит highlightNativeChat().
+            document.querySelectorAll('.cy-chat-l [data-nick], .cy-chat-p [data-nick]').forEach((el) => {
+                delete el.dataset.legionAddonApplied;
+            });
+            if (this._pipDoc) {
+                this._pipDoc.querySelectorAll('.chat-author[data-nick]').forEach((el) => {
+                    delete el.dataset.legionAddonApplied;
+                });
+            }
+
             this.highlightNativeChat(document);
             if (this.isOpen()) this.renderMessages();
         },
@@ -133,6 +158,21 @@
         init() {
             if (this._inited) return;
             this._inited = true;
+
+            // ТЗ 11.6.0h.1: сначала поднимаем прошлый список пользователей
+            // аддона из localStorage — тогда подсветка появляется в первом же
+            // кадре, не дожидаясь POST /heartbeat + GET /users. Кэш старше
+            // часа (TTL) игнорируем: за это время состав мог поменяться, а
+            // свежий набор придёт из syncAddonUsers() на первом тике.
+            try {
+                const raw = localStorage.getItem('LEGION_ADDON_USERS_CACHE');
+                if (raw) {
+                    const c = JSON.parse(raw);
+                    if (Array.isArray(c?.list) && (Date.now() - (c.ts || 0)) < 60 * 60 * 1000) {
+                        this.addonUsers = new Set(c.list.map(x => String(x).trim().toLowerCase()));
+                    }
+                }
+            } catch (e) {}
 
             this.badge = document.getElementById(DOM_IDS.chatBadge) || document.getElementById('chat-badge');
 
@@ -157,6 +197,13 @@
             // шлёт POST /heartbeat (мы тоже в списке) и раз в 30 с обновляет
             // набор из GET /users; сеть и наблюдатель — в chat-net.js.
             this.startAddonUsersPolling();
+
+            // Прогнать уже отрисованные сообщения (на случай, если чат успел
+            // отрисоваться до нас): подсветка из кэша навешивается сразу, без
+            // ожидания первого ответа /users.
+            if (typeof this.highlightNativeChat === 'function') {
+                this.highlightNativeChat(document);
+            }
         },
 
         // Детектор стороннего чата (Legion7TV, плагин ProCto_Fliy).

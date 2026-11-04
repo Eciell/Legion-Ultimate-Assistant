@@ -301,17 +301,19 @@
         .party-heal-btn:disabled { opacity: 0.6; cursor: default; }
         /* 7TV-смайлики: размер задаётся переменной --t7-h (S/M/L/XL из настроек чата) */
         .t7-emote { height: var(--t7-h, 1.9em); vertical-align: middle; margin: 0 2px; }
-        /* Подсветка пользователей аддона (ТЗ 11.6.0g-3) */
+        /* Подсветка пользователей аддона (ТЗ 11.6.0h).
+           НЕ переопределяем color — сохраняем индивидуальный цвет игрока
+           (класс/ранг выставляет его самой игрой). text-shadow с currentColor
+           даёт свечение ровно в его родном цвете. */
         .legion-addon-user {
-            color: #00f0ff !important;
-            text-shadow: 0 0 7px rgba(0, 240, 255, 0.55) !important;
-            font-weight: 800 !important;
+            text-shadow: 0 0 4px currentColor, 0 0 10px currentColor !important;
         }
         .legion-addon-badge {
             display: inline-block;
             margin-right: 3px;
             font-size: 11px;
-            filter: drop-shadow(0 0 4px rgba(0, 240, 255, 0.7));
+            /* Фирменное золотое свечение аддона (было голубое #00f0ff). */
+            filter: drop-shadow(0 0 4px rgba(255, 207, 106, 0.7));
             vertical-align: middle;
             user-select: none;
         }

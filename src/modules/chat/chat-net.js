@@ -607,8 +607,6 @@
         // MutationObserver нативной ленты и узел, который он слушает.
         _addonObserver: null,
         _addonObserved: null,
-        // Дебаунс перерисовки подсветки: игра перестраивает ленту пачкой.
-        _addonHlTimer: null,
 
         /**
          * База сервера аддона: сначала адрес пати (Party.getBaseUrl), затем
@@ -693,6 +691,17 @@
                 const changed = next.size !== prev.size || Array.from(next).some((n) => !prev.has(n));
                 this.addonUsers = next;
 
+                // ТЗ 11.6.0h.1: persist-кэш списка. Нужен, чтобы после
+                // перезагрузки страницы подсветка появилась мгновенно, не
+                // дожидаясь ответа /users (см. Chat.init). TTL проверяется
+                // при чтении — 1 час.
+                try {
+                    localStorage.setItem('LEGION_ADDON_USERS_CACHE', JSON.stringify({
+                        list: Array.from(this.addonUsers),
+                        ts: Date.now()
+                    }));
+                } catch (e) {}
+
                 this.highlightNativeChat();
                 // Свой PiP-чат перерисовываем только при изменении состава:
                 // innerHTML каждые 30 с сбивал бы выделение текста у читающего.
@@ -707,8 +716,9 @@
          *
          * Нативная лента рисует автора как <b data-nick="login"> внутри
          * .cy-chat-l (reference/LegionFrontSRC/lib/site-chat.js, chatLi).
-         * Её inline style="color:..." перебивается только нашим CSS
-         * !important (см. .legion-addon-user в core/styles.js).
+         * Свой inline color мы НЕ перебиваем (ТЗ 11.6.0h): цвет остаётся
+         * игровым, а «аддонность» показывают класс .legion-addon-user
+         * (свечение через currentColor) и бейдж ⚡.
          *
          * @param {Document|Element} [root] где искать ники (по умолчанию document)
          */
@@ -716,32 +726,65 @@
             const scope = (root && typeof root.querySelectorAll === 'function') ? root : document;
             const nodes = scope.querySelectorAll('.cy-chat-l [data-nick], .cy-chat-p [data-nick]');
 
-            nodes.forEach((el) => {
-                const nick = String(el.getAttribute('data-nick') || '').trim().toLowerCase();
-                const isAddon = !!nick && this.isAddonUser(nick);
+            nodes.forEach((el) => this._syncAddonNickState(el, true));
 
-                if (!isAddon) {
-                    // Ник вышел из окна онлайна — снимаем подсветку и бейдж.
-                    el.classList.remove('legion-addon-user');
-                    const staleBadge = el.previousElementSibling;
-                    if (staleBadge && staleBadge.getAttribute('data-legion-addon-badge') === '1') staleBadge.remove();
-                    return;
-                }
+            // PiP-чат живёт в другом документе, поэтому document-проход его не
+            // задевает. Класс и бейдж там ставит сам renderMessages() при сборке
+            // HTML — здесь только синхронизируем класс/маркер, иначе вставка ⚡
+            // дала бы второй бейдж.
+            const pipDoc = this._pipDoc;
+            if (pipDoc && pipDoc !== scope && typeof pipDoc.querySelectorAll === 'function') {
+                pipDoc.querySelectorAll('.chat-author[data-nick]').forEach((el) => this._syncAddonNickState(el, false));
+            }
+        },
 
-                el.classList.add('legion-addon-user');
+        /**
+         * Идемпотентно приводит ник к нужному состоянию подсветки.
+         *
+         * Маркер data-legion-addon-applied (data-атрибут, а не поле объекта)
+         * переживает перерисовку самого узла и хранит последнее применённое
+         * состояние. Если оно совпадает с желаемым — узел не трогаем вообще:
+         * именно повторные classList.add/remove на каждом проходе (таймер 30 с
+         * + MutationObserver) и давали флэш при перерисовках ленты.
+         *
+         * @param {Element} el ник (b в нативной ленте либо .chat-author в PiP)
+         * @param {boolean} withBadge ставить ли бейдж ⚡ (в PiP его рисует рендер)
+         */
+        _syncAddonNickState(el, withBadge) {
+            const nick = String(el.getAttribute('data-nick') || '').trim().toLowerCase();
+            if (!nick) return;
 
-                // Бейдж ставим ровно один раз: нас зовёт и таймер, и
-                // MutationObserver — второй ⚡ перед ником был бы дублем.
+            const shouldBeAddon = this.isAddonUser(nick);
+            const wantState = shouldBeAddon ? '1' : '0';
+            if (el.dataset.legionAddonApplied === wantState) return; // уже в нужном состоянии
+            el.dataset.legionAddonApplied = wantState;
+
+            if (!shouldBeAddon) {
+                // Ник вышел из окна онлайна (или подсветку выключили) —
+                // снимаем класс и осиротевший бейдж.
+                el.classList.remove('legion-addon-user');
                 const prev = el.previousElementSibling;
-                if (prev && prev.getAttribute('data-legion-addon-badge') === '1') return;
+                if (prev && prev.dataset && prev.dataset.legionAddonBadge === '1') prev.remove();
+                return;
+            }
 
-                const badge = (el.ownerDocument || document).createElement('span');
-                badge.className = 'legion-addon-badge';
-                badge.setAttribute('data-legion-addon-badge', '1');
-                badge.title = 'Пользователь Legion Ultimate';
-                badge.textContent = '⚡';
-                if (el.parentNode) el.parentNode.insertBefore(badge, el);
-            });
+            el.classList.add('legion-addon-user');
+            if (!withBadge) return;
+
+            // Бейдж ставим ровно один раз: нас зовёт и таймер, и MutationObserver —
+            // второй ⚡ перед ником был бы дублем.
+            const prev = el.previousElementSibling;
+            if (prev && prev.dataset && prev.dataset.legionAddonBadge === '1') return;
+
+            // Наши собственные вставки не должны считаться «перерисовкой ленты».
+            this._suppressObserver = true;
+            const badge = (el.ownerDocument || document).createElement('span');
+            badge.className = 'legion-addon-badge';
+            badge.dataset.legionAddonBadge = '1';
+            badge.title = 'Пользователь Legion Ultimate';
+            badge.textContent = '⚡';
+            if (el.parentNode) el.parentNode.insertBefore(badge, el);
+            this._suppressObserver = false;
         },
 
         /**
@@ -764,15 +807,59 @@
             }
 
             this._addonObserved = list;
-            this._addonObserver = new MutationObserver(() => {
-                // Рендер идёт пачкой — склеиваем мутации в один проход.
-                if (this._addonHlTimer) return;
-                this._addonHlTimer = setTimeout(() => {
-                    this._addonHlTimer = null;
-                    this.highlightNativeChat();
-                }, 150);
+            this._addonObserver = new MutationObserver((mutations) => {
+                // Свои вставки/удаления бейджей не должны запускать повторный
+                // проход (иначе бесконечная рекурсия). Флаг ставится на время
+                // правки DOM в _syncAddonNickState(); записи наблюдатель отдаёт
+                // уже после возврата из него, поэтому рабочая защита — именно
+                // фильтр по содержимому пачки.
+                if (this._suppressObserver) return;
+
+                // ТЗ 11.6.0h.1: никакого debounce. Колбэк MutationObserver —
+                // это микротаск, он выполняется ДО paint, поэтому класс ⚡ и
+                // свечение попадают в тот же кадр, что и сам ник. Флэша нет
+                // не потому, что «быстро», а потому что отрисовать состояние
+                // без класса браузер физически не успевает.
+                mutations.forEach((mut) => {
+                    if (this._isBadgeOnlyMutation(mut)) return;
+                    if (!mut.addedNodes) return;
+                    mut.addedNodes.forEach((node) => this._highlightSubtree(node));
+                });
             });
             this._addonObserver.observe(list, { childList: true, subtree: true });
+        },
+
+        /**
+         * Синхронно обрабатывает добавленное поддерево: сам узел (если это ник)
+         * и все ники внутри. Ровно те же элементы, что обходит
+         * highlightNativeChat(), только без повторного querySelector по всей
+         * ленте — так новый ник обрабатывается в том же микротаске.
+         *
+         * @param {Node} node узел из addedNodes MutationObserver
+         */
+        _highlightSubtree(node) {
+            if (!node || node.nodeType !== 1) return; // текст/комментарии не интересны
+
+            // Сам добавленный узел может быть ником (<b data-nick>).
+            if (node.dataset && node.dataset.nick) this._syncAddonNickState(node, true);
+
+            if (typeof node.querySelectorAll === 'function') {
+                node.querySelectorAll('[data-nick]').forEach((el) => this._syncAddonNickState(el, true));
+            }
+        },
+
+        /**
+         * Запись MutationObserver касается только наших бейджей ⚡?
+         * Такие мутации не требуют повторного прохода по ленте — именно они
+         * и вызывали лишние пересчёты (а с ними флэш) после каждой вставки.
+         */
+        _isBadgeOnlyMutation(mut) {
+            const isBadge = (node) => !!(node && node.nodeType === 1
+                && node.dataset && node.dataset.legionAddonBadge === '1');
+            const added = mut.addedNodes ? Array.from(mut.addedNodes) : [];
+            const removed = mut.removedNodes ? Array.from(mut.removedNodes) : [];
+            if (added.length === 0 && removed.length === 0) return false;
+            return added.every(isBadge) && removed.every(isBadge);
         },
 
         /** Запуск поллинга /heartbeat + /users (раз в 30 с, идемпотентно). */
@@ -794,10 +881,6 @@
             if (this._addonPollTimer) {
                 clearInterval(this._addonPollTimer);
                 this._addonPollTimer = null;
-            }
-            if (this._addonHlTimer) {
-                clearTimeout(this._addonHlTimer);
-                this._addonHlTimer = null;
             }
             if (this._addonObserver) {
                 try { this._addonObserver.disconnect(); } catch (e) {}

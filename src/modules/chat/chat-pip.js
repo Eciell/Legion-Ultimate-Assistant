@@ -853,10 +853,19 @@
 
                 const authorNick = m.author || '';
                 const isAddon = this.isAddonUser(authorNick);
-                const addonBadge = isAddon ? `<span class="legion-addon-badge" title="Пользователь Legion Ultimate">⚡</span>` : '';
+                // data-legion-addon-badge — маркер для ChatNet.highlightNativeChat():
+                // по нему видно, что PiP-бейдж уже нарисован (второй ⚡ не нужен).
+                const addonBadge = isAddon ? `<span class="legion-addon-badge" data-legion-addon-badge="1" title="Пользователь Legion Ultimate">⚡</span>` : '';
                 const addonClass = isAddon ? ' legion-addon-user' : '';
-                const authorColor = isAddon ? '#00f0ff' : (meta.color || '#ffcf6a');
-                const authorHtml = `${addonBadge}<span class="chat-author nick-clickable${addonClass}" data-nick="${Utils.escapeHtml(authorNick)}" title="Кликните, чтобы упомянуть" style="color: ${authorColor} !important; cursor: pointer;">${Utils.escapeHtml(authorNick)}</span>`;
+                // v11.6.0h: бирюзовый #00f0ff больше не подставляется — у ника
+                // остаётся его родной цвет класса (meta.color), а свечение
+                // .legion-addon-user рисуется через currentColor, т.е. в нём же.
+                // Оставлять style пустым для addon-ников нельзя: правило
+                // .chat-author в core/styles.js задаёт color !important и
+                // перекрасило бы их в белый, потеряв и цвет, и оттенок свечения.
+                const authorColor = meta.color || '#ffcf6a';
+                const styleColor = `color: ${authorColor} !important; `;
+                const authorHtml = `${addonBadge}<span class="chat-author nick-clickable${addonClass}" data-nick="${Utils.escapeHtml(authorNick)}" title="Кликните, чтобы упомянуть" style="${styleColor}cursor: pointer;">${Utils.escapeHtml(authorNick)}</span>`;
 
                 if (m.k === 'dm') {
                     div.innerHTML = `
