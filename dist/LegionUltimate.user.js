@@ -8,6 +8,7 @@
 // @connect      api.ivr.fi
 // @connect      localhost
 // @connect      127.0.0.1
+// @connect      legion.ctrlfree.host
 // @author       eciell
 // @match        https://play.multidonate.ru/c/*
 // @noframes
@@ -1211,24 +1212,67 @@
         .player-hud-row { display: flex; justify-content: space-between; align-items: center; }
         .player-hud-label { color: #aaa; }
         .player-hud-val { font-weight: bold; }
-        /* ── Ассистент Жреца: плавающий HUD боя (Поход) ── */
-        .priest-hud { position: fixed; top: 80px; right: 20px; background: #1e1724; border: 1px solid #caa55c; border-radius: 8px; padding: 10px; display: none; flex-direction: column; z-index: 10001; box-shadow: 0 4px 15px rgba(0,0,0,0.7); min-width: 150px; max-width: 240px; font-family: 'Nunito', sans-serif; color: #f7eadf; }
-        .priest-hud-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: bold; color: #caa55c; font-size: 12px; margin-bottom: 8px; cursor: grab; user-select: none; touch-action: none; }
-        .priest-hud-header:active { cursor: grabbing; }
-        .priest-hud-watchlist { max-height: 100px; overflow-y: auto; }
-        .priest-hud-watch-item { font-size: 11px; color: #aaa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .priest-hud-settings { background: none; border: none; color: #caa55c; font-size: 13px; line-height: 1; cursor: pointer; padding: 0 2px; }
-        .priest-hud-settings:hover { color: #ffcf6a; }
-        .priest-hud-actions { display: flex; align-items: center; gap: 6px; }
-        .priest-hud-close { color: #ff5a7a; font-size: 12px; line-height: 1; cursor: pointer; padding: 0 2px; }
-        .priest-hud-close:hover { color: #fff; }
-        .priest-hud-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; background: rgba(0,0,0,0.3); padding: 4px; border-radius: 4px; }
-        .priest-hud-nick { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .priest-heal-btn { background: #28a745; color: #fff; border: none; border-radius: 3px; padding: 2px 6px; font-size: 11px; cursor: pointer; flex-shrink: 0; }
-        .priest-heal-btn:hover:not(:disabled) { background: #34c759; }
-        .priest-heal-btn:disabled { background: #555; color: #fff; cursor: not-allowed; opacity: 0.7; }
+        /* ── Пати (v11.6.0g-2): модалка, HP-панель и журнал ──
+           Раньше формы окна «Пати» рисовались инлайном (серые рамки #444) —
+           теперь это классы: тёмный фон, золотистые акценты #caa55c/#ffcf6a
+           и hover-эффекты как у кнопки «Создать пати». */
+        .party-modal h2 { border-bottom-color: #3a3040; }
+        .party-muted { font-size: 11px; color: #c9b184; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+        .party-input { width: 100%; box-sizing: border-box; background: #16121a; border: 1px solid #4a3c56; color: #f7eadf; padding: 8px 10px; border-radius: 6px; font-size: 13px; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
+        .party-input::placeholder { color: #7d7189; }
+        .party-input:focus { border-color: #caa55c; box-shadow: 0 0 0 2px rgba(202, 165, 92, 0.15); }
+        .party-input.party-token { font-family: monospace; font-size: 11px; }
+        .party-btn { padding: 8px 12px; background: #2a2030; border: 1px solid #caa55c; color: #ffcf6a; border-radius: 6px; cursor: pointer; font-size: 13px; white-space: nowrap; transition: background 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s; }
+        .party-btn:hover:not(:disabled) { background: #caa55c; color: #1d1620; border-color: #e0bb6b; box-shadow: 0 0 10px rgba(202, 165, 92, 0.35); }
+        .party-btn:active:not(:disabled) { transform: translateY(1px); }
+        .party-btn:disabled { opacity: 0.55; cursor: default; }
+        .party-btn-sm { padding: 4px 8px; border-radius: 5px; font-size: 11px; }
+        .party-btn-lg { padding: 8px 12px; font-size: 13px; }
+        .party-btn-danger { background: #3a1f28; border-color: #ff5a7a; color: #ff5a7a; }
+        .party-btn-danger:hover:not(:disabled) { background: #ff5a7a; border-color: #ff8fa3; color: #1d1620; box-shadow: 0 0 10px rgba(255, 90, 122, 0.35); }
+        .party-sep { border-top: 1px solid #3a3040; padding-top: 12px; }
+        .party-field { display: flex; gap: 6px; }
+        .party-self-nick { color: #ffcf6a; }
+        /* Ошибка модалки: пустой блок не занимает места (раньше он всегда
+           висел с display:none и текст ошибки был не виден). */
+        .party-error { color: #ff8fa3; font-size: 12px; line-height: 1.35; }
+        .party-error:empty { display: none; }
+
+        /* HUD пати: HP-панель и журнал в одном контейнере, перетаскивание
+           за заголовки. Контейнер и панели — pointer-events:none, чтобы не
+           перехватывать клики по игре; интерактивные узлы возвращают auto. */
+        .party-hud-container { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; align-items: stretch; box-sizing: border-box; pointer-events: none; }
+        .party-panel, .party-log-panel { display: none; position: relative; box-sizing: border-box; min-width: 150px; max-width: 260px; background: rgba(20, 16, 26, 0.92); border: 1px solid #3a3040; border-radius: 10px; padding: 8px 10px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); font: 12px/1.4 system-ui, "Segoe UI", sans-serif; color: #e8e8ea; pointer-events: none; }
+        .party-drag-handle { pointer-events: auto; cursor: grab; user-select: none; -webkit-user-select: none; touch-action: none; }
+        .party-drag-handle:active, .party-hud-container.party-dragging .party-drag-handle { cursor: grabbing; }
+        .party-panel-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #c9b184; margin-bottom: 6px; }
+        .party-log-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .party-log-body { pointer-events: auto; max-height: 150px; overflow-y: auto; margin-top: 6px; }
+        .party-log-body::-webkit-scrollbar { width: 6px; }
+        .party-log-body::-webkit-scrollbar-thumb { background: #44374a; border-radius: 4px; }
+        .party-log-body::-webkit-scrollbar-thumb:hover { background: #caa55c; }
+        .party-log-toggle { pointer-events: auto; background: none; border: none; padding: 0 2px; color: #ffcf6a; cursor: pointer; font-size: 12px; line-height: 1; }
+        .party-log-toggle:hover { color: #fff; }
+        .party-heal-btn { pointer-events: auto; flex: none; padding: 0 5px; background: #22352a; border: 1px solid #5fd987; color: #5fd987; border-radius: 4px; font-size: 10px; line-height: 15px; cursor: pointer; transition: background 0.15s, color 0.15s; }
+        .party-heal-btn:hover:not(:disabled) { background: #5fd987; color: #16121a; }
+        .party-heal-btn:disabled { opacity: 0.6; cursor: default; }
         /* 7TV-смайлики: размер задаётся переменной --t7-h (S/M/L/XL из настроек чата) */
         .t7-emote { height: var(--t7-h, 1.9em); vertical-align: middle; margin: 0 2px; }
+        /* Подсветка пользователей аддона (ТЗ 11.6.0g-3) */
+        .legion-addon-user {
+            color: #00f0ff !important;
+            text-shadow: 0 0 7px rgba(0, 240, 255, 0.55) !important;
+            font-weight: 800 !important;
+        }
+        .legion-addon-badge {
+            display: inline-block;
+            margin-right: 3px;
+            font-size: 11px;
+            filter: drop-shadow(0 0 4px rgba(0, 240, 255, 0.7));
+            vertical-align: middle;
+            user-select: none;
+        }
+
     `;
 
     // ===== src/core/hooks.js =====
@@ -1398,8 +1442,11 @@
 
             // 3) data(q) — сеттер игры: сохраняем СЫРОЙ пакет до буферизации.
             //    quest.js кладёт его в RAW и показывает с задержкой стрима (q.dl),
-            //    поэтому _view() отстаёт. Этот снимок нужен Ассистенту Жреца:
-            //    раненые (b.low) должны быть максимально свежими.
+            //    поэтому _view() отстаёт.
+            // TODO: REMOVE — снимок писался для Ассистента Жреца
+            // (modules/priest-assistant.js удалён в 11.6.0g-1); сейчас
+            // G.__lgRawQuestData никто не читает. Хук оставлен, пока
+            // пользователь не подтвердил удаление.
             if (typeof val.data === 'function' && !val.__dataHooked) {
                 const origData = val.data;
                 val.data = function (q) {
@@ -1483,7 +1530,6 @@
                         <button class="fab-menu-item" id="${d.btnBuildSim}">⚙️ Планировщик Героя</button>
                         <button class="fab-menu-item" id="${d.btnAuctionScan}">🔍 Сканер Аукциона</button>
                         <button class="fab-menu-item" id="${d.btnPocketCity}">🏰 Карманный Город</button>
-                        <button class="fab-menu-item" id="btn-priest-panel">✨ Панель Жреца</button>
                     </div>
                 </div>
 
@@ -1529,9 +1575,10 @@
          * Модалка служебных настроек аддона (открывается из FAB-меню).
          * Обработчики кнопок навешивает UI.openSettings().
          *
-         * @param {boolean} chatDisabled перехват чата отключён
+         * @param {boolean} chatDisabled    перехват чата отключён
+         * @param {boolean} addonHighlight  подсветка ников Legion включена (11.6.0g-4)
          */
-        settingsModal(chatDisabled) {
+        settingsModal(chatDisabled, addonHighlight = true) {
             return `
                 <h2>⚙️ Настройки аддона <button class="custom-close" id="custom-close-btn">✖</button></h2>
                 <div style="display:flex; flex-direction:column; gap:15px; padding:10px;">
@@ -1539,6 +1586,11 @@
                     <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer;">
                         <span>🚫 Отключить перехват чата</span>
                         <input type="checkbox" id="modal-chk-chat" style="width:16px; height:16px; accent-color:#ff5a7a;" ${chatDisabled ? 'checked' : ''}>
+                    </label>
+                    <!-- v11.6.0g-4: подсветка ников пользователей аддона в чате -->
+                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
+                        <span>⚡ Подсветка ников Legion</span>
+                        <input type="checkbox" id="modal-chk-addon-hl" style="width:16px; height:16px; accent-color:#00f0ff;" ${addonHighlight ? 'checked' : ''}>
                     </label>
                 </div>
             `;
@@ -1984,9 +2036,11 @@
         // Вынесены из FAB-меню в модалку, чтобы меню не разрасталось.
         openSettings() {
             const chatDisabled = (typeof Chat !== 'undefined') ? !!Chat.disabled : false;
+            // 11.6.0g-4: состояние тумблера подсветки ников (дефолт — включено).
+            const addonHighlight = (typeof Chat !== 'undefined') ? Chat.addonHighlight !== false : true;
 
             // Разметка модалки — в core/ui-templates.js (UITemplates.settingsModal).
-            const modal = this.showModal(UITemplates.settingsModal(chatDisabled), { compact: true });
+            const modal = this.showModal(UITemplates.settingsModal(chatDisabled, addonHighlight), { compact: true });
 
             if (!modal) return;
 
@@ -2000,6 +2054,13 @@
             modal.querySelector('#modal-chk-chat')?.addEventListener('change', (e) => {
                 if (typeof Chat !== 'undefined' && typeof Chat.setDisabled === 'function') {
                     Chat.setDisabled(e.target.checked);
+                }
+            });
+
+            // 11.6.0g-4: подсветка ников Legion — сохраняем и перерисовываем чат.
+            modal.querySelector('#modal-chk-addon-hl')?.addEventListener('change', (e) => {
+                if (typeof Chat !== 'undefined' && typeof Chat.setAddonHighlight === 'function') {
+                    Chat.setAddonHighlight(e.target.checked);
                 }
             });
         },
@@ -2103,9 +2164,8 @@
 
         // Текущая локация героя для HUD «👤 Профиль»: { text, color }.
         //   Шахта — по разметке нативного модуля (.mn-world/.mn-screen) либо по URL;
-        //   Поход — по состоянию LGQuest (q.on). Состояние читаем у PriestAssistant:
-        //   его _readQuest() берёт сырые пакеты из hooks.js (без задержки стрима q.dl),
-        //   LGQuest._view() — запасной вариант, если модуль жреца ещё не объявлен.
+        //   Поход — по состоянию LGQuest (q.on) через штатный геттер игры
+        //   LGQuest._view() (данные с задержкой стрима q.dl).
         _detectHudLocation() {
             const inMine = !!document.querySelector('.mn-world') ||
                            !!document.querySelector('.mn-screen') ||
@@ -2116,10 +2176,7 @@
 
             let inQuest = false;
             try {
-                if (typeof PriestAssistant !== 'undefined' && typeof PriestAssistant._readQuest === 'function') {
-                    const q = PriestAssistant._readQuest();
-                    inQuest = !!(q && q.on);
-                } else if (G.LGQuest && typeof G.LGQuest._view === 'function') {
+                if (G.LGQuest && typeof G.LGQuest._view === 'function') {
                     const q = G.LGQuest._view();
                     inQuest = !!(q && q.on);
                 }
@@ -5442,651 +5499,6 @@ const Players = {
         }
     };
 
-    // ===== src/modules/priest-assistant.js =====
-    // ============================================================
-    // 4.2. МОДУЛЬ: АССИСТЕНТ ЖРЕЦА (HUD для Похода)
-    //
-    // Данные боя берём из нативного модуля игры (в песочнице — через G).
-    // Приоритет источников — от самого свежего к самому «ленивому»:
-    //   G.__lgRawQuestData  — сырой пакет, перехваченный hooks.js на LGQuest.data(q)
-    //                         (до буферизации и задержки стрима q.dl);
-    //   G.__BB_LAST_RAW_Q__ — аналогичный снимок от «Чёрного ящика»;
-    //   G.LGQuest._view()   — штатный геттер игры (данные с задержкой);
-    //                         data(q) — СЕТТЕР, без аргумента возвращает undefined.
-    //   q.on     — поход активен (false — завершён/не запущен)
-    //   q.b.st   — фаза боя: 'party' (ход отряда — основное окно хила),
-    //              'tele'/'mech'/'trans'/'hit' — бой идёт, 'intro'/'end' — нет
-    //   q.b.low  — массив [login, name, hp] по раненым участникам
-    //   q.b.sk   — умения героя в бою [id, кулдаун, тип] ('heal' = хилка)
-    //
-    // HUD показывает только отслеживаемых игроков и даёт кнопку быстрого хила.
-    // Источник списка по умолчанию — НАТИВНЫЕ друзья игры (/api/friends),
-    // локальный список «Друзья» из аддона удалён в 11.5.4.
-    // Рендер дешёвый: тяжёлая часть (innerHTML) пересобирается только при
-    // изменении данных боя.
-    // ============================================================
-    const PriestAssistant = {
-        hudEl: null,
-        watchedNicks: [],          // ники как ввёл пользователь (сравнение — без учёта регистра)
-        nativeFriends: new Set(),  // нативные друзья игры (/api/friends), логины в нижнем регистре
-        isVisible: false,          // HUD открывается/закрывается вручную из FAB-меню
-        // true — показывать всех раненых отряда, игнорируя список (по умолчанию).
-        showAllWounded: true,
-        _remindedThisCombat: false,
-        _updateInterval: null,
-        _friendsInterval: null,    // периодическое обновление нативных друзей
-        _friendsLoading: false,    // защита от наложения запросов /api/friends
-        _menuBtn: null,
-        _ownsMenuBtn: false,       // true — кнопку создали сами (фолбэк), её же и удаляем
-        _onQuestUpdate: null,
-        _dragBound: false,
-
-        STORAGE_KEY: 'LEGION_PRIEST_WATCHED',
-        HUD_POS_KEY: 'LEGION_PRIEST_HUD_POS',
-        VISIBLE_KEY: 'LEGION_PRIEST_HUD_VISIBLE',
-        ALL_KEY: 'LEGION_PRIEST_ALL',   // режим «показывать всех раненых»
-
-        init() {
-            // Список друзей берём у игры: аддон больше не ведёт свой.
-            // Запрос асинхронный — HUD успевает отрисоваться и без него.
-            this.loadNativeFriends();
-            if (this._friendsInterval) clearInterval(this._friendsInterval);
-            // Друга могли добавить прямо в игре — раз в минуту обновляем.
-            this._friendsInterval = setInterval(() => this.loadNativeFriends(), 60000);
-
-            this._loadVisibility();
-            this._loadWatched();
-            this._loadShowAll();
-            this._bindMenuButton();
-
-            // Игра отдельного события об изменениях боя не даёт, но если оно
-            // появится — перерисуем сразу, не ожидая тика поллинга.
-            if (!this._onQuestUpdate) {
-                this._onQuestUpdate = () => this.renderHud();
-                document.addEventListener('lg-quest-update', this._onQuestUpdate);
-            }
-
-            // Поллинг: контекст похода обновляет q.b в реальном времени.
-            if (this._updateInterval) clearInterval(this._updateInterval);
-            this._updateInterval = setInterval(() => this.renderHud(), 1000);
-
-            this.renderHud();
-        },
-
-        // Снятие таймеров/слушателей при повторном запуске аддона (single-instance guard).
-        destroy() {
-            if (this._updateInterval) {
-                clearInterval(this._updateInterval);
-                this._updateInterval = null;
-            }
-            if (this._friendsInterval) {
-                clearInterval(this._friendsInterval);
-                this._friendsInterval = null;
-            }
-            if (this._onQuestUpdate) {
-                document.removeEventListener('lg-quest-update', this._onQuestUpdate);
-                this._onQuestUpdate = null;
-            }
-            // Кнопку из разметки main.js не трогаем (живёт вместе с FAB),
-            // удаляем только аварийно созданный дубль.
-            if (this._menuBtn && this._ownsMenuBtn) {
-                this._menuBtn.remove();
-            }
-            this._menuBtn = null;
-            this._ownsMenuBtn = false;
-            if (this.hudEl) {
-                this.hudEl.remove();
-                this.hudEl = null;
-            }
-            this._dragBound = false;
-            this._remindedThisCombat = false;
-        },
-
-        // ------------------------------------------------------------
-        // Нативные друзья игры (GET /api/friends).
-        //
-        // Ответ современного клиента: { ok: true, friends: [{ login, ... }] },
-        // но старые сборки могли отдавать просто массив логинов — поэтому
-        // нормализуем оба варианта. При ошибке/пустом ответе прошлый кэш
-        // НЕ затираем: панель продолжает работать по последнему списку.
-        // ------------------------------------------------------------
-        async loadNativeFriends() {
-            if (this._friendsLoading) return;       // запрос уже в полёте
-            this._friendsLoading = true;
-            try {
-                const res = await Utils.fetchApi('/api/friends');
-                const data = res?.body || res;
-                // Ответ: { ok, friends: [...] } либо просто массив друзей.
-                const list = Array.isArray(data) ? data
-                           : Array.isArray(data?.friends) ? data.friends
-                           : Array.isArray(res?.friends) ? res.friends
-                           : null;
-                if (!list) return;
-
-                const set = new Set();
-                list.forEach(f => {
-                    const raw = (f && typeof f === 'object')
-                        ? (f.login || f.nick || f.name || '')
-                        : f;
-                    const key = String(raw || '').trim().toLowerCase();
-                    if (key) set.add(key);
-                });
-                this.nativeFriends = set;
-                dbg(`[PRIEST] Загружено нативных друзей: ${set.size}`);
-            } catch (e) {
-                dbg('[PRIEST] Ошибка загрузки нативных друзей:', e);
-            } finally {
-                this._friendsLoading = false;
-            }
-        },
-
-        _loadVisibility() {
-            try {
-                this.isVisible = localStorage.getItem(this.VISIBLE_KEY) === 'true';
-            } catch (e) {
-                this.isVisible = false;
-            }
-        },
-
-        _saveVisibility() {
-            try {
-                localStorage.setItem(this.VISIBLE_KEY, String(this.isVisible));
-            } catch (e) {
-                dbg('PriestAssistant: не удалось сохранить видимость HUD', e);
-            }
-        },
-
-        _setVisible(visible) {
-            this.isVisible = !!visible;
-            this._saveVisibility();
-            this._syncMenuButton();
-            this.renderHud(true);
-        },
-
-        // Пункт FAB. Штатно кнопка объявлена в main.js (как «Профиль»);
-        // динамическое создание — фолбэк, если разметка старая.
-        _bindMenuButton() {
-            const btn = document.getElementById('btn-priest-panel');
-            if (btn) {
-                btn.addEventListener('click', () => {
-                    const fabMenu = document.getElementById(DOM_IDS.fabMenu);
-                    if (fabMenu) fabMenu.classList.remove('open');
-                    this._setVisible(!this.isVisible);
-                });
-                this._menuBtn = btn;
-                this._ownsMenuBtn = false;
-                this._syncMenuButton();
-                return;
-            }
-
-            if (this._menuBtn) return;
-            const fabMenu = document.getElementById(DOM_IDS.fabMenu);
-            if (!fabMenu) return;
-
-            const created = document.createElement('button');
-            created.type = 'button';
-            created.className = 'fab-menu-item';
-            created.textContent = '✨ Панель Жреца';
-            created.addEventListener('click', () => {
-                fabMenu.classList.remove('open');
-                this._setVisible(!this.isVisible);
-            });
-
-            // Ставим сразу после «Профиля»: пункт остаётся в группе кнопок
-            // и не задевает кнопку «⚙️ Настройки» того же блока.
-            const profileBtn = document.getElementById(DOM_IDS.btnProfile);
-            if (profileBtn) profileBtn.insertAdjacentElement('afterend', created);
-            else fabMenu.appendChild(created);
-
-            this._menuBtn = created;
-            this._ownsMenuBtn = true;
-            this._syncMenuButton();
-        },
-
-        // Подсветка активного пункта меню, пока панель открыта.
-        _syncMenuButton() {
-            if (!this._menuBtn || !this._menuBtn.classList) return;
-            this._menuBtn.classList.toggle('active', this.isVisible);
-            this._menuBtn.title = this.isVisible ? 'Скрыть панель Жреца' : 'Показать панель Жреца';
-        },
-
-        _loadWatched() {
-            try {
-                const arr = JSON.parse(localStorage.getItem(this.STORAGE_KEY));
-                this.watchedNicks = Array.isArray(arr) ? this._normalizeNicks(arr) : [];
-            } catch (e) {
-                dbg('PriestAssistant: не удалось прочитать список отслеживаемых', e);
-                this.watchedNicks = [];
-            }
-        },
-
-        // Режим «показывать всех раненых». Включён по умолчанию: пользователь
-        // должен явно выключить его ('false'), чтобы вернуться к фильтру по
-        // списку. Читаем/пишем безопасно — при запрещённом localStorage
-        // аддон не должен падать на старте.
-        _loadShowAll() {
-            try {
-                this.showAllWounded = localStorage.getItem(this.ALL_KEY) !== 'false';
-            } catch (e) {
-                this.showAllWounded = true;
-            }
-        },
-
-        _saveShowAll() {
-            try {
-                localStorage.setItem(this.ALL_KEY, this.showAllWounded);
-            } catch (e) {
-                dbg('PriestAssistant: не удалось сохранить режим "все раненые"', e);
-            }
-        },
-
-        // Переключение режима (чекбокс в настройках, при необходимости — кнопка в меню).
-        toggleShowAll() {
-            this.showAllWounded = !this.showAllWounded;
-            this._saveShowAll();
-            this.renderHud(true);
-        },
-
-        // Ники храним как ввёл пользователь (чтобы список читался нормально),
-        // дубликаты убираем без учёта регистра.
-        _normalizeNicks(list) {
-            const seen = new Set();
-            const out = [];
-            (Array.isArray(list) ? list : []).forEach(raw => {
-                const nick = String(raw).trim();
-                const key = nick.toLowerCase();
-                if (!nick || seen.has(key)) return;
-                seen.add(key);
-                out.push(nick);
-            });
-            return out;
-        },
-
-        // Кого отслеживаем. Пустой свой список = все нативные друзья игры
-        // (как и написано в настройках панели).
-        _getWatchSet() {
-            if (this.watchedNicks.length) {
-                return new Set(this.watchedNicks.map(n => n.toLowerCase()));
-            }
-            // nativeFriends уже приведены к нижнему регистру в loadNativeFriends().
-            return new Set(this.nativeFriends);
-        },
-
-        _getMyNick() {
-            let playerNick = '';
-            try {
-                if (typeof Players !== 'undefined' && typeof Players.getMyNick === 'function') {
-                    playerNick = Players.getMyNick();
-                }
-            } catch (e) {}
-
-            const candidates = [
-                playerNick,
-                G.ME?.user?.login,
-                G.ME?.user?.name,
-                G.ME?.hero?.n,
-                G.ME?.hero?.name,
-                typeof Chat !== 'undefined' ? Chat.myNick : ''
-            ];
-            for (const c of candidates) {
-                if (c) return String(c).trim().toLowerCase();
-            }
-            return '';
-        },
-
-        // Роль героя. В Legion класс лежит в hero.class; role — устаревшее/пустое
-        // поле, поэтому проверяем его только после class (см. Chat.myRole =
-        // hero.class, BuildSim.classNames.priest).
-        _getMyRole() {
-            // ME/герой — объекты страницы: в песочнице доступны только через G.
-            const hero = G.ME?.hero || G.ME?.me || G.__lgHero || window.__lgHero || null;
-            const candidates = [
-                hero && hero.class,
-                hero && hero.role,
-                hero && hero.cl,
-                hero && hero.sk && hero.sk.c,
-                G.ME?.user?.class,
-                G.ME?.user?.role,
-                typeof Chat !== 'undefined' ? Chat.myRole : ''
-            ];
-            for (const c of candidates) {
-                if (c) return String(c).trim().toLowerCase();
-            }
-            return '';
-        },
-
-        // Состояние похода. Порядок источников (от самого свежего):
-        //   1) __lgRawQuestData — сырой пакет из hooks.js (без задержки стрима);
-        //   2) __BB_LAST_RAW_Q__ — сырой снимок от BlackBox (если он стоит);
-        //   3) LGQuest._view() — штатный геттер игры (данные с задержкой q.dl);
-        //   4) __lgQuestContext.data() — старый фолбэк.
-        _readQuest() {
-            const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-
-            // 1. Самый свежий пакет: игра зовёт data(q) на каждое обновление,
-            //    hooks.js кладёт его сюда ДО буферизации в RAW игры.
-            if (G.__lgRawQuestData && typeof G.__lgRawQuestData === 'object') {
-                // { on: false } — поход завершён: это достоверно, старые
-                // снимки (BlackBox/_view) подставлять нельзя.
-                return G.__lgRawQuestData.on === false ? null : G.__lgRawQuestData;
-            }
-
-            // 2. Пакет от «Чёрного ящика» (если хука из п.1 ещё нет).
-            if (G.__BB_LAST_RAW_Q__ && typeof G.__BB_LAST_RAW_Q__ === 'object') {
-                return G.__BB_LAST_RAW_Q__.on === false ? null : G.__BB_LAST_RAW_Q__;
-            }
-
-            // 3. Запасной вариант: _view() — данные с задержкой стрима.
-            if (G.LGQuest && typeof G.LGQuest._view === 'function') {
-                try {
-                    const v = G.LGQuest._view();
-                    if (v && typeof v === 'object') return v.on === false ? null : v;
-                } catch (e) {}
-            }
-
-            // 4. Старый fallback (у контекста QX метода data нет).
-            const ctx = G.__lgQuestContext || window.__lgQuestContext;
-            if (ctx && typeof ctx.data === 'function') {
-                try {
-                    const q = ctx.data();
-                    if (q && typeof q === 'object') return q;
-                } catch (e) {}
-            }
-            return null;
-        },
-
-        // Бой активен, если объект боя есть и фаза не 'end' и не 'intro'.
-        // Фазы по docs/API.md: 'party' (ход отряда — тут и нужен хил),
-        // 'tele', 'hit', 'mech', 'trans' — бой идёт; 'intro' и 'end' — нет.
-        _isBattleActive(battle) {
-            return !!battle && typeof battle === 'object' &&
-                battle.st !== 'end' && battle.st !== 'intro';
-        },
-
-        // Раненые отряда (q.b.low). Показываем либо отслеживаемых (свой список
-        // / друзья игры), либо ВСЕХ, если включён showAllWounded.
-        // q можно не передавать — тогда читаем состояние похода сами.
-        _collectWounded(q = this._readQuest()) {
-            const battle = q && q.b;
-            if (!this._isBattleActive(battle) || !Array.isArray(battle.low)) return [];
-
-            const myNick = this._getMyNick();
-            const isAll = this.showAllWounded;
-            // В режиме «все» фильтр по списку не нужен вообще.
-            const watchSet = isAll ? null : this._getWatchSet();
-            if (!isAll && !watchSet.size) return [];
-
-            const seen = new Set();
-            return battle.low
-                .filter(row => Array.isArray(row) && row[0] != null)
-                .map(row => {
-                    const login = String(row[0]).trim();
-                    const name = row[1] ? String(row[1]) : login;
-                    const rawHp = Number(row[2]);
-                    // HP приходит долей (0..1); на всякий случай принимаем и
-                    // уже посчитанные проценты.
-                    const hp = Number.isFinite(rawHp)
-                        ? Math.min(100, Math.max(0, Math.round(rawHp <= 1 ? rawHp * 100 : rawHp)))
-                        : 0;
-                    return { login, name, hp };
-                })
-                .filter(w => {
-                    const key = w.login.toLowerCase();
-                    if (!key || key === myNick || seen.has(key)) return false;
-                    seen.add(key);
-                    // Режим «все раненые»: показываем каждого, кроме себя.
-                    if (isAll) return true;
-                    return watchSet.has(key);
-                })
-                .sort((a, b) => a.hp - b.hp);
-        },
-
-        _findReadyHeal(q) {
-            const skills = q && q.b && Array.isArray(q.b.sk) ? q.b.sk : null;
-            if (!skills) return null;
-            // Формат умения: [id, кулдаун, тип]. Готова та, у которой кулдаун 0.
-            return skills.find(sk => Array.isArray(sk) && sk[2] === 'heal' && (sk[1] === 0 || sk[1] === '0')) || null;
-        },
-
-        renderHud(force = false) {
-            // После destroy() HUD не восстанавливаем.
-            if (!this._updateInterval) return;
-
-            const q = this._readQuest();
-
-            // Бой активен, если есть объект q.b и фаза не 'end' и не 'intro'.
-            // Хил нужен именно в 'party' (ход отряда), а не только в 'hit'.
-            const isBattle = this._isBattleActive(q && q.b);
-
-            // Напоминание жрецу: бой идёт, панель закрыта — один раз за бой.
-            if (isBattle && this._getMyRole() === 'priest') {
-                if (!this.isVisible && !this._remindedThisCombat) {
-                    UI.showToast('✨ Вы Жрец! Откройте Панель Жреца в меню для быстрого хила.', false);
-                    this._remindedThisCombat = true;
-                }
-            } else if (!isBattle) {
-                // Бой закончился (или мы не в походе) — напоминание снова разрешено.
-                this._remindedThisCombat = false;
-            }
-
-            // Панель закрыта пользователем — не создаём и не показываем HUD.
-            if (!this.isVisible) {
-                if (this.hudEl) this.hudEl.style.display = 'none';
-                return;
-            }
-
-            this._ensureHud();
-
-            // Состояние 1: контекста похода нет — статус и список наблюдения.
-            if (!q) {
-                this._showHud(this._outsideQuestHtml(), force);
-                return;
-            }
-
-            // Состояние 2: в походе, но бой ещё не идёт (или уже закончился).
-            if (!isBattle) {
-                this._showHud(this._hudHeader('✨ Жрец: Ожидание боя') + this._watchListHtml(), force);
-                return;
-            }
-
-            const wounded = this._collectWounded(q);
-
-            // Состояние 3: бой идёт, но из отслеживаемых никто не ранен.
-            // Список наблюдаемых оставляем под заголовком — видно, что панель жива.
-            if (!wounded.length) {
-                this._showHud(this._hudHeader('✨ Жрец: Все целы', '#4cc95a') + this._watchListHtml(), force);
-                return;
-            }
-
-            // Состояние 4: бой, есть раненые — строки с кнопками хила.
-            const readyHeal = this._findReadyHeal(q);
-            const rows = wounded.map(w => {
-                const hpColor = w.hp < 40 ? '#ff5a7a' : '#fff';
-                const safeLogin = Utils.escapeHtml(w.login);
-                const safeName = Utils.escapeHtml(w.name);
-                const btnTitle = readyHeal ? `Хил на ${safeName}` : 'Хилка ещё не готова';
-                return `
-                    <div class="priest-hud-row">
-                        <span class="priest-hud-nick" style="color:${hpColor};">${safeName} (${w.hp}%)</span>
-                        <button type="button" class="priest-heal-btn" data-nick="${safeLogin}" title="${btnTitle}"${readyHeal ? '' : ' disabled'}>Хил</button>
-                    </div>
-                `;
-            }).join('');
-
-            this._showHud(this._hudHeader('✨ Панель Жреца') + rows, force);
-        },
-
-        _ensureHud() {
-            if (this.hudEl) return;
-            this.hudEl = document.createElement('div');
-            this.hudEl.className = 'priest-hud';
-            // Клики обрабатываем делегированием: innerHTML меняется, а слушатель один.
-            this.hudEl.addEventListener('click', (e) => this._onHudClick(e));
-            document.body.appendChild(this.hudEl);
-        },
-
-        // Пишем innerHTML только при реальном изменении — кнопки не «мигают».
-        _showHud(html, force) {
-            if (!this.hudEl) return;
-            this.hudEl.style.display = 'flex';
-            if (!force && this.hudEl.innerHTML === html) return;
-            this.hudEl.innerHTML = html;
-            this._bindDragOnce();
-        },
-
-        // Шапка HUD: статус слева, настройки и закрытие справа.
-        _hudHeader(text, color) {
-            const colorStyle = color ? ` style="color:${color};"` : '';
-            return `
-                <div class="priest-hud-header">
-                    <span${colorStyle}>${text}</span>
-                    <div class="priest-hud-actions">
-                        <span class="priest-hud-settings" id="priest-settings-icon" title="Настройки">⚙️</span>
-                        <span class="priest-hud-close" id="priest-close-icon" title="Закрыть">✖</span>
-                    </div>
-                </div>
-            `;
-        },
-
-        // Список отслеживаемых ников — общий рендер для всех состояний HUD.
-        // Показываем свой список либо нативных друзей игры (их может быть
-        // много, поэтому выводим счётчик). Пусто — значит «все друзья».
-        _watchListHtml() {
-            let listHtml;
-            if (this.watchedNicks.length) {
-                listHtml = this.watchedNicks
-                    .map(n => `<div class="priest-hud-watch-item">• ${Utils.escapeHtml(n)}</div>`)
-                    .join('');
-            } else if (this.nativeFriends.size) {
-                listHtml = `<div class="priest-hud-watch-item">• Друзей в игре: ${this.nativeFriends.size}</div>`;
-            } else {
-                listHtml = '<div class="priest-hud-watch-item">• (Все друзья)</div>';
-            }
-
-            return `<div class="priest-hud-watchlist">${listHtml}</div>`;
-        },
-
-        _outsideQuestHtml() {
-            // Вне похода показываем, кого реально отслеживаем.
-            return this._hudHeader('✨ Жрец: Ожидание похода') + this._watchListHtml();
-        },
-
-        // Перетаскивание вешаем один раз — когда в HUD уже есть .priest-hud-header.
-        _bindDragOnce() {
-            if (this._dragBound || !this.hudEl) return;
-            this._dragBound = true;
-            UI.makeDraggable(this.hudEl, '.priest-hud-header', this.HUD_POS_KEY);
-            // makeDraggable() только сохраняет позицию — восстанавливаем её сами.
-            try {
-                const pos = JSON.parse(localStorage.getItem(this.HUD_POS_KEY) || 'null');
-                if (pos && pos.left && pos.top) {
-                    this.hudEl.style.left = pos.left;
-                    this.hudEl.style.top = pos.top;
-                    this.hudEl.style.right = 'auto';
-                }
-            } catch (e) {}
-        },
-
-        _onHudClick(e) {
-            const target = e.target;
-            if (!target || !target.closest) return;
-
-            if (target.closest('.priest-hud-close')) {
-                this._setVisible(false);
-                return;
-            }
-            if (target.closest('.priest-hud-settings')) {
-                this.openSettings();
-                return;
-            }
-            const btn = target.closest('.priest-heal-btn');
-            if (btn && !btn.disabled) this.heal(btn.dataset.nick, btn);
-        },
-
-        heal(login, btn) {
-            if (!login) return;
-
-            const ctx = G.__lgQuestContext || window.__lgQuestContext;
-            if (!ctx || typeof ctx.act !== 'function') {
-                UI.showToast('Поход: нет доступа к контексту боя', true);
-                return;
-            }
-
-            // Данные читаем в момент клика: между тиками кулдаун мог измениться.
-            const healSk = this._findReadyHeal(this._readQuest());
-            if (!healSk) {
-                UI.showToast('Хилка ещё не готова', true);
-                this.renderHud(true);
-                return;
-            }
-
-            try {
-                ctx.act({ k: 'b', a: 'sk', w: healSk[0], t: login });
-            } catch (e) {
-                dbg('PriestAssistant: ошибка отправки хила', e);
-                UI.showToast('Хил: сбой отправки', true);
-                return;
-            }
-
-            if (btn) {
-                btn.disabled = true;
-                btn.textContent = '...';
-            }
-            UI.showToast(`✨ Хил на ${login}`);
-        },
-
-        openSettings() {
-            const current = this.watchedNicks.join(', ');
-
-            const modal = UI.showModal(`
-                <h2>✨ Настройки Жреца <button class="custom-close" id="custom-close-btn">✖</button></h2>
-                <div style="padding: 10px;">
-                    <div style="font-size: 13px; color: #aaa; margin-bottom: 15px;">
-                        Введите ники через запятую или пробел. Если поле пустое, панель будет отслеживать всех ваших друзей. Галочка ниже полностью отключает фильтр по списку.
-                    </div>
-                    <textarea id="priest-nicks-input" maxlength="500" style="width: 100%; height: 100px; background: #111; border: 1px solid #444; color: #fff; padding: 10px; border-radius: 6px; box-sizing: border-box; font-family: monospace; resize: vertical;" placeholder="ник1, ник2, ник3">${Utils.escapeHtml(current)}</textarea>
-                    <label style="margin-top: 12px; display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                        <input type="checkbox" id="priest-show-all" style="width: 16px; height: 16px; accent-color: #caa55c; flex-shrink: 0;" ${this.showAllWounded ? 'checked' : ''}>
-                        <span style="font-size: 13px;">Показывать ВСЕХ раненых (игнорировать список)</span>
-                    </label>
-                    <div style="display: flex; gap: 10px; margin-top: 15px;">
-                        <button id="priest-save-btn" style="flex: 1; padding: 10px; background: #caa55c; color: #1d1620; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">Сохранить</button>
-                    </div>
-                </div>
-            `, { compact: true });
-
-            const input = modal?.querySelector('#priest-nicks-input');
-            const saveBtn = modal?.querySelector('#priest-save-btn');
-            if (!input || !saveBtn) return;
-
-            // Режим «все раненые» применяем сразу, без кнопки «Сохранить»:
-            // состояние пишем в localStorage и сразу перерисовываем HUD.
-            const showAllChk = modal.querySelector('#priest-show-all');
-            if (showAllChk) {
-                showAllChk.addEventListener('change', (e) => {
-                    this.showAllWounded = !!e.target.checked;
-                    this._saveShowAll();
-                    this.renderHud(true);
-                });
-            }
-
-            saveBtn.addEventListener('click', () => {
-                // Разделители: запятая, пробел, перенос строки (и их сочетания).
-                this.watchedNicks = this._normalizeNicks(String(input.value || '').split(/[\s,]+/));
-
-                try {
-                    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.watchedNicks));
-                } catch (e) {
-                    dbg('PriestAssistant: не удалось сохранить список', e);
-                }
-
-                UI.showToast('Список отслеживаемых обновлен');
-                UI.closeModals();
-                this.renderHud(true); // Принудительный перерендер
-            });
-        }
-    };
-
     // ===== src/modules/pocket-city.js =====
     // ============================================================
     // 6.5. МОДУЛЬ: КАРМАННЫЙ ГОРОД (modules/pocket-city.js)
@@ -6187,23 +5599,25 @@ const Players = {
     // и CSP страницы `connect-src 'self'`).
     //
     // Хранилище — GM_setValue/GM_getValue (@grant в шапке):
-    //   lgPartyBaseUrl — адрес сервера (по умолчанию http://localhost:8787);
-    //   lgParty        — {groupId, inviteToken, sessionId, login};
+    //   lgPartyBaseUrl — адрес сервера (по умолчанию https://legion.ctrlfree.host, см. v11.6.0e/f);
+    //   lgParty        — {groupId, inviteToken, sessionId, login}
+    //                    (inviteToken — техническое имя поля сервера,
+    //                     в интерфейсе это «Код приглашения»);
     //   lgPartyOwner   — создал ли этот клиент пати.
     // Если GM-хранилище недоступно (старая версия скрипта без @grant),
     // молча падаем на localStorage, иначе модуль падал бы на первом клике.
     //
     // Шаг 1 = только auth/token-gate: create/join/leave/rotate/kick/members.
-    // v11.6.0a: вход — по inviteToken (POST /party/join), memberId отдельно от
-    // sessionId, серверный leave и lowercase-логины. Ник читается из игры
-    // ТОЛЬКО в момент клика «Создать»/«Присоединиться».
+    // v11.6.0a: вход — по коду приглашения (inviteToken, POST /party/join),
+    // memberId отдельно от sessionId, серверный leave и lowercase-логины.
+    // Ник читается из игры ТОЛЬКО в момент клика «Создать»/«Присоединиться».
     // v11.6.0a.2: ник и HP берутся из GET /api/me (user.login / hero.hpNow),
     // LG_CH.login — только фолбэк: в песочнице он бывает пустым.
     // v11.6.0a.3: пустое состояние рисуется синхронно, поэтому при первом
     // открытии «Вы: …» показывал фолбэк LG_CH.login (логин Twitch-канала).
     // Теперь open() дозапрашивает /api/me в фоне и обновляет ТОЛЬКО текстовый
     // узел ника (.party-self-nick): полная перерисовка сбила бы фокус в поле
-    // inviteToken.
+    // кода приглашения.
     // v11.6.0b: HP-панель. Раз в 3 с (только когда мы в пати) клиент шлёт
     // POST /party/:id/state и перерисовывает список из GET /party/:id/state.
     // v11.6.0c: журнал боя. В том же тике сравниваем снимки /api/me и шлём
@@ -6212,21 +5626,30 @@ const Players = {
     // v11.6.0d: взаимный хил. В строке HP-панели у раненого союзника появляется
     // кнопка «❤» -> _healMember() -> POST /c/<канал>/api/qact
     // {k:'b', a:'sk', w:'лечение', t:<ник>}. Успех пишется в журнал типом
-    // heal_cast. Кнопка только если цель не мы, цель ранена и свой герой в
-    // походе (вне похода игра отклоняет запрос).
+    // heal_cast. Кнопка только если цель не мы, цель ранена, свой герой в
+    // походе (вне похода игра отклоняет запрос) и наш класс — жрец
+    // (v11.6.0g-2: _prevMe.role === 'priest').
     // Под HP-панелью — блок «Журнал» с ленивой догрузкой GET .../log?since=.
+    // v11.6.0g-2: UI-патч. В интерфейсе «inviteToken» называется «Код
+    // приглашения»; модалка переведена на классы core/styles.js (тёмный фон,
+    // золотистые акценты, hover как у «Создать пати»); HP-панель и журнал
+    // живут в общем контейнере .party-hud-container и перетаскиваются за
+    // заголовки, позиция — GM_setValue('lgPartyHudPos').
     // ============================================================
     const Party = {
         BASE_URL_KEY: 'lgPartyBaseUrl',
         STATE_KEY: 'lgParty',
         OWNER_KEY: 'lgPartyOwner',
-        DEFAULT_BASE_URL: 'http://localhost:8787',
+        // Позиция HUD {left, top} после перетаскивания (v11.6.0g-2).
+        DRAG_KEY: 'lgPartyHudPos',
+        DEFAULT_BASE_URL: 'https://legion.ctrlfree.host',
         REQUEST_TIMEOUT: 12000,
         // Период синхронизации HP (ТЗ 11.6.0b: раз в 3 секунды).
         HP_SYNC_MS: 3000,
         // Сервер хранит ник только в нижнем регистре (server/index.js).
         LOGIN_RE: /^[a-z0-9_]{1,32}$/,
-        // inviteToken = 16 случайных байт = 32 hex-символа (server/db.js).
+        // Код приглашения (inviteToken) = 16 случайных байт = 32 hex-символа
+        // (server/db.js).
         INVITE_RE: /^[a-f0-9]{32}$/i,
 
         // Журнал боя (ТЗ 11.6.0c).
@@ -6252,6 +5675,10 @@ const Players = {
         // Промис фонового /api/me для .party-self-nick: повторные open() не
         // должны плодить одинаковые запросы, пока первый ещё в полёте.
         _selfNickFetch: null,
+        // Контейнер HUD (v11.6.0g-2): HP-панель и журнал — его дети, поэтому
+        // перетаскивание за заголовок двигает оба блока сразу.
+        HUD_ID: `${RAND_ID}-party-hud`,
+        _hudResizeBound: false, // слушатель resize навешен (clamp при смене размера)
         // id панели с префиксом RAND_ID: чужие page-стили не должны её зацепить.
         PANEL_ID: `${RAND_ID}-party-hp-panel`,
 
@@ -6268,16 +5695,16 @@ const Players = {
         _logReady: false,    // первичная загрузка (limit=100) выполнена
         _logBodyEl: null,    // .party-log-body — кэш, чтобы не искать каждый тик
 
-        // Инлайн-стили: у модалок аддона нет готовых классов для форм,
-        // а заводить их в core/styles.js ради одного окна — лишнее.
-        INPUT_STYLE: 'width:100%; box-sizing:border-box; background:#222; border:1px solid #444; color:#fff; padding:8px 10px; border-radius:6px; font-size:13px; outline:none;',
-        BTN_STYLE: 'padding:8px 12px; background:#2a2030; border:1px solid #caa55c; color:#ffcf6a; border-radius:6px; cursor:pointer; font-size:13px; white-space:nowrap;',
-        DANGER_BTN_STYLE: 'padding:4px 8px; background:#3a1f28; border:1px solid #ff5a7a; color:#ff5a7a; border-radius:5px; cursor:pointer; font-size:11px; white-space:nowrap;',
-        // Кнопка «❤» в строке HP-панели (v11.6.0d). pointer-events:auto обязателен:
-        // сама панель — pointer-events:none, чтобы не перехватывать клики по игре,
-        // но потомок с auto снова становится кликабельным.
-        HEAL_BTN_STYLE: 'flex:none; pointer-events:auto; padding:0 5px; background:#22352a; border:1px solid #5fd987; color:#5fd987; border-radius:4px; font-size:10px; line-height:15px; cursor:pointer;',
-        MUTED_STYLE: 'font-size:11px; color:#888; text-transform:uppercase; margin-bottom:6px;',
+        // v11.6.0g-2: инлайн-стили форм заменены классами из core/styles.js —
+        // только так работают hover/focus-эффекты (inline :hover невозможен).
+        // Кнопка «❤»: pointer-events:auto обязателен, сама панель —
+        // pointer-events:none, чтобы не перехватывать клики по игре.
+        INPUT_CLASS: 'party-input',
+        TOKEN_INPUT_CLASS: 'party-input party-token',
+        BTN_CLASS: 'party-btn',
+        DANGER_BTN_CLASS: 'party-btn party-btn-danger',
+        HEAL_BTN_CLASS: 'party-heal-btn',
+        MUTED_CLASS: 'party-muted',
 
         /* ---------------------------------------------------------- */
         /* Хранилище                                                   */
@@ -6396,14 +5823,18 @@ const Players = {
          * сравнивать такой снимок с предыдущим нельзя, иначе пропавший
          * /api/me выглядел бы как «вышел из похода» + «воскрес».
          *
+         * v11.6.0g-2: добавлен role (hero.role) — кнопка «❤» рисуется только
+         * жрецу, а роль видна только из /api/me.
+         *
          * @returns {Promise<{login: string, hp: number|null, maxHp: number|null,
-         *                    quest: object|null, ghost: boolean, live: boolean}>}
+         *                    quest: object|null, ghost: boolean, role: string,
+         *                    live: boolean}>}
          */
         async _fetchMe() {
             const channel = this._channelLogin();
             if (!channel) {
                 console.warn('[PARTY] LG_CH.login недоступен — /api/me не запросить');
-                return { login: '', hp: null, maxHp: null, quest: null, ghost: false, live: false };
+                return { login: '', hp: null, maxHp: null, quest: null, ghost: false, role: 'unknown', live: false };
             }
 
             try {
@@ -6421,6 +5852,9 @@ const Players = {
                 // (docs/API.md, §GET /api/me; в игре hpNow ?? stats.hp).
                 const hp = Number(data.hero?.hpNow);
                 const maxHp = Number(data.hero?.stats?.hp);
+                // Класс героя (docs/API.md, §GET /api/me: "role": "priest").
+                // 'unknown' — когда поля нет: хил тогда недоступен.
+                const role = data.hero?.role || 'unknown';
 
                 // ql — объект состояния похода (docs/API.md, §ql). При on:false
                 // похода нет, поэтому нормализуем в null: детектору журнала
@@ -6434,6 +5868,7 @@ const Players = {
                     maxHp: Number.isFinite(maxHp) ? maxHp : null,
                     quest,
                     ghost: data.hero?.ghost === true,
+                    role,
                     live: true
                 };
                 this._cachedLogin = me.login;
@@ -6441,7 +5876,7 @@ const Players = {
             } catch (e) {
                 console.warn('[PARTY] /api/me недоступен, берём LG_CH.login:', e);
                 this._cachedLogin = channel;
-                return { login: channel, hp: null, maxHp: null, quest: null, ghost: false, live: false };
+                return { login: channel, hp: null, maxHp: null, quest: null, ghost: false, role: 'unknown', live: false };
             }
         },
 
@@ -6478,10 +5913,10 @@ const Players = {
         _errorText(status, data, fallback) {
             const map = {
                 bad_login: 'Ник: 1–32 символа, только a–z, 0–9 и _',
-                bad_invite: 'Неверный инвайт-токен',
-                bad_invite_token: 'Некорректный инвайт-токен',
+                bad_invite: 'Неверный код приглашения',
+                bad_invite_token: 'Некорректный код приглашения',
                 login_taken: 'Этот ник уже занят в пати',
-                party_not_found: 'Пати с таким токеном не найдена — проверьте inviteToken',
+                party_not_found: 'Пати с таким кодом приглашения не найдена — проверьте код',
                 unauthorized: 'Сессия недействительна — войдите в пати заново',
                 not_owner: 'Действие доступно только владельцу пати',
                 not_member: 'Эта сессия не принадлежит пати',
@@ -6599,16 +6034,16 @@ const Players = {
         },
 
         /**
-         * POST /party/join — войти по инвайт-токену.
+         * POST /party/join — войти по коду приглашения.
          * groupId на клиенте не нужен: сервер находит пати по токену и
          * возвращает groupId в ответе.
-         * @param {string} inviteToken 32 hex-символа (пробелы обрезаются)
+         * @param {string} inviteToken код приглашения: 32 hex-символа (пробелы обрезаются)
          * @returns {Promise<{groupId: string, inviteToken: string, sessionId: string, login: string}>}
          */
         async partyJoin(inviteToken) {
             const token = String(inviteToken ?? '').trim();
-            if (!token) throw new Error('Укажите inviteToken');
-            if (!this.INVITE_RE.test(token)) throw new Error('Токен: 32 hex-символа');
+            if (!token) throw new Error('Укажите код приглашения');
+            if (!this.INVITE_RE.test(token)) throw new Error('Код приглашения: 32 hex-символа');
             const nick = await this._currentLogin();
 
             const res = await this._request(
@@ -6678,16 +6113,16 @@ const Players = {
         },
 
         /**
-         * POST /party/:id/rotate — перевыпустить инвайт-токен (только владелец).
-         * @returns {Promise<string>} новый токен
+         * POST /party/:id/rotate — перевыпустить код приглашения (только владелец).
+         * @returns {Promise<string>} новый код приглашения
          */
         async partyRotateToken() {
             const state = this._readState();
             if (!state) throw new Error('Вы не в пати');
-            if (!this._isOwner()) throw new Error('Токен может перевыпустить только владелец пати');
+            if (!this._isOwner()) throw new Error('Код приглашения может перевыпустить только владелец пати');
 
             const res = await this._request('POST', this._partyPath('rotate'), { body: {} });
-            if (!res?.inviteToken) throw new Error('Сервер не вернул новый inviteToken');
+            if (!res?.inviteToken) throw new Error('Сервер не вернул новый код приглашения');
 
             this._writeState({ ...state, inviteToken: res.inviteToken }, true);
             return res.inviteToken;
@@ -6723,31 +6158,183 @@ const Players = {
         /* HP-панель и синхронизация состояния (шаг 2, v11.6.0b)      */
         /* ---------------------------------------------------------- */
 
+        /* ---------------------------------------------------------- */
+        /* HUD: контейнер, перетаскивание, clamp (v11.6.0g-2)          */
+        /* ---------------------------------------------------------- */
+
         /**
-         * Элемент панели создаётся лениво и живёт до перезагрузки страницы.
-         * Вариант «а» из ТЗ: fixed/right/top, тёмный фон и скругления как у FAB.
-         * pointer-events:none — панель не должна перехватывать клики по игре.
+         * Контейнер HUD: HP-панель и журнал — его дети, поэтому drag за любой
+         * заголовок двигает оба блока сразу (ТЗ 11.6.0g-2 п.1).
+         * Позиция берётся из GM_setValue('lgPartyHudPos'); пока её нет —
+         * работает CSS-якорь top/right из core/styles.js.
+         * pointer-events:none у контейнера: клики по игре не перехватываются,
+         * интерактивные узлы возвращают auto в CSS (.party-drag-handle и др.).
+         */
+        _ensureHud() {
+            let hud = document.getElementById(this.HUD_ID);
+            if (hud && hud.isConnected) return hud;
+
+            hud = document.createElement('div');
+            hud.id = this.HUD_ID;
+            hud.className = 'party-hud-container';
+            document.body.appendChild(hud);
+
+            // Сохранённую позицию применяем сразу; clamp внутри проверит
+            // размеры — пока панели display:none, rect нулевой и он no-op.
+            this._applyHudPosition(hud);
+
+            // Смена размера окна: панель могла уехать за границы (п.6).
+            if (!this._hudResizeBound) {
+                this._hudResizeBound = true;
+                window.addEventListener('resize', () => this._clampHud());
+            }
+            return hud;
+        },
+
+        /**
+         * Применяет сохранённую позицию HUD {left, top}. Вызывается при
+         * создании контейнера и на каждом рендере панели (ТЗ 11.6.0g-2 п.4).
+         * Позиции нет — возвращаем CSS-якорь (right:20px, top:20px).
+         */
+        _applyHudPosition(hud = null) {
+            const el = hud || document.getElementById(this.HUD_ID);
+            if (!el) return;
+            // Пока тащат, сохранённую позицию не навязываем: рендер раз в 3 с
+            // иначе дёргал бы панель из-под курсора.
+            if (el.classList.contains('party-dragging')) return;
+
+            const pos = this._gmGet(this.DRAG_KEY, null);
+            const left = Number(pos?.left);
+            const top = Number(pos?.top);
+            if (!Number.isFinite(left) || !Number.isFinite(top)) {
+                el.style.left = '';
+                el.style.top = '';
+                el.style.right = '20px';
+                el.style.bottom = '';
+                return;
+            }
+
+            el.style.left = `${Math.round(left)}px`;
+            el.style.top = `${Math.round(top)}px`;
+            el.style.right = 'auto';
+            el.style.bottom = 'auto';
+            this._clampHud(el);
+        },
+
+        /**
+         * Возвращает HUD в пределы окна (ТЗ 11.6.0g-2 п.6): left/top
+         * ограничиваются так, чтобы правый/нижний край не выходил за экран.
+         * Скрытые панели имеют нулевые размеры — их не трогаем.
+         */
+        _clampHud(hud = null) {
+            const el = hud || document.getElementById(this.HUD_ID);
+            if (!el || !el.isConnected) return;
+
+            const left = parseFloat(el.style.left);
+            const top = parseFloat(el.style.top);
+            // Панель ещё на CSS-якоре (right:20px) — двигать нечего.
+            if (!Number.isFinite(left) || !Number.isFinite(top)) return;
+
+            const rect = el.getBoundingClientRect();
+            if (!rect.width && !rect.height) return; // оба блока скрыты
+
+            const maxLeft = Math.max(0, (window.innerWidth || 0) - rect.width);
+            const maxTop = Math.max(0, (window.innerHeight || 0) - rect.height);
+            el.style.left = `${Math.round(Math.min(Math.max(0, left), maxLeft))}px`;
+            el.style.top = `${Math.round(Math.min(Math.max(0, top), maxTop))}px`;
+            el.style.right = 'auto';
+            el.style.bottom = 'auto';
+        },
+
+        /**
+         * Перетаскивание за заголовок (ТЗ 11.6.0g-2 п.2–3).
+         * pointerdown/move/up покрывают и мышь, и тач (touch-action:none в CSS).
+         * В GM-хранилище позиция пишется ТОЛЬКО на отпускании: запись на
+         * каждый pointermove — лишние обращения к хранилищу Tampermonkey.
+         * @param {HTMLElement|null} handle заголовок панели или журнала
+         */
+        _bindHudDrag(handle) {
+            if (!handle || handle.dataset.partyDragBound === '1') return;
+            handle.dataset.partyDragBound = '1';
+
+            let drag = null;
+
+            const onMove = (e) => {
+                if (!drag) return;
+                const hud = document.getElementById(this.HUD_ID);
+                if (!hud) return;
+                const rect = hud.getBoundingClientRect();
+                const maxLeft = Math.max(0, (window.innerWidth || 0) - rect.width);
+                const maxTop = Math.max(0, (window.innerHeight || 0) - rect.height);
+                const left = Math.min(Math.max(0, drag.left + (e.clientX - drag.startX)), maxLeft);
+                const top = Math.min(Math.max(0, drag.top + (e.clientY - drag.startY)), maxTop);
+                hud.style.left = `${Math.round(left)}px`;
+                hud.style.top = `${Math.round(top)}px`;
+                hud.style.right = 'auto';
+                hud.style.bottom = 'auto';
+                if (e.cancelable) e.preventDefault();
+            };
+
+            const onUp = () => {
+                if (!drag) return;
+                drag = null;
+                window.removeEventListener('pointermove', onMove);
+                window.removeEventListener('pointerup', onUp);
+                window.removeEventListener('pointercancel', onUp);
+
+                const hud = document.getElementById(this.HUD_ID);
+                if (!hud) return;
+                hud.classList.remove('party-dragging');
+
+                const left = parseFloat(hud.style.left);
+                const top = parseFloat(hud.style.top);
+                if (Number.isFinite(left) && Number.isFinite(top)) {
+                    this._gmSet(this.DRAG_KEY, { left: Math.round(left), top: Math.round(top) });
+                }
+            };
+
+            handle.addEventListener('pointerdown', (e) => {
+                // Только ЛКМ/касание; кнопки внутри заголовка (▾ журнала) не тащат.
+                if (e.button) return;
+                if (e.target && typeof e.target.closest === 'function' && e.target.closest('button')) return;
+
+                const hud = document.getElementById(this.HUD_ID);
+                if (!hud) return;
+                const rect = hud.getBoundingClientRect();
+                // Стартовые left/top — реальные координаты контейнера: он мог
+                // стоять на CSS-якоре right:20px, а тащим уже в left/top.
+                drag = { startX: e.clientX, startY: e.clientY, left: rect.left, top: rect.top };
+                hud.classList.add('party-dragging');
+                window.addEventListener('pointermove', onMove);
+                window.addEventListener('pointerup', onUp);
+                window.addEventListener('pointercancel', onUp);
+                e.preventDefault();
+            });
+        },
+
+        /**
+         * HP-панель создаётся лениво внутри HUD-контейнера (v11.6.0g-2) и
+         * живёт до перезагрузки страницы. Тёмный фон и скругления — класс
+         * .party-panel из core/styles.js; заголовок «ПАТИ · HP» получает
+         * .party-drag-handle (pointer-events:auto, cursor:grab).
          */
         _ensurePanel() {
+            const hud = this._ensureHud();
             let el = document.getElementById(this.PANEL_ID);
             if (el && el.isConnected) {
+                // После повторной инъекции скрипта панель могла остаться в body.
+                if (el.parentElement !== hud) hud.appendChild(el);
                 this._bindPanelClick(el);
+                this._bindHudDrag(el.querySelector('.party-panel-title'));
+                this._applyHudPosition(hud);
                 return el;
             }
 
             el = document.createElement('div');
             el.id = this.PANEL_ID;
+            el.className = 'party-panel';
             el.setAttribute('role', 'status');
-            el.style.cssText = [
-                'position:fixed', 'top:20px', 'right:20px', 'z-index:9999',
-                'min-width:150px', 'max-width:260px',
-                'background:rgba(20,16,26,0.92)', 'border:1px solid #3a3040',
-                'border-radius:10px', 'padding:8px 10px',
-                'box-shadow:0 6px 18px rgba(0,0,0,0.45)',
-                'font:12px/1.4 system-ui,"Segoe UI",sans-serif', 'color:#e8e8ea',
-                'display:none', 'pointer-events:none'
-            ].join(';') + ';';
-            document.body.appendChild(el);
+            hud.appendChild(el);
             this._bindPanelClick(el);
             return el;
         },
@@ -6782,6 +6369,8 @@ const Players = {
          * Перерисовка списка «ник: hp/maxHp» с цветовой полоской:
          * зелёный > 50%, жёлтый 20–50%, красный < 20% HP.
          * v11.6.0d: у раненого союзника в строке есть кнопка «❤» (_healMember).
+         * v11.6.0g-2: кнопка — только жрецу (this._prevMe.role === 'priest');
+         * заголовок панели стал drag-handle для перетаскивания HUD.
          * @param {Array<{login: string, hp: number, maxHp: number}>} states
          */
         _renderPanel(states) {
@@ -6795,6 +6384,9 @@ const Players = {
             // _prevMe появляется после первого «живого» снимка /api/me в _hpTick();
             // пока его нет, кнопку не рисуем (заведомо провальный запрос).
             const inQuest = !!this._prevMe?.quest;
+            // v11.6.0g-2: класс героя. Роль приходит из /api/me (hero.role) и
+            // кэшируется в _prevMe; у остальных классов кнопки «❤» нет вообще.
+            const isPriest = this._prevMe?.role === 'priest';
 
             const rows = list.map((s) => {
                 const nick = String(s.login || '?');
@@ -6808,20 +6400,17 @@ const Players = {
                 // Ровно 50% — уже не «зелёный» (ТЗ: зелёный строго > 50%).
                 const color = pct > 50 ? '#5fd987' : (pct < 20 ? '#ff5a7a' : '#ffcf6a');
 
-                // Кнопка «Хил» (ТЗ 11.6.0d) — только если: это не мы, цель
-                // ранена (hp < maxHp) и свой герой в походе.
+                // Кнопка «Хил» (ТЗ 11.6.0d) — только если: мы жрец, цель не мы,
+                // цель ранена (hp < maxHp) и свой герой в походе.
                 const busy = this._healBusy.has(nick.toLowerCase());
-                const showHeal = inQuest
+                const showHeal = isPriest
+                    && inQuest
                     && nick.toLowerCase() !== selfLogin
                     && rawMax > 0
                     && rawHp < rawMax;
-                const healStyle = busy
-                    ? `${this.HEAL_BTN_STYLE} cursor:default; opacity:0.6;`
-                    : this.HEAL_BTN_STYLE;
                 const healBtn = showHeal
-                    ? `<button type="button" data-party-heal="${login}"`
-                        + ` title="Лечить ${login}"${busy ? ' disabled' : ''}`
-                        + ` style="${healStyle}">${busy ? '...' : '❤'}</button>`
+                    ? `<button type="button" class="${this.HEAL_BTN_CLASS}" data-party-heal="${login}"`
+                        + ` title="Лечить ${login}"${busy ? ' disabled' : ''}>${busy ? '...' : '❤'}</button>`
                     : '';
 
                 return `<div style="margin-bottom:6px;">
@@ -6838,13 +6427,23 @@ const Players = {
                 </div>`;
             }).join('');
 
-            el.innerHTML = '<div style="font-size:10px; letter-spacing:0.06em;'
-                + ' text-transform:uppercase; color:#888; margin-bottom:6px;">Пати · HP</div>'
+            // Заголовок — drag-handle (ТЗ 11.6.0g-2 п.2): .party-drag-handle
+            // даёт pointer-events:auto и cursor:grab, т.к. сама панель
+            // pointer-events:none и клики по игре не перехватывает.
+            el.innerHTML = '<div class="party-panel-title party-drag-handle" title="Перетащить панель">'
+                + '<span>Пати · HP</span></div>'
                 + (rows || '<div style="color:#888;">Нет данных</div>');
             el.style.display = 'block';
 
-            // Журнал живёт отдельным блоком под HP-панелью (она не
-            // flex-column), поэтому позицию пересчитываем после каждого рендера.
+            // innerHTML пересоздал заголовок — слушатель drag вешаем заново
+            // (dataset-флаг не даёт задвоить его на одном и том же узле).
+            this._bindHudDrag(el.querySelector('.party-panel-title'));
+
+            // Позиция из хранилища применяется на каждом рендере (п.4).
+            this._applyHudPosition();
+
+            // Журнал — сосед по HUD-контейнеру; его видимость и догрузку
+            // синхронизируем на каждом тике.
             this._syncLogPanel();
         },
 
@@ -6867,61 +6466,56 @@ const Players = {
         },
 
         /**
-         * Панель журнала создаётся лениво: отдельный fixed-блок под HP-панелью
-         * с отступом 8px (ТЗ 11.6.0c). Живёт до перезагрузки страницы.
+         * Панель журнала создаётся лениво внутри HUD-контейнера (v11.6.0g-2):
+         * раньше это был отдельный fixed-блок, который _positionLogPanel()
+         * ставил вручную под HP-панель. Теперь оба блока — соседи по
+         * flex-column с gap 8px, поэтому отступы считает CSS.
          */
         _ensureLogPanel() {
+            const hud = this._ensureHud();
             let el = document.getElementById(this.LOG_PANEL_ID);
             if (el && el.isConnected) {
+                if (el.parentElement !== hud) hud.appendChild(el);
                 this._logBodyEl = el.querySelector('.party-log-body');
+                this._bindHudDrag(el.querySelector('.party-log-head'));
                 return el;
             }
 
             el = document.createElement('div');
             el.id = this.LOG_PANEL_ID;
             el.className = 'party-log-panel';
-            el.style.cssText = [
-                'position:fixed', 'right:20px', 'top:120px', 'z-index:9999',
-                'min-width:150px', 'max-width:260px', 'box-sizing:border-box',
-                'background:rgba(20,16,26,0.92)', 'border:1px solid #3a3040',
-                'border-radius:10px', 'padding:8px 10px',
-                'box-shadow:0 6px 18px rgba(0,0,0,0.45)',
-                'font:12px/1.4 system-ui,"Segoe UI",sans-serif', 'color:#e8e8ea',
-                'display:none', 'pointer-events:auto'
-            ].join(';') + ';';
 
             // Заголовок статичный — innerHTML допустим. Строки событий
             // вставляются только через textContent (текст от других игроков).
-            el.innerHTML = '<div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">'
-                + '<span style="font-size:10px; letter-spacing:0.06em; text-transform:uppercase; color:#888;">Журнал</span>'
-                + '<button type="button" class="party-log-toggle" title="Свернуть журнал"'
-                + ' style="background:none; border:none; padding:0 2px; color:#ffcf6a; cursor:pointer; font-size:12px; line-height:1;">▾</button>'
+            // .party-log-head — drag-handle: тянем за «Журнал», кнопка ▾
+            // остаётся кликабельной (pointerdown по button игнорируется).
+            el.innerHTML = '<div class="party-log-head party-drag-handle" title="Перетащить панель">'
+                + '<span>Журнал</span>'
+                + '<button type="button" class="party-log-toggle" title="Свернуть журнал">▾</button>'
                 + '</div>'
-                + '<div class="party-log-body" style="max-height:150px; overflow-y:auto; margin-top:6px;">'
+                + '<div class="party-log-body">'
                 + '<div class="party-log-empty" style="color:#888;">Пока пусто</div>'
                 + '</div>';
-            document.body.appendChild(el);
+            hud.appendChild(el);
 
             el.querySelector('.party-log-toggle')?.addEventListener('click', () => {
                 this._setLogOpen(!this._logOpen);
             });
+            this._bindHudDrag(el.querySelector('.party-log-head'));
 
             this._logBodyEl = el.querySelector('.party-log-body');
             return el;
         },
 
-        /** Ставит журнал вплотную под HP-панелью: отступ 8px (ТЗ 11.6.0c). */
+        /**
+         * Раньше ставил журнал вплотную под HP-панелью вручную (top из
+         * getBoundingClientRect). С v11.6.0g-2 оба блока лежат в общем
+         * контейнере .party-hud-container (flex-column, gap 8px), поэтому
+         * раскладку считает CSS. Метод оставлен ради вызова из
+         * _syncLogPanel(): здесь применяем сохранённую позицию всего HUD.
+         */
         _positionLogPanel() {
-            const hp = document.getElementById(this.PANEL_ID);
-            const el = this._ensureLogPanel();
-            const rect = hp && hp.isConnected && hp.style.display !== 'none'
-                ? hp.getBoundingClientRect()
-                : null;
-
-            // HP-панель ещё не отрисована — держим журнал ниже её штатного
-            // top:20px, чтобы блок не наехал на FAB-кнопки.
-            el.style.top = `${rect && rect.height > 0 ? Math.round(rect.bottom + 8) : 120}px`;
-            if (rect && rect.width > 0) el.style.width = `${Math.round(rect.width)}px`;
+            this._applyHudPosition();
         },
 
         /**
@@ -7102,8 +6696,8 @@ const Players = {
          * prev === null (первый тик после входа в пати) событий не даёт:
          * состояние «до» неизвестно, а quest_start на входе в пати был бы ложным.
          *
-         * @param {{hp: number|null, quest: object|null, ghost: boolean}|null} prev
-         * @param {{hp: number|null, quest: object|null, ghost: boolean}} cur
+         * @param {{hp: number|null, quest: object|null, ghost: boolean, role: string}|null} prev
+         * @param {{hp: number|null, quest: object|null, ghost: boolean, role: string}} cur
          * @returns {Array<{type: string, text: string}>}
          */
         _detectLogEvents(prev, cur) {
@@ -7196,7 +6790,7 @@ const Players = {
                     }
                     // _prevMe обновляем даже при ошибке сети: иначе одно и то же
                     // событие отправлялось бы каждый тик.
-                    this._prevMe = { hp: me.hp, quest: me.quest, ghost: me.ghost };
+                    this._prevMe = { hp: me.hp, quest: me.quest, ghost: me.ghost, role: me.role };
                     // 401 внутри POST уже сбросил локальное состояние.
                     if (!this._readState()) return;
                 }
@@ -7332,9 +6926,9 @@ const Players = {
         },
 
         /**
-         * Копирование токена. navigator.clipboard требует secure context и
-         * разрешения — при отказе выделяем текст в поле, чтобы пользователь
-         * скопировал его вручную (Ctrl+C).
+         * Копирование кода приглашения. navigator.clipboard требует secure
+         * context и разрешения — при отказе выделяем текст в поле, чтобы
+         * пользователь скопировал его вручную (Ctrl+C).
          */
         async _copy(text, fallbackEl = null) {
             const value = String(text ?? '');
@@ -7379,7 +6973,7 @@ const Players = {
             const state = this.partyState();
 
             if (!state.party) {
-                const modal = UI.showModal(this._modalHtmlEmpty(), { compact: true });
+                const modal = UI.showModal(this._modalHtmlEmpty(), { compact: true, customClass: 'party-modal' });
                 if (!modal) return;
                 this._bindEmpty(modal);
                 // Ник отрисован синхронно (мог уйти в фолбэк LG_CH.login):
@@ -7388,7 +6982,7 @@ const Players = {
                 return;
             }
 
-            const modal = UI.showModal(this._modalHtmlParty(state.party, state.isOwner), { compact: true });
+            const modal = UI.showModal(this._modalHtmlParty(state.party, state.isOwner), { compact: true, customClass: 'party-modal' });
             if (!modal) return;
             this._bindParty(modal, state.party);
             // Список участников — отдельным запросом: модалка открывается
@@ -7407,7 +7001,7 @@ const Players = {
          * textContent узла .party-self-nick.
          *
          * Полная перерисовка модалки запрещена: пользователь может уже
-         * печатать inviteToken, innerHTML-рендер собьёт фокус и каретку.
+         * печатать код приглашения, innerHTML-рендер собьёт фокус и каретку.
          *
          * Пока запрос в полёте, повторный open() его переиспользует
          * (_selfNickFetch), а если ник уже кэширован — сеть не трогаем.
@@ -7459,7 +7053,7 @@ const Players = {
         /** Секция «УЧАСТНИКИ»: список заполняет _refreshMembers(). */
         _membersSection() {
             return `<div>
-                <div style="${this.MUTED_STYLE}">Участники</div>
+                <div class="${this.MUTED_CLASS}">Участники</div>
                 <div id="party-members" style="display:flex; flex-direction:column; max-height:180px; overflow-y:auto;">
                     <div style="font-size:12px; color:#888;">Загрузка…</div>
                 </div>
@@ -7476,7 +7070,7 @@ const Players = {
             // Кик — только у владельца и только для чужих строк. memberId
             // храним в data-атрибуте: sessionId клиенту больше не приходит.
             const kick = (canKick && !member.self && member.memberId)
-                ? `<button data-party-kick="${Utils.escapeHtml(member.memberId)}" style="${this.DANGER_BTN_STYLE}">Кикнуть</button>`
+                ? `<button data-party-kick="${Utils.escapeHtml(member.memberId)}" class="${this.DANGER_BTN_CLASS} party-btn-sm">Кикнуть</button>`
                 : '';
 
             return `<div style="display:flex; align-items:center; gap:8px; padding:4px 0; font-size:13px;">
@@ -7485,7 +7079,7 @@ const Players = {
                     </div>`;
         },
 
-        /** Состояние «нет пати»: создать либо присоединиться по inviteToken. */
+        /** Состояние «нет пати»: создать либо присоединиться по коду приглашения. */
         _modalHtmlEmpty() {
             const nick = this._defaultNick();
             const safeNick = Utils.escapeHtml(nick || '—');
@@ -7494,30 +7088,30 @@ const Players = {
                 <h2>👥 Пати ${this._closeBtn()}</h2>
                 <div style="display:flex; flex-direction:column; gap:14px; padding:6px 2px;">
                     <div>
-                        <div style="${this.MUTED_STYLE}">Создать пати</div>
+                        <div class="${this.MUTED_CLASS}">Создать пати</div>
                         <div style="display:flex; align-items:center; gap:8px;">
                             <div style="flex:1; min-width:0; font-size:13px; color:#ccc; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                                Вы: <b class="party-self-nick" style="color:#ffcf6a;">${safeNick}</b>
+                                Вы: <b class="party-self-nick">${safeNick}</b>
                             </div>
-                            <button id="party-create-btn" style="${this.BTN_STYLE}">Создать</button>
+                            <button id="party-create-btn" class="${this.BTN_CLASS}">Создать</button>
                         </div>
                     </div>
-                    <div style="border-top:1px solid #3a3040; padding-top:14px;">
-                        <div style="${this.MUTED_STYLE}">Присоединиться</div>
-                        <div style="display:flex; gap:6px;">
+                    <div class="party-sep">
+                        <div class="${this.MUTED_CLASS}">Код приглашения</div>
+                        <div class="party-field">
                             <input id="party-join-token" type="text" autocomplete="off" spellcheck="false"
-                                placeholder="inviteToken" style="${this.INPUT_STYLE}">
-                            <button id="party-join-btn" style="${this.BTN_STYLE}">Присоединиться</button>
+                                placeholder="Вставьте код приглашения" class="${this.INPUT_CLASS}">
+                            <button id="party-join-btn" class="${this.BTN_CLASS}">Присоединиться</button>
                         </div>
                     </div>
-                    <div id="party-error" style="display:none; color:#ff8fa3; font-size:12px; line-height:1.35;"></div>
+                    <div id="party-error" class="party-error"></div>
                 </div>
             `;
         },
 
         /**
-         * Состояние «в пати». owner видит полный токен, ротацию и кик;
-         * member — только состав и выход.
+         * Состояние «в пати». owner видит полный код приглашения, ротацию и
+         * кик; member — только состав и выход.
          */
         _modalHtmlParty(party, isOwner) {
             const safeLogin = Utils.escapeHtml(party.login || '—');
@@ -7525,16 +7119,16 @@ const Players = {
 
             const tokenBlock = isOwner ? `
                     <div>
-                        <div style="${this.MUTED_STYLE}">Invite token</div>
-                        <div style="display:flex; gap:6px;">
+                        <div class="${this.MUTED_CLASS}">Код приглашения</div>
+                        <div class="party-field">
                             <input id="party-token-input" type="text" readonly value="${Utils.escapeHtml(party.inviteToken || '')}"
-                                style="${this.INPUT_STYLE} font-size:11px; font-family:monospace;">
-                            <button id="party-copy-token" style="${this.BTN_STYLE}">Копировать</button>
+                                class="${this.TOKEN_INPUT_CLASS}">
+                            <button id="party-copy-token" class="${this.BTN_CLASS}">Копировать</button>
                         </div>
                     </div>` : '';
 
             const rotateBtn = isOwner
-                ? `<button id="party-rotate-btn" style="${this.BTN_STYLE}">Перевыпустить токен</button>`
+                ? `<button id="party-rotate-btn" class="${this.BTN_CLASS}">Перевыпустить код</button>`
                 : '';
 
             return `
@@ -7546,12 +7140,12 @@ const Players = {
                     </div>
                     ${tokenBlock}
                     ${this._membersSection()}
-                    <div style="display:flex; gap:8px; flex-wrap:wrap; border-top:1px solid #3a3040; padding-top:12px;">
-                        <button id="party-refresh-btn" style="${this.BTN_STYLE}">Обновить</button>
+                    <div class="party-sep" style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <button id="party-refresh-btn" class="${this.BTN_CLASS}">Обновить</button>
                         ${rotateBtn}
-                        <button id="party-leave-btn" style="${this.DANGER_BTN_STYLE} padding:8px 12px; font-size:13px;">Покинуть пати</button>
+                        <button id="party-leave-btn" class="${this.DANGER_BTN_CLASS} party-btn-lg">Покинуть пати</button>
                     </div>
-                    <div id="party-error" style="display:none; color:#ff8fa3; font-size:12px; line-height:1.35;"></div>
+                    <div id="party-error" class="party-error"></div>
                 </div>
             `;
         },
@@ -7643,7 +7237,7 @@ const Players = {
                 const input = modal.querySelector('#party-token-input');
                 const ok = await this._copy(party.inviteToken || '', input);
                 UI.showToast(
-                    ok ? 'Инвайт-токен скопирован' : 'Скопируйте токен вручную (Ctrl+C)',
+                    ok ? 'Код приглашения скопирован' : 'Скопируйте код вручную (Ctrl+C)',
                     !ok
                 );
             });
@@ -7656,8 +7250,8 @@ const Players = {
             const rotateBtn = modal.querySelector('#party-rotate-btn');
             rotateBtn?.addEventListener('click', () => this._runAction(rotateBtn, errorBox, async () => {
                 await this.partyRotateToken();
-                UI.showToast('Инвайт-токен перевыпущен');
-                // В модалке показан сам токен — перерисовываем её целиком.
+                UI.showToast('Код приглашения перевыпущен');
+                // В модалке показан сам код — перерисовываем её целиком.
                 await this.open();
             }));
 
@@ -8085,6 +7679,10 @@ const Players = {
     // Слой-миксин: перехват fetch / EventSource / WebSocket, живой поток
     // /api/live и разбор входящих в общий Chat.handleIncoming().
     // this внутри методов — это Chat (Object.assign в chat/chat.js).
+
+    // v11.6.0g-3: период поллинга «кто играет с аддоном» (ТЗ — раз в 30 с).
+    // Один тик = POST /heartbeat + GET /users, окно онлайна на сервере 15 мин.
+    const ADDON_USERS_POLL_MS = 30000;
 
     const ChatNet = {
         // id текущей шахты (обновляется из /api/mine/* и /api/live).
@@ -8672,7 +8270,215 @@ const Players = {
             try { wrappedFetch.__lgChatProxied = true; } catch (e) {}
             try { pageWin.fetch = wrappedFetch; } catch (e) {}
             if (pageWin !== window) { try { window.fetch = wrappedFetch; } catch (e) {} }
-        }
+        },
+
+        /* ---------------------------------------------------------- */
+        /* Подсветка пользователей аддона (v11.6.0g-3)                 */
+        /* ---------------------------------------------------------- */
+
+        // Таймер поллинга /heartbeat + /users.
+        _addonPollTimer: null,
+        // MutationObserver нативной ленты и узел, который он слушает.
+        _addonObserver: null,
+        _addonObserved: null,
+        // Дебаунс перерисовки подсветки: игра перестраивает ленту пачкой.
+        _addonHlTimer: null,
+
+        /**
+         * База сервера аддона: сначала адрес пати (Party.getBaseUrl), затем
+         * прод-домен. Party объявлен раньше чата (build.js: SHARED_MODULES
+         * идут до CHAT_MODULES), но проверка на undefined оставлена — чат не
+         * должен падать, если модуль пати когда-нибудь исключат из сборки.
+         */
+        _addonBaseUrl() {
+            try {
+                if (typeof Party !== 'undefined' && Party && typeof Party.getBaseUrl === 'function') {
+                    const base = Party.getBaseUrl();
+                    if (base) return String(base).trim().replace(/\/+$/, '');
+                }
+            } catch (e) {}
+            return 'https://legion.ctrlfree.host';
+        },
+
+        /**
+         * Запрос к серверу аддона через GM_xmlhttpRequest: домен чужой для
+         * игры, обычный fetch упёрся бы в CORS и CSP `connect-src 'self'`
+         * (см. AGENTS.md §3). Разбираем только JSON и только 2xx.
+         */
+        _addonRequest(method, url, body = null) {
+            return new Promise((resolve, reject) => {
+                if (typeof GM_xmlhttpRequest !== 'function') {
+                    reject(new Error('GM_xmlhttpRequest недоступен: проверьте @grant в шапке'));
+                    return;
+                }
+                GM_xmlhttpRequest({
+                    method,
+                    url,
+                    headers: { 'Content-Type': 'application/json' },
+                    data: body ? JSON.stringify(body) : undefined,
+                    timeout: 8000,
+                    onload: (res) => {
+                        if (res.status < 200 || res.status >= 300) {
+                            reject(new Error(`HTTP ${res.status}: ${url}`));
+                            return;
+                        }
+                        try {
+                            resolve(res.responseText ? JSON.parse(res.responseText) : null);
+                        } catch (e) {
+                            reject(new Error(`Некорректный JSON от ${url}`));
+                        }
+                    },
+                    onerror: () => reject(new Error(`Сервер аддона недоступен: ${url}`)),
+                    ontimeout: () => reject(new Error(`Сервер аддона не ответил за 8 с: ${url}`)),
+                    onabort: () => reject(new Error('Запрос к серверу аддона отменён'))
+                });
+            });
+        },
+
+        /**
+         * Отметка «я онлайн» + обновление списка пользователей аддона.
+         *
+         * POST /heartbeat {login} — чтобы нас видели другие; GET /users —
+         * чтобы увидели мы. Ошибки сети не всплывают тостом: сервер аддона
+         * может быть недоступен, подсветка просто остаётся на прошлом наборе.
+         */
+        async syncAddonUsers() {
+            const nick = this.myNick ? String(this.myNick).trim() : '';
+            // Ник ещё не пришёл (/api/me в пути) — отправим на следующем тике.
+            if (!nick) return;
+
+            const base = this._addonBaseUrl();
+
+            try {
+                await this._addonRequest('POST', base + '/heartbeat', { login: nick });
+                const data = await this._addonRequest('GET', base + '/users');
+                const list = (data && Array.isArray(data.users)) ? data.users : [];
+
+                const next = new Set();
+                list.forEach((login) => {
+                    const norm = String(login || '').trim().toLowerCase();
+                    if (norm) next.add(norm);
+                });
+                // Свой ник добавляем локально: heartbeat уже ушёл, а снимок
+                // /users мог быть собран сервером до нашей вставки.
+                next.add(nick.toLowerCase());
+
+                const prev = this.addonUsers || new Set();
+                const changed = next.size !== prev.size || Array.from(next).some((n) => !prev.has(n));
+                this.addonUsers = next;
+
+                this.highlightNativeChat();
+                // Свой PiP-чат перерисовываем только при изменении состава:
+                // innerHTML каждые 30 с сбивал бы выделение текста у читающего.
+                if (changed && this.isOpen()) this.renderMessages();
+            } catch (e) {
+                dbg('[CHAT] подсветка аддона: синхронизация не удалась:', e && e.message ? e.message : e);
+            }
+        },
+
+        /**
+         * Красит ники пользователей аддона в нативном чате игры.
+         *
+         * Нативная лента рисует автора как <b data-nick="login"> внутри
+         * .cy-chat-l (reference/LegionFrontSRC/lib/site-chat.js, chatLi).
+         * Её inline style="color:..." перебивается только нашим CSS
+         * !important (см. .legion-addon-user в core/styles.js).
+         *
+         * @param {Document|Element} [root] где искать ники (по умолчанию document)
+         */
+        highlightNativeChat(root = document) {
+            const scope = (root && typeof root.querySelectorAll === 'function') ? root : document;
+            const nodes = scope.querySelectorAll('.cy-chat-l [data-nick], .cy-chat-p [data-nick]');
+
+            nodes.forEach((el) => {
+                const nick = String(el.getAttribute('data-nick') || '').trim().toLowerCase();
+                const isAddon = !!nick && this.isAddonUser(nick);
+
+                if (!isAddon) {
+                    // Ник вышел из окна онлайна — снимаем подсветку и бейдж.
+                    el.classList.remove('legion-addon-user');
+                    const staleBadge = el.previousElementSibling;
+                    if (staleBadge && staleBadge.getAttribute('data-legion-addon-badge') === '1') staleBadge.remove();
+                    return;
+                }
+
+                el.classList.add('legion-addon-user');
+
+                // Бейдж ставим ровно один раз: нас зовёт и таймер, и
+                // MutationObserver — второй ⚡ перед ником был бы дублем.
+                const prev = el.previousElementSibling;
+                if (prev && prev.getAttribute('data-legion-addon-badge') === '1') return;
+
+                const badge = (el.ownerDocument || document).createElement('span');
+                badge.className = 'legion-addon-badge';
+                badge.setAttribute('data-legion-addon-badge', '1');
+                badge.title = 'Пользователь Legion Ultimate';
+                badge.textContent = '⚡';
+                if (el.parentNode) el.parentNode.insertBefore(badge, el);
+            });
+        },
+
+        /**
+         * MutationObserver на нативную ленту: chatRender() переписывает
+         * innerHTML при каждом новом сообщении, и наши классы/бейджи
+         * исчезают — наблюдатель возвращает их после перерисовки.
+         *
+         * Игра пересоздаёт .cy-chat при переходе город <-> шахта, поэтому
+         * метод переподключает наблюдателя, если узел сменился. Вызывается
+         * из startAddonUsersPolling() на каждом тике.
+         */
+        initNativeChatObserver() {
+            const list = document.querySelector('.cy-chat-l');
+            if (!list) return; // ленты нет (другая страница) — ждём следующего тика
+            if (this._addonObserver && this._addonObserved === list) return;
+
+            if (this._addonObserver) {
+                try { this._addonObserver.disconnect(); } catch (e) {}
+                this._addonObserver = null;
+            }
+
+            this._addonObserved = list;
+            this._addonObserver = new MutationObserver(() => {
+                // Рендер идёт пачкой — склеиваем мутации в один проход.
+                if (this._addonHlTimer) return;
+                this._addonHlTimer = setTimeout(() => {
+                    this._addonHlTimer = null;
+                    this.highlightNativeChat();
+                }, 150);
+            });
+            this._addonObserver.observe(list, { childList: true, subtree: true });
+        },
+
+        /** Запуск поллинга /heartbeat + /users (раз в 30 с, идемпотентно). */
+        startAddonUsersPolling() {
+            if (this._addonPollTimer) return;
+
+            // Первый тик сразу: ждать полминуты до первой подсветки незачем.
+            this.initNativeChatObserver();
+            this.syncAddonUsers();
+
+            this._addonPollTimer = setInterval(() => {
+                this.initNativeChatObserver();
+                this.syncAddonUsers();
+            }, ADDON_USERS_POLL_MS);
+        },
+
+        /** Остановка поллинга и отключение MutationObserver (Chat.destroy). */
+        stopAddonUsersPolling() {
+            if (this._addonPollTimer) {
+                clearInterval(this._addonPollTimer);
+                this._addonPollTimer = null;
+            }
+            if (this._addonHlTimer) {
+                clearTimeout(this._addonHlTimer);
+                this._addonHlTimer = null;
+            }
+            if (this._addonObserver) {
+                try { this._addonObserver.disconnect(); } catch (e) {}
+                this._addonObserver = null;
+            }
+            this._addonObserved = null;
+        },
     };
 
     // ===== src/modules/chat/chat-pip.js =====
@@ -9515,8 +9321,6 @@ const Players = {
                     ).join('');
                 }
 
-                const authorNick = m.author || '';
-
                 // Бейдж титула (aw) перед ником автора
                 let awardBadge = '';
                 const aw = m.aw;
@@ -9531,7 +9335,12 @@ const Players = {
                     ? `<span class="chat-mod-badge" title="Модератор" style="display:inline-block; background:rgba(255, 207, 106, 0.15); border:1px solid #caa55c; color:#ffcf6a; font-size:10px; font-weight:bold; padding:1px 5px; border-radius:4px; margin-right:4px; vertical-align:middle;">⚖️ Модер</span>`
                     : '';
 
-                const authorHtml = `<span class="chat-author nick-clickable" data-nick="${Utils.escapeHtml(authorNick)}" title="Кликните, чтобы упомянуть" style="color: ${meta.color || '#ffcf6a'} !important; cursor: pointer;">${Utils.escapeHtml(authorNick)}</span>`;
+                const authorNick = m.author || '';
+                const isAddon = this.isAddonUser(authorNick);
+                const addonBadge = isAddon ? `<span class="legion-addon-badge" title="Пользователь Legion Ultimate">⚡</span>` : '';
+                const addonClass = isAddon ? ' legion-addon-user' : '';
+                const authorColor = isAddon ? '#00f0ff' : (meta.color || '#ffcf6a');
+                const authorHtml = `${addonBadge}<span class="chat-author nick-clickable${addonClass}" data-nick="${Utils.escapeHtml(authorNick)}" title="Кликните, чтобы упомянуть" style="color: ${authorColor} !important; cursor: pointer;">${Utils.escapeHtml(authorNick)}</span>`;
 
                 if (m.k === 'dm') {
                     div.innerHTML = `
@@ -9829,6 +9638,11 @@ const Players = {
         badge: null,
         unreadCount: 0,
         disabled: localStorage.getItem('LEGION_CHAT_DISABLED') === 'true',
+        // v11.6.0g-4: подсветка ников пользователей аддона (⚡ + бирюзовый
+        // цвет). По умолчанию включена: ключа нет -> true; выключение пишет
+        // строку 'false' (паттерн LEGION_AUC_SOUND). Настройка живёт в
+        // localStorage, т.к. это UI-предпочтение, а не серверные данные.
+        addonHighlight: localStorage.getItem('LEGION_ADDON_HIGHLIGHT') !== 'false',
         _inited: false,
         messages: [], // Массив всех сообщений
         activeMainTab: 'city',
@@ -9840,6 +9654,25 @@ const Players = {
         dmTarget: null, // Ник собеседника, с которым сейчас открыт диалог во вкладке ЛС
         currentMineId: 'home',
         SevenTV: ChatEmotes.SevenTV, // тот же объект, что и const SevenTV
+
+        // v11.6.0g-3: ники, которые прямо сейчас играют с аддоном, в нижнем
+        // регистре. Источник — GET /users сервера пати; наполняет
+        // ChatNet.syncAddonUsers(). Пустой Set = подсветки нет.
+        addonUsers: new Set(),
+
+        /**
+         * Есть ли ник в списке пользователей аддона.
+         * Сервер отдаёт ники в нижнем регистре, а в сообщениях автор приходит
+         * как в игре — поэтому сравниваем нормализованно.
+         */
+        isAddonUser(nick) {
+            // Единый гейт подсветки (11.6.0g-4): выключенный тумблер отключает
+            // и нативный чат (ChatNet.highlightNativeChat), и PiP-рендер
+            // (ChatPip.renderMessages) — оба спрашивают именно этот метод.
+            if (this.addonHighlight === false) return false;
+            if (!nick || this.addonUsers.size === 0) return false;
+            return this.addonUsers.has(String(nick).trim().toLowerCase());
+        },
 
         get activeTab() {
             if (this.activeMainTab === 'mine' || this.activeMainTab === 'dm') return this.activeMainTab;
@@ -9893,6 +9726,25 @@ const Players = {
             }
         },
 
+        /**
+         * Тумблер «⚡ Подсветка ников Legion» (ТЗ 11.6.0g-4).
+         *
+         * Сохраняем выбор и сразу перерисовываем уже отрисованное: без этого
+         * выключенная подсветка жила бы до следующего тика поллинга (30 с),
+         * а классы/бейджи ⚡ оставались бы на экране.
+         *
+         * highlightNativeChat() — снимает/навешивает классы в нативной ленте
+         * (idempotent); renderMessages() нужен только для открытого PiP-чата.
+         */
+        setAddonHighlight(val) {
+            this.addonHighlight = !!val;
+            try {
+                localStorage.setItem('LEGION_ADDON_HIGHLIGHT', String(this.addonHighlight));
+            } catch (e) {}
+            this.highlightNativeChat(document);
+            if (this.isOpen()) this.renderMessages();
+        },
+
         // v11.5.3: встроенный виджет чата удалён — его заменил сторонний плагин
         // Legion7TV (ProCto_Fliy). Здесь остаётся только то, что нужно нашему
         // вынесенному чату и перехватчикам:
@@ -9923,6 +9775,11 @@ const Players = {
 
             this.syncMe();
             this.detectExternalChat();
+
+            // v11.6.0g-3: подсветка ников пользователей аддона. Поллинг сам
+            // шлёт POST /heartbeat (мы тоже в списке) и раз в 30 с обновляет
+            // набор из GET /users; сеть и наблюдатель — в chat-net.js.
+            this.startAddonUsersPolling();
         },
 
         // Детектор стороннего чата (Legion7TV, плагин ProCto_Fliy).
@@ -10100,6 +9957,18 @@ const Players = {
             }
             this.popoutChat();
         },
+
+        /**
+         * Остановка фоновых задач чата (ТЗ 11.6.0g-3).
+         *
+         * Вызывается из legionApi.shutdown() в main.js при перезапуске скрипта.
+         * Живой поток /api/live гасит сам shutdown (stopBackgroundLiveListener);
+         * здесь — только поллинг /heartbeat + /users, его таймер и
+         * MutationObserver нативной ленты чата.
+         */
+        destroy() {
+            this.stopAddonUsersPolling();
+        },
     };
 
     // Подмешиваем слои. Объекты независимы и не пересекаются по ключам,
@@ -10126,7 +9995,7 @@ const Players = {
     //   core/hooks.js  -> перехватчики LGCity / LGAuction / LGQuest / LGMine
     //   core/ui-templates.js -> UITemplates (HTML: FAB-меню, модалки, HUD)
     //   core/ui.js     -> UI
-    //   modules/*      -> BuildSim, HeroPlanner, Auction, Players, PriestAssistant,
+    //   modules/*      -> BuildSim, HeroPlanner, Auction, Players,
     //                     PocketCity, Party, Miner, Chat
     // ============================================================
 
@@ -10221,7 +10090,6 @@ const Players = {
         Miner.init();
         BuildSim.init();        // без кнопки — регистрирует только глобальный клик для .sim-card
         HeroPlanner.init();     // кнопка FAB ведёт сюда
-        PriestAssistant.init(); // HUD Жреца в Походе (window.__lgQuestContext)
         Auction.init();
         Players.init();
         // 🎉 Пати: кнопка в FAB-меню, клиент сервера из server/ (шаг 1).
@@ -10248,7 +10116,6 @@ const Players = {
             HeroPlanner,
             Auction,
             Players,
-            PriestAssistant,
             PocketCity,
             Party,
             Chat,
@@ -10256,7 +10123,6 @@ const Players = {
             RAND_ID,
             _booted: true,
             shutdown: () => {
-                PriestAssistant.destroy();
                 if (Miner.abortController) {
                     try { Miner.abortController.abort(); } catch(e) {}
                     Miner.abortController = null;
@@ -10271,6 +10137,10 @@ const Players = {
                     Chat._popoutWin = null;
                 }
                 Chat.stopBackgroundLiveListener();
+                // ТЗ 11.6.0g-3: гасим поллинг /heartbeat + /users и
+                // MutationObserver нативной ленты (иначе после перезапуска
+                // скрипта остались бы два интервала).
+                Chat.destroy();
                 document.querySelectorAll('.' + DOM_IDS.customModal + ', .sim-card, .' + DOM_IDS.chatWidget + ', .float-btns, .' + DOM_IDS.fabWrap + ', #' + DOM_IDS.playerHud + ', .' + DOM_IDS.hudLog + ', #' + DOM_IDS.hudLog + ', .hud-log, .custom-modal, .chat-widget, .legion-fab-wrap, #legion-player-hud').forEach(el => el.remove());
                 legionApi._booted = false;
             }
