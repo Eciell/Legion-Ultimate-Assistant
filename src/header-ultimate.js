@@ -8,6 +8,7 @@
 // @connect      api.ivr.fi
 // @connect      localhost
 // @connect      127.0.0.1
+// @connect      addon.legion.com
 // @author       eciell
 // @match        https://play.multidonate.ru/c/*
 // @noframes

@@ -41,7 +41,12 @@ import {
     upsertState
 } from './db.js';
 
-const PORT = Number(process.env.PORT || 8787);
+// v11.6.0e: платформа (addon.legion.com) пробрасывает СВОЙ порт в CTRLFREE_PORT,
+// поэтому он приоритетнее локального PORT. hostname обязателен: без 0.0.0.0
+// сервер слушает только loopback и снаружи (из платформы и клиентов аддона)
+// недоступен.
+const port = Number(process.env.CTRLFREE_PORT || process.env.PORT || 8787);
+const hostname = '0.0.0.0';
 
 // Логин хранится и сравнивается ТОЛЬКО в нижнем регистре: игра отдаёт ник
 // как есть, а две «формы» одного ника заняли бы одно имя дважды.
@@ -500,7 +505,8 @@ async function handleLeave(req, partyId) {
 /* ------------------------------------------------------------------ */
 
 const server = Bun.serve({
-    port: PORT,
+    hostname,
+    port,
     async fetch(req, srv) {
         try {
             const url = new URL(req.url);
@@ -592,4 +598,5 @@ const server = Bun.serve({
     }
 });
 
-console.log(`[legion-party] слушаю http://localhost:${server.port}`);
+// v11.6.0e: печатаем фактический bind (hostname может быть 0.0.0.0), а не localhost.
+console.log(`[legion-party] слушаю http://${hostname}:${server.port}`);
