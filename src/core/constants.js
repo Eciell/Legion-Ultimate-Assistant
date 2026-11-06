@@ -59,7 +59,18 @@
     const API_BASE = window.LG_BASE || (location.pathname.match(/^\/c\/[^/]+/)?.[0] || '');
     const CHAT_DEDUP_TTL = 8000;
     const MAX_POINTS = 50;
-    const Y_MAP = { 30: 80, 20: 230, 10: 380, 5: 530, 0: 680 };
+    /*
+     * v11.6.1: сетка дерева навыков сжата под 1920x1080 без скролла.
+     * Нативные пропорции (reference/LegionFrontSRC/site/skills.js):
+     * TH 140 / TOP 40 / BOT 80 -> BH 680.
+     * Сжатые: TH 95 / TOP 30 / BOT 45 -> BH = 30 + 4*95 + 45 = 455.
+     */
+    const TH = 95;
+    const TOP = 30;
+    const BOT = 45;
+    const BH = TOP + 4 * TH + BOT; // 455
+    // Y-координаты ярусов req=30..0 (верх -> низ): BH - BOT - индекс_яруса * TH.
+    const Y_MAP = { 30: TOP, 20: BH - BOT - 3 * TH, 10: BH - BOT - 2 * TH, 5: BH - BOT - TH, 0: BH - BOT };
     const SKIP_FX_PREFIXES = ['ctl_', 'act_', 'cd_'];
 
     /*

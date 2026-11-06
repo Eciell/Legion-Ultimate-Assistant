@@ -2,7 +2,15 @@
     // 3. СТИЛИ
     // ============================================================
     const STYLES = `
-        .${DOM_IDS.customModal}, .custom-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(20, 16, 26, 0.98); border: 2px solid #caa55c; border-radius: 12px; padding: 20px; z-index: 10000; color: #f7eadf; width: 1200px; max-width: 98vw; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,0.85); font-family: 'Nunito', sans-serif; backdrop-filter: blur(4px); }
+        /* Глобальные переменные игры (нативные цвета дерева навыков, v11.6.1). */
+        :root {
+            --tb-slate: #25302c; --tb-slate2: #313f39; --tb-slate3: #19211e;
+            --tb-wood: #a8754f; --tb-woodD: #6e4a2f;
+            --tb-chalk: #f4f1e4; --tb-chalk2: #c9d2c3;
+            --tb-ink: #2b1d18; --tb-gold: #ffcf4a;
+            --br1: #84d4ff; --br2: #ffa982; --br3: #d6b4ff;
+        }
+        .${DOM_IDS.customModal}, .custom-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(20, 16, 26, 0.98); border: 2px solid #caa55c; border-radius: 12px; padding: 20px; z-index: 10000; color: #f7eadf; width: 1200px; max-width: 98vw; max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,0.85); font-family: 'Nunito', sans-serif; backdrop-filter: blur(4px); }
         .${DOM_IDS.customModal}.modal-compact, .custom-modal.modal-compact { width: 450px; max-width: 95vw; max-height: 65vh; padding: 16px; }
         .${DOM_IDS.customModal} h2, .custom-modal h2 { margin-top: 0; color: #ffcf6a; border-bottom: 1px solid #555; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; cursor: grab; user-select: none; }
         .${DOM_IDS.customModal} h2:active, .custom-modal h2:active { cursor: grabbing; }
@@ -21,30 +29,76 @@
         .modal-tab.active { background: #caa55c; color: #1d1620; border-color: #caa55c; }
         .tab-content { display: none; flex: 1; overflow: hidden; position: relative; }
         .tab-content.active { display: flex; gap: 20px; }
-        /* Контейнер дерева: тёмная тема + ограничение по высоте экрана и вертикальный скролл */
-        .sim-tree-wrap { flex: 1; background: #16121a !important; border: 1px solid #3d2f44; border-radius: 8px; box-shadow: inset 0 0 20px rgba(0,0,0,0.6); position: relative; overflow-y: auto; overflow-x: auto; max-height: calc(100vh - 250px); padding-bottom: 20px; display: flex; flex-direction: column; }
-        /* Высоту НЕ фиксируем: иначе содержимое (панель + ветки 760px) выше бокса,
-           и нижний ряд нод (top: 680px) вываливается за серый фон. */
-        .sim-tree-inner { min-width: 700px; padding: 20px; display: flex; flex-direction: column; height: auto; min-height: 760px; flex-shrink: 0; background: transparent !important; position: relative; }
-        .sim-top-bar { display: flex; flex-direction: column; gap: 12px; margin-bottom: 15px; background: #1e1724; padding: 12px; border-radius: 8px; border: 1px solid #3d2f44; position: relative; z-index: 10; }
-        .sim-free-pts { font-size: 14px; color: #eee; }
-        /* Ветки растягиваются на всю доступную высоту: нижняя нода на 680px
-           занимает ещё ~40px вниз (иконка 44px центрирована по top), поэтому 740px. */
-        .sim-branches { position: relative; height: 100%; min-height: 740px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
-        .sim-branch { position: relative; background: rgba(255,255,255,0.03); border-radius: 8px; height: 100%; }
-        .sim-branch-header { text-align: center; font-weight: bold; color: #ffcf6a; font-size: 14px; position: absolute; top: 0; width: 100%; pointer-events: none; }
-        .sim-branch-pts { font-size: 11px; color: #aaa; margin-top: 2px; }
-        .sim-node { position: absolute; z-index: 2; display: flex; flex-direction: column; align-items: center; width: 90px; cursor: pointer; transform: translate(-50%, -50%); }
-        .sim-node-icon { width: 44px; height: 44px; border-radius: 50%; background: #2a2030; border: 3px solid #555; display: flex; align-items: center; justify-content: center; font-size: 20px; transition: all 0.2s; box-shadow: 0 4px 6px rgba(0,0,0,0.5); }
-        .sim-node.available .sim-node-icon { border-color: #ffcf6a; box-shadow: 0 0 10px rgba(255, 207, 106, 0.5); cursor: pointer; }
-        .sim-node.available:hover .sim-node-icon { transform: scale(1.15); }
-        .sim-node.maxed .sim-node-icon { background: #caa55c; border-color: #ffcf6a; color: #111; }
-        .sim-node.locked { opacity: 0.6; cursor: not-allowed; }
-        .sim-node.locked .sim-node-icon { border-style: dashed; background: #111; }
-        .sim-node-ranks { display: flex; gap: 2px; margin-top: 4px; background: rgba(0,0,0,0.7); padding: 2px 4px; border-radius: 6px; }
-        .sim-node-ranks i { width: 6px; height: 6px; border-radius: 50%; background: #333; border: 1px solid #555; }
-        .sim-node-ranks i.filled { background: #ffcf6a; border-color: #ffcf6a; }
-        .sim-node-name { font-size: 10px; text-align: center; margin-top: 2px; font-weight: bold; background: rgba(0,0,0,0.8); padding: 2px 4px; border-radius: 4px; line-height: 1.1; position: relative; z-index: 3; white-space: normal; }
+        /* ============================================================
+           ДЕРЕВО НАВЫКОВ В СТИЛЕ НАТИВНОГО ЭКРАНА ИГРЫ (v11.6.1)
+           Источник: reference/LegionFrontSRC/site/skills.css (.skx-*).
+           Сетка сжата под 1920x1080: TH=95, TOP=30, BOT=45, BH=455.
+           ============================================================ */
+        .sim-tree-wrap { flex: 1; min-width: 0; background: #16121a !important; border: 1px solid #3d2f44; border-radius: 8px; box-shadow: inset 0 0 20px rgba(0,0,0,0.6); position: relative; overflow: auto; max-height: calc(88vh - 170px); display: flex; flex-direction: column; }
+        .sim-tree-inner { min-width: 820px; padding: 12px; display: flex; flex-direction: column; height: auto; flex-shrink: 0; background: transparent !important; position: relative; }
+        /* Верхняя панель: ровно одна строка 38px (очки / билды / обмен). */
+        .sim-top-bar { display: flex; align-items: center; gap: 8px; height: 38px; min-height: 38px; margin-bottom: 10px; padding: 0 8px; background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px; position: relative; z-index: 10; }
+        .sim-free-pts { font-size: 12px; color: var(--tb-chalk2, #c9d2c3); white-space: nowrap; }
+        .sim-free-pts b { color: var(--tb-gold, #ffcf4a); font-size: 16px; margin: 0 2px; font-variant-numeric: tabular-nums; }
+        .sim-bar-sep { width: 1px; height: 20px; background: #3d2f44; flex: none; }
+        .sim-top-bar input, .sim-top-bar select, .sim-top-bar button { height: 26px; box-sizing: border-box; border-radius: 6px; font-size: 12px; font-weight: 700; font-family: inherit; }
+        .sim-top-bar input, .sim-top-bar select { background: #0f0f15; border: 1px solid #3d2f44; color: #fff; padding: 0 8px; outline: none; min-width: 0; }
+        .sim-top-bar input { width: 120px; flex: 0 1 120px; }
+        .sim-top-bar select { width: 150px; flex: 0 1 150px; cursor: pointer; }
+        .sim-top-bar button { padding: 0 10px; cursor: pointer; white-space: nowrap; flex: none; transition: filter 0.15s, background 0.15s; }
+        .sim-top-bar button:hover { filter: brightness(1.15); }
+        .sim-save-btn { background: #caa55c; color: #1d1620; border: 1px solid #caa55c; }
+        .sim-del-btn { background: transparent; color: #ff5a7a; border: 1px solid #ff5a7a; padding: 0 8px; }
+        .sim-share-btn, .sim-import-btn { background: transparent; color: #caa55c; border: 1px solid #caa55c; }
+        .sim-reset-btn { background: rgba(255, 90, 122, 0.1); color: #ff5a7a; border: 1px solid #ff5a7a; margin-left: auto; }
+        .sim-reset-btn:hover { background: rgba(255, 90, 122, 0.22); }
+        /* Ветки: три колонки как в нативном дереве, цвет ветки — --br1..--br3. */
+        .sim-branches { position: relative; display: grid; grid-template-columns: repeat(var(--nb, 3), minmax(0, 1fr)); width: 100%; }
+        .sim-branch { position: relative; min-width: 0; }
+        .sim-branch + .sim-branch { border-left: 2px dashed rgba(244, 241, 228, 0.14); }
+        .sim-branch:nth-child(1) { --bc: var(--br1, #84d4ff); }
+        .sim-branch:nth-child(2) { --bc: var(--br2, #ffa982); }
+        .sim-branch:nth-child(3) { --bc: var(--br3, #d6b4ff); }
+        .sim-branch:nth-child(n+4) { --bc: var(--br1, #84d4ff); }
+        .sim-branch-header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; height: 28px; margin: 0 12px; padding-bottom: 4px; border-bottom: 3px solid var(--bc, var(--tb-chalk)); color: var(--bc, var(--tb-chalk)); font-size: 13px; font-weight: 700; position: relative; z-index: 3; }
+        .sim-branch-header .sim-svg { width: 18px; height: 18px; color: var(--bc, var(--tb-gold)); }
+        .sim-branch-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .sim-branch-pts { min-width: 24px; height: 24px; padding: 0 5px; display: grid; place-items: center; border-radius: 12px; background: var(--bc, var(--tb-slate3)); color: var(--tb-ink); border: 2px solid var(--tb-ink); font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
+        /* Поле узлов: высота задаётся инлайном из BH (455px). */
+        .sim-in { position: relative; height: 455px; }
+        .sim-lines { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 1; }
+        .sim-lines path { fill: none; vector-effect: non-scaling-stroke; stroke-linecap: round; }
+        .sim-lines .tk-bg { stroke: var(--tb-slate3, #19211e); stroke-width: 14px; }
+        .sim-lines .tk-on { stroke: var(--bc, var(--tb-gold)); stroke-width: 6px; }
+        .sim-lines .tk-off { stroke: var(--tb-chalk, #f4f1e4); stroke-opacity: 0.4; stroke-width: 3px; stroke-dasharray: 2 8; }
+        .sim-lines .tw { stroke: var(--tb-chalk, #f4f1e4); stroke-opacity: 0.25; stroke-width: 2.5px; stroke-dasharray: 4 6; }
+        .sim-lines .tw.op { stroke: var(--bc, var(--tb-chalk)); stroke-opacity: 0.55; stroke-dasharray: none; }
+        .sim-lines .tw.on { stroke: var(--bc, var(--tb-gold)); stroke-opacity: 1; stroke-width: 4px; stroke-dasharray: none; }
+        .sim-lines .pre { stroke: var(--tb-chalk, #f4f1e4); stroke-opacity: 0.3; stroke-width: 2px; stroke-dasharray: 3 6; }
+        .sim-lines .pre.op { stroke: var(--bc, var(--tb-chalk)); stroke-opacity: 0.75; }
+        .sim-lines .pre.on { stroke: var(--bc, var(--tb-gold)); stroke-opacity: 1; stroke-width: 3px; stroke-dasharray: none; }
+        /* SVG-иконки: обводка currentColor, solid-вариант с полупрозрачной заливкой. */
+        .sim-svg { fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+        .sim-svg.so { fill: currentColor; fill-opacity: 0.18; }
+        /* Узел: круг как .skx-i в нативном дереве. */
+        .sim-node { position: absolute; z-index: 2; transform: translate(-50%, -21px); display: grid; justify-items: center; width: 92px; cursor: pointer; }
+        .sim-node-icon { position: relative; width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; background: var(--tb-slate2, #313f39); border: 3px solid var(--tb-chalk2, #c9d2c3); color: var(--tb-chalk, #f4f1e4); box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35); transition: translate 0.12s, box-shadow 0.12s; }
+        .sim-node-icon .sim-svg { width: 23px; height: 23px; }
+        .sim-node:hover { z-index: 4; }
+        .sim-node:hover .sim-node-icon { translate: 0 -2px; }
+        .sim-node .sim-node-icon { border-color: color-mix(in srgb, var(--bc, var(--tb-chalk2)) 60%, var(--tb-slate2)); }
+        .sim-node.locked .sim-node-icon { background: var(--tb-slate3, #19211e); border-style: dashed; border-color: color-mix(in srgb, var(--tb-chalk) 35%, transparent); color: color-mix(in srgb, var(--tb-chalk) 45%, transparent); }
+        .sim-node.available .sim-node-icon { background: color-mix(in srgb, var(--bc, var(--tb-gold)) 26%, var(--tb-slate2)); border: 3px solid var(--bc, var(--tb-gold)); color: var(--tb-chalk, #f4f1e4); box-shadow: 0 0 0 3px var(--tb-slate), 0 0 0 5px color-mix(in srgb, var(--bc, var(--tb-gold)) 45%, transparent); }
+        .sim-node.available .sim-node-icon::after { content: ''; position: absolute; inset: -8px; border-radius: inherit; border: 3px solid var(--bc, var(--tb-gold)); opacity: 0; animation: simNodePulse 2s ease-out infinite; pointer-events: none; }
+        @keyframes simNodePulse { 0% { transform: scale(0.88); opacity: 0.9; } 70%, 100% { transform: scale(1.22); opacity: 0; } }
+        .sim-node.has .sim-node-icon { background: var(--bc, var(--tb-gold)); border: 3px solid var(--tb-ink); color: var(--tb-ink); box-shadow: 0 0 0 3px var(--tb-slate), 0 0 0 5px var(--bc, var(--tb-gold)); }
+        .sim-node.has .sim-node-icon .sim-svg.so { fill-opacity: 0.4; }
+        .sim-node.maxed .sim-node-icon { box-shadow: 0 0 0 3px var(--tb-slate), 0 0 0 5px var(--tb-gold); }
+        .sim-node-ranks { display: flex; gap: 3px; margin-top: 2px; padding: 1px 4px; border-radius: 7px; background: var(--tb-slate, #25302c); }
+        .sim-node-ranks i { width: 6px; height: 6px; border-radius: 50%; background: var(--tb-slate3, #19211e); border: 1.5px solid color-mix(in srgb, var(--tb-chalk) 45%, transparent); }
+        .sim-node-ranks i.filled { background: var(--bc, var(--tb-gold)); border-color: var(--bc, var(--tb-gold)); }
+        .sim-node-name { max-width: 92px; margin-top: 2px; padding: 0 3px; font-size: 10.5px; line-height: 1.15; font-weight: 700; text-align: center; color: var(--tb-chalk, #f4f1e4); background: var(--tb-slate, #25302c); border-radius: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; hyphens: auto; overflow-wrap: anywhere; }
+        .sim-node.locked .sim-node-name { color: var(--tb-chalk2, #c9d2c3); opacity: 0.8; }
         .sim-card { position: fixed; background: #f5e9c8; color: #2a2010; border: 3px solid #2b1d18; border-radius: 12px; padding: 15px; width: 280px; z-index: 10001; box-shadow: 0 10px 25px rgba(0,0,0,0.6); display: none; }
         .sim-card h4 { margin: 0 0 5px 0; font-size: 16px; color: #2b1d18; display: flex; justify-content: space-between; }
         .sim-card .desc { font-size: 13px; margin-bottom: 10px; line-height: 1.3; }
@@ -53,13 +107,10 @@
         .sim-card button { background: #caa55c; border: 2px solid #2b1d18; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; color: #2b1d18; font-size: 13px; }
         .sim-card button:disabled { opacity: 0.5; cursor: not-allowed; }
         .sim-card-close { position: absolute; top: 8px; right: 8px; cursor: pointer; font-size: 16px; color: #888; }
-        .sim-reset-btn { background: rgba(255,90,122,0.1); color: #ff5a7a; border: 1px solid #ff5a7a; padding: 6px 14px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s; }
-        .sim-reset-btn:hover { background: rgba(255,90,122,0.22); }
-        /* Кнопки сохранения/удаления билдов в верхней панели планировщика */
-        .sim-save-btn { background: #28a745; color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s; white-space: nowrap; }
-        .sim-save-btn:hover { background: #34c759; }
-        .sim-del-btn { background: #3a2028; color: #ff5a7a; border: 1px solid #ff5a7a; border-radius: 6px; padding: 8px 12px; font-size: 12px; cursor: pointer; transition: 0.2s; }
-        .sim-del-btn:hover { background: rgba(255,90,122,0.22); }
+        /* Табы классов планировщика: компактные (34px), с SVG-иконкой класса. */
+        .modal-tab.sim-tab { height: 34px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; box-sizing: border-box; }
+        .modal-tab.sim-tab .sim-svg { width: 16px; height: 16px; }
+        .sim-load-select option { background: #0f0f15; color: #fff; }
         .build-right { width: 250px; flex-shrink: 0; background: #1e1724; padding: 15px; border-radius: 8px; border: 1px solid #3d2f44; height: fit-content; }
         /* Панель статов справа */
         .stats-panel { background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px; padding: 15px; }
