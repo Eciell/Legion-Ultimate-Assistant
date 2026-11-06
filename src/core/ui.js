@@ -446,9 +446,11 @@
 
         renderPlayerHudContent(hud, hero) {
             if (!hud) return;
-            // Глобальный G (core/constants.js) — это unsafeWindow: LG_CH/ME/LGQuest
+            // Глобальный G (core/constants.js) — это unsafeWindow: ME/LGQuest
             // живут в контексте страницы и в песочнице напрямую не видны.
-            const name = hero?.name || hero?.n || G.LG_CH?.name || (G.ME?.user?.name) || 'Игрок';
+            // v11.6.0g-5: LG_CH сюда не подмешиваем — это Twitch-канал, а не
+            // игрок; в HUD попадал чужой ник (баг «ника в чате»).
+            const name = hero?.name || G.ME?.user?.name || G.ME?.user?.login || 'Игрок';
             const rawClass = hero?.class || hero?.c || hero?.sk?.c || 'recruit';
             const className = (typeof BuildSim !== 'undefined' && BuildSim.classNames?.[rawClass]) || rawClass;
             const lvl = hero?.lvl || hero?.level || hero?.l || 1;

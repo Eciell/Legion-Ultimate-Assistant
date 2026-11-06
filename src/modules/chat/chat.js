@@ -26,9 +26,11 @@
         messages: [], // Массив всех сообщений
         activeMainTab: 'city',
         activeSubTab: 'general',
-        // Ник узнаём из page-context (LG_CH) либо позже — асинхронно из syncMe().
+        // v11.6.0g-5: ник — это ME.user (page-context), а не LG_CH: в LG_CH
+        // лежит логин Twitch-канала, из-за него в чат/HUD попадал чужой ник.
+        // Если ME ещё пуст — ник придёт асинхронно из syncMe().
         // Хардкод чужого ника опаснее пустого значения: до ответа /api/me лучше null.
-        myNick: (typeof unsafeWindow !== 'undefined' && unsafeWindow.LG_CH?.name) || window.LG_CH?.name || null,
+        myNick: (typeof unsafeWindow !== 'undefined' && (unsafeWindow.ME?.user?.login || unsafeWindow.ME?.user?.name)) || null,
         myRole: 'legionary',
         dmTarget: null, // Ник собеседника, с которым сейчас открыт диалог во вкладке ЛС
         currentMineId: 'home',

@@ -117,10 +117,16 @@
         async syncMe() {
             try {
                 const res = await Utils.fetchApi('/api/me');
+                // v11.6.0g-5: ник — это user.login из /api/me. LG_CH сюда не
+                // подмешиваем: там логин Twitch-канала, а не игрока (баг «чужой
+                // ник в чате»). Фолбэк — ME.user из page-context.
+                const user = res?.user || (typeof G !== 'undefined' && G.ME?.user);
+                const login = user?.login || user?.name;
+                if (login) {
+                    this.myNick = String(login).trim().toLowerCase();
+                }
                 const me = res?.hero || res?.body?.hero;
                 if (me) {
-                    // LG_CH/ME живут в page-context — читаем через G, без хардкода ника.
-                    this.myNick = me.name || G.LG_CH?.name || G.ME?.user?.name || null;
                     this.myRole = me.class || me.sk?.c || 'legionary';
                 }
             } catch (e) {}

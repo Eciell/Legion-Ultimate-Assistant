@@ -102,6 +102,24 @@ CREATE TABLE IF NOT EXISTS active_users (
 CREATE INDEX IF NOT EXISTS idx_active_seen ON active_users(last_seen);
 `);
 
+/*
+ * users_stats (v11.6.0g-5) — «когда видели игрока» + версия аддона.
+ *
+ * active_users живёт только окном онлайна (15 минут) и чистится, поэтому
+ * для DAU/MAU нужна отдельная таблица: строка на логин хранится постоянно,
+ * first_seen пишется один раз, last_seen/last_version перезаписываются
+ * каждым heartbeat (POST /heartbeat {login, version}).
+ */
+db.exec(`
+CREATE TABLE IF NOT EXISTS users_stats (
+  login TEXT PRIMARY KEY,
+  first_seen INTEGER NOT NULL,
+  last_seen INTEGER NOT NULL,
+  last_version TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_stats_seen ON users_stats(last_seen);
+`);
+
 // Окно «онлайн»: heartbeat реже (30 с), так что 15 минут прощает до 30
 // пропущенных тиков (сон ноутбука, лаг вкладки, перезагрузка страницы).
 const ACTIVE_WINDOW_MS = 15 * 60 * 1000;
@@ -260,6 +278,23 @@ const selectActiveUsersStmt = db.query(
 );
 const deleteStaleActiveUsersStmt = db.query(
     'DELETE FROM active_users WHERE last_seen <= $threshold'
+);
+
+// --- Статистика (v11.6.0g-5) ----------------------------------------
+// UPSERT по PK login: first_seen пишется только при первой вставке
+// (впервые увидели игрока), last_seen/last_version обновляются каждым
+// heartbeat с валидной version.
+const upsertUserStatsStmt = db.query(
+    `INSERT INTO users_stats (login, first_seen, last_seen, last_version)
+     VALUES ($login, $seen, $seen, $version)
+     ON CONFLICT(login) DO UPDATE SET
+       last_seen = excluded.last_seen,
+       last_version = excluded.last_version`
+);
+// DAU и MAU считаются одним запросом с разным порогом: индекс idx_stats_seen
+// делает COUNT по диапазону дешёвым даже на десятках тысяч строк.
+const countStatsSinceStmt = db.query(
+    'SELECT COUNT(*) AS n FROM users_stats WHERE last_seen >= $threshold'
 );
 
 /* ------------------------------------------------------------------ */
@@ -612,4 +647,51 @@ export function getActiveUsers() {
  */
 export function cleanupActiveUsers() {
     return deleteStaleActiveUsersStmt.run({ $threshold: Date.now() - ACTIVE_WINDOW_MS }).changes;
+}
+
+/* ------------------------------------------------------------------ */
+/* Статистика аддона (v11.6.0g-5)                                      */
+/* ------------------------------------------------------------------ */
+
+// Окна DAU/MAU. Порог включительный (>=): игрок, отметившийся ровно сутки
+// назад, ещё считается «активным за 24 часа».
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Запись в users_stats: «этот логин видели, версия аддона — такая».
+ *
+ * login приходит из HTTP-слоя уже нормализованным (trim + toLowerCase).
+ * version необязателен: клиенты до 11.6.0g-5 его не шлют — тогда в
+ * last_version остаётся прежнее значение (NULL при первой вставке).
+ *
+ * @param {string} login
+ * @param {string|null} [version]
+ * @returns {number} записанный last_seen (Date.now() сервера)
+ */
+export function updateUserStats(login, version) {
+    const seen = Date.now();
+    upsertUserStatsStmt.run({
+        $login: String(login),
+        $seen: seen,
+        $version: version ? String(version) : null
+    });
+    return seen;
+}
+
+/**
+ * Счётчики для GET /stats.
+ *
+ * online — окно active_users (15 минут, тот же порог, что у GET /users),
+ * dau/mau — количество логинов в users_stats с last_seen за 24 часа и за
+ * 30 дней. Считаем COUNT в SQLite, а не в JS: таблица живёт годами.
+ *
+ * @returns {{online: number, dau: number, mau: number}}
+ */
+export function getStats() {
+    const now = Date.now();
+    return {
+        online: getActiveUsers().length,
+        dau: countStatsSinceStmt.get({ $threshold: now - DAY_MS }).n,
+        mau: countStatsSinceStmt.get({ $threshold: now - 30 * DAY_MS }).n
+    };
 }

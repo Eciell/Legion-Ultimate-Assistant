@@ -51,6 +51,9 @@
         // Позиция HUD {left, top} после перетаскивания (v11.6.0g-2).
         DRAG_KEY: 'lgPartyHudPos',
         DEFAULT_BASE_URL: 'https://legion.ctrlfree.host',
+        // v11.6.0g-6: ключ доступа к нашему серверу. Должен совпадать с API_KEY
+        // в server/index.js (env LGU_API_KEY) — иначе любой запрос получит 401.
+        API_KEY: 'LGU-default-secret-key-change-me',
         REQUEST_TIMEOUT: 12000,
         // Период синхронизации HP (ТЗ 11.6.0b: раз в 3 секунды).
         HP_SYNC_MS: 3000,
@@ -365,6 +368,9 @@
                 }
 
                 const headers = { 'Content-Type': 'application/json' };
+                // v11.6.0g-6: без этого заголовка сервер отвечает 401 — ключ
+                // проверяется до роутинга, включая POST /party и /party/join.
+                headers['X-Legion-Key'] = this.API_KEY;
                 const state = this._readState();
                 if (auth && state?.sessionId) {
                     headers.Authorization = 'Bearer ' + state.sessionId;

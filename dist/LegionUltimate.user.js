@@ -2344,9 +2344,11 @@
 
         renderPlayerHudContent(hud, hero) {
             if (!hud) return;
-            // Глобальный G (core/constants.js) — это unsafeWindow: LG_CH/ME/LGQuest
+            // Глобальный G (core/constants.js) — это unsafeWindow: ME/LGQuest
             // живут в контексте страницы и в песочнице напрямую не видны.
-            const name = hero?.name || hero?.n || G.LG_CH?.name || (G.ME?.user?.name) || 'Игрок';
+            // v11.6.0g-5: LG_CH сюда не подмешиваем — это Twitch-канал, а не
+            // игрок; в HUD попадал чужой ник (баг «ника в чате»).
+            const name = hero?.name || G.ME?.user?.name || G.ME?.user?.login || 'Игрок';
             const rawClass = hero?.class || hero?.c || hero?.sk?.c || 'recruit';
             const className = (typeof BuildSim !== 'undefined' && BuildSim.classNames?.[rawClass]) || rawClass;
             const lvl = hero?.lvl || hero?.level || hero?.l || 1;
@@ -5814,6 +5816,9 @@ const Players = {
         // Позиция HUD {left, top} после перетаскивания (v11.6.0g-2).
         DRAG_KEY: 'lgPartyHudPos',
         DEFAULT_BASE_URL: 'https://legion.ctrlfree.host',
+        // v11.6.0g-6: ключ доступа к нашему серверу. Должен совпадать с API_KEY
+        // в server/index.js (env LGU_API_KEY) — иначе любой запрос получит 401.
+        API_KEY: 'LGU-default-secret-key-change-me',
         REQUEST_TIMEOUT: 12000,
         // Период синхронизации HP (ТЗ 11.6.0b: раз в 3 секунды).
         HP_SYNC_MS: 3000,
@@ -6128,6 +6133,9 @@ const Players = {
                 }
 
                 const headers = { 'Content-Type': 'application/json' };
+                // v11.6.0g-6: без этого заголовка сервер отвечает 401 — ключ
+                // проверяется до роутинга, включая POST /party и /party/join.
+                headers['X-Legion-Key'] = this.API_KEY;
                 const state = this._readState();
                 if (auth && state?.sessionId) {
                     headers.Authorization = 'Bearer ' + state.sessionId;
@@ -7832,10 +7840,16 @@ const Players = {
         async syncMe() {
             try {
                 const res = await Utils.fetchApi('/api/me');
+                // v11.6.0g-5: ник — это user.login из /api/me. LG_CH сюда не
+                // подмешиваем: там логин Twitch-канала, а не игрока (баг «чужой
+                // ник в чате»). Фолбэк — ME.user из page-context.
+                const user = res?.user || (typeof G !== 'undefined' && G.ME?.user);
+                const login = user?.login || user?.name;
+                if (login) {
+                    this.myNick = String(login).trim().toLowerCase();
+                }
                 const me = res?.hero || res?.body?.hero;
                 if (me) {
-                    // LG_CH/ME живут в page-context — читаем через G, без хардкода ника.
-                    this.myNick = me.name || G.LG_CH?.name || G.ME?.user?.name || null;
                     this.myRole = me.class || me.sk?.c || 'legionary';
                 }
             } catch (e) {}
@@ -7854,6 +7868,11 @@ const Players = {
     // v11.6.0g-3: период поллинга «кто играет с аддоном» (ТЗ — раз в 30 с).
     // Один тик = POST /heartbeat + GET /users, окно онлайна на сервере 15 мин.
     const ADDON_USERS_POLL_MS = 30000;
+
+    // v11.6.0g-6: ключ доступа к нашему серверу. Должен совпадать с API_KEY в
+    // server/index.js (env LGU_API_KEY). Это фильтр от случайных ботов, а не
+    // секрет: значение лежит в публичной сборке аддона.
+    const ADDON_API_KEY = 'LGU-default-secret-key-change-me';
 
     const ChatNet = {
         // id текущей шахты (обновляется из /api/mine/* и /api/live).
@@ -8398,7 +8417,14 @@ const Players = {
                             const hero = data?.hero || data?.body?.hero || data?.me;
                             if (hero) {
                                 window.__lgHero = hero;
-                                if (hero.name) self.myNick = hero.name;
+                                // v11.6.0g-5: ник берём из user.login (/api/me), а
+                                // не из hero.name: подсветка и «свои» сообщения
+                                // должны сравниваться с тем логином, под которым
+                                // игрок реально сидит в чате. ME — фолбэк, если
+                                // ответ пришёл без user (старые сборки/кэш).
+                                const user = data?.user || (typeof G !== 'undefined' && G.ME?.user);
+                                const userLogin = user?.login || user?.name;
+                                if (userLogin) self.myNick = String(userLogin).trim().toLowerCase();
                                 if (hero.class) self.myRole = hero.class;
                                 const hud = document.getElementById(DOM_IDS.playerHud) || document.getElementById('legion-player-hud');
                                 if (hud && hud.style.display !== 'none' && typeof UI !== 'undefined' && UI.renderPlayerHudContent) {
@@ -8481,7 +8507,11 @@ const Players = {
                 GM_xmlhttpRequest({
                     method,
                     url,
-                    headers: { 'Content-Type': 'application/json' },
+                    // v11.6.0g-6: сервер пускает только с ключом (401 иначе).
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Legion-Key': ADDON_API_KEY
+                    },
                     data: body ? JSON.stringify(body) : undefined,
                     timeout: 8000,
                     onload: (res) => {
@@ -8503,32 +8533,101 @@ const Players = {
         },
 
         /**
+         * Канал игры (LG_CH.login) в нижнем регистре.
+         *
+         * v11.6.0g-5: это НЕ ник игрока, а логин Twitch-канала. Нужен только
+         * затем, чтобы не подсвечивать служебные сообщения канала как
+         * «пользователь аддона».
+         */
+        _channelLogin() {
+            try {
+                if (typeof G === 'undefined' || !G) return '';
+                return String(G.LG_CH?.login || '').trim().toLowerCase();
+            } catch (e) {
+                return '';
+            }
+        },
+
+        /**
+         * Ник текущего игрока для heartbeat и подсветки (нижний регистр).
+         *
+         * v11.6.0g-5: источники только игровые — ME.user из page-context и,
+         * как фолбэк, GET /api/me. LG_CH сюда не подмешивается: там логин
+         * Twitch-канала, из-за которого отправлялся и подсвечивался чужой ник.
+         *
+         * @returns {Promise<string>} нормализованный логин либо '' (неизвестен)
+         */
+        async _resolveMyLogin() {
+            // 1. Страница уже знает игрока — самый дешёвый и свежий путь.
+            try {
+                if (typeof G !== 'undefined' && G) {
+                    const pageLogin = G.ME?.user?.login || G.ME?.user?.name;
+                    if (pageLogin) return String(pageLogin).trim().toLowerCase();
+                }
+            } catch (e) {}
+
+            // 2. Ник, полученный ранее (syncMe / перехват /api/me).
+            if (this.myNick) {
+                const known = String(this.myNick).trim().toLowerCase();
+                if (known) return known;
+            }
+
+            // 3. Фолбэк: сам /api/me — ME в странице может быть ещё пуст, а
+            // первый heartbeat откладывать нельзя. Результат кэшируем в myNick,
+            // поэтому следующий тик пойдёт уже без запроса.
+            try {
+                const res = await Utils.fetchApi('/api/me');
+                const user = res?.user || res?.body?.user;
+                const login = user?.login || user?.name;
+                if (login) {
+                    const norm = String(login).trim().toLowerCase();
+                    this.myNick = norm;
+                    return norm;
+                }
+            } catch (e) {}
+
+            return '';
+        },
+
+        /**
          * Отметка «я онлайн» + обновление списка пользователей аддона.
          *
-         * POST /heartbeat {login} — чтобы нас видели другие; GET /users —
-         * чтобы увидели мы. Ошибки сети не всплывают тостом: сервер аддона
-         * может быть недоступен, подсветка просто остаётся на прошлом наборе.
+         * POST /heartbeat {login, version} — чтобы нас видели другие (и чтобы
+         * сервер знал версию аддона для GET /stats); GET /users — чтобы увидели
+         * мы. Ошибки сети не всплывают тостом: сервер аддона может быть
+         * недоступен, подсветка просто остаётся на прошлом наборе.
          */
         async syncAddonUsers() {
-            const nick = this.myNick ? String(this.myNick).trim() : '';
+            // v11.6.0g-5: ник резолвится через ME.user / /api/me, LG_CH не в счёт.
+            const nick = await this._resolveMyLogin();
             // Ник ещё не пришёл (/api/me в пути) — отправим на следующем тике.
             if (!nick) return;
 
             const base = this._addonBaseUrl();
+            // Канал игры: его логин не должен попасть в список подсветки.
+            const channel = this._channelLogin();
 
             try {
-                await this._addonRequest('POST', base + '/heartbeat', { login: nick });
+                // Версия из шапки userscript'а: GM_info доступен в песочнице
+                // Tampermonkey и не зависит от игры (фолбэк 'unknown').
+                const ver = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || 'unknown';
+                await this._addonRequest('POST', base + '/heartbeat', { login: nick, version: ver });
                 const data = await this._addonRequest('GET', base + '/users');
                 const list = (data && Array.isArray(data.users)) ? data.users : [];
 
                 const next = new Set();
                 list.forEach((login) => {
                     const norm = String(login || '').trim().toLowerCase();
-                    if (norm) next.add(norm);
+                    // Канал игры (G.LG_CH.login) — не игрок: служебные сообщения
+                    // канала идут в нативной ленте с его data-nick, и подсветка
+                    // «аддоном» на них была бы ложной (v11.6.0g-5).
+                    if (!norm || norm === channel) return;
+                    next.add(norm);
                 });
                 // Свой ник добавляем локально: heartbeat уже ушёл, а снимок
-                // /users мог быть собран сервером до нашей вставки.
-                next.add(nick.toLowerCase());
+                // /users мог быть собран сервером до нашей вставки. nick уже
+                // нормализован (нижний регистр) в _resolveMyLogin().
+                next.add(nick);
 
                 const prev = this.addonUsers || new Set();
                 const changed = next.size !== prev.size || Array.from(next).some((n) => !prev.has(n));
@@ -9885,9 +9984,11 @@ const Players = {
         messages: [], // Массив всех сообщений
         activeMainTab: 'city',
         activeSubTab: 'general',
-        // Ник узнаём из page-context (LG_CH) либо позже — асинхронно из syncMe().
+        // v11.6.0g-5: ник — это ME.user (page-context), а не LG_CH: в LG_CH
+        // лежит логин Twitch-канала, из-за него в чат/HUD попадал чужой ник.
+        // Если ME ещё пуст — ник придёт асинхронно из syncMe().
         // Хардкод чужого ника опаснее пустого значения: до ответа /api/me лучше null.
-        myNick: (typeof unsafeWindow !== 'undefined' && unsafeWindow.LG_CH?.name) || window.LG_CH?.name || null,
+        myNick: (typeof unsafeWindow !== 'undefined' && (unsafeWindow.ME?.user?.login || unsafeWindow.ME?.user?.name)) || null,
         myRole: 'legionary',
         dmTarget: null, // Ник собеседника, с которым сейчас открыт диалог во вкладке ЛС
         currentMineId: 'home',
