@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Legion: Ultimate Assistant (Chat, Auction, Pocket City)
 // @namespace    http://tampermonkey.net/
-// @version      11.6.0
+// @version      11.6.1
 // @description  QoL-аддон для Легиона: Умный чат, Сканер аукциона, Разведка, Планировщик, Карманный город. Без авто-копания.
 // @connect      7tv.io
 // @connect      cdn.7tv.app
@@ -16,6 +16,8 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_notification
+// @grant        GM_openInTab
 // @updateURL    https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js
 // @downloadURL  https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js
 // ==/UserScript==
@@ -7869,6 +7871,11 @@ const Players = {
     // Один тик = POST /heartbeat + GET /users, окно онлайна на сервере 15 мин.
     const ADDON_USERS_POLL_MS = 30000;
 
+    // v11.6.1c: как часто спрашивать GET /latest-version (раз в час). Троттлинг
+    // хранится в localStorage 'lgUpdateCheck', чтобы проверка не зависела от
+    // перезапуска поллинга (переключение вкладок, повторный init чата).
+    const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+
     // v11.6.0g-6: ключ доступа к нашему серверу. Должен совпадать с API_KEY в
     // server/index.js (env LGU_API_KEY). Это фильтр от случайных ботов, а не
     // секрет: значение лежит в публичной сборке аддона.
@@ -8598,6 +8605,10 @@ const Players = {
          * недоступен, подсветка просто остаётся на прошлом наборе.
          */
         async syncAddonUsers() {
+            // v11.6.1c: раз в час заодно спрашиваем сервер о новой версии.
+            // Без await — уведомление не должно задерживать подсветку, а
+            // собственные ошибки checkForUpdates() гасит внутри себя.
+            this.checkForUpdates();
             // v11.6.0g-5: ник резолвится через ME.user / /api/me, LG_CH не в счёт.
             const nick = await this._resolveMyLogin();
             // Ник ещё не пришёл (/api/me в пути) — отправим на следующем тике.
@@ -8659,6 +8670,61 @@ const Players = {
         },
 
         /* ---------------------------------------------------------- */
+        /* Проверка обновлений (ТЗ 11.6.1c)                           */
+        /* ---------------------------------------------------------- */
+
+        /**
+         * Спрашивает GET /latest-version и, если на сервере версия новее,
+         * показывает GM_notification со ссылкой на raw-сборку GitHub.
+         *
+         * Троттлинг — localStorage 'lgUpdateCheck' (раз в час). Хранилище
+         * намеренно не GM-овское: это не настройка, а кэш момента проверки,
+         * потеря которого стоит одного лишнего запроса.
+         *
+         * Ошибки не всплывают: старый сервер без эндпоинта ответит 404,
+         * сервер может быть недоступен — тогда отметка времени не пишется и
+         * проверка повторится на следующем тике поллинга.
+         */
+        async checkForUpdates() {
+            try {
+                const now = Date.now();
+                const lastCheck = Number(localStorage.getItem('lgUpdateCheck') || 0) || 0;
+                if (now - lastCheck <= UPDATE_CHECK_INTERVAL_MS) return;
+
+                const base = this._addonBaseUrl();
+                const res = await this._addonRequest('GET', base + '/latest-version');
+                // Пустой ответ — не повод считать проверку выполненной.
+                if (!res || !res.version) return;
+                localStorage.setItem('lgUpdateCheck', String(now));
+
+                // Своя версия — из шапки userscript'а. Без GM_info сравнение
+                // невозможно (не Tampermonkey), поэтому просто выходим.
+                const current = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '';
+                if (!current) return;
+
+                // numeric:true обязателен: лексикографически «11.6.10» < «11.6.9»,
+                // а числовое сравнение даёт правильный порядок сегментов.
+                const isNewer = String(res.version)
+                    .localeCompare(String(current), undefined, { numeric: true, sensitivity: 'base' }) > 0;
+                if (!isNewer) return;
+
+                // GM_notification/GM_openInTab требуют @grant в шапке; проверка
+                // typeof оставлена, чтобы в менеджере без этих API аддон не падал.
+                if (typeof GM_notification === 'function') {
+                    GM_notification({
+                        title: 'Legion Ultimate Assistant',
+                        text: `Вышла новая версия ${res.version}. Нажмите, чтобы обновить.`,
+                        onclick: () => {
+                            if (typeof GM_openInTab === 'function') GM_openInTab(res.url);
+                        }
+                    });
+                }
+            } catch (e) {
+                dbg('[CHAT] проверка обновлений не удалась:', e && e.message ? e.message : e);
+            }
+        },
+
+        /* ---------------------------------------------------------- */
         /* CSS-подсветка (ТЗ 11.6.0h.2)                               */
         /* ---------------------------------------------------------- */
         // DOM-наблюдатель, навешивание класса и вставка бейджа из JS удалены.
@@ -8694,28 +8760,16 @@ const Players = {
             // Наш PiP-чат: <span class="chat-author" data-nick="login">.
             const pipSel = nicks.map(n => `.chat-author[data-nick="${esc(n)}" i]`).join(',');
 
-            // v11.6.0h.3: «⚡» — не текст, а фоновая SVG-картинка. Псевдоэлемент
-            // ::before добавлял символ в textContent узла, из-за чего игра
-            // читала ник как "⚡nick": ломалось выделение текста и упоминание
-            // по клику. background-image в разметку вообще не вмешивается —
-            // textContent остаётся ровно "nick".
-            // В data URI диез обязан быть %23, иначе браузер обрежет url по «#».
+            // v11.6.1c: бейдж «⚡» убран полностью. Он рисовался фоновой
+            // SVG-картинкой (чтобы не портить textContent ника), но визуально
+            // мешал и сдвигал ник вправо из-за padding-left. Осталось только
+            // свечение text-shadow — оно не меняет ни разметку, ни ширину узла.
             return `
             ${nativeSel} {
                 text-shadow: 0 0 4px currentColor, 0 0 10px currentColor !important;
-                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 16" width="12" height="16"><path d="M7 0L0 9h5v7l7-9H7z" fill="%23ffcf6a"/></svg>');
-                background-repeat: no-repeat;
-                background-position: left center;
-                background-size: 10px 13px;
-                padding-left: 14px !important;
             }
             ${pipSel} {
                 text-shadow: 0 0 4px currentColor, 0 0 10px currentColor !important;
-                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 16" width="12" height="16"><path d="M7 0L0 9h5v7l7-9H7z" fill="%23ffcf6a"/></svg>');
-                background-repeat: no-repeat;
-                background-position: left center;
-                background-size: 10px 13px;
-                padding-left: 14px !important;
             }
         `;
         },
@@ -9660,12 +9714,9 @@ const Players = {
 
                 const authorNick = m.author || '';
                 const isAddon = this.isAddonUser(authorNick);
-                // v11.6.0h.3: бейдж ⚡ рисует CSS — фоновая SVG-картинка из
-                // ChatNet._buildAddonStylesCss(). В HTML его нет вообще, поэтому
-                // textContent узла остаётся чистым ником (выделение и упоминание
-                // по клику работают как в обычном чате).
-                // Класс .legion-addon-user оставляем: по нему core/styles.js
-                // даёт свечение, а динамическая простыня — иконку и обводку.
+                // v11.6.1c: бейджа «⚡» больше нет ни в HTML, ни в CSS — ник
+                // остаётся чистым текстом. Класс .legion-addon-user оставляем:
+                // по нему core/styles.js и динамическая простыня дают свечение.
                 const addonClass = isAddon ? ' legion-addon-user' : '';
                 // v11.6.0h: бирюзовый #00f0ff больше не подставляется — у ника
                 // остаётся его родной цвет класса (meta.color), а свечение

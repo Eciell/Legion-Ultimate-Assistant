@@ -1,6 +1,6 @@
 {
   "name": "legion-addon",
-  "version": "11.5.6",
+  "version": "11.6.1",
   "scripts": {
     "build": "node build.js --all",
     "build:all": "node build.js --all",

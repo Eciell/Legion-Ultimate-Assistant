@@ -20,6 +20,10 @@
  * X-Legion-Key (общий секрет аддона, env LGU_API_KEY); POST /heartbeat
  * ограничен 3 запросами в минуту на IP -> 429 too_many_requests.
  *
+ * v11.6.1c: GET /latest-version (публичный, как GET /) отдаёт
+ * {version, url} — клиент раз в час сравнивает версию с GM_info.script.version
+ * и показывает GM_notification. Лимит heartbeat поднят до 6 запросов в минуту.
+ *
  * v11.6.0a: вход только через POST /party/join (inviteToken — первичный
  * ключ), memberId отдельно от sessionId, DELETE /party/:id/leave, логины
  * в нижнем регистре.
@@ -68,6 +72,14 @@ const hostname = '0.0.0.0';
 // окружения LGU_API_KEY на сервере; клиенты шлют одно и то же значение из
 // chat-net.js / party.js, поэтому при смене ключа их надо пересобрать.
 const API_KEY = process.env.LGU_API_KEY || 'LGU-default-secret-key-change-me';
+
+// Версия аддона для автообновления (v11.6.1c): GET /latest-version отдаёт её
+// вместе со ссылкой на raw-сборку. Клиент сравнивает её с GM_info.script.version
+// и раз в час показывает GM_notification, поэтому при релизе версию надо
+// поднимать и здесь, и в src/header-*.js — иначе уведомление будет приходить
+// даже тем, кто уже обновился (их GM_info всё ещё покажет старую версию).
+const LATEST_VERSION = '11.6.1';
+const UPDATE_URL = 'https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js';
 
 // Логин хранится и сравнивается ТОЛЬКО в нижнем регистре: игра отдаёт ник
 // как есть, а две «формы» одного ника заняли бы одно имя дважды.
@@ -240,10 +252,11 @@ function checkJoinRate(ip) {
 /* Rate limit на heartbeat (v11.6.0g-6)                                */
 /* ------------------------------------------------------------------ */
 
-// 3 запроса в минуту на IP. Клиент шлёт heartbeat раз в 30 с (2 в минуту),
-// поэтому лимит срабатывает только на спам; 429 клиент молча проглатывает и
-// повторяет на следующем тике.
-const HEARTBEAT_LIMIT = 3;
+// 6 запросов в минуту на IP (v11.6.1c: было 3). Клиент шлёт heartbeat раз в
+// 30 с (2 в минуту), поэтому лимит срабатывает только на спам; запас в 3x
+// покрывает перезагрузки страницы и несколько вкладок с одного IP. 429 клиент
+// молча проглатывает и повторяет на следующем тике.
+const HEARTBEAT_LIMIT = 6;
 const HEARTBEAT_WINDOW_MS = 60_000;
 
 // ip -> { count, resetAt }. Как и joinAttempts, Map живёт в памяти процесса:
@@ -634,6 +647,18 @@ async function handleStats() {
     return json(getStats());
 }
 
+/*
+ * GET /latest-version -> {version, url} (v11.6.1c)
+ *
+ * Публичный эндпоинт (проверяется в роутере до X-Legion-Key): клиент узнаёт
+ * о новой сборке до всякой авторизации, а в ответе нет ников и секретов.
+ * version сравнивается на клиенте с GM_info.script.version, url открывается
+ * по клику на уведомление.
+ */
+async function handleLatestVersion() {
+    return json({ version: LATEST_VERSION, url: UPDATE_URL });
+}
+
 /* ------------------------------------------------------------------ */
 /* Роутер                                                              */
 /* ------------------------------------------------------------------ */
@@ -647,10 +672,12 @@ const server = Bun.serve({
             const parts = url.pathname.split('/').filter(Boolean);
 
             // Защита API (v11.6.0g-6): ключ обязателен для всех запросов, кроме
-            // GET / (health-check платформы) и OPTIONS (preflight/пробы).
-            // Сравнение простое строковое: это общий секрет аддона, а не
-            // аутентификация игрока — та осталась на Bearer sessionId в /party.
-            const isPublic = req.method === 'OPTIONS' || (req.method === 'GET' && url.pathname === '/');
+            // GET / (health-check платформы), GET /latest-version (v11.6.1c) и
+            // OPTIONS (preflight/пробы). Сравнение простое строковое: это общий
+            // секрет аддона, а не аутентификация игрока — та осталась на Bearer
+            // sessionId в /party.
+            const isPublic = req.method === 'OPTIONS'
+                || (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/latest-version'));
             if (!isPublic && req.headers.get('x-legion-key') !== API_KEY) {
                 throw new HttpError(401, 'unauthorized', 'Нужен заголовок X-Legion-Key');
             }
@@ -675,6 +702,13 @@ const server = Bun.serve({
                     throw new HttpError(405, 'method_not_allowed', 'Ожидается GET /stats');
                 }
                 return await handleStats();
+            }
+            // Уведомление об обновлении (v11.6.1c): версия + ссылка на сборку.
+            if (url.pathname === '/latest-version') {
+                if (req.method !== 'GET') {
+                    throw new HttpError(405, 'method_not_allowed', 'Ожидается GET /latest-version');
+                }
+                return await handleLatestVersion();
             }
 
             if (parts[0] !== 'party') {
