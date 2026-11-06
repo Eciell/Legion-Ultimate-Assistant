@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Legion: Ultimate Assistant (Chat, Auction, Pocket City)
 // @namespace    http://tampermonkey.net/
-// @version      11.6.0
+// @version      11.6.1
 // @description  QoL-аддон для Легиона: Умный чат, Сканер аукциона, Разведка, Планировщик, Карманный город. Без авто-копания.
 // @connect      7tv.io
 // @connect      cdn.7tv.app
@@ -16,6 +16,8 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_notification
+// @grant        GM_openInTab
 // @updateURL    https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js
 // @downloadURL  https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js
 // ==/UserScript==
@@ -85,7 +87,18 @@
     const API_BASE = window.LG_BASE || (location.pathname.match(/^\/c\/[^/]+/)?.[0] || '');
     const CHAT_DEDUP_TTL = 8000;
     const MAX_POINTS = 50;
-    const Y_MAP = { 30: 80, 20: 230, 10: 380, 5: 530, 0: 680 };
+    /*
+     * v11.6.1: сетка дерева навыков сжата под 1920x1080 без скролла.
+     * Нативные пропорции (reference/LegionFrontSRC/site/skills.js):
+     * TH 140 / TOP 40 / BOT 80 -> BH 680.
+     * Сжатые: TH 95 / TOP 30 / BOT 45 -> BH = 30 + 4*95 + 45 = 455.
+     */
+    const TH = 95;
+    const TOP = 30;
+    const BOT = 45;
+    const BH = TOP + 4 * TH + BOT; // 455
+    // Y-координаты ярусов req=30..0 (верх -> низ): BH - BOT - индекс_яруса * TH.
+    const Y_MAP = { 30: TOP, 20: BH - BOT - 3 * TH, 10: BH - BOT - 2 * TH, 5: BH - BOT - TH, 0: BH - BOT };
     const SKIP_FX_PREFIXES = ['ctl_', 'act_', 'cd_'];
 
     /*
@@ -959,7 +972,15 @@
     // 3. СТИЛИ
     // ============================================================
     const STYLES = `
-        .${DOM_IDS.customModal}, .custom-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(20, 16, 26, 0.98); border: 2px solid #caa55c; border-radius: 12px; padding: 20px; z-index: 10000; color: #f7eadf; width: 1200px; max-width: 98vw; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,0.85); font-family: 'Nunito', sans-serif; backdrop-filter: blur(4px); }
+        /* Глобальные переменные игры (нативные цвета дерева навыков, v11.6.1). */
+        :root {
+            --tb-slate: #25302c; --tb-slate2: #313f39; --tb-slate3: #19211e;
+            --tb-wood: #a8754f; --tb-woodD: #6e4a2f;
+            --tb-chalk: #f4f1e4; --tb-chalk2: #c9d2c3;
+            --tb-ink: #2b1d18; --tb-gold: #ffcf4a;
+            --br1: #84d4ff; --br2: #ffa982; --br3: #d6b4ff;
+        }
+        .${DOM_IDS.customModal}, .custom-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(20, 16, 26, 0.98); border: 2px solid #caa55c; border-radius: 12px; padding: 20px; z-index: 10000; color: #f7eadf; width: 1200px; max-width: 98vw; max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,0.85); font-family: 'Nunito', sans-serif; backdrop-filter: blur(4px); }
         .${DOM_IDS.customModal}.modal-compact, .custom-modal.modal-compact { width: 450px; max-width: 95vw; max-height: 65vh; padding: 16px; }
         .${DOM_IDS.customModal} h2, .custom-modal h2 { margin-top: 0; color: #ffcf6a; border-bottom: 1px solid #555; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; cursor: grab; user-select: none; }
         .${DOM_IDS.customModal} h2:active, .custom-modal h2:active { cursor: grabbing; }
@@ -972,36 +993,91 @@
         /* Пати: компактный крестик в правом верхнем углу заголовка (v11.6.0a). */
         .party-close { border-radius: 5px; transition: color 0.2s, background 0.2s; }
         .party-close:hover { color: #fff; background: rgba(255, 143, 163, 0.14); }
+        /* Планировщик билдов (v11.6.1d): модалка выше (95vh), чтобы дерево
+           навыков влезало целиком без внутреннего скролла. */
+        .custom-modal.sim-modal, .${DOM_IDS.customModal}.sim-modal { max-height: 95vh; }
         .modal-tabs { display: flex; gap: 10px; margin-bottom: 15px; border-bottom: 1px solid #444; padding-bottom: 10px; flex-wrap: wrap; }
         .modal-tab { background: #2a2030; border: 1px solid #555; color: #ccc; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: all 0.2s; }
         .modal-tab:hover { background: #3a2c40; color: #fff; }
         .modal-tab.active { background: #caa55c; color: #1d1620; border-color: #caa55c; }
         .tab-content { display: none; flex: 1; overflow: hidden; position: relative; }
         .tab-content.active { display: flex; gap: 20px; }
-        /* Контейнер дерева: тёмная тема + ограничение по высоте экрана и вертикальный скролл */
-        .sim-tree-wrap { flex: 1; background: #16121a !important; border: 1px solid #3d2f44; border-radius: 8px; box-shadow: inset 0 0 20px rgba(0,0,0,0.6); position: relative; overflow-y: auto; overflow-x: auto; max-height: calc(100vh - 250px); padding-bottom: 20px; display: flex; flex-direction: column; }
-        /* Высоту НЕ фиксируем: иначе содержимое (панель + ветки 760px) выше бокса,
-           и нижний ряд нод (top: 680px) вываливается за серый фон. */
-        .sim-tree-inner { min-width: 700px; padding: 20px; display: flex; flex-direction: column; height: auto; min-height: 760px; flex-shrink: 0; background: transparent !important; position: relative; }
-        .sim-top-bar { display: flex; flex-direction: column; gap: 12px; margin-bottom: 15px; background: #1e1724; padding: 12px; border-radius: 8px; border: 1px solid #3d2f44; position: relative; z-index: 10; }
-        .sim-free-pts { font-size: 14px; color: #eee; }
-        /* Ветки растягиваются на всю доступную высоту: нижняя нода на 680px
-           занимает ещё ~40px вниз (иконка 44px центрирована по top), поэтому 740px. */
-        .sim-branches { position: relative; height: 100%; min-height: 740px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
-        .sim-branch { position: relative; background: rgba(255,255,255,0.03); border-radius: 8px; height: 100%; }
-        .sim-branch-header { text-align: center; font-weight: bold; color: #ffcf6a; font-size: 14px; position: absolute; top: 0; width: 100%; pointer-events: none; }
-        .sim-branch-pts { font-size: 11px; color: #aaa; margin-top: 2px; }
-        .sim-node { position: absolute; z-index: 2; display: flex; flex-direction: column; align-items: center; width: 90px; cursor: pointer; transform: translate(-50%, -50%); }
-        .sim-node-icon { width: 44px; height: 44px; border-radius: 50%; background: #2a2030; border: 3px solid #555; display: flex; align-items: center; justify-content: center; font-size: 20px; transition: all 0.2s; box-shadow: 0 4px 6px rgba(0,0,0,0.5); }
-        .sim-node.available .sim-node-icon { border-color: #ffcf6a; box-shadow: 0 0 10px rgba(255, 207, 106, 0.5); cursor: pointer; }
-        .sim-node.available:hover .sim-node-icon { transform: scale(1.15); }
-        .sim-node.maxed .sim-node-icon { background: #caa55c; border-color: #ffcf6a; color: #111; }
-        .sim-node.locked { opacity: 0.6; cursor: not-allowed; }
-        .sim-node.locked .sim-node-icon { border-style: dashed; background: #111; }
-        .sim-node-ranks { display: flex; gap: 2px; margin-top: 4px; background: rgba(0,0,0,0.7); padding: 2px 4px; border-radius: 6px; }
-        .sim-node-ranks i { width: 6px; height: 6px; border-radius: 50%; background: #333; border: 1px solid #555; }
-        .sim-node-ranks i.filled { background: #ffcf6a; border-color: #ffcf6a; }
-        .sim-node-name { font-size: 10px; text-align: center; margin-top: 2px; font-weight: bold; background: rgba(0,0,0,0.8); padding: 2px 4px; border-radius: 4px; line-height: 1.1; position: relative; z-index: 3; white-space: normal; }
+        /* ============================================================
+           ДЕРЕВО НАВЫКОВ В СТИЛЕ НАТИВНОГО ЭКРАНА ИГРЫ (v11.6.1)
+           Источник: reference/LegionFrontSRC/site/skills.css (.skx-*).
+           Сетка сжата под 1920x1080: TH=95, TOP=30, BOT=45, BH=455.
+           ============================================================ */
+        /* v11.6.1d: внутренний скролл убран — при max-height: 95vh дерево
+           (панель 38 + отступы + шапки веток 28 + поле 455) влезает целиком.
+           overflow: visible, чтобы не обрезались свечения узлов. */
+        .sim-tree-wrap { flex: 1; min-width: 0; background: #16121a !important; border: 1px solid #3d2f44; border-radius: 8px; box-shadow: inset 0 0 20px rgba(0,0,0,0.6); position: relative; overflow: visible; display: flex; flex-direction: column; }
+        .sim-tree-inner { min-width: 820px; padding: 12px; display: flex; flex-direction: column; height: auto; flex-shrink: 0; background: transparent !important; position: relative; }
+        /* Верхняя панель: ровно одна строка 38px (очки / билды / обмен). */
+        .sim-top-bar { display: flex; align-items: center; gap: 8px; height: 38px; min-height: 38px; margin-bottom: 10px; padding: 0 8px; background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px; position: relative; z-index: 10; }
+        .sim-free-pts { font-size: 12px; color: var(--tb-chalk2, #c9d2c3); white-space: nowrap; }
+        .sim-free-pts b { color: var(--tb-gold, #ffcf4a); font-size: 16px; margin: 0 2px; font-variant-numeric: tabular-nums; }
+        .sim-bar-sep { width: 1px; height: 20px; background: #3d2f44; flex: none; }
+        .sim-top-bar input, .sim-top-bar select, .sim-top-bar button { height: 26px; box-sizing: border-box; border-radius: 6px; font-size: 12px; font-weight: 700; font-family: inherit; }
+        .sim-top-bar input, .sim-top-bar select { background: #0f0f15; border: 1px solid #3d2f44; color: #fff; padding: 0 8px; outline: none; min-width: 0; }
+        .sim-top-bar input { width: 120px; flex: 0 1 120px; }
+        .sim-top-bar select { width: 150px; flex: 0 1 150px; cursor: pointer; }
+        .sim-top-bar button { padding: 0 10px; cursor: pointer; white-space: nowrap; flex: none; transition: filter 0.15s, background 0.15s; }
+        .sim-top-bar button:hover { filter: brightness(1.15); }
+        .sim-save-btn { background: #caa55c; color: #1d1620; border: 1px solid #caa55c; }
+        .sim-del-btn { background: transparent; color: #ff5a7a; border: 1px solid #ff5a7a; padding: 0 8px; }
+        .sim-share-btn, .sim-import-btn { background: transparent; color: #caa55c; border: 1px solid #caa55c; }
+        .sim-reset-btn { background: rgba(255, 90, 122, 0.1); color: #ff5a7a; border: 1px solid #ff5a7a; margin-left: auto; }
+        .sim-reset-btn:hover { background: rgba(255, 90, 122, 0.22); }
+        /* Ветки: три колонки как в нативном дереве, цвет ветки — --br1..--br3. */
+        .sim-branches { position: relative; display: grid; grid-template-columns: repeat(var(--nb, 3), minmax(0, 1fr)); width: 100%; }
+        .sim-branch { position: relative; min-width: 0; }
+        .sim-branch + .sim-branch { border-left: 2px dashed rgba(244, 241, 228, 0.14); }
+        .sim-branch:nth-child(1) { --bc: var(--br1, #84d4ff); }
+        .sim-branch:nth-child(2) { --bc: var(--br2, #ffa982); }
+        .sim-branch:nth-child(3) { --bc: var(--br3, #d6b4ff); }
+        .sim-branch:nth-child(n+4) { --bc: var(--br1, #84d4ff); }
+        .sim-branch-header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; height: 28px; margin: 0 12px; padding-bottom: 4px; border-bottom: 3px solid var(--bc, var(--tb-chalk)); color: var(--bc, var(--tb-chalk)); font-size: 13px; font-weight: 700; position: relative; z-index: 3; }
+        .sim-branch-header .sim-svg { width: 18px; height: 18px; color: var(--bc, var(--tb-gold)); }
+        .sim-branch-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .sim-branch-pts { min-width: 24px; height: 24px; padding: 0 5px; display: grid; place-items: center; border-radius: 12px; background: var(--bc, var(--tb-slate3)); color: var(--tb-ink); border: 2px solid var(--tb-ink); font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
+        /* Поле узлов: высота задаётся инлайном из BH (455px). */
+        .sim-in { position: relative; height: 455px; }
+        .sim-lines { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 1; }
+        .sim-lines path { fill: none; vector-effect: non-scaling-stroke; stroke-linecap: round; }
+        .sim-lines .tk-bg { stroke: var(--tb-slate3, #19211e); stroke-width: 14px; }
+        .sim-lines .tk-on { stroke: var(--bc, var(--tb-gold)); stroke-width: 6px; }
+        .sim-lines .tk-off { stroke: var(--tb-chalk, #f4f1e4); stroke-opacity: 0.4; stroke-width: 3px; stroke-dasharray: 2 8; }
+        .sim-lines .tw { stroke: var(--tb-chalk, #f4f1e4); stroke-opacity: 0.25; stroke-width: 2.5px; stroke-dasharray: 4 6; }
+        .sim-lines .tw.op { stroke: var(--bc, var(--tb-chalk)); stroke-opacity: 0.55; stroke-dasharray: none; }
+        .sim-lines .tw.on { stroke: var(--bc, var(--tb-gold)); stroke-opacity: 1; stroke-width: 4px; stroke-dasharray: none; }
+        .sim-lines .pre { stroke: var(--tb-chalk, #f4f1e4); stroke-opacity: 0.3; stroke-width: 2px; stroke-dasharray: 3 6; }
+        .sim-lines .pre.op { stroke: var(--bc, var(--tb-chalk)); stroke-opacity: 0.75; }
+        .sim-lines .pre.on { stroke: var(--bc, var(--tb-gold)); stroke-opacity: 1; stroke-width: 3px; stroke-dasharray: none; }
+        /* SVG-иконки: обводка currentColor, solid-вариант с полупрозрачной заливкой. */
+        .sim-svg { fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+        .sim-svg.so { fill: currentColor; fill-opacity: 0.18; }
+        /* Узел: круг как .skx-i в нативном дереве. */
+        .sim-node { position: absolute; z-index: 2; transform: translate(-50%, -21px); display: grid; justify-items: center; width: 92px; cursor: pointer; }
+        .sim-node-icon { position: relative; width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; background: var(--tb-slate2, #313f39); border: 3px solid var(--tb-chalk2, #c9d2c3); color: var(--tb-chalk, #f4f1e4); box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35); transition: translate 0.12s, box-shadow 0.12s; }
+        .sim-node-icon .sim-svg { width: 23px; height: 23px; }
+        .sim-node:hover { z-index: 4; }
+        .sim-node:hover .sim-node-icon { translate: 0 -2px; }
+        .sim-node .sim-node-icon { border-color: color-mix(in srgb, var(--bc, var(--tb-chalk2)) 60%, var(--tb-slate2)); }
+        .sim-node.locked .sim-node-icon { background: var(--tb-slate3, #19211e); border-style: dashed; border-color: color-mix(in srgb, var(--tb-chalk) 35%, transparent); color: color-mix(in srgb, var(--tb-chalk) 45%, transparent); }
+        .sim-node.available .sim-node-icon { background: color-mix(in srgb, var(--bc, var(--tb-gold)) 26%, var(--tb-slate2)); border: 3px solid var(--bc, var(--tb-gold)); color: var(--tb-chalk, #f4f1e4); box-shadow: 0 0 0 3px var(--tb-slate), 0 0 0 5px color-mix(in srgb, var(--bc, var(--tb-gold)) 45%, transparent); }
+        .sim-node.available .sim-node-icon::after { content: ''; position: absolute; inset: -8px; border-radius: inherit; border: 3px solid var(--bc, var(--tb-gold)); opacity: 0; animation: simNodePulse 2s ease-out infinite; pointer-events: none; }
+        @keyframes simNodePulse { 0% { transform: scale(0.88); opacity: 0.9; } 70%, 100% { transform: scale(1.22); opacity: 0; } }
+        .sim-node.has .sim-node-icon { background: var(--bc, var(--tb-gold)); border: 3px solid var(--tb-ink); color: var(--tb-ink); box-shadow: 0 0 0 3px var(--tb-slate), 0 0 0 5px var(--bc, var(--tb-gold)); }
+        .sim-node.has .sim-node-icon .sim-svg.so { fill-opacity: 0.4; }
+        .sim-node.maxed .sim-node-icon { box-shadow: 0 0 0 3px var(--tb-slate), 0 0 0 5px var(--tb-gold); }
+        /* Узел, чей тултип сейчас открыт (outline — чтобы не спорить с box-shadow
+           состояний has/maxed/available). */
+        .sim-node.sim-node-active .sim-node-icon { outline: 2px solid #caa55c; outline-offset: 3px; }
+        .sim-node-ranks { display: flex; gap: 3px; margin-top: 2px; padding: 1px 4px; border-radius: 7px; background: var(--tb-slate, #25302c); }
+        .sim-node-ranks i { width: 6px; height: 6px; border-radius: 50%; background: var(--tb-slate3, #19211e); border: 1.5px solid color-mix(in srgb, var(--tb-chalk) 45%, transparent); }
+        .sim-node-ranks i.filled { background: var(--bc, var(--tb-gold)); border-color: var(--bc, var(--tb-gold)); }
+        .sim-node-name { max-width: 92px; margin-top: 2px; padding: 0 3px; font-size: 10.5px; line-height: 1.15; font-weight: 700; text-align: center; color: var(--tb-chalk, #f4f1e4); background: var(--tb-slate, #25302c); border-radius: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; hyphens: auto; overflow-wrap: anywhere; }
+        .sim-node.locked .sim-node-name { color: var(--tb-chalk2, #c9d2c3); opacity: 0.8; }
         .sim-card { position: fixed; background: #f5e9c8; color: #2a2010; border: 3px solid #2b1d18; border-radius: 12px; padding: 15px; width: 280px; z-index: 10001; box-shadow: 0 10px 25px rgba(0,0,0,0.6); display: none; }
         .sim-card h4 { margin: 0 0 5px 0; font-size: 16px; color: #2b1d18; display: flex; justify-content: space-between; }
         .sim-card .desc { font-size: 13px; margin-bottom: 10px; line-height: 1.3; }
@@ -1010,13 +1086,35 @@
         .sim-card button { background: #caa55c; border: 2px solid #2b1d18; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; color: #2b1d18; font-size: 13px; }
         .sim-card button:disabled { opacity: 0.5; cursor: not-allowed; }
         .sim-card-close { position: absolute; top: 8px; right: 8px; cursor: pointer; font-size: 16px; color: #888; }
-        .sim-reset-btn { background: rgba(255,90,122,0.1); color: #ff5a7a; border: 1px solid #ff5a7a; padding: 6px 14px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s; }
-        .sim-reset-btn:hover { background: rgba(255,90,122,0.22); }
-        /* Кнопки сохранения/удаления билдов в верхней панели планировщика */
-        .sim-save-btn { background: #28a745; color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s; white-space: nowrap; }
-        .sim-save-btn:hover { background: #34c759; }
-        .sim-del-btn { background: #3a2028; color: #ff5a7a; border: 1px solid #ff5a7a; border-radius: 6px; padding: 8px 12px; font-size: 12px; cursor: pointer; transition: 0.2s; }
-        .sim-del-btn:hover { background: rgba(255,90,122,0.22); }
+        /* Тултип узла навыка (v11.6.1d).
+           Один элемент на модалку, position: absolute: containing block —
+           padding-box .custom-modal (она position: fixed), поэтому overflow
+           дерева его не режет, а координаты не зависят от transform модалки.
+           Видимость переключает класс .on (BuildSim.showNodeTooltip/hideTooltip). */
+        .sim-tooltip { position: absolute; top: 0; left: 0; z-index: 10001; display: none; box-sizing: border-box; width: 290px; max-width: calc(100vw - 16px); padding: 12px 14px; background: rgba(22, 16, 12, 0.98); color: #f4f1e4; border: 2px solid #caa55c; border-radius: 10px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.7); font: 13px/1.35 'Nunito', system-ui, sans-serif; text-align: left; }
+        .sim-tooltip.on { display: block; }
+        .sim-tooltip h4 { margin: 0 22px 6px 0; padding: 0; border: none; font-size: 15px; line-height: 1.25; color: #ffcf6a; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+        .sim-tooltip h4 span { flex: none; font-size: 12px; font-weight: 700; color: #c9d2c3; }
+        .sim-tooltip .desc { margin-bottom: 8px; font-size: 13px; line-height: 1.35; }
+        .sim-tooltip .req { margin-bottom: 8px; font-size: 12px; font-weight: 700; color: #ff8fa3; }
+        .sim-tooltip .controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; }
+        .sim-tooltip button { flex: 1; padding: 6px 8px; background: #caa55c; color: #1d1620; border: 2px solid #2b1d18; border-radius: 6px; font-family: inherit; font-size: 12px; font-weight: 700; line-height: 1.2; cursor: pointer; }
+        .sim-tooltip button:hover:not(:disabled) { filter: brightness(1.12); }
+        .sim-tooltip button:disabled { opacity: 0.45; cursor: not-allowed; }
+        .sim-tooltip-close { position: absolute; top: 6px; right: 8px; font-size: 13px; line-height: 1; color: #c9b184; cursor: pointer; user-select: none; }
+        .sim-tooltip-close:hover { color: #fff; }
+        /* Табы классов планировщика: компактные (34px), с SVG-иконкой класса. */
+        .modal-tab.sim-tab { height: 34px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; box-sizing: border-box; }
+        .modal-tab.sim-tab .sim-svg { width: 16px; height: 16px; }
+        /* Цвет класса в --c (инлайн-стиль таба из BuildSim.classColors, v11.6.1d),
+           цвет текста на заливке — в --ct (BuildSim.classTextColors, v11.6.1e):
+           неактивный — тёмная подложка + цветная рамка/текст,
+           активный — заливка цветом класса; текст тёмный на светлых цветах
+           (Жрец, Паладин, Разбойник) и белый на тёмных (Некромант). */
+        .modal-tab.sim-tab { border: 2px solid var(--c, #caa55c); color: var(--c, #ffcf6a); background: rgba(0, 0, 0, 0.25); }
+        .modal-tab.sim-tab:hover { border-color: var(--c, #caa55c); color: var(--c, #ffcf6a); background: rgba(0, 0, 0, 0.45); }
+        .modal-tab.sim-tab.active { background: var(--c, #caa55c); border-color: var(--c, #caa55c); color: var(--ct, #12100e); }
+        .sim-load-select option { background: #0f0f15; color: #fff; }
         .build-right { width: 250px; flex-shrink: 0; background: #1e1724; padding: 15px; border-radius: 8px; border: 1px solid #3d2f44; height: fit-content; }
         /* Панель статов справа */
         .stats-panel { background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px; padding: 15px; }
@@ -2282,9 +2380,11 @@
 
         renderPlayerHudContent(hud, hero) {
             if (!hud) return;
-            // Глобальный G (core/constants.js) — это unsafeWindow: LG_CH/ME/LGQuest
+            // Глобальный G (core/constants.js) — это unsafeWindow: ME/LGQuest
             // живут в контексте страницы и в песочнице напрямую не видны.
-            const name = hero?.name || hero?.n || G.LG_CH?.name || (G.ME?.user?.name) || 'Игрок';
+            // v11.6.0g-5: LG_CH сюда не подмешиваем — это Twitch-канал, а не
+            // игрок; в HUD попадал чужой ник (баг «ника в чате»).
+            const name = hero?.name || G.ME?.user?.name || G.ME?.user?.login || 'Игрок';
             const rawClass = hero?.class || hero?.c || hero?.sk?.c || 'recruit';
             const className = (typeof BuildSim !== 'undefined' && BuildSim.classNames?.[rawClass]) || rawClass;
             const lvl = hero?.lvl || hero?.level || hero?.l || 1;
@@ -2550,29 +2650,136 @@
         _currentBuildName: '', // имя последнего сохранённого/загруженного билда (для будущих фич UI)
         _currentBuildNames: {}, // { [clsId]: name } — активный билд каждого класса (нужен для кнопки «Удалить»)
         _autoLoadClass: null, // класс, чей билд пришёл ссылкой #build=… (вкладку открываем после создания табов)
+        _tooltipTimer: null, // setTimeout hover-тултипа узла (500 мс, ТЗ 11.6.1e)
+        _tooltipState: null, // { clsId, nodeId, mode: 'hover'|'click' } — что сейчас показано
 
         statNames: { hp: 'Макс. HP', atk: 'Физ. урон', mag: 'Магия', def: 'Броня', crit: 'Крит %', critDmg: 'Сила крита', dodge: 'Уклонение', pierce: 'Пробивание', healPow: 'Сила лечения', luck: 'Удача', resist: 'Сопротивление' },
         fxNames: { melee: 'Физ. урон %', magic: 'Магия %', hp: 'Макс. HP %', def: 'Броня', healPow: 'Сила лечения %', healIn: 'Вх. лечение %', crit: 'Крит %', critDmg: 'Сила крита', skel: 'Урон скелетов %', skelT: 'Время скелетов', leech: 'Вампиризм %', block: 'Снижение урона %', dodge: 'Уклонение %', lead: 'Урон по боссам %', first: 'Урон 1-й ход %', dmg: 'Весь урон %', pierce: 'Пробивание %', resist: 'Сопротивление', healCrit: 'Крит лечения %', regen: 'Регенерация %', low: 'Урон при низком HP %', a_siyanie: 'Сияние +%', a_obereg: 'Оберег +%', a_dlan: 'Длань +%', a_aura: 'Аура +%', aura: 'Аура −урон %', a_svet: 'Свет +%', a_vspyshka: 'Вспышка +%', a_oznob: 'Озноб +%', a_pricel: 'Прицел +%', a_grad: 'Град +%', a_natisk: 'Натиск +%', a_stoyka: 'Стойка +%', a_vspinu: 'Вспину +%', a_yad: 'Яд +%', a_vytyanut: 'Вытянуть +%', a_podnyat: 'Поднять +%', poison: 'Отрава %', steal: 'Кража %', loot: 'Добыча %', skelN: 'Скелетов +', volley: 'Залп +%', shieldBlock: 'Щит блок %', trapDodge: 'Ловушки %', steady: 'Промах→удар %', cleave: 'Замах %', cleaveBoss: 'Замах по боссу %', penBoss: 'Бронебой по боссу %', drain: 'Вытягивание %', hex: 'Проклятие +%', holy: 'По нежити +%', poisonT: 'Время отравы' },
-        classNames: { recruit: '🐱 Новобранец', legionary: '🛡️ Легионер', archer: '🏹 Лучник', mage: '🔮 Маг', priest: '✨ Жрец', rogue: '🗡️ Разбойник', necromancer: '💀 Некромант', paladin: '🔨 Паладин' },
-        nodeIcons: {
-            nec_b_call: '💀', nec_b_grave: '❄️', nec_b_ward: '🛡️', nec_b_raise: '⬆️', nec_b_long: '⏳', nec_b_marrow: '🦴', nec_b_two: '👥', nec_b_hunger: '🍖', nec_b_fast: '⚡', nec_b_legion: '⚔️', nec_b_lich: '👑', nec_b_cap: '🌟',
-            nec_l_sip: '🩸', nec_l_pale: '👻', nec_l_cold: '🧊', nec_l_drain: '🌪️', nec_l_thirst: '🥤', nec_l_skin: '🛡️', nec_l_deep: '🕳️', nec_l_regen: '💚', nec_l_low: '😫', nec_l_fast: '💨', nec_l_last: '🏺', nec_l_cap: '♾️',
-            nec_d_bolt: '🏹', nec_d_eye: '👁️', nec_d_book: '📖', nec_d_curse: '🪄', nec_d_doom: '🎯', nec_d_mark: '💀', nec_d_hex: '🔮', nec_d_crit: '🦴', nec_d_omen: '☄️', nec_d_fast: '🤫', nec_d_rot: '🦠', nec_d_cap: '🌑',
-            pri_h_hands: '🤲', pri_h_grace: '✨', pri_h_ward: '🛡️', pri_h_salve: '🧴', pri_h_cure: '💧', pri_h_quick: '⚡', pri_h_glow: '☀️', pri_h_halo: '😇', pri_h_miracle: '🪄', pri_h_vigil: '👁️', pri_h_spring: '⛲', pri_h_cap: '👑',
-            pri_f_vest: '👕', pri_f_psalm: '📜', pri_f_hope: '🕊️', pri_f_wall: '🧱', pri_f_step: '👣', pri_f_omen: '🌟', pri_f_martyr: '🔥', pri_f_calm: '😌', pri_f_saint: '💫', pri_f_resur: '⚰️', pri_f_purity: '💎', pri_f_cap: '😇',
-            pri_w_smite: '⚡', pri_w_censer: '🪔', pri_w_zeal: '💢', pri_w_judge: '⚖️', pri_w_sure: '🎯', pri_w_fervor: '❤️‍🔥', pri_w_wrath: '🌩️', pri_w_drain: '🩸', pri_w_last: '🙏', pri_w_doom: '💥', pri_w_dawn: '🌅', pri_w_cap: '🔨'
+        classNames: { recruit: 'Новобранец', legionary: 'Легионер', archer: 'Лучник', mage: 'Маг', priest: 'Жрец', rogue: 'Разбойник', necromancer: 'Некромант', paladin: 'Паладин' },
+        /*
+         * Цвета кнопок классов — из нативного экрана игры (ТЗ 11.6.1d, скрин 4).
+         * Значение кладётся в CSS-переменную --c таба класса: неактивный таб —
+         * цветная рамка/текст на тёмной подложке, активный — заливка цветом.
+         * recruit в нативном списке не подсвечивался — нейтральный серо-золотой.
+         */
+        classColors: { recruit: '#d7d3c8', legionary: '#ff7b7b', archer: '#7bff7b', mage: '#7bbaff', priest: '#ffcf4a', rogue: '#d4aaff', necromancer: '#7c52cc', paladin: '#ffdf7b' },
+
+        /*
+         * Цвет текста НА заливке цвета класса (активный таб, ТЗ 11.6.1e).
+         * Правило контраста: светлая заливка (Жрец, Паладин, Разбойник #d4aaff) —
+         * тёмный текст #12100e; тёмная заливка (Некромант #7c52cc) — белый.
+         * Кладётся в CSS-переменную --ct (значение по умолчанию — тёмное).
+         */
+        classTextColors: { necromancer: '#fff' },
+
+        /*
+         * Словарь нативных SVG-иконок игры (viewBox 0 0 24 24, stroke=currentColor).
+         * Источник: reference/LegionFrontSRC/site/skills.js (объекты NI и BI + DIAM).
+         * Ключи иконок веток совпадают с id веток из /api/skills (blade, shield, ...)
+         * и используются как fallback, когда у навыка нет подходящей fx-иконки.
+         */
+        SKILL_ICONS: {
+            // --- Иконки навыков (NI) ---
+            sword: '<path d="M19.5 4.5 20 4l-.5 4.5L9.5 18.5l-4-4zM7.5 16.5l-3 3M4 15l5 5"/>',
+            shield: '<path d="M12 3.5l7 2.8v5.1c0 4.6-3 7.8-7 9.6-4-1.8-7-5-7-9.6V6.3z"/>',
+            bow: '<path d="M6 3c6 3 9 9 6 18M6 3l12 18M14 5h5v5M19 5 9 15"/>',
+            spark: '<path d="M12 2.5l1.8 6.2 6.2 1.8-6.2 1.8L12 18.5l-1.8-6.2L4 10.5l6.2-1.8z"/><path d="M19 17l.8 2.2 2.2.8-2.2.8L19 23"/>',
+            fire: '<path d="M12 21c-4 0-6.5-2.6-6.5-6 0-3.6 3-5.8 3.6-9.5 2 1.5 3 3.4 3.2 5.3 1-1 1.6-2.4 1.6-3.8 2.7 2.2 4.6 5 4.6 8 0 3.4-2.5 6-6 6z"/>',
+            frost: '<path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9M9.5 4.5 12 7l2.5-2.5M9.5 19.5 12 17l2.5 2.5"/>',
+            heart: '<path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/>',
+            cross: '<path d="M9.5 3.5h5v6h6v5h-6v6h-5v-6h-6v-5h6z"/>',
+            skull: '<path d="M12 3.5a7.5 7.5 0 0 0-4.5 13.5v3h9v-3A7.5 7.5 0 0 0 12 3.5z"/><circle cx="9.3" cy="11.5" r="1.6"/><circle cx="14.7" cy="11.5" r="1.6"/><path d="M10.5 20.5v-2M13.5 20.5v-2"/>',
+            star: '<path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7z"/>',
+            bolt: '<path d="M13.5 2.5 5.5 13.5h6l-1.5 8 8-11h-6z"/>',
+            crown: '<path d="M3.5 18.5h17M4.5 18.5 3.5 7l5 4 3.5-6 3.5 6 5-4-1 11.5z"/>',
+            wind: '<path d="M3 8.5h11a3 3 0 1 0-3-3M3 12.5h15a3 3 0 1 1-3 3M3 16.5h8"/>',
+            eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
+            dagger: '<path d="M14.5 3.5 16 5l-7.5 9-2-2zM6.5 12l-2.5 2.5 2 2 2.5-2.5M5 15.5l-1.5 1.5 3 3L8 18.5"/><path d="M15 13.5l5 5"/>',
+            vial: '<path d="M9.5 3.5h5M10.5 3.5v5L6 17a2.6 2.6 0 0 0 2.3 3.5h7.4A2.6 2.6 0 0 0 18 17l-4.5-8.5v-5M8 14.5h8"/>',
+            sun: '<circle cx="12" cy="12" r="3.8"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>',
+            drop: '<path d="M12 3.5s-6 6.6-6 10.6a6 6 0 0 0 12 0c0-4-6-10.6-6-10.6z"/>',
+            coin: '<circle cx="12" cy="12" r="8"/><path d="M14.5 9.5c-.6-.9-1.5-1.3-2.5-1.3-1.5 0-2.5.8-2.5 1.9 0 2.7 5.2 1.3 5.2 4 0 1.1-1.1 1.9-2.7 1.9-1.1 0-2.1-.5-2.6-1.4M12 6.5v1.7M12 15.8v1.7"/>',
+            // --- Иконки веток (BI): ключ = id ветки из /api/skills ---
+            blade: '<path d="M19.5 4.5 20 4l-.5 4.5L9.5 18.5l-4-4zM7.5 16.5l-3 3M4 15l5 5"/>',
+            veteran: '<path d="M8 3h8l-1.5 6h-5zM12 9v3"/><circle cx="12" cy="16.5" r="4.2"/><path d="M12 14.6l.7 1.4 1.5.2-1.1 1 .3 1.5-1.4-.7-1.4.7.3-1.5-1.1-1 1.5-.2z"/>',
+            aim: '<circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="3.5"/><path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4"/>',
+            hunt: '<path d="M5 19 19 5M15 5h4v4M5 15l4 4M7 13l4 4"/><path d="M6 6c5-2 10 3 12 12"/>',
+            shade: '<path d="M4 10.5c3-1.5 5.5-1.5 8 0s5 1.5 8 0M4 14.5c3-1.5 5.5-1.5 8 0s5 1.5 8 0M7 6.5c2-1 3.5-1 5 0s3 1 5 0"/>',
+            lore: '<path d="M5 4.5h10.5a2 2 0 0 1 2 2V19.5H7a2 2 0 0 1-2-2zM5 17.5a2 2 0 0 1 2-2h10.5M9 8.5h5M9 11.5h4"/>',
+            mercy: '<path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="9"/>',
+            faith: '<circle cx="12" cy="12" r="3.8"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>',
+            wrath: '<path d="M13.5 2.5 5.5 13.5h6l-1.5 8 8-11h-6z"/>',
+            blades: '<path d="M14.5 3.5 16 5l-7.5 9-2-2zM6.5 12l-2.5 2.5 2 2 2.5-2.5M5 15.5l-1.5 1.5 3 3L8 18.5"/><path d="M15 13.5l5 5"/>',
+            venom: '<path d="M9.5 3.5h5M10.5 3.5v5L6 17a2.6 2.6 0 0 0 2.3 3.5h7.4A2.6 2.6 0 0 0 18 17l-4.5-8.5v-5M8 14.5h8"/>',
+            shadow: '<path d="M15.5 4.5A8 8 0 1 0 19.5 16 6.5 6.5 0 0 1 15.5 4.5z"/>',
+            bones: '<path d="M12 3.5a7.5 7.5 0 0 0-4.5 13.5v3h9v-3A7.5 7.5 0 0 0 12 3.5z"/><circle cx="9.3" cy="11.5" r="1.6"/><circle cx="14.7" cy="11.5" r="1.6"/>',
+            life: '<path d="M12 3.5s-6 6.6-6 10.6a6 6 0 0 0 12 0c0-4-6-10.6-6-10.6z"/>',
+            dark: '<path d="M9 21h6M10 21V11h4v10M12 11V8"/><path d="M12 8c-1.6-1.2-1.6-3 0-4.5 1.6 1.5 1.6 3.3 0 4.5z"/>',
+            light: '<circle cx="12" cy="12" r="3.8"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>',
+            grace: '<path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="9"/>',
+            bulwark: '<path d="M12 3.5l7 2.8v5.1c0 4.6-3 7.8-7 9.6-4-1.8-7-5-7-9.6V6.3z"/><path d="M12 7v10M8 11h8"/>',
+            // Ромб-заглушка (DIAM) для неизвестных веток и классов.
+            diam: '<path d="M12 3.5l8.5 8.5-8.5 8.5L3.5 12z"/>'
+        },
+        // Иконки, которые в игре заливаются полупрозрачно (нативный класс .so).
+        SOLID_ICONS: ['sword', 'shield', 'heart', 'cross', 'star', 'bolt', 'crown', 'fire', 'spark'],
+        // fx-ключ -> иконка; порядок важен: срабатывает первое совпадение (FXI из skills.js).
+        FX_ICONS: [
+            [/^(melee|dmg|cleave|first|a_natisk|cd_natisk)$/, 'sword'],
+            [/^(def|block|shieldBlock|resist|a_stoyka)$/, 'shield'],
+            [/^(ranged|volley|pierce|a_pricel|a_grad|cd_grad)$/, 'bow'],
+            [/^(magic|crit|critDmg|a_vspyshka|cd_vspyshka)$/, 'spark'],
+            [/^(hp|regen|leech|healIn)$/, 'heart'],
+            [/^(healPow|healCrit|a_obereg|cd_obereg|a_siyanie|cd_siyanie)$/, 'cross'],
+            [/^(low|lastStand)$/, 'skull'],
+            [/^(dodge|trapDodge)$/, 'wind'],
+            [/^(steady|lead)$/, 'eye'],
+            [/^(a_oznob|cd_oznob)$/, 'frost'],
+            [/^(poison|poisonT|a_yad|cd_yad)$/, 'vial'],
+            [/^(steal|loot)$/, 'coin'],
+            [/^(a_vspinu|cd_vspinu)$/, 'dagger'],
+            [/^(skel|skelT|skelN|a_podnyat|cd_podnyat)$/, 'skull'],
+            [/^(drain|a_vytyanut|cd_vytyanut)$/, 'drop'],
+            [/^(hex|a_proklyat|cd_proklyat)$/, 'fire'],
+            [/^(holy|a_svet)$/, 'sun'],
+            [/^(aura|a_dlan|cd_dlan|cd_aura)$/, 'cross']
+        ],
+        // Иконка класса для табов (CLI из skills.js); «Экипировка» — щит.
+        CLASS_ICONS: { legionary: 'sword', archer: 'bow', mage: 'spark', priest: 'cross', rogue: 'dagger', necromancer: 'skull', paladin: 'sun', gear: 'shield' },
+        // Горизонтальные позиции узлов внутри яруса (XS из skills.js).
+        TIER_X: { 1: [50], 2: [28, 72], 3: [18, 50, 82], 4: [14, 38, 62, 86] },
+        // SVG из словаря: solid-иконки заливаются полупрозрачно (нативный класс .so).
+        _svg(key) {
+            const known = this.SKILL_ICONS[key] ? key : 'diam';
+            const solid = this.SOLID_ICONS.includes(known) ? ' so' : '';
+            return `<svg class="sim-svg${solid}" viewBox="0 0 24 24" aria-hidden="true">${this.SKILL_ICONS[known]}</svg>`;
         },
 
-        getNodeIcon(nodeId) {
-            if (this.nodeIcons[nodeId]) return this.nodeIcons[nodeId];
-            if (nodeId.startsWith('leg_')) return '⚔️';
-            if (nodeId.startsWith('arc_')) return '🏹';
-            if (nodeId.startsWith('mag_')) return '🔮';
-            if (nodeId.startsWith('pri_')) return '✨';
-            if (nodeId.startsWith('rog_')) return '🗡️';
-            if (nodeId.startsWith('nec_')) return '💀';
-            if (nodeId.startsWith('pal_')) return '🔨';
-            return '⭐';
+        // Ключ иконки навыка: kind -> первый fx -> иконка ветки (iconOf из skills.js).
+        iconKeyOf(node, branch) {
+            if (!node) return 'diam';
+            if (node.kind === 'cap') return 'crown';
+            if (node.kind === 'act') return 'bolt';
+            if (node.kind === 'ctl') return 'star';
+            for (const k of Object.keys(node.fx || {})) {
+                for (const [re, icon] of this.FX_ICONS) if (re.test(k)) return icon;
+            }
+            const bid = branch && branch.id;
+            return (bid && this.SKILL_ICONS[bid]) ? bid : 'diam';
+        },
+
+        getNodeSvg(node, branch) { return this._svg(this.iconKeyOf(node, branch)); },
+        getBranchSvg(branch) {
+            const bid = branch && branch.id;
+            return this._svg((bid && this.SKILL_ICONS[bid]) ? bid : 'diam');
+        },
+        getClassSvg(clsId) { return this._svg(this.CLASS_ICONS[clsId] || 'diam'); },
+
+        // Горизонталь узла в ярусе: нативные XS для 1-4 узлов, иначе равномерно.
+        xFor(count, index) {
+            const xs = this.TIER_X[count];
+            if (xs && xs[index] !== undefined) return xs[index];
+            return Math.round((100 * (index + 1)) / (count + 1));
         },
         isSkipFx(key) { return SKIP_FX_PREFIXES.some(p => key.startsWith(p)); },
 
@@ -2594,15 +2801,22 @@
         init() {
             // Кнопка теперь принадлежит HeroPlanner — см. src/modules/hero-planner.js.
             // BuildSim остаётся как модуль и открывается из таба «Билды».
+            // Клик вне узла/тултипа закрывает тултип навыка (ТЗ 11.6.1d).
             document.addEventListener('click', (e) => {
-                if (!e.target.closest('.sim-node') && !e.target.closest('.sim-card')) {
-                    document.querySelectorAll('.sim-card').forEach(c => c.remove());
-                }
+                // Клики внутри тултипа (кнопки +/−, крестик) и по узлу обрабатывают
+                // свои слушатели — здесь их не трогаем, иначе тултип закроется раньше.
+                const t = e.target;
+                if (t && t.closest && (t.closest('.sim-tooltip') || t.closest('.sim-node'))) return;
+                // Старые карточки .sim-card (до v11.6.1d) могли остаться в DOM — чистим.
+                document.querySelectorAll('.sim-card').forEach(c => c.remove());
+                this.hideTooltip();
             });
         },
 
         async open() {
-            const modal = UI.showModal(`<h2>🧮 Планировщик билдов <button class="custom-close" id="custom-close-btn">✖</button></h2><div id="buildsim-modal-body" style="display:flex; flex-direction:column; flex:1; min-height:0;"></div>`);
+            // sim-modal: отдельный класс модалки — в styles.js ему поднята max-height
+            // до 95vh, чтобы дерево навыков влезало целиком без внутреннего скролла.
+            const modal = UI.showModal(`<h2>🧮 Планировщик билдов <button class="custom-close" id="custom-close-btn">✖</button></h2><div id="buildsim-modal-body" style="display:flex; flex-direction:column; flex:1; min-height:0;"></div>`, { customClass: 'sim-modal' });
             const body = modal.querySelector('#buildsim-modal-body');
             if (body) await this.mount(body);
         },
@@ -2619,6 +2833,9 @@
             // Сохранённые билды поднимаем до парсинга /api/me и /api/skills,
             // чтобы UI успел отрисовать список «Мои билды» при первом renderTree.
             this.loadSavedBuilds();
+            // Тултип узла от прошлой сессии не должен «воскресать» при повторном
+            // открытии модалки (state хранится на объекте BuildSim).
+            this.hideTooltip();
             // Очки при каждом открытии начинаются с нуля (this.simulatedSkills = {}),
             // поэтому и «активного» билда нет: кнопка «Удалить» до выбора/загрузки
             // честно попросит выбрать билд.
@@ -2647,9 +2864,14 @@
                 const bag = h.items.filter(x => !x.on && x.wearable);
                 const allClasses = (this.skillsCache.classes || []).filter(c => c.branches && c.branches.length > 0);
 
-                let tabsHtml = `<button class="modal-tab active" data-tab="gear">🛡️ Экипировка</button>`;
+                // Табы классов: компактные (34px) с нативной SVG-иконкой класса.
+                let tabsHtml = `<button class="modal-tab sim-tab active" data-tab="gear">${this.getClassSvg('gear')}Экипировка</button>`;
                 allClasses.forEach(c => {
-                    tabsHtml += `<button class="modal-tab" data-tab="${c.id}">${this.classNames[c.id] || c.name || c.id}</button>`;
+                    // --c: цвет класса из classColors (стили таба — в styles.js);
+                    // --ct: цвет текста на заливке (classTextColors, ТЗ 11.6.1e).
+                    const color = this.classColors[c.id] || '#caa55c';
+                    const textColor = this.classTextColors[c.id] || '#12100e';
+                    tabsHtml += `<button class="modal-tab sim-tab" data-tab="${c.id}" style="--c:${color};--ct:${textColor}">${this.getClassSvg(c.id)}${this.classNames[c.id] || c.name || c.id}</button>`;
                 });
 
                 let contentHtml = `
@@ -2685,33 +2907,19 @@
                         <div class="tab-content" id="tab-${c.id}">
                             <div class="sim-tree-wrap">
                                 <div class="sim-tree-inner">
-                                    <div class="sim-top-bar" style="display: flex; flex-direction: column; gap: 15px; background: #1e1724; padding: 15px; border-radius: 8px; border: 1px solid #3d2f44; margin-bottom: 15px;">
-                                        <!-- Верхняя строка: очки и сброс -->
-                                        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #3d2f44; padding-bottom: 12px;">
-                                            <div class="sim-free-pts" style="font-size: 14px; color: #eee;">Свободно очков: <span id="free-${c.id}" style="color: #caa55c; font-weight: bold; font-size: 20px; margin: 0 4px;">0</span> <span style="color: #888;">/ ${MAX_POINTS}</span></div>
-                                            <button class="sim-reset-btn" data-reset="${c.id}" style="background: rgba(255, 90, 122, 0.1); color: #ff5a7a; border: 1px solid #ff5a7a; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 12px; transition: 0.2s;">Сбросить всё</button>
-                                        </div>
-                                        <!-- Средняя строка: сохранение и загрузка -->
-                                        <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
-                                            <!-- Блок «Сохранить» -->
-                                            <div style="display: flex; gap: 8px; flex: 1; min-width: 250px;">
-                                                <input type="text" id="save-name-${c.id}" class="search-bar" style="margin:0; padding:8px 12px; font-size:12px; flex:1; background:#0f0f15; border:1px solid #3d2f44; color:#fff; border-radius:6px; outline:none;" placeholder="Название нового билда...">
-                                                <button class="sim-save-btn" data-save="${c.id}" style="background: #caa55c; color: #1d1620; border: none; border-radius: 6px; padding: 8px 16px; font-size: 12px; font-weight: bold; cursor: pointer; white-space: nowrap;">💾 Сохранить</button>
-                                            </div>
-                                            <!-- Блок «Загрузить» -->
-                                            <div style="display: flex; gap: 8px; align-items: center;">
-                                                <select id="load-select-${c.id}" class="search-bar" style="margin:0; padding:8px 12px; font-size:12px; width:180px; background:#0f0f15; border:1px solid #3d2f44; color:#fff; border-radius:6px; cursor:pointer; outline:none;">
-                                                    <option value="">— Мои билды —</option>
-                                                </select>
-                                                <button class="sim-del-btn" data-del="${c.id}" style="background: transparent; color: #ff5a7a; border: 1px solid #ff5a7a; border-radius: 6px; padding: 8px 12px; font-size: 12px; cursor: pointer;" title="Удалить выбранный билд">🗑️</button>
-                                            </div>
-                                        </div>
-                                        <!-- Нижняя строка: обмен -->
-                                        <div style="display: flex; gap: 8px; align-items: center; border-top: 1px solid #3d2f44; padding-top: 12px;">
-                                            <span style="font-size: 11px; color: #888; text-transform: uppercase; margin-right: 10px;">Обмен:</span>
-                                            <button class="sim-share-btn" data-share="${c.id}" style="background: transparent; color: #caa55c; border: 1px solid #caa55c; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s;" title="Поделиться билдом">📤 Поделиться</button>
-                                            <button class="sim-import-btn" data-import="${c.id}" style="background: transparent; color: #caa55c; border: 1px solid #caa55c; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s;" title="Импортировать билд">📥 Импорт</button>
-                                        </div>
+                                    <!-- Верхняя панель: одна строка 38px (очки / билды / обмен). -->
+                                    <div class="sim-top-bar">
+                                        <div class="sim-free-pts">Свободно: <b id="free-${c.id}">0</b> / ${MAX_POINTS}</div>
+                                        <div class="sim-bar-sep"></div>
+                                        <button class="sim-save-btn" data-save="${c.id}" title="Сохранить билд (имя спросим)">Сохранить</button>
+                                        <button class="sim-share-btn" data-share="${c.id}" title="Поделиться билдом">Поделиться</button>
+                                        <button class="sim-import-btn" data-import="${c.id}" title="Импортировать билд">Импорт</button>
+                                        <div class="sim-bar-sep"></div>
+                                        <select id="load-select-${c.id}" class="sim-load-select" title="Мои билды">
+                                            <option value="">— Мои билды —</option>
+                                        </select>
+                                        <button class="sim-del-btn" data-del="${c.id}" title="Удалить выбранный билд">🗑️</button>
+                                        <button class="sim-reset-btn" data-reset="${c.id}" title="Сбросить все навыки">Сбросить всё</button>
                                     </div>
                                     <div class="sim-branches" id="tree-${c.id}"></div>
                                 </div>
@@ -2730,6 +2938,9 @@
 
                 container.querySelectorAll('.modal-tab').forEach(tab => {
                     tab.addEventListener('click', () => {
+                        // Тултип узла относится к дереву текущей вкладки — прячем его
+                        // при переключении класса (ТЗ 11.6.1d).
+                        this.hideTooltip();
                         container.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
                         container.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
                         tab.classList.add('active');
@@ -2758,6 +2969,11 @@
 
         resetBuild(clsId) {
             this.simulatedSkills[clsId] = {};
+            // ТЗ 11.6.1d, п. 2.1: «Сбросить всё» НЕ должно подставлять последний
+            // сохранённый билд. Забываем активный билд класса — тогда renderTree()
+            // вернёт <select> к плейсхолдеру «— Мои билды —», а не к старой записи.
+            this._setCurrentBuild(clsId, '');
+            this.hideTooltip();
             this.renderTree(clsId);
             document.querySelectorAll('.sim-card').forEach(c => c.remove());
         },
@@ -2976,7 +3192,8 @@
 
         yFor(req) {
             if (Y_MAP[req] !== undefined) return Y_MAP[req];
-            return 680 - Math.round(((req || 0) / 30) * 600);
+            // Произвольный req: линейно между нижним (0) и верхним (30) ярусом.
+            return BH - BOT - Math.round(((req || 0) / 30) * 4 * TH);
         },
 
         changeSkill(clsId, nodeId, delta, maxRank, preNode, branchReq, branchIds, event) {
@@ -3054,9 +3271,13 @@
             }
             simTree[nodeId] = Math.max(0, current + delta);
             if (simTree[nodeId] === 0) delete simTree[nodeId];
+            // renderTree() пересоздаёт узлы и прячет тултип, поэтому запоминаем его
+            // состояние до перерисовки и восстанавливаем после (ТЗ 11.6.1d).
+            const tipState = this._tooltipState ? { ...this._tooltipState } : null;
             this.renderTree(clsId);
-            const card = document.querySelector('.sim-card');
-            if (card && card.dataset.node === nodeId) this.showNodeCard(clsId, nodeId, null);
+            if (tipState && tipState.clsId === clsId && tipState.nodeId === nodeId) {
+                this.showNodeTooltip(clsId, nodeId, tipState.mode === 'click');
+            }
         },
 
         renderTree(clsId) {
@@ -3064,6 +3285,8 @@
             if (!clsData) return;
             const container = document.getElementById(`tree-${clsId}`);
             if (!container) return;
+            // Число колонок-веток как в нативном дереве (--nb), обычно 3.
+            container.style.setProperty('--nb', String((clsData.branches || []).length || 3));
 
             if (!this.simulatedSkills[clsId]) this.simulatedSkills[clsId] = {};
             const simTree = this.simulatedSkills[clsId];
@@ -3076,31 +3299,56 @@
             const simStats = {};
 
             clsData.branches.forEach(branch => {
+                const nodes = branch.nodes || [];
                 let branchPoints = 0;
-                (branch.nodes || []).forEach(n => branchPoints += (simTree[n.id] || 0));
+                nodes.forEach(n => { branchPoints += (simTree[n.id] || 0); });
 
-                let lines = `<path d="M50% 20 L50% 680" class="trunk" style="stroke:#333;stroke-width:6px;" />`;
-                (branch.nodes || []).forEach(node => {
+                // Раскладка ярусов: узлы одного req стоят на одной горизонтали (XS из игры).
+                const tiers = new Map();
+                nodes.forEach(n => {
+                    if (!tiers.has(n.req)) tiers.set(n.req, []);
+                    tiers.get(n.req).push(n);
+                });
+                const xMap = new Map();
+                tiers.forEach(list => list.forEach((n, i) => xMap.set(n.id, this.xFor(list.length, i))));
+
+                const topY = this.yFor(30);      // верхний ярус (req 30)
+                const rootY = this.yFor(0) + 40; // ствол начинается под нижним узлом
+                // Открытый ярус: максимальный req, набранный в ветке (req 0 открыт всегда).
+                const openReq = [30, 20, 10, 5, 0].reduce((acc, req) => (req > acc && branchPoints >= req ? req : acc), 0);
+
+                // Ствол: тёмная основа, пройденная часть цветом ветки, закрытая — пунктиром.
+                let lines = `<path class="tk-bg" d="M50 ${rootY} V${topY}"/>`
+                    + `<path class="tk-on" d="M50 ${rootY} V${this.yFor(openReq)}"/>`
+                    + (openReq < 30 ? `<path class="tk-off" d="M50 ${this.yFor(openReq)} V${topY}"/>` : '');
+
+                // Отводы к боковым узлам — кривые Безье; prereq — прямые линии.
+                nodes.forEach(node => {
+                    const rank = simTree[node.id] || 0;
+                    const x = xMap.get(node.id);
+                    const y = this.yFor(node.req);
+                    const shut = branchPoints < node.req || (node.pre && !(simTree[node.pre] > 0));
+
+                    if (x !== 50) {
+                        const tw = rank > 0 ? 'tw on' : (shut ? 'tw' : 'tw op');
+                        lines += `<path class="${tw}" d="M50 ${y + 40} Q50 ${y} ${x} ${y}"/>`;
+                    }
                     if (node.pre) {
-                        const parent = branch.nodes.find(n => n.id === node.pre);
+                        const parent = nodes.find(n => n.id === node.pre);
                         if (parent) {
-                            const pNodes = branch.nodes.filter(n => n.req === parent.req);
-                            const cNodes = branch.nodes.filter(n => n.req === node.req);
-                            const px = pNodes.length === 1 ? 50 : (pNodes.indexOf(parent) === 0 ? 25 : 75);
-                            const cx = cNodes.length === 1 ? 50 : (cNodes.indexOf(node) === 0 ? 25 : 75);
-                            const active = (simTree[node.id] || 0) > 0;
-                            const py = this.yFor(parent.req);
-                            const cy = this.yFor(node.req);
-                            lines += `<path d="M${px}% ${py} L${cx}% ${cy}" class="${active ? 'active' : ''}"/>`;
+                            const px = xMap.get(parent.id);
+                            const cls = rank > 0 ? 'pre on' : ((simTree[parent.id] || 0) > 0 ? 'pre op' : 'pre');
+                            lines += `<path class="${cls}" d="M${px} ${this.yFor(parent.req)} L${x} ${y}"/>`;
                         }
                     }
                 });
 
                 html += `<div class="sim-branch">
-                    <div class="sim-branch-header">${branch.name}<div class="sim-branch-pts">${branchPoints} очков</div></div>
-                    <svg class="sim-lines" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;overflow:visible;">${lines}</svg>`;
+                    <div class="sim-branch-header">${this.getBranchSvg(branch)}<div class="sim-branch-title">${branch.name}</div><div class="sim-branch-pts" title="Очков в ветке">${branchPoints}</div></div>
+                    <div class="sim-in" style="height:${BH}px">
+                        <svg class="sim-lines" viewBox="0 0 100 ${BH}" preserveAspectRatio="none" aria-hidden="true">${lines}</svg>`;
 
-                (branch.nodes || []).forEach(node => {
+                nodes.forEach(node => {
                     const rank = simTree[node.id] || 0;
                     const locked = branchPoints < node.req || (node.pre && !(simTree[node.pre] > 0));
                     const maxed = rank >= node.max;
@@ -3112,33 +3360,59 @@
                         }
                     }
 
-                    const tier = branch.nodes.filter(n => n.req === node.req);
-                    let left = 50;
-                    if (tier.length === 2) left = tier.indexOf(node) === 0 ? 25 : 75;
-                    if (tier.length === 3) left = [15, 50, 85][tier.indexOf(node)];
-
                     let ranksHtml = '';
                     for (let i = 0; i < node.max; i++) ranksHtml += `<i class="${i < rank ? 'filled' : ''}"></i>`;
-                    const icon = this.getNodeIcon(node.id);
-                    const top = this.yFor(node.req);
 
-                    html += `<div class="sim-node ${locked ? 'locked' : (maxed ? 'maxed' : 'available')}"
+                    // Состояния как в нативном дереве: lock / has / max / can (available).
+                    const state = (locked ? ' locked' : '')
+                        + (rank > 0 ? ' has' : '')
+                        + (maxed ? ' maxed' : '')
+                        + (!locked && !maxed ? ' available' : '');
+                    const x = xMap.get(node.id);
+                    const y = this.yFor(node.req);
+
+                    html += `<div class="sim-node${state}"
                         data-cls="${clsId}" data-node="${node.id}"
-                        style="left:${left}%;top:${top}px">
-                        <div class="sim-node-icon">${icon}</div>
+                        style="left:${x}%;top:${y}px">
+                        <div class="sim-node-icon">${this.getNodeSvg(node, branch)}</div>
                         <div class="sim-node-ranks">${ranksHtml}</div>
                         <div class="sim-node-name">${node.name}</div>
                     </div>`;
                 });
-                html += `</div>`;
+                html += `</div></div>`;
             });
 
             container.innerHTML = html;
 
             container.querySelectorAll('.sim-node').forEach(el => {
+                const nodeCls = el.dataset.cls;
+                const nodeId = el.dataset.node;
+
+                // Наведение: через 500 мс показываем тултип ТОЛЬКО с текстом.
+                el.addEventListener('mouseenter', () => {
+                    this._clearTooltipTimer();
+                    this._tooltipTimer = setTimeout(() => {
+                        this._tooltipTimer = null;
+                        this.showNodeTooltip(nodeCls, nodeId, false);
+                    }, 500);
+                });
+
+                // Мышь ушла раньше таймера — отменяем; висящий hover-тултип прячем.
+                el.addEventListener('mouseleave', () => {
+                    this._clearTooltipTimer();
+                    if (this._tooltipState && this._tooltipState.mode === 'hover') this.hideTooltip();
+                });
+
+                // Клик: тултип с кнопками +/−; повторный клик по тому же узлу закрывает.
                 el.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    this.showNodeCard(el.dataset.cls, el.dataset.node, e);
+                    const st = this._tooltipState;
+                    if (st && st.mode === 'click' && st.clsId === nodeCls && st.nodeId === nodeId) {
+                        this.hideTooltip();
+                        return;
+                    }
+                    this._clearTooltipTimer();
+                    this.showNodeTooltip(nodeCls, nodeId, true);
                 });
             });
 
@@ -3163,9 +3437,8 @@
             const sel = document.getElementById(`load-select-${clsId}`);
             const delBtn = document.querySelector(`.sim-del-btn[data-del="${clsId}"]`);
             const saveBtn = document.querySelector(`.sim-save-btn[data-save="${clsId}"]`);
-            const saveInput = document.getElementById(`save-name-${clsId}`);
 
-            if (sel && saveBtn && delBtn && saveInput) {
+            if (sel && saveBtn && delBtn) {
                 const builds = this.savedBuilds[clsId] || [];
                 // Имя билда вводит пользователь → экранируем перед вставкой в innerHTML.
                 sel.innerHTML = `<option value="">— Мои билды (${builds.length}) —</option>` +
@@ -3180,7 +3453,9 @@
                     : 'Удалить выбранный билд';
 
                 saveBtn.onclick = () => {
-                    const name = saveInput.value.trim();
+                    // Панель однострочная — имя нового билда спрашиваем диалогом.
+                    const name = (window.prompt('Название билда:',
+                        (this._currentBuildNames && this._currentBuildNames[clsId]) || '') || '').trim();
                     if (!name) { UI.showToast('Введите имя билда', true); return; }
                     if (this.saveCurrentBuild(clsId, name)) {
                         UI.showToast('💾 Билд сохранен');
@@ -3189,9 +3464,15 @@
                 };
 
                 sel.onchange = () => {
+                    // Плейсхолдер «— Мои билды —» = пустое дерево (ТЗ 11.6.1d, п. 2.2):
+                    // раньше выбор дефолтного пункта ничего не делал и билд оставался.
+                    if (sel.value === '') {
+                        this.resetBuild(clsId);
+                        return;
+                    }
                     // Выбор в списке сразу загружает билд и делает его активным;
                     // sel.value после renderTree выставит преселект выше.
-                    if (sel.value !== '') this.loadBuild(clsId, +sel.value);
+                    this.loadBuild(clsId, +sel.value);
                 };
 
                 delBtn.onclick = () => {
@@ -3214,20 +3495,95 @@
 
             const importBtn = document.querySelector(`.sim-import-btn[data-import="${clsId}"]`);
             if (importBtn) importBtn.onclick = () => this.importBuild(clsId);
+
+            // Перерисовка пересоздала узлы — старый тултип невалиден (позиция
+            // устарела). changeSkill() при необходимости покажет его заново.
+            this.hideTooltip();
         },
 
-        showNodeCard(clsId, nodeId, event) {
-            if (event) { event.stopPropagation(); event.preventDefault(); }
-            const x = event ? event.clientX : window.innerWidth / 2;
-            const y = event ? event.clientY : window.innerHeight / 2;
+        // ------------------------------------------------------------
+        // Тултип узла навыка (ТЗ 11.6.1d).
+        // Один общий DOM-элемент .sim-tooltip на окно планировщика:
+        //   • наведение 500 мс → только текст (без кнопок);
+        //   • клик по узлу      → текст + кнопки «− Убрать» / «+ Вложить»;
+        //   • повторный клик по тому же узлу / клик вне дерева → закрыть.
+        // Элемент — прямой ребёнок .custom-modal (НЕ внутри .sim-tree-wrap),
+        // поэтому overflow дерева его не обрезает. position: absolute, а не fixed:
+        // модалка таскается и теряет transform, absolute же всегда считается
+        // от её padding-box (модалка position: fixed), т.е. координаты стабильны.
+        // ------------------------------------------------------------
+        _clearTooltipTimer() {
+            if (this._tooltipTimer) {
+                clearTimeout(this._tooltipTimer);
+                this._tooltipTimer = null;
+            }
+        },
 
-            document.querySelectorAll('.sim-card').forEach(c => c.remove());
-            const clsData = this.skillsCache.classes.find(c => c.id === clsId);
+        _getTooltip() {
+            const body = document.getElementById('buildsim-modal-body');
+            const host = (body && body.closest('.custom-modal')) || document.body;
+            let tip = host.querySelector('.sim-tooltip');
+            // Элемент должен быть один: остатки от прошлых модалок удаляем.
+            document.querySelectorAll('.sim-tooltip').forEach(t => { if (t !== tip) t.remove(); });
+            if (!tip) {
+                tip = document.createElement('div');
+                tip.className = 'sim-tooltip';
+                host.appendChild(tip);
+            }
+            return tip;
+        },
+
+        hideTooltip() {
+            this._clearTooltipTimer();
+            this._tooltipState = null;
+            document.querySelectorAll('.sim-tooltip').forEach(tip => {
+                tip.classList.remove('on');
+                tip.innerHTML = '';
+            });
+            document.querySelectorAll('.sim-node.sim-node-active').forEach(n => n.classList.remove('sim-node-active'));
+        },
+
+        // Ставим тултип рядом с узлом: справа, если влезает, иначе слева;
+        // по вертикали — от верхней кромки узла, с прижатием к краям экрана.
+        _positionTooltip(tip, nodeEl) {
+            const host = tip.parentElement || document.body;
+            const nRect = nodeEl.getBoundingClientRect();
+            const vw = window.innerWidth || 1280;
+            const vh = window.innerHeight || 720;
+            const gap = 12, edge = 8;
+            const w = tip.offsetWidth || 280;
+            const h = tip.offsetHeight || 160;
+
+            let x = nRect.right + gap;
+            if (x + w > vw - edge) x = nRect.left - w - gap; // справа не влезает — слева
+            x = Math.max(edge, Math.min(x, vw - w - edge));
+
+            let y = nRect.top - 10;
+            y = Math.max(edge, Math.min(y, vh - h - edge));
+
+            // Пересчёт из системы окна в систему родителя (padding-box модалки).
+            const hRect = host.getBoundingClientRect();
+            const baseX = (host === document.body) ? 0 : hRect.left + host.clientLeft;
+            const baseY = (host === document.body) ? 0 : hRect.top + host.clientTop;
+
+            tip.style.left = Math.round(x - baseX) + 'px';
+            tip.style.top = Math.round(y - baseY) + 'px';
+        },
+
+        showNodeTooltip(clsId, nodeId, withControls) {
+            const classes = (this.skillsCache && Array.isArray(this.skillsCache.classes)) ? this.skillsCache.classes : [];
+            const clsData = classes.find(c => c.id === clsId);
             if (!clsData) return;
-            const branch = clsData.branches.find(b => (b.nodes || []).some(n => n.id === nodeId));
+            const branch = (clsData.branches || []).find(b => (b.nodes || []).some(n => n.id === nodeId));
             if (!branch) return;
             const node = branch.nodes.find(n => n.id === nodeId);
             if (!node) return;
+
+            // renderTree() пересоздаёт узлы — позиционируемся от актуального элемента.
+            const treeEl = document.getElementById(`tree-${clsId}`);
+            const nodeEl = treeEl ? Array.from(treeEl.querySelectorAll('.sim-node'))
+                .find(el => el.dataset.node === nodeId) : null;
+            if (!nodeEl) return; // вкладка закрыта — привязываться не к чему
 
             if (!this.simulatedSkills[clsId]) this.simulatedSkills[clsId] = {};
             const simTree = this.simulatedSkills[clsId];
@@ -3243,41 +3599,53 @@
             if (branchPoints < node.req) reqText = `Требуется очков в ветке: ${node.req}`;
             if (node.pre && !(simTree[node.pre] > 0)) reqText = `Сначала изучите предыдущий навык.`;
 
-            const card = document.createElement('div');
-            card.className = 'sim-card';
-            card.dataset.node = nodeId;
-            card.style.display = 'block';
-
-            const cw = 280, ch = 200;
-            let px = x + 15, py = y - 50;
-            if (px + cw > window.innerWidth) px = x - cw - 15;
-            if (py + ch > window.innerHeight) py = window.innerHeight - ch - 20;
-            if (py < 20) py = 20;
-            card.style.left = px + 'px';
-            card.style.top = py + 'px';
-
-            card.innerHTML = `
-                <div class="sim-card-close">✖</div>
-                <h4>${node.name} <span>${rank}/${node.max}</span></h4>
+            const tip = this._getTooltip();
+            tip.dataset.cls = clsId;
+            tip.dataset.node = nodeId;
+            tip.classList.add('on');
+            tip.innerHTML = `
+                ${withControls ? '<div class="sim-tooltip-close" title="Закрыть">✖</div>' : ''}
+                <h4>${Utils.escapeHtml(node.name)} <span>${rank}/${node.max}</span></h4>
                 <div class="desc">${this.formatNodeText(node, rank)}</div>
                 ${reqText ? `<div class="req">${reqText}</div>` : ''}
-                <div class="controls">
-                    <button data-action="minus" ${rank === 0 ? 'disabled' : ''}>- Убрать</button>
-                    <button data-action="plus" ${maxed || locked ? 'disabled' : ''}>+ Вложить</button>
-                </div>`;
-            document.body.appendChild(card);
+                ${withControls ? `<div class="controls">
+                    <button type="button" data-action="minus" ${rank === 0 ? 'disabled' : ''}>− Убрать</button>
+                    <button type="button" data-action="plus" ${maxed || locked ? 'disabled' : ''}>+ Вложить</button>
+                </div>` : ''}`;
 
-            card.querySelector('.sim-card-close').addEventListener('click', (e) => {
-                e.stopPropagation();
-                card.remove();
-            });
-            card.querySelectorAll('button[data-action]').forEach(btn => {
+            // Позиция — после вставки контента: нужны реальные offsetWidth/Height.
+            this._positionTooltip(tip, nodeEl);
+
+            document.querySelectorAll('.sim-node.sim-node-active').forEach(n => n.classList.remove('sim-node-active'));
+            nodeEl.classList.add('sim-node-active');
+
+            const closeBtn = tip.querySelector('.sim-tooltip-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.hideTooltip();
+                });
+            }
+
+            // stopPropagation обязателен: иначе клик по кнопке всплывёт до document
+            // и тултип закроется раньше, чем отработает changeSkill().
+            tip.querySelectorAll('button[data-action]').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const delta = btn.dataset.action === 'plus' ? 1 : -1;
                     this.changeSkill(clsId, node.id, delta, node.max, node.pre || null, node.req || 0, branchIds, e);
                 });
             });
+
+            this._tooltipState = { clsId, nodeId, mode: withControls ? 'click' : 'hover' };
+        },
+
+        // Алиас для старых вызовов: карточка .sim-card заменена общим тултипом
+        // (ТЗ 11.6.1d). Поведение как у клика по узлу — с кнопками +/−.
+        showNodeCard(clsId, nodeId, event) {
+            if (event) { event.stopPropagation(); event.preventDefault(); }
+            this._clearTooltipTimer();
+            this.showNodeTooltip(clsId, nodeId, true);
         }
     };
 
@@ -5645,6 +6013,9 @@ const Players = {
         // Позиция HUD {left, top} после перетаскивания (v11.6.0g-2).
         DRAG_KEY: 'lgPartyHudPos',
         DEFAULT_BASE_URL: 'https://legion.ctrlfree.host',
+        // v11.6.0g-6: ключ доступа к нашему серверу. Должен совпадать с API_KEY
+        // в server/index.js (env LGU_API_KEY) — иначе любой запрос получит 401.
+        API_KEY: 'LGU-default-secret-key-change-me',
         REQUEST_TIMEOUT: 12000,
         // Период синхронизации HP (ТЗ 11.6.0b: раз в 3 секунды).
         HP_SYNC_MS: 3000,
@@ -5959,6 +6330,9 @@ const Players = {
                 }
 
                 const headers = { 'Content-Type': 'application/json' };
+                // v11.6.0g-6: без этого заголовка сервер отвечает 401 — ключ
+                // проверяется до роутинга, включая POST /party и /party/join.
+                headers['X-Legion-Key'] = this.API_KEY;
                 const state = this._readState();
                 if (auth && state?.sessionId) {
                     headers.Authorization = 'Bearer ' + state.sessionId;
@@ -7663,10 +8037,16 @@ const Players = {
         async syncMe() {
             try {
                 const res = await Utils.fetchApi('/api/me');
+                // v11.6.0g-5: ник — это user.login из /api/me. LG_CH сюда не
+                // подмешиваем: там логин Twitch-канала, а не игрока (баг «чужой
+                // ник в чате»). Фолбэк — ME.user из page-context.
+                const user = res?.user || (typeof G !== 'undefined' && G.ME?.user);
+                const login = user?.login || user?.name;
+                if (login) {
+                    this.myNick = String(login).trim().toLowerCase();
+                }
                 const me = res?.hero || res?.body?.hero;
                 if (me) {
-                    // LG_CH/ME живут в page-context — читаем через G, без хардкода ника.
-                    this.myNick = me.name || G.LG_CH?.name || G.ME?.user?.name || null;
                     this.myRole = me.class || me.sk?.c || 'legionary';
                 }
             } catch (e) {}
@@ -7685,6 +8065,16 @@ const Players = {
     // v11.6.0g-3: период поллинга «кто играет с аддоном» (ТЗ — раз в 30 с).
     // Один тик = POST /heartbeat + GET /users, окно онлайна на сервере 15 мин.
     const ADDON_USERS_POLL_MS = 30000;
+
+    // v11.6.1c: как часто спрашивать GET /latest-version (раз в час). Троттлинг
+    // хранится в localStorage 'lgUpdateCheck', чтобы проверка не зависела от
+    // перезапуска поллинга (переключение вкладок, повторный init чата).
+    const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+
+    // v11.6.0g-6: ключ доступа к нашему серверу. Должен совпадать с API_KEY в
+    // server/index.js (env LGU_API_KEY). Это фильтр от случайных ботов, а не
+    // секрет: значение лежит в публичной сборке аддона.
+    const ADDON_API_KEY = 'LGU-default-secret-key-change-me';
 
     const ChatNet = {
         // id текущей шахты (обновляется из /api/mine/* и /api/live).
@@ -8229,7 +8619,14 @@ const Players = {
                             const hero = data?.hero || data?.body?.hero || data?.me;
                             if (hero) {
                                 window.__lgHero = hero;
-                                if (hero.name) self.myNick = hero.name;
+                                // v11.6.0g-5: ник берём из user.login (/api/me), а
+                                // не из hero.name: подсветка и «свои» сообщения
+                                // должны сравниваться с тем логином, под которым
+                                // игрок реально сидит в чате. ME — фолбэк, если
+                                // ответ пришёл без user (старые сборки/кэш).
+                                const user = data?.user || (typeof G !== 'undefined' && G.ME?.user);
+                                const userLogin = user?.login || user?.name;
+                                if (userLogin) self.myNick = String(userLogin).trim().toLowerCase();
                                 if (hero.class) self.myRole = hero.class;
                                 const hud = document.getElementById(DOM_IDS.playerHud) || document.getElementById('legion-player-hud');
                                 if (hud && hud.style.display !== 'none' && typeof UI !== 'undefined' && UI.renderPlayerHudContent) {
@@ -8312,7 +8709,11 @@ const Players = {
                 GM_xmlhttpRequest({
                     method,
                     url,
-                    headers: { 'Content-Type': 'application/json' },
+                    // v11.6.0g-6: сервер пускает только с ключом (401 иначе).
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Legion-Key': ADDON_API_KEY
+                    },
                     data: body ? JSON.stringify(body) : undefined,
                     timeout: 8000,
                     onload: (res) => {
@@ -8334,32 +8735,105 @@ const Players = {
         },
 
         /**
+         * Канал игры (LG_CH.login) в нижнем регистре.
+         *
+         * v11.6.0g-5: это НЕ ник игрока, а логин Twitch-канала. Нужен только
+         * затем, чтобы не подсвечивать служебные сообщения канала как
+         * «пользователь аддона».
+         */
+        _channelLogin() {
+            try {
+                if (typeof G === 'undefined' || !G) return '';
+                return String(G.LG_CH?.login || '').trim().toLowerCase();
+            } catch (e) {
+                return '';
+            }
+        },
+
+        /**
+         * Ник текущего игрока для heartbeat и подсветки (нижний регистр).
+         *
+         * v11.6.0g-5: источники только игровые — ME.user из page-context и,
+         * как фолбэк, GET /api/me. LG_CH сюда не подмешивается: там логин
+         * Twitch-канала, из-за которого отправлялся и подсвечивался чужой ник.
+         *
+         * @returns {Promise<string>} нормализованный логин либо '' (неизвестен)
+         */
+        async _resolveMyLogin() {
+            // 1. Страница уже знает игрока — самый дешёвый и свежий путь.
+            try {
+                if (typeof G !== 'undefined' && G) {
+                    const pageLogin = G.ME?.user?.login || G.ME?.user?.name;
+                    if (pageLogin) return String(pageLogin).trim().toLowerCase();
+                }
+            } catch (e) {}
+
+            // 2. Ник, полученный ранее (syncMe / перехват /api/me).
+            if (this.myNick) {
+                const known = String(this.myNick).trim().toLowerCase();
+                if (known) return known;
+            }
+
+            // 3. Фолбэк: сам /api/me — ME в странице может быть ещё пуст, а
+            // первый heartbeat откладывать нельзя. Результат кэшируем в myNick,
+            // поэтому следующий тик пойдёт уже без запроса.
+            try {
+                const res = await Utils.fetchApi('/api/me');
+                const user = res?.user || res?.body?.user;
+                const login = user?.login || user?.name;
+                if (login) {
+                    const norm = String(login).trim().toLowerCase();
+                    this.myNick = norm;
+                    return norm;
+                }
+            } catch (e) {}
+
+            return '';
+        },
+
+        /**
          * Отметка «я онлайн» + обновление списка пользователей аддона.
          *
-         * POST /heartbeat {login} — чтобы нас видели другие; GET /users —
-         * чтобы увидели мы. Ошибки сети не всплывают тостом: сервер аддона
-         * может быть недоступен, подсветка просто остаётся на прошлом наборе.
+         * POST /heartbeat {login, version} — чтобы нас видели другие (и чтобы
+         * сервер знал версию аддона для GET /stats); GET /users — чтобы увидели
+         * мы. Ошибки сети не всплывают тостом: сервер аддона может быть
+         * недоступен, подсветка просто остаётся на прошлом наборе.
          */
         async syncAddonUsers() {
-            const nick = this.myNick ? String(this.myNick).trim() : '';
+            // v11.6.1c: раз в час заодно спрашиваем сервер о новой версии.
+            // Без await — уведомление не должно задерживать подсветку, а
+            // собственные ошибки checkForUpdates() гасит внутри себя.
+            this.checkForUpdates();
+            // v11.6.0g-5: ник резолвится через ME.user / /api/me, LG_CH не в счёт.
+            const nick = await this._resolveMyLogin();
             // Ник ещё не пришёл (/api/me в пути) — отправим на следующем тике.
             if (!nick) return;
 
             const base = this._addonBaseUrl();
+            // Канал игры: его логин не должен попасть в список подсветки.
+            const channel = this._channelLogin();
 
             try {
-                await this._addonRequest('POST', base + '/heartbeat', { login: nick });
+                // Версия из шапки userscript'а: GM_info доступен в песочнице
+                // Tampermonkey и не зависит от игры (фолбэк 'unknown').
+                const ver = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || 'unknown';
+                await this._addonRequest('POST', base + '/heartbeat', { login: nick, version: ver });
                 const data = await this._addonRequest('GET', base + '/users');
                 const list = (data && Array.isArray(data.users)) ? data.users : [];
 
                 const next = new Set();
                 list.forEach((login) => {
                     const norm = String(login || '').trim().toLowerCase();
-                    if (norm) next.add(norm);
+                    // Канал игры (G.LG_CH.login) — не игрок: служебные сообщения
+                    // канала идут в нативной ленте с его data-nick, и подсветка
+                    // «аддоном» на них была бы ложной (v11.6.0g-5).
+                    if (!norm || norm === channel) return;
+                    next.add(norm);
                 });
                 // Свой ник добавляем локально: heartbeat уже ушёл, а снимок
-                // /users мог быть собран сервером до нашей вставки.
-                next.add(nick.toLowerCase());
+                // /users мог быть собран сервером до нашей вставки. nick уже
+                // нормализован (нижний регистр) в _resolveMyLogin().
+                next.add(nick);
 
                 const prev = this.addonUsers || new Set();
                 const changed = next.size !== prev.size || Array.from(next).some((n) => !prev.has(n));
@@ -8387,6 +8861,61 @@ const Players = {
                 if (changed && this.isOpen()) this.renderMessages();
             } catch (e) {
                 dbg('[CHAT] подсветка аддона: синхронизация не удалась:', e && e.message ? e.message : e);
+            }
+        },
+
+        /* ---------------------------------------------------------- */
+        /* Проверка обновлений (ТЗ 11.6.1c)                           */
+        /* ---------------------------------------------------------- */
+
+        /**
+         * Спрашивает GET /latest-version и, если на сервере версия новее,
+         * показывает GM_notification со ссылкой на raw-сборку GitHub.
+         *
+         * Троттлинг — localStorage 'lgUpdateCheck' (раз в час). Хранилище
+         * намеренно не GM-овское: это не настройка, а кэш момента проверки,
+         * потеря которого стоит одного лишнего запроса.
+         *
+         * Ошибки не всплывают: старый сервер без эндпоинта ответит 404,
+         * сервер может быть недоступен — тогда отметка времени не пишется и
+         * проверка повторится на следующем тике поллинга.
+         */
+        async checkForUpdates() {
+            try {
+                const now = Date.now();
+                const lastCheck = Number(localStorage.getItem('lgUpdateCheck') || 0) || 0;
+                if (now - lastCheck <= UPDATE_CHECK_INTERVAL_MS) return;
+
+                const base = this._addonBaseUrl();
+                const res = await this._addonRequest('GET', base + '/latest-version');
+                // Пустой ответ — не повод считать проверку выполненной.
+                if (!res || !res.version) return;
+                localStorage.setItem('lgUpdateCheck', String(now));
+
+                // Своя версия — из шапки userscript'а. Без GM_info сравнение
+                // невозможно (не Tampermonkey), поэтому просто выходим.
+                const current = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '';
+                if (!current) return;
+
+                // numeric:true обязателен: лексикографически «11.6.10» < «11.6.9»,
+                // а числовое сравнение даёт правильный порядок сегментов.
+                const isNewer = String(res.version)
+                    .localeCompare(String(current), undefined, { numeric: true, sensitivity: 'base' }) > 0;
+                if (!isNewer) return;
+
+                // GM_notification/GM_openInTab требуют @grant в шапке; проверка
+                // typeof оставлена, чтобы в менеджере без этих API аддон не падал.
+                if (typeof GM_notification === 'function') {
+                    GM_notification({
+                        title: 'Legion Ultimate Assistant',
+                        text: `Вышла новая версия ${res.version}. Нажмите, чтобы обновить.`,
+                        onclick: () => {
+                            if (typeof GM_openInTab === 'function') GM_openInTab(res.url);
+                        }
+                    });
+                }
+            } catch (e) {
+                dbg('[CHAT] проверка обновлений не удалась:', e && e.message ? e.message : e);
             }
         },
 
@@ -8426,28 +8955,16 @@ const Players = {
             // Наш PiP-чат: <span class="chat-author" data-nick="login">.
             const pipSel = nicks.map(n => `.chat-author[data-nick="${esc(n)}" i]`).join(',');
 
-            // v11.6.0h.3: «⚡» — не текст, а фоновая SVG-картинка. Псевдоэлемент
-            // ::before добавлял символ в textContent узла, из-за чего игра
-            // читала ник как "⚡nick": ломалось выделение текста и упоминание
-            // по клику. background-image в разметку вообще не вмешивается —
-            // textContent остаётся ровно "nick".
-            // В data URI диез обязан быть %23, иначе браузер обрежет url по «#».
+            // v11.6.1c: бейдж «⚡» убран полностью. Он рисовался фоновой
+            // SVG-картинкой (чтобы не портить textContent ника), но визуально
+            // мешал и сдвигал ник вправо из-за padding-left. Осталось только
+            // свечение text-shadow — оно не меняет ни разметку, ни ширину узла.
             return `
             ${nativeSel} {
                 text-shadow: 0 0 4px currentColor, 0 0 10px currentColor !important;
-                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 16" width="12" height="16"><path d="M7 0L0 9h5v7l7-9H7z" fill="%23ffcf6a"/></svg>');
-                background-repeat: no-repeat;
-                background-position: left center;
-                background-size: 10px 13px;
-                padding-left: 14px !important;
             }
             ${pipSel} {
                 text-shadow: 0 0 4px currentColor, 0 0 10px currentColor !important;
-                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 16" width="12" height="16"><path d="M7 0L0 9h5v7l7-9H7z" fill="%23ffcf6a"/></svg>');
-                background-repeat: no-repeat;
-                background-position: left center;
-                background-size: 10px 13px;
-                padding-left: 14px !important;
             }
         `;
         },
@@ -9392,12 +9909,9 @@ const Players = {
 
                 const authorNick = m.author || '';
                 const isAddon = this.isAddonUser(authorNick);
-                // v11.6.0h.3: бейдж ⚡ рисует CSS — фоновая SVG-картинка из
-                // ChatNet._buildAddonStylesCss(). В HTML его нет вообще, поэтому
-                // textContent узла остаётся чистым ником (выделение и упоминание
-                // по клику работают как в обычном чате).
-                // Класс .legion-addon-user оставляем: по нему core/styles.js
-                // даёт свечение, а динамическая простыня — иконку и обводку.
+                // v11.6.1c: бейджа «⚡» больше нет ни в HTML, ни в CSS — ник
+                // остаётся чистым текстом. Класс .legion-addon-user оставляем:
+                // по нему core/styles.js и динамическая простыня дают свечение.
                 const addonClass = isAddon ? ' legion-addon-user' : '';
                 // v11.6.0h: бирюзовый #00f0ff больше не подставляется — у ника
                 // остаётся его родной цвет класса (meta.color), а свечение
@@ -9716,9 +10230,11 @@ const Players = {
         messages: [], // Массив всех сообщений
         activeMainTab: 'city',
         activeSubTab: 'general',
-        // Ник узнаём из page-context (LG_CH) либо позже — асинхронно из syncMe().
+        // v11.6.0g-5: ник — это ME.user (page-context), а не LG_CH: в LG_CH
+        // лежит логин Twitch-канала, из-за него в чат/HUD попадал чужой ник.
+        // Если ME ещё пуст — ник придёт асинхронно из syncMe().
         // Хардкод чужого ника опаснее пустого значения: до ответа /api/me лучше null.
-        myNick: (typeof unsafeWindow !== 'undefined' && unsafeWindow.LG_CH?.name) || window.LG_CH?.name || null,
+        myNick: (typeof unsafeWindow !== 'undefined' && (unsafeWindow.ME?.user?.login || unsafeWindow.ME?.user?.name)) || null,
         myRole: 'legionary',
         dmTarget: null, // Ник собеседника, с которым сейчас открыт диалог во вкладке ЛС
         currentMineId: 'home',

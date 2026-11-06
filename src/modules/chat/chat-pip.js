@@ -868,12 +868,9 @@
 
                 const authorNick = m.author || '';
                 const isAddon = this.isAddonUser(authorNick);
-                // v11.6.0h.3: бейдж ⚡ рисует CSS — фоновая SVG-картинка из
-                // ChatNet._buildAddonStylesCss(). В HTML его нет вообще, поэтому
-                // textContent узла остаётся чистым ником (выделение и упоминание
-                // по клику работают как в обычном чате).
-                // Класс .legion-addon-user оставляем: по нему core/styles.js
-                // даёт свечение, а динамическая простыня — иконку и обводку.
+                // v11.6.1c: бейджа «⚡» больше нет ни в HTML, ни в CSS — ник
+                // остаётся чистым текстом. Класс .legion-addon-user оставляем:
+                // по нему core/styles.js и динамическая простыня дают свечение.
                 const addonClass = isAddon ? ' legion-addon-user' : '';
                 // v11.6.0h: бирюзовый #00f0ff больше не подставляется — у ника
                 // остаётся его родной цвет класса (meta.color), а свечение

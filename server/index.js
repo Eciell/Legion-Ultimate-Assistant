@@ -13,6 +13,17 @@
  * v11.6.0g-3: POST /heartbeat и GET /users — кто играет с аддоном
  * (подсветка ников в чате; окно «онлайн» — 15 минут, Bearer не нужен).
  *
+ * v11.6.0g-5: heartbeat принимает необязательный version (GM_info.script.version)
+ * и пишет его в users_stats; GET /stats отдаёт online/dau/mau (без Bearer).
+ *
+ * v11.6.0g-6: все запросы, кроме GET / и OPTIONS, требуют заголовок
+ * X-Legion-Key (общий секрет аддона, env LGU_API_KEY); POST /heartbeat
+ * ограничен 3 запросами в минуту на IP -> 429 too_many_requests.
+ *
+ * v11.6.1c: GET /latest-version (публичный, как GET /) отдаёт
+ * {version, url} — клиент раз в час сравнивает версию с GM_info.script.version
+ * и показывает GM_notification. Лимит heartbeat поднят до 6 запросов в минуту.
+ *
  * v11.6.0a: вход только через POST /party/join (inviteToken — первичный
  * ключ), memberId отдельно от sessionId, DELETE /party/:id/leave, логины
  * в нижнем регистре.
@@ -35,6 +46,7 @@ import {
     getSessionByLogin,
     getSessionByMemberId,
     getStates,
+    getStats,
     isConstraintError,
     kickSession,
     listSessions,
@@ -44,6 +56,7 @@ import {
     rotateToken,
     trimLog,
     updateHeartbeat,
+    updateUserStats,
     upsertState
 } from './db.js';
 
@@ -54,10 +67,29 @@ import {
 const port = Number(process.env.CTRLFREE_PORT || process.env.PORT || 8787);
 const hostname = '0.0.0.0';
 
+// Ключ доступа к API (v11.6.0g-6): общий секрет аддона, а не аутентификация
+// игрока (её даёт Bearer sessionId у /party). Переопределяется переменной
+// окружения LGU_API_KEY на сервере; клиенты шлют одно и то же значение из
+// chat-net.js / party.js, поэтому при смене ключа их надо пересобрать.
+const API_KEY = process.env.LGU_API_KEY || 'LGU-default-secret-key-change-me';
+
+// Версия аддона для автообновления (v11.6.1c): GET /latest-version отдаёт её
+// вместе со ссылкой на raw-сборку. Клиент сравнивает её с GM_info.script.version
+// и раз в час показывает GM_notification, поэтому при релизе версию надо
+// поднимать и здесь, и в src/header-*.js — иначе уведомление будет приходить
+// даже тем, кто уже обновился (их GM_info всё ещё покажет старую версию).
+const LATEST_VERSION = '11.6.1';
+const UPDATE_URL = 'https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js';
+
 // Логин хранится и сравнивается ТОЛЬКО в нижнем регистре: игра отдаёт ник
 // как есть, а две «формы» одного ника заняли бы одно имя дважды.
 const LOGIN_RE = /^[a-z0-9_]{1,32}$/;
 const TOKEN_RE = /^[A-Za-z0-9_-]{16,64}$/;
+// Версия аддона (v11.6.0g-5): необязательное поле heartbeat. Ограничение
+// длины и алфавита — защита БД от мусора; невалидное значение просто
+// игнорируется, чтобы старая или битая версия клиента не теряла отметку
+// «онлайн» из-за одного поля.
+const VERSION_RE = /^[A-Za-z0-9._-]{1,32}$/;
 
 // Антибрутфорс на join: 10 попыток в минуту на IP.
 const JOIN_LIMIT = 10;
@@ -141,6 +173,17 @@ function normalizeLogin(value) {
 }
 
 /**
+ * Версия аддона из тела heartbeat (v11.6.0g-5): строка 1..32 символов
+ * [A-Za-z0-9._-]. Возвращает null, если поля нет или оно не проходит
+ * проверку — обработчик тогда просто не пишет last_version.
+ */
+function normalizeVersion(value) {
+    if (typeof value !== 'string') return null;
+    const version = value.trim();
+    return VERSION_RE.test(version) ? version : null;
+}
+
+/**
  * HP из тела state-запроса: целое в диапазоне 0..MAX_HP.
  * Возвращает null, если значение не число или вне диапазона —
  * обработчик превращает это в 400 bad_hp.
@@ -201,6 +244,43 @@ function checkJoinRate(ip) {
     if (rec.count >= JOIN_LIMIT) {
         const retryAfter = Math.max(1, Math.ceil((rec.resetAt - now) / 1000));
         throw new HttpError(429, 'rate_limited', `Слишком много попыток входа, повторите через ${retryAfter} c.`);
+    }
+    rec.count += 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* Rate limit на heartbeat (v11.6.0g-6)                                */
+/* ------------------------------------------------------------------ */
+
+// 6 запросов в минуту на IP (v11.6.1c: было 3). Клиент шлёт heartbeat раз в
+// 30 с (2 в минуту), поэтому лимит срабатывает только на спам; запас в 3x
+// покрывает перезагрузки страницы и несколько вкладок с одного IP. 429 клиент
+// молча проглатывает и повторяет на следующем тике.
+const HEARTBEAT_LIMIT = 6;
+const HEARTBEAT_WINDOW_MS = 60_000;
+
+// ip -> { count, resetAt }. Как и joinAttempts, Map живёт в памяти процесса:
+// одного Bun-инстанса достаточно, кластеру понадобился бы общий стор.
+const heartbeatAttempts = new Map();
+
+function checkHeartbeatRate(ip) {
+    const now = Date.now();
+
+    // Ленивая чистка: иначе Map растёт от каждого нового IP бесконечно.
+    if (heartbeatAttempts.size > 5000) {
+        for (const [key, rec] of heartbeatAttempts) {
+            if (rec.resetAt <= now) heartbeatAttempts.delete(key);
+        }
+    }
+
+    const rec = heartbeatAttempts.get(ip);
+    if (!rec || rec.resetAt <= now) {
+        heartbeatAttempts.set(ip, { count: 1, resetAt: now + HEARTBEAT_WINDOW_MS });
+        return;
+    }
+    if (rec.count >= HEARTBEAT_LIMIT) {
+        const retryAfter = Math.max(1, Math.ceil((rec.resetAt - now) / 1000));
+        throw new HttpError(429, 'too_many_requests', `Слишком частый heartbeat, повторите через ${retryAfter} c.`);
     }
     rec.count += 1;
 }
@@ -511,18 +591,35 @@ async function handleLeave(req, partyId) {
 /* ------------------------------------------------------------------ */
 
 /*
- * POST /heartbeat {login}
+ * POST /heartbeat {login, version?}
  *
  * Отметка «я в игре с аддоном». Bearer не нужен: эндпоинт общий, к пати
  * отношения не имеет. Ник валидируется тем же normalizeLogin, что и при
  * создании пати (trim + toLowerCase + /^[a-z0-9_]{1,32}$/), поэтому в БД и
  * в GET /users попадает одна форма ника. Ответ короткий: клиенту нечего
  * показывать, список он берёт отдельным GET /users.
+ *
+ * v11.6.0g-5: необязательное поле version уходит в users_stats (GET /stats:
+ * dau/mau) и на форму ответа не влияет.
+ *
+ * v11.6.0g-6: 3 запроса в минуту на IP (checkHeartbeatRate) -> 429
+ * too_many_requests. Лимит проверяется до чтения тела.
  */
-async function handleHeartbeat(req) {
+async function handleHeartbeat(req, server) {
+    // v11.6.0g-6: 3 запроса в минуту на IP. Лимит проверяем до чтения тела —
+    // спам не должен доходить даже до JSON-парсера.
+    const ip = server.requestIP(req)?.address || 'unknown';
+    checkHeartbeatRate(ip);
+
     const body = await readJson(req);
     const login = normalizeLogin(body.login);
     const lastSeen = updateHeartbeat(login);
+    // v11.6.0g-5: версия необязательна. Клиенты 11.6.0g-4 и старше её не шлют —
+    // для них heartbeat работает как раньше, просто без строки в users_stats.
+    // Невалидную версию молча отбрасываем: 400 из-за поля, которого может не
+    // быть, сломал бы отметку «онлайн».
+    const version = normalizeVersion(body.version);
+    if (version) updateUserStats(login, version);
     return json({ ok: true, lastSeen });
 }
 
@@ -538,6 +635,30 @@ async function handleActiveUsers() {
     return json({ users: getActiveUsers() });
 }
 
+/*
+ * GET /stats -> {online, dau, mau} (v11.6.0g-5)
+ *
+ * Витрина «сколько людей играет с аддоном». Bearer не нужен: счётчики
+ * публичные и ников не раскрывают. online — окно active_users (15 минут,
+ * как у GET /users), dau/mau — строки users_stats за 24 часа и 30 дней
+ * (там last_seen хранится постоянно, чистка онлайна на них не влияет).
+ */
+async function handleStats() {
+    return json(getStats());
+}
+
+/*
+ * GET /latest-version -> {version, url} (v11.6.1c)
+ *
+ * Публичный эндпоинт (проверяется в роутере до X-Legion-Key): клиент узнаёт
+ * о новой сборке до всякой авторизации, а в ответе нет ников и секретов.
+ * version сравнивается на клиенте с GM_info.script.version, url открывается
+ * по клику на уведомление.
+ */
+async function handleLatestVersion() {
+    return json({ version: LATEST_VERSION, url: UPDATE_URL });
+}
+
 /* ------------------------------------------------------------------ */
 /* Роутер                                                              */
 /* ------------------------------------------------------------------ */
@@ -550,19 +671,44 @@ const server = Bun.serve({
             const url = new URL(req.url);
             const parts = url.pathname.split('/').filter(Boolean);
 
-            // Пользователи аддона (v11.6.0g-3): /heartbeat и /users живут
-            // вне /party — они общие для всех клиентов аддона, без Bearer.
+            // Защита API (v11.6.0g-6): ключ обязателен для всех запросов, кроме
+            // GET / (health-check платформы), GET /latest-version (v11.6.1c) и
+            // OPTIONS (preflight/пробы). Сравнение простое строковое: это общий
+            // секрет аддона, а не аутентификация игрока — та осталась на Bearer
+            // sessionId в /party.
+            const isPublic = req.method === 'OPTIONS'
+                || (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/latest-version'));
+            if (!isPublic && req.headers.get('x-legion-key') !== API_KEY) {
+                throw new HttpError(401, 'unauthorized', 'Нужен заголовок X-Legion-Key');
+            }
+
+            // Пользователи аддона (v11.6.0g-3): /heartbeat, /users и /stats
+            // живут вне /party — они общие для всех клиентов аддона, без Bearer.
             if (url.pathname === '/heartbeat') {
                 if (req.method !== 'POST') {
                     throw new HttpError(405, 'method_not_allowed', 'Ожидается POST /heartbeat');
                 }
-                return await handleHeartbeat(req);
+                return await handleHeartbeat(req, srv);
             }
             if (url.pathname === '/users') {
                 if (req.method !== 'GET') {
                     throw new HttpError(405, 'method_not_allowed', 'Ожидается GET /users');
                 }
                 return await handleActiveUsers();
+            }
+            // Статистика аддона (v11.6.0g-5): online/dau/mau, только чтение.
+            if (url.pathname === '/stats') {
+                if (req.method !== 'GET') {
+                    throw new HttpError(405, 'method_not_allowed', 'Ожидается GET /stats');
+                }
+                return await handleStats();
+            }
+            // Уведомление об обновлении (v11.6.1c): версия + ссылка на сборку.
+            if (url.pathname === '/latest-version') {
+                if (req.method !== 'GET') {
+                    throw new HttpError(405, 'method_not_allowed', 'Ожидается GET /latest-version');
+                }
+                return await handleLatestVersion();
             }
 
             if (parts[0] !== 'party') {

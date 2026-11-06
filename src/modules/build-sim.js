@@ -8,29 +8,136 @@
         _currentBuildName: '', // имя последнего сохранённого/загруженного билда (для будущих фич UI)
         _currentBuildNames: {}, // { [clsId]: name } — активный билд каждого класса (нужен для кнопки «Удалить»)
         _autoLoadClass: null, // класс, чей билд пришёл ссылкой #build=… (вкладку открываем после создания табов)
+        _tooltipTimer: null, // setTimeout hover-тултипа узла (500 мс, ТЗ 11.6.1e)
+        _tooltipState: null, // { clsId, nodeId, mode: 'hover'|'click' } — что сейчас показано
 
         statNames: { hp: 'Макс. HP', atk: 'Физ. урон', mag: 'Магия', def: 'Броня', crit: 'Крит %', critDmg: 'Сила крита', dodge: 'Уклонение', pierce: 'Пробивание', healPow: 'Сила лечения', luck: 'Удача', resist: 'Сопротивление' },
         fxNames: { melee: 'Физ. урон %', magic: 'Магия %', hp: 'Макс. HP %', def: 'Броня', healPow: 'Сила лечения %', healIn: 'Вх. лечение %', crit: 'Крит %', critDmg: 'Сила крита', skel: 'Урон скелетов %', skelT: 'Время скелетов', leech: 'Вампиризм %', block: 'Снижение урона %', dodge: 'Уклонение %', lead: 'Урон по боссам %', first: 'Урон 1-й ход %', dmg: 'Весь урон %', pierce: 'Пробивание %', resist: 'Сопротивление', healCrit: 'Крит лечения %', regen: 'Регенерация %', low: 'Урон при низком HP %', a_siyanie: 'Сияние +%', a_obereg: 'Оберег +%', a_dlan: 'Длань +%', a_aura: 'Аура +%', aura: 'Аура −урон %', a_svet: 'Свет +%', a_vspyshka: 'Вспышка +%', a_oznob: 'Озноб +%', a_pricel: 'Прицел +%', a_grad: 'Град +%', a_natisk: 'Натиск +%', a_stoyka: 'Стойка +%', a_vspinu: 'Вспину +%', a_yad: 'Яд +%', a_vytyanut: 'Вытянуть +%', a_podnyat: 'Поднять +%', poison: 'Отрава %', steal: 'Кража %', loot: 'Добыча %', skelN: 'Скелетов +', volley: 'Залп +%', shieldBlock: 'Щит блок %', trapDodge: 'Ловушки %', steady: 'Промах→удар %', cleave: 'Замах %', cleaveBoss: 'Замах по боссу %', penBoss: 'Бронебой по боссу %', drain: 'Вытягивание %', hex: 'Проклятие +%', holy: 'По нежити +%', poisonT: 'Время отравы' },
-        classNames: { recruit: '🐱 Новобранец', legionary: '🛡️ Легионер', archer: '🏹 Лучник', mage: '🔮 Маг', priest: '✨ Жрец', rogue: '🗡️ Разбойник', necromancer: '💀 Некромант', paladin: '🔨 Паладин' },
-        nodeIcons: {
-            nec_b_call: '💀', nec_b_grave: '❄️', nec_b_ward: '🛡️', nec_b_raise: '⬆️', nec_b_long: '⏳', nec_b_marrow: '🦴', nec_b_two: '👥', nec_b_hunger: '🍖', nec_b_fast: '⚡', nec_b_legion: '⚔️', nec_b_lich: '👑', nec_b_cap: '🌟',
-            nec_l_sip: '🩸', nec_l_pale: '👻', nec_l_cold: '🧊', nec_l_drain: '🌪️', nec_l_thirst: '🥤', nec_l_skin: '🛡️', nec_l_deep: '🕳️', nec_l_regen: '💚', nec_l_low: '😫', nec_l_fast: '💨', nec_l_last: '🏺', nec_l_cap: '♾️',
-            nec_d_bolt: '🏹', nec_d_eye: '👁️', nec_d_book: '📖', nec_d_curse: '🪄', nec_d_doom: '🎯', nec_d_mark: '💀', nec_d_hex: '🔮', nec_d_crit: '🦴', nec_d_omen: '☄️', nec_d_fast: '🤫', nec_d_rot: '🦠', nec_d_cap: '🌑',
-            pri_h_hands: '🤲', pri_h_grace: '✨', pri_h_ward: '🛡️', pri_h_salve: '🧴', pri_h_cure: '💧', pri_h_quick: '⚡', pri_h_glow: '☀️', pri_h_halo: '😇', pri_h_miracle: '🪄', pri_h_vigil: '👁️', pri_h_spring: '⛲', pri_h_cap: '👑',
-            pri_f_vest: '👕', pri_f_psalm: '📜', pri_f_hope: '🕊️', pri_f_wall: '🧱', pri_f_step: '👣', pri_f_omen: '🌟', pri_f_martyr: '🔥', pri_f_calm: '😌', pri_f_saint: '💫', pri_f_resur: '⚰️', pri_f_purity: '💎', pri_f_cap: '😇',
-            pri_w_smite: '⚡', pri_w_censer: '🪔', pri_w_zeal: '💢', pri_w_judge: '⚖️', pri_w_sure: '🎯', pri_w_fervor: '❤️‍🔥', pri_w_wrath: '🌩️', pri_w_drain: '🩸', pri_w_last: '🙏', pri_w_doom: '💥', pri_w_dawn: '🌅', pri_w_cap: '🔨'
+        classNames: { recruit: 'Новобранец', legionary: 'Легионер', archer: 'Лучник', mage: 'Маг', priest: 'Жрец', rogue: 'Разбойник', necromancer: 'Некромант', paladin: 'Паладин' },
+        /*
+         * Цвета кнопок классов — из нативного экрана игры (ТЗ 11.6.1d, скрин 4).
+         * Значение кладётся в CSS-переменную --c таба класса: неактивный таб —
+         * цветная рамка/текст на тёмной подложке, активный — заливка цветом.
+         * recruit в нативном списке не подсвечивался — нейтральный серо-золотой.
+         */
+        classColors: { recruit: '#d7d3c8', legionary: '#ff7b7b', archer: '#7bff7b', mage: '#7bbaff', priest: '#ffcf4a', rogue: '#d4aaff', necromancer: '#7c52cc', paladin: '#ffdf7b' },
+
+        /*
+         * Цвет текста НА заливке цвета класса (активный таб, ТЗ 11.6.1e).
+         * Правило контраста: светлая заливка (Жрец, Паладин, Разбойник #d4aaff) —
+         * тёмный текст #12100e; тёмная заливка (Некромант #7c52cc) — белый.
+         * Кладётся в CSS-переменную --ct (значение по умолчанию — тёмное).
+         */
+        classTextColors: { necromancer: '#fff' },
+
+        /*
+         * Словарь нативных SVG-иконок игры (viewBox 0 0 24 24, stroke=currentColor).
+         * Источник: reference/LegionFrontSRC/site/skills.js (объекты NI и BI + DIAM).
+         * Ключи иконок веток совпадают с id веток из /api/skills (blade, shield, ...)
+         * и используются как fallback, когда у навыка нет подходящей fx-иконки.
+         */
+        SKILL_ICONS: {
+            // --- Иконки навыков (NI) ---
+            sword: '<path d="M19.5 4.5 20 4l-.5 4.5L9.5 18.5l-4-4zM7.5 16.5l-3 3M4 15l5 5"/>',
+            shield: '<path d="M12 3.5l7 2.8v5.1c0 4.6-3 7.8-7 9.6-4-1.8-7-5-7-9.6V6.3z"/>',
+            bow: '<path d="M6 3c6 3 9 9 6 18M6 3l12 18M14 5h5v5M19 5 9 15"/>',
+            spark: '<path d="M12 2.5l1.8 6.2 6.2 1.8-6.2 1.8L12 18.5l-1.8-6.2L4 10.5l6.2-1.8z"/><path d="M19 17l.8 2.2 2.2.8-2.2.8L19 23"/>',
+            fire: '<path d="M12 21c-4 0-6.5-2.6-6.5-6 0-3.6 3-5.8 3.6-9.5 2 1.5 3 3.4 3.2 5.3 1-1 1.6-2.4 1.6-3.8 2.7 2.2 4.6 5 4.6 8 0 3.4-2.5 6-6 6z"/>',
+            frost: '<path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9M9.5 4.5 12 7l2.5-2.5M9.5 19.5 12 17l2.5 2.5"/>',
+            heart: '<path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/>',
+            cross: '<path d="M9.5 3.5h5v6h6v5h-6v6h-5v-6h-6v-5h6z"/>',
+            skull: '<path d="M12 3.5a7.5 7.5 0 0 0-4.5 13.5v3h9v-3A7.5 7.5 0 0 0 12 3.5z"/><circle cx="9.3" cy="11.5" r="1.6"/><circle cx="14.7" cy="11.5" r="1.6"/><path d="M10.5 20.5v-2M13.5 20.5v-2"/>',
+            star: '<path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7z"/>',
+            bolt: '<path d="M13.5 2.5 5.5 13.5h6l-1.5 8 8-11h-6z"/>',
+            crown: '<path d="M3.5 18.5h17M4.5 18.5 3.5 7l5 4 3.5-6 3.5 6 5-4-1 11.5z"/>',
+            wind: '<path d="M3 8.5h11a3 3 0 1 0-3-3M3 12.5h15a3 3 0 1 1-3 3M3 16.5h8"/>',
+            eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
+            dagger: '<path d="M14.5 3.5 16 5l-7.5 9-2-2zM6.5 12l-2.5 2.5 2 2 2.5-2.5M5 15.5l-1.5 1.5 3 3L8 18.5"/><path d="M15 13.5l5 5"/>',
+            vial: '<path d="M9.5 3.5h5M10.5 3.5v5L6 17a2.6 2.6 0 0 0 2.3 3.5h7.4A2.6 2.6 0 0 0 18 17l-4.5-8.5v-5M8 14.5h8"/>',
+            sun: '<circle cx="12" cy="12" r="3.8"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>',
+            drop: '<path d="M12 3.5s-6 6.6-6 10.6a6 6 0 0 0 12 0c0-4-6-10.6-6-10.6z"/>',
+            coin: '<circle cx="12" cy="12" r="8"/><path d="M14.5 9.5c-.6-.9-1.5-1.3-2.5-1.3-1.5 0-2.5.8-2.5 1.9 0 2.7 5.2 1.3 5.2 4 0 1.1-1.1 1.9-2.7 1.9-1.1 0-2.1-.5-2.6-1.4M12 6.5v1.7M12 15.8v1.7"/>',
+            // --- Иконки веток (BI): ключ = id ветки из /api/skills ---
+            blade: '<path d="M19.5 4.5 20 4l-.5 4.5L9.5 18.5l-4-4zM7.5 16.5l-3 3M4 15l5 5"/>',
+            veteran: '<path d="M8 3h8l-1.5 6h-5zM12 9v3"/><circle cx="12" cy="16.5" r="4.2"/><path d="M12 14.6l.7 1.4 1.5.2-1.1 1 .3 1.5-1.4-.7-1.4.7.3-1.5-1.1-1 1.5-.2z"/>',
+            aim: '<circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="3.5"/><path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4"/>',
+            hunt: '<path d="M5 19 19 5M15 5h4v4M5 15l4 4M7 13l4 4"/><path d="M6 6c5-2 10 3 12 12"/>',
+            shade: '<path d="M4 10.5c3-1.5 5.5-1.5 8 0s5 1.5 8 0M4 14.5c3-1.5 5.5-1.5 8 0s5 1.5 8 0M7 6.5c2-1 3.5-1 5 0s3 1 5 0"/>',
+            lore: '<path d="M5 4.5h10.5a2 2 0 0 1 2 2V19.5H7a2 2 0 0 1-2-2zM5 17.5a2 2 0 0 1 2-2h10.5M9 8.5h5M9 11.5h4"/>',
+            mercy: '<path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="9"/>',
+            faith: '<circle cx="12" cy="12" r="3.8"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>',
+            wrath: '<path d="M13.5 2.5 5.5 13.5h6l-1.5 8 8-11h-6z"/>',
+            blades: '<path d="M14.5 3.5 16 5l-7.5 9-2-2zM6.5 12l-2.5 2.5 2 2 2.5-2.5M5 15.5l-1.5 1.5 3 3L8 18.5"/><path d="M15 13.5l5 5"/>',
+            venom: '<path d="M9.5 3.5h5M10.5 3.5v5L6 17a2.6 2.6 0 0 0 2.3 3.5h7.4A2.6 2.6 0 0 0 18 17l-4.5-8.5v-5M8 14.5h8"/>',
+            shadow: '<path d="M15.5 4.5A8 8 0 1 0 19.5 16 6.5 6.5 0 0 1 15.5 4.5z"/>',
+            bones: '<path d="M12 3.5a7.5 7.5 0 0 0-4.5 13.5v3h9v-3A7.5 7.5 0 0 0 12 3.5z"/><circle cx="9.3" cy="11.5" r="1.6"/><circle cx="14.7" cy="11.5" r="1.6"/>',
+            life: '<path d="M12 3.5s-6 6.6-6 10.6a6 6 0 0 0 12 0c0-4-6-10.6-6-10.6z"/>',
+            dark: '<path d="M9 21h6M10 21V11h4v10M12 11V8"/><path d="M12 8c-1.6-1.2-1.6-3 0-4.5 1.6 1.5 1.6 3.3 0 4.5z"/>',
+            light: '<circle cx="12" cy="12" r="3.8"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>',
+            grace: '<path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="9"/>',
+            bulwark: '<path d="M12 3.5l7 2.8v5.1c0 4.6-3 7.8-7 9.6-4-1.8-7-5-7-9.6V6.3z"/><path d="M12 7v10M8 11h8"/>',
+            // Ромб-заглушка (DIAM) для неизвестных веток и классов.
+            diam: '<path d="M12 3.5l8.5 8.5-8.5 8.5L3.5 12z"/>'
+        },
+        // Иконки, которые в игре заливаются полупрозрачно (нативный класс .so).
+        SOLID_ICONS: ['sword', 'shield', 'heart', 'cross', 'star', 'bolt', 'crown', 'fire', 'spark'],
+        // fx-ключ -> иконка; порядок важен: срабатывает первое совпадение (FXI из skills.js).
+        FX_ICONS: [
+            [/^(melee|dmg|cleave|first|a_natisk|cd_natisk)$/, 'sword'],
+            [/^(def|block|shieldBlock|resist|a_stoyka)$/, 'shield'],
+            [/^(ranged|volley|pierce|a_pricel|a_grad|cd_grad)$/, 'bow'],
+            [/^(magic|crit|critDmg|a_vspyshka|cd_vspyshka)$/, 'spark'],
+            [/^(hp|regen|leech|healIn)$/, 'heart'],
+            [/^(healPow|healCrit|a_obereg|cd_obereg|a_siyanie|cd_siyanie)$/, 'cross'],
+            [/^(low|lastStand)$/, 'skull'],
+            [/^(dodge|trapDodge)$/, 'wind'],
+            [/^(steady|lead)$/, 'eye'],
+            [/^(a_oznob|cd_oznob)$/, 'frost'],
+            [/^(poison|poisonT|a_yad|cd_yad)$/, 'vial'],
+            [/^(steal|loot)$/, 'coin'],
+            [/^(a_vspinu|cd_vspinu)$/, 'dagger'],
+            [/^(skel|skelT|skelN|a_podnyat|cd_podnyat)$/, 'skull'],
+            [/^(drain|a_vytyanut|cd_vytyanut)$/, 'drop'],
+            [/^(hex|a_proklyat|cd_proklyat)$/, 'fire'],
+            [/^(holy|a_svet)$/, 'sun'],
+            [/^(aura|a_dlan|cd_dlan|cd_aura)$/, 'cross']
+        ],
+        // Иконка класса для табов (CLI из skills.js); «Экипировка» — щит.
+        CLASS_ICONS: { legionary: 'sword', archer: 'bow', mage: 'spark', priest: 'cross', rogue: 'dagger', necromancer: 'skull', paladin: 'sun', gear: 'shield' },
+        // Горизонтальные позиции узлов внутри яруса (XS из skills.js).
+        TIER_X: { 1: [50], 2: [28, 72], 3: [18, 50, 82], 4: [14, 38, 62, 86] },
+        // SVG из словаря: solid-иконки заливаются полупрозрачно (нативный класс .so).
+        _svg(key) {
+            const known = this.SKILL_ICONS[key] ? key : 'diam';
+            const solid = this.SOLID_ICONS.includes(known) ? ' so' : '';
+            return `<svg class="sim-svg${solid}" viewBox="0 0 24 24" aria-hidden="true">${this.SKILL_ICONS[known]}</svg>`;
         },
 
-        getNodeIcon(nodeId) {
-            if (this.nodeIcons[nodeId]) return this.nodeIcons[nodeId];
-            if (nodeId.startsWith('leg_')) return '⚔️';
-            if (nodeId.startsWith('arc_')) return '🏹';
-            if (nodeId.startsWith('mag_')) return '🔮';
-            if (nodeId.startsWith('pri_')) return '✨';
-            if (nodeId.startsWith('rog_')) return '🗡️';
-            if (nodeId.startsWith('nec_')) return '💀';
-            if (nodeId.startsWith('pal_')) return '🔨';
-            return '⭐';
+        // Ключ иконки навыка: kind -> первый fx -> иконка ветки (iconOf из skills.js).
+        iconKeyOf(node, branch) {
+            if (!node) return 'diam';
+            if (node.kind === 'cap') return 'crown';
+            if (node.kind === 'act') return 'bolt';
+            if (node.kind === 'ctl') return 'star';
+            for (const k of Object.keys(node.fx || {})) {
+                for (const [re, icon] of this.FX_ICONS) if (re.test(k)) return icon;
+            }
+            const bid = branch && branch.id;
+            return (bid && this.SKILL_ICONS[bid]) ? bid : 'diam';
+        },
+
+        getNodeSvg(node, branch) { return this._svg(this.iconKeyOf(node, branch)); },
+        getBranchSvg(branch) {
+            const bid = branch && branch.id;
+            return this._svg((bid && this.SKILL_ICONS[bid]) ? bid : 'diam');
+        },
+        getClassSvg(clsId) { return this._svg(this.CLASS_ICONS[clsId] || 'diam'); },
+
+        // Горизонталь узла в ярусе: нативные XS для 1-4 узлов, иначе равномерно.
+        xFor(count, index) {
+            const xs = this.TIER_X[count];
+            if (xs && xs[index] !== undefined) return xs[index];
+            return Math.round((100 * (index + 1)) / (count + 1));
         },
         isSkipFx(key) { return SKIP_FX_PREFIXES.some(p => key.startsWith(p)); },
 
@@ -52,15 +159,22 @@
         init() {
             // Кнопка теперь принадлежит HeroPlanner — см. src/modules/hero-planner.js.
             // BuildSim остаётся как модуль и открывается из таба «Билды».
+            // Клик вне узла/тултипа закрывает тултип навыка (ТЗ 11.6.1d).
             document.addEventListener('click', (e) => {
-                if (!e.target.closest('.sim-node') && !e.target.closest('.sim-card')) {
-                    document.querySelectorAll('.sim-card').forEach(c => c.remove());
-                }
+                // Клики внутри тултипа (кнопки +/−, крестик) и по узлу обрабатывают
+                // свои слушатели — здесь их не трогаем, иначе тултип закроется раньше.
+                const t = e.target;
+                if (t && t.closest && (t.closest('.sim-tooltip') || t.closest('.sim-node'))) return;
+                // Старые карточки .sim-card (до v11.6.1d) могли остаться в DOM — чистим.
+                document.querySelectorAll('.sim-card').forEach(c => c.remove());
+                this.hideTooltip();
             });
         },
 
         async open() {
-            const modal = UI.showModal(`<h2>🧮 Планировщик билдов <button class="custom-close" id="custom-close-btn">✖</button></h2><div id="buildsim-modal-body" style="display:flex; flex-direction:column; flex:1; min-height:0;"></div>`);
+            // sim-modal: отдельный класс модалки — в styles.js ему поднята max-height
+            // до 95vh, чтобы дерево навыков влезало целиком без внутреннего скролла.
+            const modal = UI.showModal(`<h2>🧮 Планировщик билдов <button class="custom-close" id="custom-close-btn">✖</button></h2><div id="buildsim-modal-body" style="display:flex; flex-direction:column; flex:1; min-height:0;"></div>`, { customClass: 'sim-modal' });
             const body = modal.querySelector('#buildsim-modal-body');
             if (body) await this.mount(body);
         },
@@ -77,6 +191,9 @@
             // Сохранённые билды поднимаем до парсинга /api/me и /api/skills,
             // чтобы UI успел отрисовать список «Мои билды» при первом renderTree.
             this.loadSavedBuilds();
+            // Тултип узла от прошлой сессии не должен «воскресать» при повторном
+            // открытии модалки (state хранится на объекте BuildSim).
+            this.hideTooltip();
             // Очки при каждом открытии начинаются с нуля (this.simulatedSkills = {}),
             // поэтому и «активного» билда нет: кнопка «Удалить» до выбора/загрузки
             // честно попросит выбрать билд.
@@ -105,9 +222,14 @@
                 const bag = h.items.filter(x => !x.on && x.wearable);
                 const allClasses = (this.skillsCache.classes || []).filter(c => c.branches && c.branches.length > 0);
 
-                let tabsHtml = `<button class="modal-tab active" data-tab="gear">🛡️ Экипировка</button>`;
+                // Табы классов: компактные (34px) с нативной SVG-иконкой класса.
+                let tabsHtml = `<button class="modal-tab sim-tab active" data-tab="gear">${this.getClassSvg('gear')}Экипировка</button>`;
                 allClasses.forEach(c => {
-                    tabsHtml += `<button class="modal-tab" data-tab="${c.id}">${this.classNames[c.id] || c.name || c.id}</button>`;
+                    // --c: цвет класса из classColors (стили таба — в styles.js);
+                    // --ct: цвет текста на заливке (classTextColors, ТЗ 11.6.1e).
+                    const color = this.classColors[c.id] || '#caa55c';
+                    const textColor = this.classTextColors[c.id] || '#12100e';
+                    tabsHtml += `<button class="modal-tab sim-tab" data-tab="${c.id}" style="--c:${color};--ct:${textColor}">${this.getClassSvg(c.id)}${this.classNames[c.id] || c.name || c.id}</button>`;
                 });
 
                 let contentHtml = `
@@ -143,33 +265,19 @@
                         <div class="tab-content" id="tab-${c.id}">
                             <div class="sim-tree-wrap">
                                 <div class="sim-tree-inner">
-                                    <div class="sim-top-bar" style="display: flex; flex-direction: column; gap: 15px; background: #1e1724; padding: 15px; border-radius: 8px; border: 1px solid #3d2f44; margin-bottom: 15px;">
-                                        <!-- Верхняя строка: очки и сброс -->
-                                        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #3d2f44; padding-bottom: 12px;">
-                                            <div class="sim-free-pts" style="font-size: 14px; color: #eee;">Свободно очков: <span id="free-${c.id}" style="color: #caa55c; font-weight: bold; font-size: 20px; margin: 0 4px;">0</span> <span style="color: #888;">/ ${MAX_POINTS}</span></div>
-                                            <button class="sim-reset-btn" data-reset="${c.id}" style="background: rgba(255, 90, 122, 0.1); color: #ff5a7a; border: 1px solid #ff5a7a; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 12px; transition: 0.2s;">Сбросить всё</button>
-                                        </div>
-                                        <!-- Средняя строка: сохранение и загрузка -->
-                                        <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
-                                            <!-- Блок «Сохранить» -->
-                                            <div style="display: flex; gap: 8px; flex: 1; min-width: 250px;">
-                                                <input type="text" id="save-name-${c.id}" class="search-bar" style="margin:0; padding:8px 12px; font-size:12px; flex:1; background:#0f0f15; border:1px solid #3d2f44; color:#fff; border-radius:6px; outline:none;" placeholder="Название нового билда...">
-                                                <button class="sim-save-btn" data-save="${c.id}" style="background: #caa55c; color: #1d1620; border: none; border-radius: 6px; padding: 8px 16px; font-size: 12px; font-weight: bold; cursor: pointer; white-space: nowrap;">💾 Сохранить</button>
-                                            </div>
-                                            <!-- Блок «Загрузить» -->
-                                            <div style="display: flex; gap: 8px; align-items: center;">
-                                                <select id="load-select-${c.id}" class="search-bar" style="margin:0; padding:8px 12px; font-size:12px; width:180px; background:#0f0f15; border:1px solid #3d2f44; color:#fff; border-radius:6px; cursor:pointer; outline:none;">
-                                                    <option value="">— Мои билды —</option>
-                                                </select>
-                                                <button class="sim-del-btn" data-del="${c.id}" style="background: transparent; color: #ff5a7a; border: 1px solid #ff5a7a; border-radius: 6px; padding: 8px 12px; font-size: 12px; cursor: pointer;" title="Удалить выбранный билд">🗑️</button>
-                                            </div>
-                                        </div>
-                                        <!-- Нижняя строка: обмен -->
-                                        <div style="display: flex; gap: 8px; align-items: center; border-top: 1px solid #3d2f44; padding-top: 12px;">
-                                            <span style="font-size: 11px; color: #888; text-transform: uppercase; margin-right: 10px;">Обмен:</span>
-                                            <button class="sim-share-btn" data-share="${c.id}" style="background: transparent; color: #caa55c; border: 1px solid #caa55c; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s;" title="Поделиться билдом">📤 Поделиться</button>
-                                            <button class="sim-import-btn" data-import="${c.id}" style="background: transparent; color: #caa55c; border: 1px solid #caa55c; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.2s;" title="Импортировать билд">📥 Импорт</button>
-                                        </div>
+                                    <!-- Верхняя панель: одна строка 38px (очки / билды / обмен). -->
+                                    <div class="sim-top-bar">
+                                        <div class="sim-free-pts">Свободно: <b id="free-${c.id}">0</b> / ${MAX_POINTS}</div>
+                                        <div class="sim-bar-sep"></div>
+                                        <button class="sim-save-btn" data-save="${c.id}" title="Сохранить билд (имя спросим)">Сохранить</button>
+                                        <button class="sim-share-btn" data-share="${c.id}" title="Поделиться билдом">Поделиться</button>
+                                        <button class="sim-import-btn" data-import="${c.id}" title="Импортировать билд">Импорт</button>
+                                        <div class="sim-bar-sep"></div>
+                                        <select id="load-select-${c.id}" class="sim-load-select" title="Мои билды">
+                                            <option value="">— Мои билды —</option>
+                                        </select>
+                                        <button class="sim-del-btn" data-del="${c.id}" title="Удалить выбранный билд">🗑️</button>
+                                        <button class="sim-reset-btn" data-reset="${c.id}" title="Сбросить все навыки">Сбросить всё</button>
                                     </div>
                                     <div class="sim-branches" id="tree-${c.id}"></div>
                                 </div>
@@ -188,6 +296,9 @@
 
                 container.querySelectorAll('.modal-tab').forEach(tab => {
                     tab.addEventListener('click', () => {
+                        // Тултип узла относится к дереву текущей вкладки — прячем его
+                        // при переключении класса (ТЗ 11.6.1d).
+                        this.hideTooltip();
                         container.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
                         container.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
                         tab.classList.add('active');
@@ -216,6 +327,11 @@
 
         resetBuild(clsId) {
             this.simulatedSkills[clsId] = {};
+            // ТЗ 11.6.1d, п. 2.1: «Сбросить всё» НЕ должно подставлять последний
+            // сохранённый билд. Забываем активный билд класса — тогда renderTree()
+            // вернёт <select> к плейсхолдеру «— Мои билды —», а не к старой записи.
+            this._setCurrentBuild(clsId, '');
+            this.hideTooltip();
             this.renderTree(clsId);
             document.querySelectorAll('.sim-card').forEach(c => c.remove());
         },
@@ -434,7 +550,8 @@
 
         yFor(req) {
             if (Y_MAP[req] !== undefined) return Y_MAP[req];
-            return 680 - Math.round(((req || 0) / 30) * 600);
+            // Произвольный req: линейно между нижним (0) и верхним (30) ярусом.
+            return BH - BOT - Math.round(((req || 0) / 30) * 4 * TH);
         },
 
         changeSkill(clsId, nodeId, delta, maxRank, preNode, branchReq, branchIds, event) {
@@ -512,9 +629,13 @@
             }
             simTree[nodeId] = Math.max(0, current + delta);
             if (simTree[nodeId] === 0) delete simTree[nodeId];
+            // renderTree() пересоздаёт узлы и прячет тултип, поэтому запоминаем его
+            // состояние до перерисовки и восстанавливаем после (ТЗ 11.6.1d).
+            const tipState = this._tooltipState ? { ...this._tooltipState } : null;
             this.renderTree(clsId);
-            const card = document.querySelector('.sim-card');
-            if (card && card.dataset.node === nodeId) this.showNodeCard(clsId, nodeId, null);
+            if (tipState && tipState.clsId === clsId && tipState.nodeId === nodeId) {
+                this.showNodeTooltip(clsId, nodeId, tipState.mode === 'click');
+            }
         },
 
         renderTree(clsId) {
@@ -522,6 +643,8 @@
             if (!clsData) return;
             const container = document.getElementById(`tree-${clsId}`);
             if (!container) return;
+            // Число колонок-веток как в нативном дереве (--nb), обычно 3.
+            container.style.setProperty('--nb', String((clsData.branches || []).length || 3));
 
             if (!this.simulatedSkills[clsId]) this.simulatedSkills[clsId] = {};
             const simTree = this.simulatedSkills[clsId];
@@ -534,31 +657,56 @@
             const simStats = {};
 
             clsData.branches.forEach(branch => {
+                const nodes = branch.nodes || [];
                 let branchPoints = 0;
-                (branch.nodes || []).forEach(n => branchPoints += (simTree[n.id] || 0));
+                nodes.forEach(n => { branchPoints += (simTree[n.id] || 0); });
 
-                let lines = `<path d="M50% 20 L50% 680" class="trunk" style="stroke:#333;stroke-width:6px;" />`;
-                (branch.nodes || []).forEach(node => {
+                // Раскладка ярусов: узлы одного req стоят на одной горизонтали (XS из игры).
+                const tiers = new Map();
+                nodes.forEach(n => {
+                    if (!tiers.has(n.req)) tiers.set(n.req, []);
+                    tiers.get(n.req).push(n);
+                });
+                const xMap = new Map();
+                tiers.forEach(list => list.forEach((n, i) => xMap.set(n.id, this.xFor(list.length, i))));
+
+                const topY = this.yFor(30);      // верхний ярус (req 30)
+                const rootY = this.yFor(0) + 40; // ствол начинается под нижним узлом
+                // Открытый ярус: максимальный req, набранный в ветке (req 0 открыт всегда).
+                const openReq = [30, 20, 10, 5, 0].reduce((acc, req) => (req > acc && branchPoints >= req ? req : acc), 0);
+
+                // Ствол: тёмная основа, пройденная часть цветом ветки, закрытая — пунктиром.
+                let lines = `<path class="tk-bg" d="M50 ${rootY} V${topY}"/>`
+                    + `<path class="tk-on" d="M50 ${rootY} V${this.yFor(openReq)}"/>`
+                    + (openReq < 30 ? `<path class="tk-off" d="M50 ${this.yFor(openReq)} V${topY}"/>` : '');
+
+                // Отводы к боковым узлам — кривые Безье; prereq — прямые линии.
+                nodes.forEach(node => {
+                    const rank = simTree[node.id] || 0;
+                    const x = xMap.get(node.id);
+                    const y = this.yFor(node.req);
+                    const shut = branchPoints < node.req || (node.pre && !(simTree[node.pre] > 0));
+
+                    if (x !== 50) {
+                        const tw = rank > 0 ? 'tw on' : (shut ? 'tw' : 'tw op');
+                        lines += `<path class="${tw}" d="M50 ${y + 40} Q50 ${y} ${x} ${y}"/>`;
+                    }
                     if (node.pre) {
-                        const parent = branch.nodes.find(n => n.id === node.pre);
+                        const parent = nodes.find(n => n.id === node.pre);
                         if (parent) {
-                            const pNodes = branch.nodes.filter(n => n.req === parent.req);
-                            const cNodes = branch.nodes.filter(n => n.req === node.req);
-                            const px = pNodes.length === 1 ? 50 : (pNodes.indexOf(parent) === 0 ? 25 : 75);
-                            const cx = cNodes.length === 1 ? 50 : (cNodes.indexOf(node) === 0 ? 25 : 75);
-                            const active = (simTree[node.id] || 0) > 0;
-                            const py = this.yFor(parent.req);
-                            const cy = this.yFor(node.req);
-                            lines += `<path d="M${px}% ${py} L${cx}% ${cy}" class="${active ? 'active' : ''}"/>`;
+                            const px = xMap.get(parent.id);
+                            const cls = rank > 0 ? 'pre on' : ((simTree[parent.id] || 0) > 0 ? 'pre op' : 'pre');
+                            lines += `<path class="${cls}" d="M${px} ${this.yFor(parent.req)} L${x} ${y}"/>`;
                         }
                     }
                 });
 
                 html += `<div class="sim-branch">
-                    <div class="sim-branch-header">${branch.name}<div class="sim-branch-pts">${branchPoints} очков</div></div>
-                    <svg class="sim-lines" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;overflow:visible;">${lines}</svg>`;
+                    <div class="sim-branch-header">${this.getBranchSvg(branch)}<div class="sim-branch-title">${branch.name}</div><div class="sim-branch-pts" title="Очков в ветке">${branchPoints}</div></div>
+                    <div class="sim-in" style="height:${BH}px">
+                        <svg class="sim-lines" viewBox="0 0 100 ${BH}" preserveAspectRatio="none" aria-hidden="true">${lines}</svg>`;
 
-                (branch.nodes || []).forEach(node => {
+                nodes.forEach(node => {
                     const rank = simTree[node.id] || 0;
                     const locked = branchPoints < node.req || (node.pre && !(simTree[node.pre] > 0));
                     const maxed = rank >= node.max;
@@ -570,33 +718,59 @@
                         }
                     }
 
-                    const tier = branch.nodes.filter(n => n.req === node.req);
-                    let left = 50;
-                    if (tier.length === 2) left = tier.indexOf(node) === 0 ? 25 : 75;
-                    if (tier.length === 3) left = [15, 50, 85][tier.indexOf(node)];
-
                     let ranksHtml = '';
                     for (let i = 0; i < node.max; i++) ranksHtml += `<i class="${i < rank ? 'filled' : ''}"></i>`;
-                    const icon = this.getNodeIcon(node.id);
-                    const top = this.yFor(node.req);
 
-                    html += `<div class="sim-node ${locked ? 'locked' : (maxed ? 'maxed' : 'available')}"
+                    // Состояния как в нативном дереве: lock / has / max / can (available).
+                    const state = (locked ? ' locked' : '')
+                        + (rank > 0 ? ' has' : '')
+                        + (maxed ? ' maxed' : '')
+                        + (!locked && !maxed ? ' available' : '');
+                    const x = xMap.get(node.id);
+                    const y = this.yFor(node.req);
+
+                    html += `<div class="sim-node${state}"
                         data-cls="${clsId}" data-node="${node.id}"
-                        style="left:${left}%;top:${top}px">
-                        <div class="sim-node-icon">${icon}</div>
+                        style="left:${x}%;top:${y}px">
+                        <div class="sim-node-icon">${this.getNodeSvg(node, branch)}</div>
                         <div class="sim-node-ranks">${ranksHtml}</div>
                         <div class="sim-node-name">${node.name}</div>
                     </div>`;
                 });
-                html += `</div>`;
+                html += `</div></div>`;
             });
 
             container.innerHTML = html;
 
             container.querySelectorAll('.sim-node').forEach(el => {
+                const nodeCls = el.dataset.cls;
+                const nodeId = el.dataset.node;
+
+                // Наведение: через 500 мс показываем тултип ТОЛЬКО с текстом.
+                el.addEventListener('mouseenter', () => {
+                    this._clearTooltipTimer();
+                    this._tooltipTimer = setTimeout(() => {
+                        this._tooltipTimer = null;
+                        this.showNodeTooltip(nodeCls, nodeId, false);
+                    }, 500);
+                });
+
+                // Мышь ушла раньше таймера — отменяем; висящий hover-тултип прячем.
+                el.addEventListener('mouseleave', () => {
+                    this._clearTooltipTimer();
+                    if (this._tooltipState && this._tooltipState.mode === 'hover') this.hideTooltip();
+                });
+
+                // Клик: тултип с кнопками +/−; повторный клик по тому же узлу закрывает.
                 el.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    this.showNodeCard(el.dataset.cls, el.dataset.node, e);
+                    const st = this._tooltipState;
+                    if (st && st.mode === 'click' && st.clsId === nodeCls && st.nodeId === nodeId) {
+                        this.hideTooltip();
+                        return;
+                    }
+                    this._clearTooltipTimer();
+                    this.showNodeTooltip(nodeCls, nodeId, true);
                 });
             });
 
@@ -621,9 +795,8 @@
             const sel = document.getElementById(`load-select-${clsId}`);
             const delBtn = document.querySelector(`.sim-del-btn[data-del="${clsId}"]`);
             const saveBtn = document.querySelector(`.sim-save-btn[data-save="${clsId}"]`);
-            const saveInput = document.getElementById(`save-name-${clsId}`);
 
-            if (sel && saveBtn && delBtn && saveInput) {
+            if (sel && saveBtn && delBtn) {
                 const builds = this.savedBuilds[clsId] || [];
                 // Имя билда вводит пользователь → экранируем перед вставкой в innerHTML.
                 sel.innerHTML = `<option value="">— Мои билды (${builds.length}) —</option>` +
@@ -638,7 +811,9 @@
                     : 'Удалить выбранный билд';
 
                 saveBtn.onclick = () => {
-                    const name = saveInput.value.trim();
+                    // Панель однострочная — имя нового билда спрашиваем диалогом.
+                    const name = (window.prompt('Название билда:',
+                        (this._currentBuildNames && this._currentBuildNames[clsId]) || '') || '').trim();
                     if (!name) { UI.showToast('Введите имя билда', true); return; }
                     if (this.saveCurrentBuild(clsId, name)) {
                         UI.showToast('💾 Билд сохранен');
@@ -647,9 +822,15 @@
                 };
 
                 sel.onchange = () => {
+                    // Плейсхолдер «— Мои билды —» = пустое дерево (ТЗ 11.6.1d, п. 2.2):
+                    // раньше выбор дефолтного пункта ничего не делал и билд оставался.
+                    if (sel.value === '') {
+                        this.resetBuild(clsId);
+                        return;
+                    }
                     // Выбор в списке сразу загружает билд и делает его активным;
                     // sel.value после renderTree выставит преселект выше.
-                    if (sel.value !== '') this.loadBuild(clsId, +sel.value);
+                    this.loadBuild(clsId, +sel.value);
                 };
 
                 delBtn.onclick = () => {
@@ -672,20 +853,95 @@
 
             const importBtn = document.querySelector(`.sim-import-btn[data-import="${clsId}"]`);
             if (importBtn) importBtn.onclick = () => this.importBuild(clsId);
+
+            // Перерисовка пересоздала узлы — старый тултип невалиден (позиция
+            // устарела). changeSkill() при необходимости покажет его заново.
+            this.hideTooltip();
         },
 
-        showNodeCard(clsId, nodeId, event) {
-            if (event) { event.stopPropagation(); event.preventDefault(); }
-            const x = event ? event.clientX : window.innerWidth / 2;
-            const y = event ? event.clientY : window.innerHeight / 2;
+        // ------------------------------------------------------------
+        // Тултип узла навыка (ТЗ 11.6.1d).
+        // Один общий DOM-элемент .sim-tooltip на окно планировщика:
+        //   • наведение 500 мс → только текст (без кнопок);
+        //   • клик по узлу      → текст + кнопки «− Убрать» / «+ Вложить»;
+        //   • повторный клик по тому же узлу / клик вне дерева → закрыть.
+        // Элемент — прямой ребёнок .custom-modal (НЕ внутри .sim-tree-wrap),
+        // поэтому overflow дерева его не обрезает. position: absolute, а не fixed:
+        // модалка таскается и теряет transform, absolute же всегда считается
+        // от её padding-box (модалка position: fixed), т.е. координаты стабильны.
+        // ------------------------------------------------------------
+        _clearTooltipTimer() {
+            if (this._tooltipTimer) {
+                clearTimeout(this._tooltipTimer);
+                this._tooltipTimer = null;
+            }
+        },
 
-            document.querySelectorAll('.sim-card').forEach(c => c.remove());
-            const clsData = this.skillsCache.classes.find(c => c.id === clsId);
+        _getTooltip() {
+            const body = document.getElementById('buildsim-modal-body');
+            const host = (body && body.closest('.custom-modal')) || document.body;
+            let tip = host.querySelector('.sim-tooltip');
+            // Элемент должен быть один: остатки от прошлых модалок удаляем.
+            document.querySelectorAll('.sim-tooltip').forEach(t => { if (t !== tip) t.remove(); });
+            if (!tip) {
+                tip = document.createElement('div');
+                tip.className = 'sim-tooltip';
+                host.appendChild(tip);
+            }
+            return tip;
+        },
+
+        hideTooltip() {
+            this._clearTooltipTimer();
+            this._tooltipState = null;
+            document.querySelectorAll('.sim-tooltip').forEach(tip => {
+                tip.classList.remove('on');
+                tip.innerHTML = '';
+            });
+            document.querySelectorAll('.sim-node.sim-node-active').forEach(n => n.classList.remove('sim-node-active'));
+        },
+
+        // Ставим тултип рядом с узлом: справа, если влезает, иначе слева;
+        // по вертикали — от верхней кромки узла, с прижатием к краям экрана.
+        _positionTooltip(tip, nodeEl) {
+            const host = tip.parentElement || document.body;
+            const nRect = nodeEl.getBoundingClientRect();
+            const vw = window.innerWidth || 1280;
+            const vh = window.innerHeight || 720;
+            const gap = 12, edge = 8;
+            const w = tip.offsetWidth || 280;
+            const h = tip.offsetHeight || 160;
+
+            let x = nRect.right + gap;
+            if (x + w > vw - edge) x = nRect.left - w - gap; // справа не влезает — слева
+            x = Math.max(edge, Math.min(x, vw - w - edge));
+
+            let y = nRect.top - 10;
+            y = Math.max(edge, Math.min(y, vh - h - edge));
+
+            // Пересчёт из системы окна в систему родителя (padding-box модалки).
+            const hRect = host.getBoundingClientRect();
+            const baseX = (host === document.body) ? 0 : hRect.left + host.clientLeft;
+            const baseY = (host === document.body) ? 0 : hRect.top + host.clientTop;
+
+            tip.style.left = Math.round(x - baseX) + 'px';
+            tip.style.top = Math.round(y - baseY) + 'px';
+        },
+
+        showNodeTooltip(clsId, nodeId, withControls) {
+            const classes = (this.skillsCache && Array.isArray(this.skillsCache.classes)) ? this.skillsCache.classes : [];
+            const clsData = classes.find(c => c.id === clsId);
             if (!clsData) return;
-            const branch = clsData.branches.find(b => (b.nodes || []).some(n => n.id === nodeId));
+            const branch = (clsData.branches || []).find(b => (b.nodes || []).some(n => n.id === nodeId));
             if (!branch) return;
             const node = branch.nodes.find(n => n.id === nodeId);
             if (!node) return;
+
+            // renderTree() пересоздаёт узлы — позиционируемся от актуального элемента.
+            const treeEl = document.getElementById(`tree-${clsId}`);
+            const nodeEl = treeEl ? Array.from(treeEl.querySelectorAll('.sim-node'))
+                .find(el => el.dataset.node === nodeId) : null;
+            if (!nodeEl) return; // вкладка закрыта — привязываться не к чему
 
             if (!this.simulatedSkills[clsId]) this.simulatedSkills[clsId] = {};
             const simTree = this.simulatedSkills[clsId];
@@ -701,40 +957,52 @@
             if (branchPoints < node.req) reqText = `Требуется очков в ветке: ${node.req}`;
             if (node.pre && !(simTree[node.pre] > 0)) reqText = `Сначала изучите предыдущий навык.`;
 
-            const card = document.createElement('div');
-            card.className = 'sim-card';
-            card.dataset.node = nodeId;
-            card.style.display = 'block';
-
-            const cw = 280, ch = 200;
-            let px = x + 15, py = y - 50;
-            if (px + cw > window.innerWidth) px = x - cw - 15;
-            if (py + ch > window.innerHeight) py = window.innerHeight - ch - 20;
-            if (py < 20) py = 20;
-            card.style.left = px + 'px';
-            card.style.top = py + 'px';
-
-            card.innerHTML = `
-                <div class="sim-card-close">✖</div>
-                <h4>${node.name} <span>${rank}/${node.max}</span></h4>
+            const tip = this._getTooltip();
+            tip.dataset.cls = clsId;
+            tip.dataset.node = nodeId;
+            tip.classList.add('on');
+            tip.innerHTML = `
+                ${withControls ? '<div class="sim-tooltip-close" title="Закрыть">✖</div>' : ''}
+                <h4>${Utils.escapeHtml(node.name)} <span>${rank}/${node.max}</span></h4>
                 <div class="desc">${this.formatNodeText(node, rank)}</div>
                 ${reqText ? `<div class="req">${reqText}</div>` : ''}
-                <div class="controls">
-                    <button data-action="minus" ${rank === 0 ? 'disabled' : ''}>- Убрать</button>
-                    <button data-action="plus" ${maxed || locked ? 'disabled' : ''}>+ Вложить</button>
-                </div>`;
-            document.body.appendChild(card);
+                ${withControls ? `<div class="controls">
+                    <button type="button" data-action="minus" ${rank === 0 ? 'disabled' : ''}>− Убрать</button>
+                    <button type="button" data-action="plus" ${maxed || locked ? 'disabled' : ''}>+ Вложить</button>
+                </div>` : ''}`;
 
-            card.querySelector('.sim-card-close').addEventListener('click', (e) => {
-                e.stopPropagation();
-                card.remove();
-            });
-            card.querySelectorAll('button[data-action]').forEach(btn => {
+            // Позиция — после вставки контента: нужны реальные offsetWidth/Height.
+            this._positionTooltip(tip, nodeEl);
+
+            document.querySelectorAll('.sim-node.sim-node-active').forEach(n => n.classList.remove('sim-node-active'));
+            nodeEl.classList.add('sim-node-active');
+
+            const closeBtn = tip.querySelector('.sim-tooltip-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.hideTooltip();
+                });
+            }
+
+            // stopPropagation обязателен: иначе клик по кнопке всплывёт до document
+            // и тултип закроется раньше, чем отработает changeSkill().
+            tip.querySelectorAll('button[data-action]').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const delta = btn.dataset.action === 'plus' ? 1 : -1;
                     this.changeSkill(clsId, node.id, delta, node.max, node.pre || null, node.req || 0, branchIds, e);
                 });
             });
+
+            this._tooltipState = { clsId, nodeId, mode: withControls ? 'click' : 'hover' };
+        },
+
+        // Алиас для старых вызовов: карточка .sim-card заменена общим тултипом
+        // (ТЗ 11.6.1d). Поведение как у клика по узлу — с кнопками +/−.
+        showNodeCard(clsId, nodeId, event) {
+            if (event) { event.stopPropagation(); event.preventDefault(); }
+            this._clearTooltipTimer();
+            this.showNodeTooltip(clsId, nodeId, true);
         }
     };
