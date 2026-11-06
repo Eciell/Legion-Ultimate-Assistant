@@ -8,7 +8,7 @@
         _currentBuildName: '', // имя последнего сохранённого/загруженного билда (для будущих фич UI)
         _currentBuildNames: {}, // { [clsId]: name } — активный билд каждого класса (нужен для кнопки «Удалить»)
         _autoLoadClass: null, // класс, чей билд пришёл ссылкой #build=… (вкладку открываем после создания табов)
-        _tooltipTimer: null, // setTimeout hover-тултипа узла (750 мс, ТЗ 11.6.1e)
+        _tooltipTimer: null, // setTimeout hover-тултипа узла (500 мс, ТЗ 11.6.1e)
         _tooltipState: null, // { clsId, nodeId, mode: 'hover'|'click' } — что сейчас показано
 
         statNames: { hp: 'Макс. HP', atk: 'Физ. урон', mag: 'Магия', def: 'Броня', crit: 'Крит %', critDmg: 'Сила крита', dodge: 'Уклонение', pierce: 'Пробивание', healPow: 'Сила лечения', luck: 'Удача', resist: 'Сопротивление' },
@@ -20,7 +20,15 @@
          * цветная рамка/текст на тёмной подложке, активный — заливка цветом.
          * recruit в нативном списке не подсвечивался — нейтральный серо-золотой.
          */
-        classColors: { recruit: '#d7d3c8', legionary: '#ff7b7b', archer: '#7bff7b', mage: '#7bbaff', priest: '#ffcf4a', rogue: '#b57bff', necromancer: '#a67cff', paladin: '#ffdf7b' },
+        classColors: { recruit: '#d7d3c8', legionary: '#ff7b7b', archer: '#7bff7b', mage: '#7bbaff', priest: '#ffcf4a', rogue: '#d4aaff', necromancer: '#7c52cc', paladin: '#ffdf7b' },
+
+        /*
+         * Цвет текста НА заливке цвета класса (активный таб, ТЗ 11.6.1e).
+         * Правило контраста: светлая заливка (Жрец, Паладин, Разбойник #d4aaff) —
+         * тёмный текст #12100e; тёмная заливка (Некромант #7c52cc) — белый.
+         * Кладётся в CSS-переменную --ct (значение по умолчанию — тёмное).
+         */
+        classTextColors: { necromancer: '#fff' },
 
         /*
          * Словарь нативных SVG-иконок игры (viewBox 0 0 24 24, stroke=currentColor).
@@ -217,9 +225,11 @@
                 // Табы классов: компактные (34px) с нативной SVG-иконкой класса.
                 let tabsHtml = `<button class="modal-tab sim-tab active" data-tab="gear">${this.getClassSvg('gear')}Экипировка</button>`;
                 allClasses.forEach(c => {
-                    // --c: цвет класса из classColors (стили таба — в styles.js).
+                    // --c: цвет класса из classColors (стили таба — в styles.js);
+                    // --ct: цвет текста на заливке (classTextColors, ТЗ 11.6.1e).
                     const color = this.classColors[c.id] || '#caa55c';
-                    tabsHtml += `<button class="modal-tab sim-tab" data-tab="${c.id}" style="--c:${color}">${this.getClassSvg(c.id)}${this.classNames[c.id] || c.name || c.id}</button>`;
+                    const textColor = this.classTextColors[c.id] || '#12100e';
+                    tabsHtml += `<button class="modal-tab sim-tab" data-tab="${c.id}" style="--c:${color};--ct:${textColor}">${this.getClassSvg(c.id)}${this.classNames[c.id] || c.name || c.id}</button>`;
                 });
 
                 let contentHtml = `
@@ -736,13 +746,13 @@
                 const nodeCls = el.dataset.cls;
                 const nodeId = el.dataset.node;
 
-                // Наведение: через 750 мс показываем тултип ТОЛЬКО с текстом.
+                // Наведение: через 500 мс показываем тултип ТОЛЬКО с текстом.
                 el.addEventListener('mouseenter', () => {
                     this._clearTooltipTimer();
                     this._tooltipTimer = setTimeout(() => {
                         this._tooltipTimer = null;
                         this.showNodeTooltip(nodeCls, nodeId, false);
-                    }, 750);
+                    }, 500);
                 });
 
                 // Мышь ушла раньше таймера — отменяем; висящий hover-тултип прячем.
@@ -852,7 +862,7 @@
         // ------------------------------------------------------------
         // Тултип узла навыка (ТЗ 11.6.1d).
         // Один общий DOM-элемент .sim-tooltip на окно планировщика:
-        //   • наведение 750 мс → только текст (без кнопок);
+        //   • наведение 500 мс → только текст (без кнопок);
         //   • клик по узлу      → текст + кнопки «− Убрать» / «+ Вложить»;
         //   • повторный клик по тому же узлу / клик вне дерева → закрыть.
         // Элемент — прямой ребёнок .custom-modal (НЕ внутри .sim-tree-wrap),

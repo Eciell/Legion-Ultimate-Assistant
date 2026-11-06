@@ -136,12 +136,14 @@
         /* Табы классов планировщика: компактные (34px), с SVG-иконкой класса. */
         .modal-tab.sim-tab { height: 34px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; box-sizing: border-box; }
         .modal-tab.sim-tab .sim-svg { width: 16px; height: 16px; }
-        /* Цвет класса в --c (инлайн-стиль таба из BuildSim.classColors, v11.6.1d):
+        /* Цвет класса в --c (инлайн-стиль таба из BuildSim.classColors, v11.6.1d),
+           цвет текста на заливке — в --ct (BuildSim.classTextColors, v11.6.1e):
            неактивный — тёмная подложка + цветная рамка/текст,
-           активный — заливка цветом класса с тёмным текстом (как у Жреца в игре). */
+           активный — заливка цветом класса; текст тёмный на светлых цветах
+           (Жрец, Паладин, Разбойник) и белый на тёмных (Некромант). */
         .modal-tab.sim-tab { border: 2px solid var(--c, #caa55c); color: var(--c, #ffcf6a); background: rgba(0, 0, 0, 0.25); }
         .modal-tab.sim-tab:hover { border-color: var(--c, #caa55c); color: var(--c, #ffcf6a); background: rgba(0, 0, 0, 0.45); }
-        .modal-tab.sim-tab.active { background: var(--c, #caa55c); border-color: var(--c, #caa55c); color: #12100e; }
+        .modal-tab.sim-tab.active { background: var(--c, #caa55c); border-color: var(--c, #caa55c); color: var(--ct, #12100e); }
         .sim-load-select option { background: #0f0f15; color: #fff; }
         .build-right { width: 250px; flex-shrink: 0; background: #1e1724; padding: 15px; border-radius: 8px; border: 1px solid #3d2f44; height: fit-content; }
         /* Панель статов справа */
