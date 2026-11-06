@@ -12,12 +12,19 @@
  * Math.random() не используется нигде: предсказуемый токен = чужая пати.
  */
 import { Database } from 'bun:sqlite';
-import { join } from 'node:path';
+import { resolve, join } from 'node:path';
 
 // DB_PATH — для тестов и для деплоя (например, /var/lib/legion-party/party.sqlite).
-const DB_PATH = process.env.DB_PATH || join(import.meta.dir, 'data.sqlite');
+// v11.6.1-extra: относительный путь из env резолвим от cwd процесса — иначе
+// такой путь уезжает в рабочий каталог systemd/контейнера и файл БД
+// появляется там, где его никто не ищет (в т.ч. при скачивании базы).
+const DB_PATH = process.env.DB_PATH ? resolve(process.env.DB_PATH) : join(import.meta.dir, 'data.sqlite');
 
 const db = new Database(DB_PATH, { create: true });
+
+// Печатаем фактический путь и cwd: без этого непонятно, какую именно базу
+// открыл процесс (важно для деплоя и для диагностики «пустой» data.sqlite).
+console.log(`[legion-party] SQLite подключен: ${DB_PATH} (cwd: ${process.cwd()})`);
 
 // WAL: чтение members не блокируется записью join/kick.
 db.exec('PRAGMA journal_mode = WAL;');
@@ -152,6 +159,10 @@ db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_session_member ON sessions(member
 // invite_token — первичный ключ входа в пати: дубликат сделал бы join
 // неоднозначным, поэтому уникальность гарантирует сама БД, а не код.
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_party_invite ON parties(invite_token);');
+
+// Сбрасываем схему таблиц из WAL в основной файл data.sqlite,
+// чтобы при скачивании база не была пустой.
+db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
 
 /* ------------------------------------------------------------------ */
 /* Генерация идентификаторов                                           */
@@ -694,4 +705,34 @@ export function getStats() {
         dau: countStatsSinceStmt.get({ $threshold: now - DAY_MS }).n,
         mau: countStatsSinceStmt.get({ $threshold: now - 30 * DAY_MS }).n
     };
+}
+
+/* ------------------------------------------------------------------ */
+/* Обслуживание WAL (v11.6.1-extra)                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Мягкий чекпоинт WAL: переносит готовые страницы из -wal в основной файл,
+ * не блокируя читателей и не обрывая активные транзакции.
+ *
+ * Вызывается по таймеру (раз в 5 минут, см. server/index.js) и при остановке
+ * сервера. PASSIVE выбран специально: он не ждёт читателей, поэтому не может
+ * подвесить event loop Bun. Ошибки гасим здесь же — обслуживание БД не должно
+ * ронять процесс.
+ */
+export function checkpointDb() {
+    try { db.exec('PRAGMA wal_checkpoint(PASSIVE);'); }
+    catch (err) { console.error('[legion-party] Ошибка wal_checkpoint:', err); }
+}
+
+/**
+ * Корректное закрытие БД: TRUNCATE-чекпоинт переносит ВСЕ страницы из -wal
+ * в data.sqlite и обнуляет журнал, после чего соединение закрывается.
+ *
+ * Нужен для graceful shutdown: без него последние записи остаются в
+ * data.sqlite-wal, и скачанный файл data.sqlite выглядит устаревшим.
+ */
+export function closeDb() {
+    try { db.exec('PRAGMA wal_checkpoint(TRUNCATE);'); db.close(); }
+    catch (err) { console.error('[legion-party] Ошибка при закрытии БД:', err); }
 }

@@ -35,7 +35,9 @@
 import {
     addLog,
     bindSession,
+    checkpointDb,
     cleanupActiveUsers,
+    closeDb,
     createParty,
     deleteParty,
     getActiveUsers,
@@ -78,7 +80,7 @@ const API_KEY = process.env.LGU_API_KEY || 'LGU-default-secret-key-change-me';
 // и раз в час показывает GM_notification, поэтому при релизе версию надо
 // поднимать и здесь, и в src/header-*.js — иначе уведомление будет приходить
 // даже тем, кто уже обновился (их GM_info всё ещё покажет старую версию).
-const LATEST_VERSION = '11.6.1';
+const LATEST_VERSION = '11.6.1-extra';
 const UPDATE_URL = 'https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js';
 
 // Логин хранится и сравнивается ТОЛЬКО в нижнем регистре: игра отдаёт ник
@@ -799,3 +801,21 @@ const server = Bun.serve({
 
 // v11.6.0e: печатаем фактический bind (hostname может быть 0.0.0.0), а не localhost.
 console.log(`[legion-party] слушаю http://${hostname}:${server.port}`);
+
+// v11.6.1-extra: периодический PASSIVE-чекпоинт WAL (раз в 5 минут).
+// Без него в data.sqlite-wal могут копиться страницы, и скачанный файл
+// data.sqlite отстаёт от реального состояния базы.
+setInterval(() => { checkpointDb(); }, 5 * 60 * 1000);
+
+// Корректное завершение (v11.6.1-extra): платформа шлёт SIGTERM при
+// передеплое/остановке контейнера, локальная разработка — SIGINT (Ctrl+C).
+// Порядок важен: сначала перестаём принимать запросы, затем TRUNCATE-чекпоинт
+// и closeDb(), чтобы все страницы уже лежали в основном файле БД.
+const shutdown = () => {
+    console.log('[legion-party] Остановка сервера...');
+    server.stop();
+    closeDb();
+    process.exit(0);
+};
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
