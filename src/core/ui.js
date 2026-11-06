@@ -229,6 +229,16 @@
                     Chat.setAddonHighlight(e.target.checked);
                 }
             });
+
+            // 11.6.1g: тумблер уведомлений о новых версиях.
+            // Дефолт — включено (ключа в localStorage ещё нет). Значение читает
+            // Chat.checkForUpdates() перед GM_notification.
+            const notifyOn = localStorage.getItem('LEGION_UPDATE_NOTIFY') !== 'false';
+            const notifyChk = modal.querySelector('#modal-chk-update-notify');
+            if (notifyChk) notifyChk.checked = notifyOn;
+            notifyChk?.addEventListener('change', (e) => {
+                localStorage.setItem('LEGION_UPDATE_NOTIFY', String(e.target.checked));
+            });
         },
         // 🏰 Карманный город вынесен в modules/pocket-city.js (v11.6.0, этап 3):
         //    UI.openPocketCity()     -> PocketCity.open()

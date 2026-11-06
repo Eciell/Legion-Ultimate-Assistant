@@ -849,7 +849,12 @@
 
                 // GM_notification/GM_openInTab требуют @grant в шапке; проверка
                 // typeof оставлена, чтобы в менеджере без этих API аддон не падал.
-                if (typeof GM_notification === 'function') {
+                // v11.6.1g: настройка «🔔 Уведомлять о новых версиях» (дефолт —
+                // включено). Проверка версии выше всё равно выполняется, поэтому
+                // троттлинг lgUpdateCheck обновляется, а уведомление просто не
+                // показывается при выключенном тумблере.
+                const notifyOn = localStorage.getItem('LEGION_UPDATE_NOTIFY') !== 'false';
+                if (notifyOn && typeof GM_notification === 'function') {
                     GM_notification({
                         title: 'Legion Ultimate Assistant',
                         text: `Вышла новая версия ${res.version}. Нажмите, чтобы обновить.`,

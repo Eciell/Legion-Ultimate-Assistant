@@ -1692,6 +1692,14 @@
                         <span>⚡ Подсветка ников Legion</span>
                         <input type="checkbox" id="modal-chk-addon-hl" style="width:16px; height:16px; accent-color:#00f0ff;" ${addonHighlight ? 'checked' : ''}>
                     </label>
+                    <!-- v11.6.1g: тумблер уведомлений о новых версиях.
+                         Состояние ставит и сохраняет UI.openSettings() (localStorage
+                         'LEGION_UPDATE_NOTIFY'), сама проверка версии в chat-net.js
+                         продолжает работать — просто молча. -->
+                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
+                        <span>🔔 Уведомлять о новых версиях</span>
+                        <input type="checkbox" id="modal-chk-update-notify" style="width:16px; height:16px; accent-color:#ffcf6a;">
+                    </label>
                 </div>
             `;
         },
@@ -2162,6 +2170,16 @@
                 if (typeof Chat !== 'undefined' && typeof Chat.setAddonHighlight === 'function') {
                     Chat.setAddonHighlight(e.target.checked);
                 }
+            });
+
+            // 11.6.1g: тумблер уведомлений о новых версиях.
+            // Дефолт — включено (ключа в localStorage ещё нет). Значение читает
+            // Chat.checkForUpdates() перед GM_notification.
+            const notifyOn = localStorage.getItem('LEGION_UPDATE_NOTIFY') !== 'false';
+            const notifyChk = modal.querySelector('#modal-chk-update-notify');
+            if (notifyChk) notifyChk.checked = notifyOn;
+            notifyChk?.addEventListener('change', (e) => {
+                localStorage.setItem('LEGION_UPDATE_NOTIFY', String(e.target.checked));
             });
         },
         // 🏰 Карманный город вынесен в modules/pocket-city.js (v11.6.0, этап 3):
@@ -8905,7 +8923,12 @@ const Players = {
 
                 // GM_notification/GM_openInTab требуют @grant в шапке; проверка
                 // typeof оставлена, чтобы в менеджере без этих API аддон не падал.
-                if (typeof GM_notification === 'function') {
+                // v11.6.1g: настройка «🔔 Уведомлять о новых версиях» (дефолт —
+                // включено). Проверка версии выше всё равно выполняется, поэтому
+                // троттлинг lgUpdateCheck обновляется, а уведомление просто не
+                // показывается при выключенном тумблере.
+                const notifyOn = localStorage.getItem('LEGION_UPDATE_NOTIFY') !== 'false';
+                if (notifyOn && typeof GM_notification === 'function') {
                     GM_notification({
                         title: 'Legion Ultimate Assistant',
                         text: `Вышла новая версия ${res.version}. Нажмите, чтобы обновить.`,

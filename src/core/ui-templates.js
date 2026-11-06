@@ -99,6 +99,14 @@
                         <span>⚡ Подсветка ников Legion</span>
                         <input type="checkbox" id="modal-chk-addon-hl" style="width:16px; height:16px; accent-color:#00f0ff;" ${addonHighlight ? 'checked' : ''}>
                     </label>
+                    <!-- v11.6.1g: тумблер уведомлений о новых версиях.
+                         Состояние ставит и сохраняет UI.openSettings() (localStorage
+                         'LEGION_UPDATE_NOTIFY'), сама проверка версии в chat-net.js
+                         продолжает работать — просто молча. -->
+                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
+                        <span>🔔 Уведомлять о новых версиях</span>
+                        <input type="checkbox" id="modal-chk-update-notify" style="width:16px; height:16px; accent-color:#ffcf6a;">
+                    </label>
                 </div>
             `;
         },
