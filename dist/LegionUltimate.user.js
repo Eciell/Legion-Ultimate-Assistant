@@ -993,6 +993,9 @@
         /* Пати: компактный крестик в правом верхнем углу заголовка (v11.6.0a). */
         .party-close { border-radius: 5px; transition: color 0.2s, background 0.2s; }
         .party-close:hover { color: #fff; background: rgba(255, 143, 163, 0.14); }
+        /* Планировщик билдов (v11.6.1d): модалка выше (95vh), чтобы дерево
+           навыков влезало целиком без внутреннего скролла. */
+        .custom-modal.sim-modal, .${DOM_IDS.customModal}.sim-modal { max-height: 95vh; }
         .modal-tabs { display: flex; gap: 10px; margin-bottom: 15px; border-bottom: 1px solid #444; padding-bottom: 10px; flex-wrap: wrap; }
         .modal-tab { background: #2a2030; border: 1px solid #555; color: #ccc; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: all 0.2s; }
         .modal-tab:hover { background: #3a2c40; color: #fff; }
@@ -1004,7 +1007,10 @@
            Источник: reference/LegionFrontSRC/site/skills.css (.skx-*).
            Сетка сжата под 1920x1080: TH=95, TOP=30, BOT=45, BH=455.
            ============================================================ */
-        .sim-tree-wrap { flex: 1; min-width: 0; background: #16121a !important; border: 1px solid #3d2f44; border-radius: 8px; box-shadow: inset 0 0 20px rgba(0,0,0,0.6); position: relative; overflow: auto; max-height: calc(88vh - 170px); display: flex; flex-direction: column; }
+        /* v11.6.1d: внутренний скролл убран — при max-height: 95vh дерево
+           (панель 38 + отступы + шапки веток 28 + поле 455) влезает целиком.
+           overflow: visible, чтобы не обрезались свечения узлов. */
+        .sim-tree-wrap { flex: 1; min-width: 0; background: #16121a !important; border: 1px solid #3d2f44; border-radius: 8px; box-shadow: inset 0 0 20px rgba(0,0,0,0.6); position: relative; overflow: visible; display: flex; flex-direction: column; }
         .sim-tree-inner { min-width: 820px; padding: 12px; display: flex; flex-direction: column; height: auto; flex-shrink: 0; background: transparent !important; position: relative; }
         /* Верхняя панель: ровно одна строка 38px (очки / билды / обмен). */
         .sim-top-bar { display: flex; align-items: center; gap: 8px; height: 38px; min-height: 38px; margin-bottom: 10px; padding: 0 8px; background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px; position: relative; z-index: 10; }
@@ -1064,6 +1070,9 @@
         .sim-node.has .sim-node-icon { background: var(--bc, var(--tb-gold)); border: 3px solid var(--tb-ink); color: var(--tb-ink); box-shadow: 0 0 0 3px var(--tb-slate), 0 0 0 5px var(--bc, var(--tb-gold)); }
         .sim-node.has .sim-node-icon .sim-svg.so { fill-opacity: 0.4; }
         .sim-node.maxed .sim-node-icon { box-shadow: 0 0 0 3px var(--tb-slate), 0 0 0 5px var(--tb-gold); }
+        /* Узел, чей тултип сейчас открыт (outline — чтобы не спорить с box-shadow
+           состояний has/maxed/available). */
+        .sim-node.sim-node-active .sim-node-icon { outline: 2px solid #caa55c; outline-offset: 3px; }
         .sim-node-ranks { display: flex; gap: 3px; margin-top: 2px; padding: 1px 4px; border-radius: 7px; background: var(--tb-slate, #25302c); }
         .sim-node-ranks i { width: 6px; height: 6px; border-radius: 50%; background: var(--tb-slate3, #19211e); border: 1.5px solid color-mix(in srgb, var(--tb-chalk) 45%, transparent); }
         .sim-node-ranks i.filled { background: var(--bc, var(--tb-gold)); border-color: var(--bc, var(--tb-gold)); }
@@ -1077,9 +1086,32 @@
         .sim-card button { background: #caa55c; border: 2px solid #2b1d18; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; color: #2b1d18; font-size: 13px; }
         .sim-card button:disabled { opacity: 0.5; cursor: not-allowed; }
         .sim-card-close { position: absolute; top: 8px; right: 8px; cursor: pointer; font-size: 16px; color: #888; }
+        /* Тултип узла навыка (v11.6.1d).
+           Один элемент на модалку, position: absolute: containing block —
+           padding-box .custom-modal (она position: fixed), поэтому overflow
+           дерева его не режет, а координаты не зависят от transform модалки.
+           Видимость переключает класс .on (BuildSim.showNodeTooltip/hideTooltip). */
+        .sim-tooltip { position: absolute; top: 0; left: 0; z-index: 10001; display: none; box-sizing: border-box; width: 290px; max-width: calc(100vw - 16px); padding: 12px 14px; background: rgba(22, 16, 12, 0.98); color: #f4f1e4; border: 2px solid #caa55c; border-radius: 10px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.7); font: 13px/1.35 'Nunito', system-ui, sans-serif; text-align: left; }
+        .sim-tooltip.on { display: block; }
+        .sim-tooltip h4 { margin: 0 22px 6px 0; padding: 0; border: none; font-size: 15px; line-height: 1.25; color: #ffcf6a; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+        .sim-tooltip h4 span { flex: none; font-size: 12px; font-weight: 700; color: #c9d2c3; }
+        .sim-tooltip .desc { margin-bottom: 8px; font-size: 13px; line-height: 1.35; }
+        .sim-tooltip .req { margin-bottom: 8px; font-size: 12px; font-weight: 700; color: #ff8fa3; }
+        .sim-tooltip .controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; }
+        .sim-tooltip button { flex: 1; padding: 6px 8px; background: #caa55c; color: #1d1620; border: 2px solid #2b1d18; border-radius: 6px; font-family: inherit; font-size: 12px; font-weight: 700; line-height: 1.2; cursor: pointer; }
+        .sim-tooltip button:hover:not(:disabled) { filter: brightness(1.12); }
+        .sim-tooltip button:disabled { opacity: 0.45; cursor: not-allowed; }
+        .sim-tooltip-close { position: absolute; top: 6px; right: 8px; font-size: 13px; line-height: 1; color: #c9b184; cursor: pointer; user-select: none; }
+        .sim-tooltip-close:hover { color: #fff; }
         /* Табы классов планировщика: компактные (34px), с SVG-иконкой класса. */
         .modal-tab.sim-tab { height: 34px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; box-sizing: border-box; }
         .modal-tab.sim-tab .sim-svg { width: 16px; height: 16px; }
+        /* Цвет класса в --c (инлайн-стиль таба из BuildSim.classColors, v11.6.1d):
+           неактивный — тёмная подложка + цветная рамка/текст,
+           активный — заливка цветом класса с тёмным текстом (как у Жреца в игре). */
+        .modal-tab.sim-tab { border: 2px solid var(--c, #caa55c); color: var(--c, #ffcf6a); background: rgba(0, 0, 0, 0.25); }
+        .modal-tab.sim-tab:hover { border-color: var(--c, #caa55c); color: var(--c, #ffcf6a); background: rgba(0, 0, 0, 0.45); }
+        .modal-tab.sim-tab.active { background: var(--c, #caa55c); border-color: var(--c, #caa55c); color: #12100e; }
         .sim-load-select option { background: #0f0f15; color: #fff; }
         .build-right { width: 250px; flex-shrink: 0; background: #1e1724; padding: 15px; border-radius: 8px; border: 1px solid #3d2f44; height: fit-content; }
         /* Панель статов справа */
@@ -2616,10 +2648,19 @@
         _currentBuildName: '', // имя последнего сохранённого/загруженного билда (для будущих фич UI)
         _currentBuildNames: {}, // { [clsId]: name } — активный билд каждого класса (нужен для кнопки «Удалить»)
         _autoLoadClass: null, // класс, чей билд пришёл ссылкой #build=… (вкладку открываем после создания табов)
+        _tooltipTimer: null, // setTimeout hover-тултипа узла (750 мс, ТЗ 11.6.1e)
+        _tooltipState: null, // { clsId, nodeId, mode: 'hover'|'click' } — что сейчас показано
 
         statNames: { hp: 'Макс. HP', atk: 'Физ. урон', mag: 'Магия', def: 'Броня', crit: 'Крит %', critDmg: 'Сила крита', dodge: 'Уклонение', pierce: 'Пробивание', healPow: 'Сила лечения', luck: 'Удача', resist: 'Сопротивление' },
         fxNames: { melee: 'Физ. урон %', magic: 'Магия %', hp: 'Макс. HP %', def: 'Броня', healPow: 'Сила лечения %', healIn: 'Вх. лечение %', crit: 'Крит %', critDmg: 'Сила крита', skel: 'Урон скелетов %', skelT: 'Время скелетов', leech: 'Вампиризм %', block: 'Снижение урона %', dodge: 'Уклонение %', lead: 'Урон по боссам %', first: 'Урон 1-й ход %', dmg: 'Весь урон %', pierce: 'Пробивание %', resist: 'Сопротивление', healCrit: 'Крит лечения %', regen: 'Регенерация %', low: 'Урон при низком HP %', a_siyanie: 'Сияние +%', a_obereg: 'Оберег +%', a_dlan: 'Длань +%', a_aura: 'Аура +%', aura: 'Аура −урон %', a_svet: 'Свет +%', a_vspyshka: 'Вспышка +%', a_oznob: 'Озноб +%', a_pricel: 'Прицел +%', a_grad: 'Град +%', a_natisk: 'Натиск +%', a_stoyka: 'Стойка +%', a_vspinu: 'Вспину +%', a_yad: 'Яд +%', a_vytyanut: 'Вытянуть +%', a_podnyat: 'Поднять +%', poison: 'Отрава %', steal: 'Кража %', loot: 'Добыча %', skelN: 'Скелетов +', volley: 'Залп +%', shieldBlock: 'Щит блок %', trapDodge: 'Ловушки %', steady: 'Промах→удар %', cleave: 'Замах %', cleaveBoss: 'Замах по боссу %', penBoss: 'Бронебой по боссу %', drain: 'Вытягивание %', hex: 'Проклятие +%', holy: 'По нежити +%', poisonT: 'Время отравы' },
         classNames: { recruit: 'Новобранец', legionary: 'Легионер', archer: 'Лучник', mage: 'Маг', priest: 'Жрец', rogue: 'Разбойник', necromancer: 'Некромант', paladin: 'Паладин' },
+        /*
+         * Цвета кнопок классов — из нативного экрана игры (ТЗ 11.6.1d, скрин 4).
+         * Значение кладётся в CSS-переменную --c таба класса: неактивный таб —
+         * цветная рамка/текст на тёмной подложке, активный — заливка цветом.
+         * recruit в нативном списке не подсвечивался — нейтральный серо-золотой.
+         */
+        classColors: { recruit: '#d7d3c8', legionary: '#ff7b7b', archer: '#7bff7b', mage: '#7bbaff', priest: '#ffcf4a', rogue: '#b57bff', necromancer: '#a67cff', paladin: '#ffdf7b' },
 
         /*
          * Словарь нативных SVG-иконок игры (viewBox 0 0 24 24, stroke=currentColor).
@@ -2750,15 +2791,22 @@
         init() {
             // Кнопка теперь принадлежит HeroPlanner — см. src/modules/hero-planner.js.
             // BuildSim остаётся как модуль и открывается из таба «Билды».
+            // Клик вне узла/тултипа закрывает тултип навыка (ТЗ 11.6.1d).
             document.addEventListener('click', (e) => {
-                if (!e.target.closest('.sim-node') && !e.target.closest('.sim-card')) {
-                    document.querySelectorAll('.sim-card').forEach(c => c.remove());
-                }
+                // Клики внутри тултипа (кнопки +/−, крестик) и по узлу обрабатывают
+                // свои слушатели — здесь их не трогаем, иначе тултип закроется раньше.
+                const t = e.target;
+                if (t && t.closest && (t.closest('.sim-tooltip') || t.closest('.sim-node'))) return;
+                // Старые карточки .sim-card (до v11.6.1d) могли остаться в DOM — чистим.
+                document.querySelectorAll('.sim-card').forEach(c => c.remove());
+                this.hideTooltip();
             });
         },
 
         async open() {
-            const modal = UI.showModal(`<h2>🧮 Планировщик билдов <button class="custom-close" id="custom-close-btn">✖</button></h2><div id="buildsim-modal-body" style="display:flex; flex-direction:column; flex:1; min-height:0;"></div>`);
+            // sim-modal: отдельный класс модалки — в styles.js ему поднята max-height
+            // до 95vh, чтобы дерево навыков влезало целиком без внутреннего скролла.
+            const modal = UI.showModal(`<h2>🧮 Планировщик билдов <button class="custom-close" id="custom-close-btn">✖</button></h2><div id="buildsim-modal-body" style="display:flex; flex-direction:column; flex:1; min-height:0;"></div>`, { customClass: 'sim-modal' });
             const body = modal.querySelector('#buildsim-modal-body');
             if (body) await this.mount(body);
         },
@@ -2775,6 +2823,9 @@
             // Сохранённые билды поднимаем до парсинга /api/me и /api/skills,
             // чтобы UI успел отрисовать список «Мои билды» при первом renderTree.
             this.loadSavedBuilds();
+            // Тултип узла от прошлой сессии не должен «воскресать» при повторном
+            // открытии модалки (state хранится на объекте BuildSim).
+            this.hideTooltip();
             // Очки при каждом открытии начинаются с нуля (this.simulatedSkills = {}),
             // поэтому и «активного» билда нет: кнопка «Удалить» до выбора/загрузки
             // честно попросит выбрать билд.
@@ -2806,7 +2857,9 @@
                 // Табы классов: компактные (34px) с нативной SVG-иконкой класса.
                 let tabsHtml = `<button class="modal-tab sim-tab active" data-tab="gear">${this.getClassSvg('gear')}Экипировка</button>`;
                 allClasses.forEach(c => {
-                    tabsHtml += `<button class="modal-tab sim-tab" data-tab="${c.id}">${this.getClassSvg(c.id)}${this.classNames[c.id] || c.name || c.id}</button>`;
+                    // --c: цвет класса из classColors (стили таба — в styles.js).
+                    const color = this.classColors[c.id] || '#caa55c';
+                    tabsHtml += `<button class="modal-tab sim-tab" data-tab="${c.id}" style="--c:${color}">${this.getClassSvg(c.id)}${this.classNames[c.id] || c.name || c.id}</button>`;
                 });
 
                 let contentHtml = `
@@ -2846,14 +2899,14 @@
                                     <div class="sim-top-bar">
                                         <div class="sim-free-pts">Свободно: <b id="free-${c.id}">0</b> / ${MAX_POINTS}</div>
                                         <div class="sim-bar-sep"></div>
-                                        <button class="sim-save-btn" data-save="${c.id}" title="Сохранить билд (имя спросим)">💾 Сохранить</button>
+                                        <button class="sim-save-btn" data-save="${c.id}" title="Сохранить билд (имя спросим)">Сохранить</button>
+                                        <button class="sim-share-btn" data-share="${c.id}" title="Поделиться билдом">Поделиться</button>
+                                        <button class="sim-import-btn" data-import="${c.id}" title="Импортировать билд">Импорт</button>
+                                        <div class="sim-bar-sep"></div>
                                         <select id="load-select-${c.id}" class="sim-load-select" title="Мои билды">
                                             <option value="">— Мои билды —</option>
                                         </select>
                                         <button class="sim-del-btn" data-del="${c.id}" title="Удалить выбранный билд">🗑️</button>
-                                        <div class="sim-bar-sep"></div>
-                                        <button class="sim-share-btn" data-share="${c.id}" title="Поделиться билдом">📤 Поделиться</button>
-                                        <button class="sim-import-btn" data-import="${c.id}" title="Импортировать билд">📥 Импорт</button>
                                         <button class="sim-reset-btn" data-reset="${c.id}" title="Сбросить все навыки">Сбросить всё</button>
                                     </div>
                                     <div class="sim-branches" id="tree-${c.id}"></div>
@@ -2873,6 +2926,9 @@
 
                 container.querySelectorAll('.modal-tab').forEach(tab => {
                     tab.addEventListener('click', () => {
+                        // Тултип узла относится к дереву текущей вкладки — прячем его
+                        // при переключении класса (ТЗ 11.6.1d).
+                        this.hideTooltip();
                         container.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
                         container.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
                         tab.classList.add('active');
@@ -2901,6 +2957,11 @@
 
         resetBuild(clsId) {
             this.simulatedSkills[clsId] = {};
+            // ТЗ 11.6.1d, п. 2.1: «Сбросить всё» НЕ должно подставлять последний
+            // сохранённый билд. Забываем активный билд класса — тогда renderTree()
+            // вернёт <select> к плейсхолдеру «— Мои билды —», а не к старой записи.
+            this._setCurrentBuild(clsId, '');
+            this.hideTooltip();
             this.renderTree(clsId);
             document.querySelectorAll('.sim-card').forEach(c => c.remove());
         },
@@ -3198,9 +3259,13 @@
             }
             simTree[nodeId] = Math.max(0, current + delta);
             if (simTree[nodeId] === 0) delete simTree[nodeId];
+            // renderTree() пересоздаёт узлы и прячет тултип, поэтому запоминаем его
+            // состояние до перерисовки и восстанавливаем после (ТЗ 11.6.1d).
+            const tipState = this._tooltipState ? { ...this._tooltipState } : null;
             this.renderTree(clsId);
-            const card = document.querySelector('.sim-card');
-            if (card && card.dataset.node === nodeId) this.showNodeCard(clsId, nodeId, null);
+            if (tipState && tipState.clsId === clsId && tipState.nodeId === nodeId) {
+                this.showNodeTooltip(clsId, nodeId, tipState.mode === 'click');
+            }
         },
 
         renderTree(clsId) {
@@ -3308,9 +3373,34 @@
             container.innerHTML = html;
 
             container.querySelectorAll('.sim-node').forEach(el => {
+                const nodeCls = el.dataset.cls;
+                const nodeId = el.dataset.node;
+
+                // Наведение: через 750 мс показываем тултип ТОЛЬКО с текстом.
+                el.addEventListener('mouseenter', () => {
+                    this._clearTooltipTimer();
+                    this._tooltipTimer = setTimeout(() => {
+                        this._tooltipTimer = null;
+                        this.showNodeTooltip(nodeCls, nodeId, false);
+                    }, 750);
+                });
+
+                // Мышь ушла раньше таймера — отменяем; висящий hover-тултип прячем.
+                el.addEventListener('mouseleave', () => {
+                    this._clearTooltipTimer();
+                    if (this._tooltipState && this._tooltipState.mode === 'hover') this.hideTooltip();
+                });
+
+                // Клик: тултип с кнопками +/−; повторный клик по тому же узлу закрывает.
                 el.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    this.showNodeCard(el.dataset.cls, el.dataset.node, e);
+                    const st = this._tooltipState;
+                    if (st && st.mode === 'click' && st.clsId === nodeCls && st.nodeId === nodeId) {
+                        this.hideTooltip();
+                        return;
+                    }
+                    this._clearTooltipTimer();
+                    this.showNodeTooltip(nodeCls, nodeId, true);
                 });
             });
 
@@ -3362,9 +3452,15 @@
                 };
 
                 sel.onchange = () => {
+                    // Плейсхолдер «— Мои билды —» = пустое дерево (ТЗ 11.6.1d, п. 2.2):
+                    // раньше выбор дефолтного пункта ничего не делал и билд оставался.
+                    if (sel.value === '') {
+                        this.resetBuild(clsId);
+                        return;
+                    }
                     // Выбор в списке сразу загружает билд и делает его активным;
                     // sel.value после renderTree выставит преселект выше.
-                    if (sel.value !== '') this.loadBuild(clsId, +sel.value);
+                    this.loadBuild(clsId, +sel.value);
                 };
 
                 delBtn.onclick = () => {
@@ -3387,20 +3483,95 @@
 
             const importBtn = document.querySelector(`.sim-import-btn[data-import="${clsId}"]`);
             if (importBtn) importBtn.onclick = () => this.importBuild(clsId);
+
+            // Перерисовка пересоздала узлы — старый тултип невалиден (позиция
+            // устарела). changeSkill() при необходимости покажет его заново.
+            this.hideTooltip();
         },
 
-        showNodeCard(clsId, nodeId, event) {
-            if (event) { event.stopPropagation(); event.preventDefault(); }
-            const x = event ? event.clientX : window.innerWidth / 2;
-            const y = event ? event.clientY : window.innerHeight / 2;
+        // ------------------------------------------------------------
+        // Тултип узла навыка (ТЗ 11.6.1d).
+        // Один общий DOM-элемент .sim-tooltip на окно планировщика:
+        //   • наведение 750 мс → только текст (без кнопок);
+        //   • клик по узлу      → текст + кнопки «− Убрать» / «+ Вложить»;
+        //   • повторный клик по тому же узлу / клик вне дерева → закрыть.
+        // Элемент — прямой ребёнок .custom-modal (НЕ внутри .sim-tree-wrap),
+        // поэтому overflow дерева его не обрезает. position: absolute, а не fixed:
+        // модалка таскается и теряет transform, absolute же всегда считается
+        // от её padding-box (модалка position: fixed), т.е. координаты стабильны.
+        // ------------------------------------------------------------
+        _clearTooltipTimer() {
+            if (this._tooltipTimer) {
+                clearTimeout(this._tooltipTimer);
+                this._tooltipTimer = null;
+            }
+        },
 
-            document.querySelectorAll('.sim-card').forEach(c => c.remove());
-            const clsData = this.skillsCache.classes.find(c => c.id === clsId);
+        _getTooltip() {
+            const body = document.getElementById('buildsim-modal-body');
+            const host = (body && body.closest('.custom-modal')) || document.body;
+            let tip = host.querySelector('.sim-tooltip');
+            // Элемент должен быть один: остатки от прошлых модалок удаляем.
+            document.querySelectorAll('.sim-tooltip').forEach(t => { if (t !== tip) t.remove(); });
+            if (!tip) {
+                tip = document.createElement('div');
+                tip.className = 'sim-tooltip';
+                host.appendChild(tip);
+            }
+            return tip;
+        },
+
+        hideTooltip() {
+            this._clearTooltipTimer();
+            this._tooltipState = null;
+            document.querySelectorAll('.sim-tooltip').forEach(tip => {
+                tip.classList.remove('on');
+                tip.innerHTML = '';
+            });
+            document.querySelectorAll('.sim-node.sim-node-active').forEach(n => n.classList.remove('sim-node-active'));
+        },
+
+        // Ставим тултип рядом с узлом: справа, если влезает, иначе слева;
+        // по вертикали — от верхней кромки узла, с прижатием к краям экрана.
+        _positionTooltip(tip, nodeEl) {
+            const host = tip.parentElement || document.body;
+            const nRect = nodeEl.getBoundingClientRect();
+            const vw = window.innerWidth || 1280;
+            const vh = window.innerHeight || 720;
+            const gap = 12, edge = 8;
+            const w = tip.offsetWidth || 280;
+            const h = tip.offsetHeight || 160;
+
+            let x = nRect.right + gap;
+            if (x + w > vw - edge) x = nRect.left - w - gap; // справа не влезает — слева
+            x = Math.max(edge, Math.min(x, vw - w - edge));
+
+            let y = nRect.top - 10;
+            y = Math.max(edge, Math.min(y, vh - h - edge));
+
+            // Пересчёт из системы окна в систему родителя (padding-box модалки).
+            const hRect = host.getBoundingClientRect();
+            const baseX = (host === document.body) ? 0 : hRect.left + host.clientLeft;
+            const baseY = (host === document.body) ? 0 : hRect.top + host.clientTop;
+
+            tip.style.left = Math.round(x - baseX) + 'px';
+            tip.style.top = Math.round(y - baseY) + 'px';
+        },
+
+        showNodeTooltip(clsId, nodeId, withControls) {
+            const classes = (this.skillsCache && Array.isArray(this.skillsCache.classes)) ? this.skillsCache.classes : [];
+            const clsData = classes.find(c => c.id === clsId);
             if (!clsData) return;
-            const branch = clsData.branches.find(b => (b.nodes || []).some(n => n.id === nodeId));
+            const branch = (clsData.branches || []).find(b => (b.nodes || []).some(n => n.id === nodeId));
             if (!branch) return;
             const node = branch.nodes.find(n => n.id === nodeId);
             if (!node) return;
+
+            // renderTree() пересоздаёт узлы — позиционируемся от актуального элемента.
+            const treeEl = document.getElementById(`tree-${clsId}`);
+            const nodeEl = treeEl ? Array.from(treeEl.querySelectorAll('.sim-node'))
+                .find(el => el.dataset.node === nodeId) : null;
+            if (!nodeEl) return; // вкладка закрыта — привязываться не к чему
 
             if (!this.simulatedSkills[clsId]) this.simulatedSkills[clsId] = {};
             const simTree = this.simulatedSkills[clsId];
@@ -3416,41 +3587,53 @@
             if (branchPoints < node.req) reqText = `Требуется очков в ветке: ${node.req}`;
             if (node.pre && !(simTree[node.pre] > 0)) reqText = `Сначала изучите предыдущий навык.`;
 
-            const card = document.createElement('div');
-            card.className = 'sim-card';
-            card.dataset.node = nodeId;
-            card.style.display = 'block';
-
-            const cw = 280, ch = 200;
-            let px = x + 15, py = y - 50;
-            if (px + cw > window.innerWidth) px = x - cw - 15;
-            if (py + ch > window.innerHeight) py = window.innerHeight - ch - 20;
-            if (py < 20) py = 20;
-            card.style.left = px + 'px';
-            card.style.top = py + 'px';
-
-            card.innerHTML = `
-                <div class="sim-card-close">✖</div>
-                <h4>${node.name} <span>${rank}/${node.max}</span></h4>
+            const tip = this._getTooltip();
+            tip.dataset.cls = clsId;
+            tip.dataset.node = nodeId;
+            tip.classList.add('on');
+            tip.innerHTML = `
+                ${withControls ? '<div class="sim-tooltip-close" title="Закрыть">✖</div>' : ''}
+                <h4>${Utils.escapeHtml(node.name)} <span>${rank}/${node.max}</span></h4>
                 <div class="desc">${this.formatNodeText(node, rank)}</div>
                 ${reqText ? `<div class="req">${reqText}</div>` : ''}
-                <div class="controls">
-                    <button data-action="minus" ${rank === 0 ? 'disabled' : ''}>- Убрать</button>
-                    <button data-action="plus" ${maxed || locked ? 'disabled' : ''}>+ Вложить</button>
-                </div>`;
-            document.body.appendChild(card);
+                ${withControls ? `<div class="controls">
+                    <button type="button" data-action="minus" ${rank === 0 ? 'disabled' : ''}>− Убрать</button>
+                    <button type="button" data-action="plus" ${maxed || locked ? 'disabled' : ''}>+ Вложить</button>
+                </div>` : ''}`;
 
-            card.querySelector('.sim-card-close').addEventListener('click', (e) => {
-                e.stopPropagation();
-                card.remove();
-            });
-            card.querySelectorAll('button[data-action]').forEach(btn => {
+            // Позиция — после вставки контента: нужны реальные offsetWidth/Height.
+            this._positionTooltip(tip, nodeEl);
+
+            document.querySelectorAll('.sim-node.sim-node-active').forEach(n => n.classList.remove('sim-node-active'));
+            nodeEl.classList.add('sim-node-active');
+
+            const closeBtn = tip.querySelector('.sim-tooltip-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.hideTooltip();
+                });
+            }
+
+            // stopPropagation обязателен: иначе клик по кнопке всплывёт до document
+            // и тултип закроется раньше, чем отработает changeSkill().
+            tip.querySelectorAll('button[data-action]').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const delta = btn.dataset.action === 'plus' ? 1 : -1;
                     this.changeSkill(clsId, node.id, delta, node.max, node.pre || null, node.req || 0, branchIds, e);
                 });
             });
+
+            this._tooltipState = { clsId, nodeId, mode: withControls ? 'click' : 'hover' };
+        },
+
+        // Алиас для старых вызовов: карточка .sim-card заменена общим тултипом
+        // (ТЗ 11.6.1d). Поведение как у клика по узлу — с кнопками +/−.
+        showNodeCard(clsId, nodeId, event) {
+            if (event) { event.stopPropagation(); event.preventDefault(); }
+            this._clearTooltipTimer();
+            this.showNodeTooltip(clsId, nodeId, true);
         }
     };
 

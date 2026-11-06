@@ -23,6 +23,9 @@
         /* Пати: компактный крестик в правом верхнем углу заголовка (v11.6.0a). */
         .party-close { border-radius: 5px; transition: color 0.2s, background 0.2s; }
         .party-close:hover { color: #fff; background: rgba(255, 143, 163, 0.14); }
+        /* Планировщик билдов (v11.6.1d): модалка выше (95vh), чтобы дерево
+           навыков влезало целиком без внутреннего скролла. */
+        .custom-modal.sim-modal, .${DOM_IDS.customModal}.sim-modal { max-height: 95vh; }
         .modal-tabs { display: flex; gap: 10px; margin-bottom: 15px; border-bottom: 1px solid #444; padding-bottom: 10px; flex-wrap: wrap; }
         .modal-tab { background: #2a2030; border: 1px solid #555; color: #ccc; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: all 0.2s; }
         .modal-tab:hover { background: #3a2c40; color: #fff; }
@@ -34,7 +37,10 @@
            Источник: reference/LegionFrontSRC/site/skills.css (.skx-*).
            Сетка сжата под 1920x1080: TH=95, TOP=30, BOT=45, BH=455.
            ============================================================ */
-        .sim-tree-wrap { flex: 1; min-width: 0; background: #16121a !important; border: 1px solid #3d2f44; border-radius: 8px; box-shadow: inset 0 0 20px rgba(0,0,0,0.6); position: relative; overflow: auto; max-height: calc(88vh - 170px); display: flex; flex-direction: column; }
+        /* v11.6.1d: внутренний скролл убран — при max-height: 95vh дерево
+           (панель 38 + отступы + шапки веток 28 + поле 455) влезает целиком.
+           overflow: visible, чтобы не обрезались свечения узлов. */
+        .sim-tree-wrap { flex: 1; min-width: 0; background: #16121a !important; border: 1px solid #3d2f44; border-radius: 8px; box-shadow: inset 0 0 20px rgba(0,0,0,0.6); position: relative; overflow: visible; display: flex; flex-direction: column; }
         .sim-tree-inner { min-width: 820px; padding: 12px; display: flex; flex-direction: column; height: auto; flex-shrink: 0; background: transparent !important; position: relative; }
         /* Верхняя панель: ровно одна строка 38px (очки / билды / обмен). */
         .sim-top-bar { display: flex; align-items: center; gap: 8px; height: 38px; min-height: 38px; margin-bottom: 10px; padding: 0 8px; background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px; position: relative; z-index: 10; }
@@ -94,6 +100,9 @@
         .sim-node.has .sim-node-icon { background: var(--bc, var(--tb-gold)); border: 3px solid var(--tb-ink); color: var(--tb-ink); box-shadow: 0 0 0 3px var(--tb-slate), 0 0 0 5px var(--bc, var(--tb-gold)); }
         .sim-node.has .sim-node-icon .sim-svg.so { fill-opacity: 0.4; }
         .sim-node.maxed .sim-node-icon { box-shadow: 0 0 0 3px var(--tb-slate), 0 0 0 5px var(--tb-gold); }
+        /* Узел, чей тултип сейчас открыт (outline — чтобы не спорить с box-shadow
+           состояний has/maxed/available). */
+        .sim-node.sim-node-active .sim-node-icon { outline: 2px solid #caa55c; outline-offset: 3px; }
         .sim-node-ranks { display: flex; gap: 3px; margin-top: 2px; padding: 1px 4px; border-radius: 7px; background: var(--tb-slate, #25302c); }
         .sim-node-ranks i { width: 6px; height: 6px; border-radius: 50%; background: var(--tb-slate3, #19211e); border: 1.5px solid color-mix(in srgb, var(--tb-chalk) 45%, transparent); }
         .sim-node-ranks i.filled { background: var(--bc, var(--tb-gold)); border-color: var(--bc, var(--tb-gold)); }
@@ -107,9 +116,32 @@
         .sim-card button { background: #caa55c; border: 2px solid #2b1d18; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; color: #2b1d18; font-size: 13px; }
         .sim-card button:disabled { opacity: 0.5; cursor: not-allowed; }
         .sim-card-close { position: absolute; top: 8px; right: 8px; cursor: pointer; font-size: 16px; color: #888; }
+        /* Тултип узла навыка (v11.6.1d).
+           Один элемент на модалку, position: absolute: containing block —
+           padding-box .custom-modal (она position: fixed), поэтому overflow
+           дерева его не режет, а координаты не зависят от transform модалки.
+           Видимость переключает класс .on (BuildSim.showNodeTooltip/hideTooltip). */
+        .sim-tooltip { position: absolute; top: 0; left: 0; z-index: 10001; display: none; box-sizing: border-box; width: 290px; max-width: calc(100vw - 16px); padding: 12px 14px; background: rgba(22, 16, 12, 0.98); color: #f4f1e4; border: 2px solid #caa55c; border-radius: 10px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.7); font: 13px/1.35 'Nunito', system-ui, sans-serif; text-align: left; }
+        .sim-tooltip.on { display: block; }
+        .sim-tooltip h4 { margin: 0 22px 6px 0; padding: 0; border: none; font-size: 15px; line-height: 1.25; color: #ffcf6a; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+        .sim-tooltip h4 span { flex: none; font-size: 12px; font-weight: 700; color: #c9d2c3; }
+        .sim-tooltip .desc { margin-bottom: 8px; font-size: 13px; line-height: 1.35; }
+        .sim-tooltip .req { margin-bottom: 8px; font-size: 12px; font-weight: 700; color: #ff8fa3; }
+        .sim-tooltip .controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; }
+        .sim-tooltip button { flex: 1; padding: 6px 8px; background: #caa55c; color: #1d1620; border: 2px solid #2b1d18; border-radius: 6px; font-family: inherit; font-size: 12px; font-weight: 700; line-height: 1.2; cursor: pointer; }
+        .sim-tooltip button:hover:not(:disabled) { filter: brightness(1.12); }
+        .sim-tooltip button:disabled { opacity: 0.45; cursor: not-allowed; }
+        .sim-tooltip-close { position: absolute; top: 6px; right: 8px; font-size: 13px; line-height: 1; color: #c9b184; cursor: pointer; user-select: none; }
+        .sim-tooltip-close:hover { color: #fff; }
         /* Табы классов планировщика: компактные (34px), с SVG-иконкой класса. */
         .modal-tab.sim-tab { height: 34px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; box-sizing: border-box; }
         .modal-tab.sim-tab .sim-svg { width: 16px; height: 16px; }
+        /* Цвет класса в --c (инлайн-стиль таба из BuildSim.classColors, v11.6.1d):
+           неактивный — тёмная подложка + цветная рамка/текст,
+           активный — заливка цветом класса с тёмным текстом (как у Жреца в игре). */
+        .modal-tab.sim-tab { border: 2px solid var(--c, #caa55c); color: var(--c, #ffcf6a); background: rgba(0, 0, 0, 0.25); }
+        .modal-tab.sim-tab:hover { border-color: var(--c, #caa55c); color: var(--c, #ffcf6a); background: rgba(0, 0, 0, 0.45); }
+        .modal-tab.sim-tab.active { background: var(--c, #caa55c); border-color: var(--c, #caa55c); color: #12100e; }
         .sim-load-select option { background: #0f0f15; color: #fff; }
         .build-right { width: 250px; flex-shrink: 0; background: #1e1724; padding: 15px; border-radius: 8px; border: 1px solid #3d2f44; height: fit-content; }
         /* Панель статов справа */
