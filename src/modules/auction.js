@@ -1,5 +1,11 @@
     // ============================================================
     // 5. МОДУЛЬ: СКАНЕР АУКЦИОНА
+    //
+    // v11.6.2c.1: статистика цен на нашем сервере. Каждое открытие витрины
+    // даёт снимок цен (цена за штуку, свои лоты отброшены) — пачка уходит в
+    // POST /market/scan не чаще раза в 5 минут, а медианы по всем игрокам с
+    // аддоном подтягиваются GET /market/medians и кладутся в marketMedians
+    // (тултип колонки «Медиана»). Расчёты выгоды по-прежнему локальные.
     // ============================================================
     const Auction = {
         cityStockMap: new Map(),
@@ -48,6 +54,24 @@
         // Конфиг аукциона канала из /api/auction (feePct/feeMin/com/maxLots/hours).
         // Нужен справке (showInfo), чтобы не показывать чужие числа.
         cfg: null,
+
+        // 11.6.2c.1: статистика цен на нашем сервере (legion.ctrlfree.host).
+        // marketMedians — { id: медиана } из GET /market/medians, только для
+        //   отображения (тултип колонки «Медиана»);
+        // marketScanBuffer — наблюдения {id, price} (цена за штуку), ещё не
+        //   отправленные в POST /market/scan. Копится между открытиями
+        //   витрины, поэтому пачка содержит несколько снимков цен.
+        marketMedians: {},
+        marketScanBuffer: [],
+        marketScanSentAt: 0,
+        marketScanPending: false,
+        // Троттлинг отправки (ТЗ 11.6.2c.1: раз в 5 минут) и пределы, которые
+        // ждёт сервер (см. MARKET_LIMITS в server/db.js).
+        MARKET_SYNC_MS: 5 * 60 * 1000,
+        MARKET_MAX_BATCH: 500,
+        MARKET_MAX_IDS: 200,
+        MARKET_TIMEOUT: 12000,
+        MARKET_WAIT_MS: 1200,
 
         // Базовая ценность (v) по редкости — фолбэк, если сервер не прислал
         // items[id].v (ивентовые и новые предметы). Значения из game-data.js
@@ -125,6 +149,224 @@
             })();
 
             return this.cityStockLoading;
+        },
+
+        /* ---------------------------------------------------------- */
+        /* 11.6.2c.1: сканер цен и медианы нашего сервера              */
+        /* ---------------------------------------------------------- */
+
+        /**
+         * Адрес и ключ нашего сервера.
+         *
+         * Хранятся в модуле «Пати» (Party.getBaseUrl / Party.API_KEY), поэтому
+         * берём их оттуда, а фолбэки совпадают с DEFAULT_BASE_URL/API_KEY из
+         * party.js. Модуль Party объявлен ниже в сборке, но Auction.open()
+         * вызывается уже после инициализации всех модулей — TDZ не мешает.
+         */
+        marketServer() {
+            let base = 'https://legion.ctrlfree.host';
+            let key = 'LGU-default-secret-key-change-me';
+            try {
+                if (typeof Party !== 'undefined' && Party) {
+                    if (typeof Party.getBaseUrl === 'function') base = Party.getBaseUrl() || base;
+                    if (typeof Party.API_KEY === 'string' && Party.API_KEY) key = Party.API_KEY;
+                }
+            } catch (e) {
+                // Нет модуля «Пати» (урезанная сборка) — работаем на фолбэках.
+                dbg('[AUCTION] Party недоступен, берём адрес сервера по умолчанию:', e);
+            }
+            return { base: String(base).replace(/\/+$/, ''), key };
+        },
+
+        /**
+         * Запрос к /market/* нашего сервера.
+         *
+         * Только GM_xmlhttpRequest: домен сервера чужой для игры, нативный
+         * fetch упёрся бы в CSP `connect-src 'self'` (AGENTS.md §3). Заголовок
+         * X-Legion-Key обязателен — без него сервер отвечает 401 ещё до
+         * роутинга (Bearer здесь не нужен, статистика общая).
+         *
+         * @param {string} method
+         * @param {string} path    например '/market/scan'
+         * @param {object|null} body
+         * @returns {Promise<object|null>}
+         */
+        _marketRequest(method, path, body = null) {
+            const { base, key } = this.marketServer();
+            const url = base + path;
+
+            return new Promise((resolve, reject) => {
+                if (typeof GM_xmlhttpRequest !== 'function') {
+                    reject(new Error('GM_xmlhttpRequest недоступен: проверьте @grant в шапке'));
+                    return;
+                }
+
+                GM_xmlhttpRequest({
+                    method,
+                    url,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Legion-Key': key
+                    },
+                    data: body === null ? undefined : JSON.stringify(body),
+                    timeout: this.MARKET_TIMEOUT,
+                    onload: (res) => {
+                        let payload = null;
+                        try {
+                            payload = res.responseText ? JSON.parse(res.responseText) : null;
+                        } catch (e) {
+                            payload = null;
+                        }
+                        if (res.status >= 200 && res.status < 300) {
+                            resolve(payload);
+                            return;
+                        }
+                        const err = new Error(payload?.message || `HTTP ${res.status}`);
+                        err.status = res.status;
+                        reject(err);
+                    },
+                    onerror: () => reject(new Error(`Сервер статистики недоступен: ${url}`)),
+                    ontimeout: () => reject(new Error(`Сервер статистики не ответил за ${this.MARKET_TIMEOUT / 1000} с: ${url}`)),
+                    onabort: () => reject(new Error('Запрос статистики отменён'))
+                });
+            });
+        },
+
+        /**
+         * Снимок витрины -> наблюдения цен для POST /market/scan.
+         *
+         * Цена берётся ЗА ШТУКУ (l.p / l.n): в l.p лежит сумма за стопку, а
+         * медиана считается по одной единице — ровно так же, как локальная
+         * статистика модуля (groups.prices). Свои лоты не учитываем: иначе
+         * игрок сам себе двигал бы медиану, выставляя «удобные» цены.
+         *
+         * @param {Array<object>} lots лоты из GET /api/auction
+         * @returns {string[]} id предметов снимка (для GET /market/medians)
+         */
+        collectMarketPrices(lots) {
+            const ids = [];
+            const seen = new Set();
+            if (!Array.isArray(lots) || !lots.length) return ids;
+
+            const myNick = String(this.myNick || '').toLowerCase();
+            for (const lot of lots) {
+                const id = String((lot && lot.i) || '').trim();
+                const total = Number(lot && lot.p);
+                if (!id || !Number.isFinite(total) || total <= 0) continue;
+
+                const seller = String((lot && lot.s) || '').toLowerCase();
+                if (myNick && seller === myNick) continue;
+
+                const qty = Math.max(1, Number(lot && lot.n) || 1);
+                const unit = Math.max(1, Math.round(total / qty));
+
+                if (!seen.has(id)) {
+                    seen.add(id);
+                    ids.push(id);
+                }
+                // Буфер ограничен размером пачки сервера: лишние наблюдения
+                // просто не копим (следующее открытие витрины их повторит).
+                if (this.marketScanBuffer.length < this.MARKET_MAX_BATCH) {
+                    this.marketScanBuffer.push({ id, price: unit });
+                }
+            }
+            return ids;
+        },
+
+        /**
+         * Отправка накопленных наблюдений в POST /market/scan.
+         *
+         * Троттлинг 5 минут (ТЗ 11.6.2c.1): витрину можно открывать сколько
+         * угодно раз, а сервер получает не больше одной пачки в окно. Пока
+         * запрос в полёте, новый не начинаем — иначе на медленной сети
+         * получались бы дубли и лишние 429.
+         */
+        flushMarketScan() {
+            if (this.marketScanPending || !this.marketScanBuffer.length) return;
+            const now = Date.now();
+            if (now - this.marketScanSentAt < this.MARKET_SYNC_MS) return;
+
+            const lots = this.marketScanBuffer.slice(0, this.MARKET_MAX_BATCH);
+            // Буфер очищаем сразу: даже при ошибке повторять эти же цены
+            // бессмысленно — следующее открытие витрины принесёт свежие.
+            this.marketScanBuffer = [];
+            this.marketScanSentAt = now;
+            this.marketScanPending = true;
+
+            this._marketRequest('POST', '/market/scan', { lots })
+                .then((res) => { dbg('[AUCTION] Цены отправлены на сервер:', res && res.count); })
+                .catch((e) => { dbg('[AUCTION] Отправка цен не удалась:', e); })
+                .finally(() => { this.marketScanPending = false; });
+        },
+
+        /**
+         * GET /market/medians?ids=… — медианы по всем игрокам с аддоном.
+         *
+         * Результат кладём в this.marketMedians ({ id: цена }). null от сервера
+         * («наблюдений за 7 дней нет») в объект не попадает: отсутствие ключа
+         * и означает «данных нет», тултип в этом случае не рисуется.
+         *
+         * @param {string[]} ids
+         */
+        async fetchMarketMedians(ids) {
+            const list = [];
+            for (const raw of Array.isArray(ids) ? ids : []) {
+                const id = String(raw || '').trim();
+                if (!id || list.includes(id)) continue;
+                list.push(id);
+                if (list.length >= this.MARKET_MAX_IDS) break;
+            }
+            if (!list.length) return;
+
+            // Запятые кодируются вместе со списком: сервер разбирает ids через
+            // searchParams.get('ids') и получает исходную строку.
+            const res = await this._marketRequest('GET', '/market/medians?ids=' + encodeURIComponent(list.join(',')));
+            const medians = res && res.medians;
+            if (!medians || typeof medians !== 'object') return;
+
+            const next = {};
+            for (const id of list) {
+                const price = Math.round(Number(medians[id]));
+                if (Number.isFinite(price) && price > 0) next[id] = price;
+            }
+            this.marketMedians = next;
+        },
+
+        /**
+         * Синхронизация статистики по снимку витрины (v11.6.2c.1):
+         *   1) собираем наблюдения цен и раз в 5 минут шлём пачку на сервер;
+         *   2) тянем медианы и кладём их в память модуля.
+         *
+         * Медианы ждём не дольше MARKET_WAIT_MS: если наш сервер молчит,
+         * витрина всё равно откроется и покажет локальную медиану.
+         *
+         * @param {Array<object>} lots лоты из GET /api/auction
+         */
+        async syncMarketData(lots) {
+            const ids = this.collectMarketPrices(lots);
+            this.flushMarketScan();
+            if (!ids.length) return;
+
+            const medians = this.fetchMarketMedians(ids).catch((e) => {
+                dbg('[AUCTION] Медианы сервера недоступны:', e);
+            });
+            await Promise.race([
+                medians,
+                new Promise((resolve) => setTimeout(resolve, this.MARKET_WAIT_MS))
+            ]);
+        },
+
+        /**
+         * title для ячейки «Медиана»: медиана сети из памяти модуля.
+         * Пустая строка, если по предмету наблюдений нет (v11.6.2c.1).
+         *
+         * @param {string} itemId
+         * @returns {string}
+         */
+        marketMedianTitle(itemId) {
+            const net = +this.marketMedians[itemId] || 0;
+            if (net <= 0) return '';
+            return ` title="Медиана сети (7 дн.): ${Utils.formatMoney(net)}"`;
         },
 
         // 11.5.5: базовая стоимость предмета (v) для расчёта «Вложено».
@@ -413,6 +655,13 @@
                 const histMap = res.hist || res.body?.hist || {};
                 // Конфиг канала: сбор за выставление, комиссия, сроки, лимит лотов.
                 this.cfg = res.cfg || res.body?.cfg || null;
+
+                // 11.6.2c.1: статистика цен. Вызываем после того, как известен
+                // ник (по нему отбрасываются свои лоты), но до отрисовки —
+                // медианы сети нужны для тултипа колонки «Медиана». Ждём их не
+                // дольше MARKET_WAIT_MS, так что недоступный сервер витрину не
+                // задерживает.
+                await this.syncMarketData(lots);
 
                 // Новый скан витрины — всегда с первой страницы.
                 this.currentPage = 0;
@@ -716,7 +965,7 @@
                             <td>${qtyStr}</td>
                             <td style="color:#ffcf6a; font-weight:bold;">${totalPriceStr}</td>
                             <td style="font-weight:bold;">${Utils.formatMoney(l.unitPrice)}</td>
-                            <td>${Utils.formatMoney(l.median)}</td>
+                            <td${this.marketMedianTitle(l.id)}>${Utils.formatMoney(l.median)}</td>
                             <td>${npcHtml}</td>
                             <td style="color:#d8c9a8;">${investedHtml}</td>
                             <td class="${cls}">${l.discount > 0 ? '-' : '+'}${Math.abs(l.discount)}%</td>

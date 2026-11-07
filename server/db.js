@@ -127,6 +127,29 @@ CREATE TABLE IF NOT EXISTS users_stats (
 CREATE INDEX IF NOT EXISTS idx_stats_seen ON users_stats(last_seen);
 `);
 
+/*
+ * market_prices (v11.6.2c.1) — цены аукциона, которые присылают клиенты.
+ *
+ * Строка = одно наблюдение «предмет стоил N меди в момент created_at».
+ * Медиана считается по этим наблюдениям (см. getMedians), поэтому храним
+ * сырые цены, а не готовую статистику: так можно менять окно/алгоритм, не
+ * теряя данные. Ретеншн — 7 дней (MARKET_LIMITS.retentionMs), старые строки
+ * удаляются прямо в addMarketPrices(): отдельный таймер не нужен, сканер и
+ * так пишет каждые несколько минут.
+ *
+ * id — произвольная строка (id предмета игры, например wood_club), индекс
+ * idx_market_item обязателен: медиана идёт по WHERE item_id IN (...).
+ */
+db.exec(`
+CREATE TABLE IF NOT EXISTS market_prices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id TEXT NOT NULL,
+  price INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_market_item ON market_prices(item_id);
+`);
+
 // Окно «онлайн»: heartbeat реже (30 с), так что 15 минут прощает до 30
 // пропущенных тиков (сон ноутбука, лаг вкладки, перезагрузка страницы).
 const ACTIVE_WINDOW_MS = 15 * 60 * 1000;
@@ -735,4 +758,141 @@ export function checkpointDb() {
 export function closeDb() {
     try { db.exec('PRAGMA wal_checkpoint(TRUNCATE);'); db.close(); }
     catch (err) { console.error('[legion-party] Ошибка при закрытии БД:', err); }
+}
+
+/* ------------------------------------------------------------------ */
+/* Аукцион: сканер цен (v11.6.2c.1)                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Ограничения сканера. Экспортируются, чтобы HTTP-слой (server/index.js)
+ * валидировал ровно те же числа: иначе клиент получал бы 200 на пачку,
+ * которую БД потом молча обрезала бы.
+ */
+export const MARKET_LIMITS = {
+    // Записей за один POST /market/scan (клиент присылает снимок витрины).
+    maxLotsPerScan: 500,
+    // id за один GET /market/medians (столько же кладёт клиент в запрос).
+    maxIdsPerQuery: 200,
+    // Длина id предмета: в игре это короткие слаги (wood_club), 64 — с запасом.
+    maxIdLength: 64,
+    // Верхняя граница цены: защита от мусора и переполнения INTEGER в SQLite.
+    maxPrice: 1_000_000_000,
+    // Окно статистики: наблюдения старше 7 дней удаляются (ТЗ 11.6.2c.1).
+    retentionMs: 7 * 24 * 60 * 60 * 1000
+};
+
+const deleteStaleMarketPricesStmt = db.query(
+    'DELETE FROM market_prices WHERE created_at <= $threshold'
+);
+const insertMarketPriceStmt = db.query(
+    'INSERT INTO market_prices (item_id, price, created_at) VALUES ($item, $price, $created)'
+);
+
+/*
+ * Медиана считается в SQL (ТЗ 11.6.2c.1): нумеруем цены внутри предмета по
+ * возрастанию и берём центральные строки.
+ *   • нечётное количество — одна строка: (cnt+1)/2 == (cnt+2)/2;
+ *   • чётное — две: (cnt+1)/2 и (cnt+2)/2, их среднее и даёт AVG.
+ * Деление целочисленное (SQLite: INTEGER / INTEGER -> INTEGER), поэтому
+ * дробных номеров строк не бывает. rn/cnt — оконные функции; Bun 1.4 несёт
+ * SQLite 3.4x, где они есть с версии 3.25.
+ */
+const buildMedianSql = (count) => `
+    SELECT item_id AS item_id,
+           CAST(ROUND(AVG(price)) AS INTEGER) AS median
+      FROM (
+            SELECT item_id,
+                   price,
+                   ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY price) AS rn,
+                   COUNT(*)     OVER (PARTITION BY item_id)                AS cnt
+              FROM market_prices
+             WHERE item_id IN (${new Array(count).fill('?').join(', ')})
+           )
+     WHERE rn IN ((cnt + 1) / 2, (cnt + 2) / 2)
+     GROUP BY item_id
+`;
+
+// Кэш подготовленных запросов по числу id: список IN (?, ?, …) нельзя связать
+// массивом, а пересобирать statement на каждый запрос — лишняя работа.
+const medianStmtCache = new Map();
+
+function getMedianStmt(count) {
+    let stmt = medianStmtCache.get(count);
+    if (!stmt) {
+        stmt = db.query(buildMedianSql(count));
+        medianStmtCache.set(count, stmt);
+    }
+    return stmt;
+}
+
+// Очистка старых наблюдений и вставка пачки — одной транзакцией: при сбое
+// посередине пачки не остаётся «полуснимка» витрины.
+const insertMarketBatchTx = db.transaction((rows, threshold) => {
+    deleteStaleMarketPricesStmt.run({ $threshold: threshold });
+    for (const row of rows) {
+        insertMarketPriceStmt.run({ $item: row.id, $price: row.price, $created: row.createdAt });
+    }
+});
+
+/**
+ * Массовая запись цен аукциона: одна транзакция + очистка записей старше
+ * 7 дней.
+ *
+ * Мусор внутри пачки пропускаем молча: один битый лот не должен ронять
+ * отправку всей пачки (клиент присылает снимок витрины целиком). Цена —
+ * целое > 0, id — непустая строка до maxIdLength символов.
+ *
+ * @param {Array<{id: string, price: number}>} items
+ * @returns {number} сколько наблюдений реально записано
+ */
+export function addMarketPrices(items) {
+    const list = Array.isArray(items) ? items : [];
+    const now = Date.now();
+    const rows = [];
+
+    for (const item of list) {
+        if (rows.length >= MARKET_LIMITS.maxLotsPerScan) break;
+        if (!item || typeof item !== 'object') continue;
+        const id = typeof item.id === 'string' ? item.id.trim() : '';
+        const price = Math.trunc(Number(item.price));
+        if (!id || id.length > MARKET_LIMITS.maxIdLength) continue;
+        if (!Number.isFinite(price) || price <= 0 || price > MARKET_LIMITS.maxPrice) continue;
+        rows.push({ id, price, createdAt: now });
+    }
+
+    if (!rows.length) return 0;
+    insertMarketBatchTx(rows, now - MARKET_LIMITS.retentionMs);
+    return rows.length;
+}
+
+/**
+ * Медианы по предметам за окно ретеншна.
+ *
+ * Возвращает объект ровно по запрошенным id: null означает «наблюдений нет»
+ * (клиент по null просто не показывает тултип). Пустой список -> {}.
+ *
+ * @param {string[]} itemIds
+ * @returns {Record<string, number|null>}
+ */
+export function getMedians(itemIds) {
+    const ids = [];
+    for (const raw of Array.isArray(itemIds) ? itemIds : []) {
+        const id = typeof raw === 'string' ? raw.trim() : '';
+        if (!id || id.length > MARKET_LIMITS.maxIdLength) continue;
+        if (ids.includes(id)) continue;
+        ids.push(id);
+        if (ids.length >= MARKET_LIMITS.maxIdsPerQuery) break;
+    }
+
+    const out = {};
+    for (const id of ids) out[id] = null;
+    if (!ids.length) return out;
+
+    const rows = getMedianStmt(ids.length).all(...ids);
+    for (const row of rows) {
+        const price = Number(row.median);
+        out[row.item_id] = Number.isFinite(price) && price > 0 ? price : null;
+    }
+    return out;
 }

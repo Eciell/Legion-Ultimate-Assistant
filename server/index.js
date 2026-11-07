@@ -24,6 +24,10 @@
  * {version, url} — клиент раз в час сравнивает версию с GM_info.script.version
  * и показывает GM_notification. Лимит heartbeat поднят до 6 запросов в минуту.
  *
+ * v11.6.2c.1: сканер цен аукциона — POST /market/scan {lots:[{id, price}]}
+ * пишет наблюдения в market_prices, GET /market/medians?ids=… отдаёт медианы
+ * по предметам (без Bearer: статистика общая, ников и лотов в ответе нет).
+ *
  * v11.6.0a: вход только через POST /party/join (inviteToken — первичный
  * ключ), memberId отдельно от sessionId, DELETE /party/:id/leave, логины
  * в нижнем регистре.
@@ -33,7 +37,9 @@
  * обрабатывать не нужно (и нечем: OPTIONS отдаст 405).
  */
 import {
+    MARKET_LIMITS,
     addLog,
+    addMarketPrices,
     bindSession,
     checkpointDb,
     cleanupActiveUsers,
@@ -42,6 +48,7 @@ import {
     deleteParty,
     getActiveUsers,
     getLog,
+    getMedians,
     getParty,
     getPartyByInvite,
     getSession,
@@ -100,6 +107,11 @@ const JOIN_WINDOW_MS = 60_000;
 // Тело запроса больше 4 КБ в этом API не бывает — отсекаем мусор.
 const MAX_BODY_BYTES = 4096;
 
+// v11.6.2c.1: POST /market/scan присылает снимок витрины целиком, и в 4 КБ
+// он не влезает (500 лотов * ~25 байт). Отдельный, но всё ещё скромный лимит:
+// больше пачки сканера (MARKET_LIMITS.maxLotsPerScan) тело быть не может.
+const MAX_MARKET_BODY_BYTES = 128 * 1024;
+
 // Верхняя граница HP: защита от мусора/переполнения INTEGER в SQLite
 // (реальные значения в игре — сотни, не миллионы).
 const MAX_HP = 1_000_000;
@@ -135,15 +147,20 @@ function json(data, status = 200) {
     });
 }
 
-/** Строгий разбор JSON-тела: не объект / битый JSON -> 400. */
-async function readJson(req) {
+/**
+ * Строгий разбор JSON-тела: не объект / битый JSON -> 400.
+ *
+ * maxBytes — лимит на длину тела; по умолчанию MAX_BODY_BYTES, но у
+ * /market/scan он свой (пачка лотов не влезает в 4 КБ).
+ */
+async function readJson(req, maxBytes = MAX_BODY_BYTES) {
     let text;
     try {
         text = await req.text();
     } catch (err) {
         throw new HttpError(400, 'bad_json', 'Не удалось прочитать тело запроса');
     }
-    if (text.length > MAX_BODY_BYTES) {
+    if (text.length > maxBytes) {
         throw new HttpError(413, 'body_too_large', 'Тело запроса слишком большое');
     }
     if (!text.trim()) return {};
@@ -662,6 +679,63 @@ async function handleLatestVersion() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Сканер цен аукциона (v11.6.2c.1)                                    */
+/* ------------------------------------------------------------------ */
+
+/*
+ * POST /market/scan {lots: [{id: "wood_club", price: 150}, …]}
+ *
+ * Клиент-сканер присылает снимок витрины: id предмета (лот.i) и цену ЗА
+ * ШТУКУ (лот.p / лот.n) — так же считает медиану сам модуль аукциона.
+ * Bearer не нужен: статистика общая, а тело не содержит ников — свои лоты
+ * клиент отфильтровывает ещё до отправки.
+ *
+ * Мусор ВНУТРИ пачки не роняет запрос (addMarketPrices пропускает его
+ * молча), но пустой или не-массив lots — 400: это ошибка клиента.
+ */
+async function handleMarketScan(req) {
+    const body = await readJson(req, MAX_MARKET_BODY_BYTES);
+    const lots = body.lots;
+    if (!Array.isArray(lots) || lots.length === 0) {
+        throw new HttpError(400, 'bad_lots', 'lots: непустой массив {id, price}');
+    }
+    if (lots.length > MARKET_LIMITS.maxLotsPerScan) {
+        throw new HttpError(
+            413,
+            'too_many_lots',
+            `lots: не больше ${MARKET_LIMITS.maxLotsPerScan} записей за запрос`
+        );
+    }
+
+    const count = addMarketPrices(lots);
+    return json({ ok: true, count });
+}
+
+/*
+ * GET /market/medians?ids=wood_club,iron_sword -> {medians: {id: 120|null}}
+ *
+ * Медиана считается по наблюдениям за 7 дней (см. getMedians в db.js).
+ * Ключ с null означает «данных нет» — клиент не показывает тултип.
+ * Пустой ids — 400: без списка запрос бессмысленен.
+ */
+async function handleMarketMedians(url) {
+    const raw = url.searchParams.get('ids') || '';
+    const ids = [];
+    for (const part of raw.split(',')) {
+        const id = part.trim();
+        if (!id || id.length > MARKET_LIMITS.maxIdLength) continue;
+        if (ids.includes(id)) continue;
+        ids.push(id);
+        if (ids.length >= MARKET_LIMITS.maxIdsPerQuery) break;
+    }
+    if (!ids.length) {
+        throw new HttpError(400, 'bad_ids', 'ids: список id предметов через запятую');
+    }
+
+    return json({ medians: getMedians(ids) });
+}
+
+/* ------------------------------------------------------------------ */
 /* Роутер                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -711,6 +785,21 @@ const server = Bun.serve({
                     throw new HttpError(405, 'method_not_allowed', 'Ожидается GET /latest-version');
                 }
                 return await handleLatestVersion();
+            }
+
+            // Сканер цен аукциона (v11.6.2c.1): вне /party — статистика общая
+            // для всех клиентов аддона, Bearer не нужен (ключ уже проверен).
+            if (url.pathname === '/market/scan') {
+                if (req.method !== 'POST') {
+                    throw new HttpError(405, 'method_not_allowed', 'Ожидается POST /market/scan');
+                }
+                return await handleMarketScan(req);
+            }
+            if (url.pathname === '/market/medians') {
+                if (req.method !== 'GET') {
+                    throw new HttpError(405, 'method_not_allowed', 'Ожидается GET /market/medians');
+                }
+                return await handleMarketMedians(url);
             }
 
             if (parts[0] !== 'party') {

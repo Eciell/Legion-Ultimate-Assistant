@@ -46,13 +46,14 @@
         /* ============================================================
            ДЕРЕВО НАВЫКОВ В СТИЛЕ НАТИВНОГО ЭКРАНА ИГРЫ (v11.6.1)
            Источник: reference/LegionFrontSRC/site/skills.css (.skx-*).
-           v11.6.2a.1: TH=120, TOP=40, BOT=50 -> BH=570 (узлы 48px).
+           v11.6.2a.5: TH=135, TOP=40, BOT=50 -> BH=630 (узлы 48px).
            ============================================================ */
-        /* v11.6.1d: внутренний скролл убран — при max-height: 95vh дерево
-           (панель 38 + отступы + шапки веток 28 + поле 570) влезает целиком.
+        /* v11.6.1d: внутренний скролл убран — дерево (панель 38 + отступы +
+           шапки веток 28 + поле 630) прокручивается вместе с модалкой (96vh).
            overflow: visible, чтобы не обрезались свечения узлов. */
         .sim-tree-wrap { flex: 1; min-width: 0; background: #16121a !important; border: 1px solid #3d2f44; border-radius: 8px; box-shadow: inset 0 0 20px rgba(0,0,0,0.6); position: relative; overflow: visible; display: flex; flex-direction: column; }
-        .sim-tree-inner { min-width: 820px; padding: 12px; display: flex; flex-direction: column; height: auto; flex-shrink: 0; background: transparent !important; position: relative; }
+        /* v11.6.2a.5: min-width 950px — три ветки не сжимаются «в кашу». */
+        .sim-tree-inner { min-width: 950px; padding: 12px; display: flex; flex-direction: column; height: auto; flex-shrink: 0; background: transparent !important; position: relative; }
         /* Верхняя панель: ровно одна строка 38px (очки / билды / обмен). */
         .sim-top-bar { display: flex; align-items: center; gap: 8px; height: 38px; min-height: 38px; margin-bottom: 10px; padding: 0 8px; background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px; position: relative; z-index: 10; }
         .sim-free-pts { font-size: 12px; color: var(--tb-chalk2, #c9d2c3); white-space: nowrap; }
@@ -86,8 +87,9 @@
         .sim-branch-header .sim-svg { width: 18px; height: 18px; color: var(--bc, var(--tb-gold)); }
         .sim-branch-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .sim-branch-pts { min-width: 24px; height: 24px; padding: 0 5px; display: grid; place-items: center; border-radius: 12px; background: var(--bc, var(--tb-slate3)); color: var(--tb-ink); border: 2px solid var(--tb-ink); font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
-        /* Поле узлов: высота задаётся инлайном из BH (570px). */
-        .sim-in { position: relative; height: 570px; }
+        /* Поле узлов: высота задаётся инлайном из BH (630px при TH=135).
+           Значение ниже — только fallback до первого рендера. */
+        .sim-in { position: relative; height: 630px; }
         .sim-lines { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 1; }
         .sim-lines path { fill: none; vector-effect: non-scaling-stroke; stroke-linecap: round; }
         .sim-lines .tk-bg { stroke: var(--tb-slate3, #19211e); stroke-width: 14px; }
@@ -112,10 +114,11 @@
         .sim-svg { fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
         .sim-svg.so { fill: currentColor; fill-opacity: 0.18; }
         /* Узел: круг как .skx-i в нативном дереве.
-           v11.6.2a.1: ширина 110px, кружок 48px (+3px бордюр = 54).
+           v11.6.2a.5: ширина 130px (было 110) — подписи навыков не режутся.
+           Кружок 48px (+3px бордюр = 54).
            transform -24px держит центр кружка на линии яруса (y): -24 + 54/2 ≈ y+3,
            как было при кружке 42px и сдвиге -21px. */
-        .sim-node { position: absolute; z-index: 2; transform: translate(-50%, -24px); display: grid; justify-items: center; width: 110px; cursor: pointer; }
+        .sim-node { position: absolute; z-index: 2; transform: translate(-50%, -24px); display: grid; justify-items: center; width: 130px !important; cursor: pointer; }
         .sim-node-icon { position: relative; width: 48px; height: 48px; display: grid; place-items: center; border-radius: 50%; background: var(--tb-slate2, #313f39); border: 3px solid var(--tb-chalk2, #c9d2c3); color: var(--tb-chalk, #f4f1e4); box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35); transition: translate 0.12s, box-shadow 0.12s; }
         .sim-node-icon .sim-svg { width: 26px; height: 26px; }
         .sim-node:hover { z-index: 4; }
@@ -134,7 +137,10 @@
         .sim-node-ranks { display: flex; gap: 3px; margin-top: 2px; padding: 1px 4px; border-radius: 7px; background: var(--tb-slate, #25302c); }
         .sim-node-ranks i { width: 6px; height: 6px; border-radius: 50%; background: var(--tb-slate3, #19211e); border: 1.5px solid color-mix(in srgb, var(--tb-chalk) 45%, transparent); }
         .sim-node-ranks i.filled { background: var(--bc, var(--tb-gold)); border-color: var(--bc, var(--tb-gold)); }
-        .sim-node-name { max-width: 110px; margin-top: 2px; padding: 0 3px; font-size: 12px; line-height: 1.15; font-weight: 700; text-align: center; color: var(--tb-chalk, #f4f1e4); background: var(--tb-slate, #25302c); border-radius: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; hyphens: auto; overflow-wrap: anywhere; }
+        /* v11.6.2a.5: подпись шире (130px), длинные слова переносятся
+           (word-wrap: break-word) и текст больше не обрезается по высоте —
+           -webkit-line-clamp убран, слово переносится, а не режется. */
+        .sim-node-name { max-width: 130px !important; margin-top: 2px; padding: 0 3px; font-size: 12px !important; line-height: 1.2 !important; font-weight: 700; text-align: center; color: var(--tb-chalk, #f4f1e4); background: var(--tb-slate, #25302c); border-radius: 4px; display: block; overflow: visible; hyphens: auto; word-wrap: break-word !important; overflow-wrap: anywhere; }
         .sim-node.locked .sim-node-name { color: var(--tb-chalk2, #c9d2c3); opacity: 0.8; }
         .sim-card { position: fixed; background: #f5e9c8; color: #2a2010; border: 3px solid #2b1d18; border-radius: 12px; padding: 15px; width: 280px; z-index: 10001; box-shadow: 0 10px 25px rgba(0,0,0,0.6); display: none; }
         .sim-card h4 { margin: 0 0 5px 0; font-size: 16px; color: #2b1d18; display: flex; justify-content: space-between; }
@@ -432,37 +438,56 @@
         }
 
         /* ============================================================
-           ПЛАНИРОВЩИК БИЛДОВ — СКРОЛЛ (v11.6.2a.3)
-           Реальный DOM (Live DOM): HeroPlanner монтирует BuildSim в
-           #hp-buildsim-container, а внутри — .modal-tabs +
-           .tab-content.active > .sim-tree-wrap > .sim-tree-inner.
-           Класс .sim-modal и #buildsim-modal-body жили только в
-           неиспользуемом BuildSim.open(), поэтому правила a.2 не срабатывали:
-           #hp-buildsim-container (inline overflow: auto) не мог прокрутиться,
-           т.к. вложенный .tab-content.active { flex:1; overflow:hidden }
-           сжимался под высоту контейнера и обрезал нижний ярус.
-           Теперь высоту ограничиваем контейнеру, а скроллит .sim-tree-wrap:
-           он получает конечную высоту от контейнера и прокручивает дерево.
+           ПЛАНИРОВЩИК БИЛДОВ — ПОЛНЫЙ СКРОЛЛ МОДАЛКИ (v11.6.2a.5)
+           Скроллится вся модалка целиком, включая заголовок и табы.
+           Внутренние контейнеры не режут высоту (overflow: visible).
+           Нижний ряд узлов получает запас и не обрезается.
            ============================================================ */
-        /* Контейнер планировщика: колонка с ограниченной высотой. */
+        /* 1. Модалка занимает почти весь экран; скроллит её сама (v11.6.2a.5).
+           Компактные окна (.modal-compact: настройки, пати, разведка) не
+           растягиваем — иначе их 450px-раскладка ломается. */
+        .${DOM_IDS.customModal}:not(.modal-compact), .custom-modal:not(.modal-compact) {
+            max-height: 96vh !important; /* Занимает почти весь экран по высоте */
+            height: 96vh !important;
+            max-width: 95vw !important;
+            width: 1400px !important;    /* Шире, чтобы ветки не сжимались */
+            overflow-y: auto !important;
+            overflow-x: auto !important;
+        }
+        /* 2. Снимаем flex-сжатие и overflow: hidden с вкладок планировщика */
+        #tab-hero-build {
+            overflow: visible !important;
+            flex: none !important;
+            height: auto !important;
+        }
         #hp-buildsim-container {
             display: flex !important;
             flex-direction: column !important;
-            max-height: 85vh !important; /* на ноутбуках (768–900px) дерево уходит в скролл */
-            overflow: hidden !important;
+            max-height: none !important;
+            overflow: visible !important;
+            flex: none !important;
+            height: auto !important;
+            padding-bottom: 10px !important;
         }
-        /* Обёртка дерева — единственный скроллер планировщика. */
+        #hp-buildsim-container .tab-content.active {
+            overflow: visible !important;
+            flex: none !important;
+            height: auto !important;
+        }
+        /* 3. Обертка дерева больше не изолирует внутренний скролл */
         #hp-buildsim-container .sim-tree-wrap {
+            overflow: visible !important;
             flex: 1 1 auto !important;
-            overflow-y: auto !important;
-            overflow-x: hidden !important;
-            min-height: 0 !important;
-            padding-bottom: 20px !important; /* последний ряд не прилипает к краю */
+            min-height: auto !important;
+            padding-bottom: 0 !important;
         }
-        /* Внутренний контейнер не режет контент и отдаёт высоту обёртке. */
+        /* 4. Запас хода под нижний ряд узлов (узлы выступают за sim-in 630px).
+           v11.6.2a.5: подписи больше не клипаются по 2 строки, поэтому запас
+           увеличен 45 -> 60px — трёхстрочное имя в нижнем ярусе не срезается. */
         #hp-buildsim-container .sim-tree-inner {
             overflow: visible !important;
             height: auto !important;
+            padding-bottom: 60px !important;
         }
 
     `;
