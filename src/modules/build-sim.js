@@ -269,7 +269,7 @@
                                     <div class="sim-top-bar">
                                         <div class="sim-free-pts">Свободно: <b id="free-${c.id}">0</b> / ${MAX_POINTS}</div>
                                         <div class="sim-bar-sep"></div>
-                                        <button class="sim-save-btn" data-save="${c.id}" title="Сохранить билд (имя спросим)">Сохранить</button>
+                                        <button class="sim-save-btn" data-save="${c.id}" title="Сохранить билд">Сохранить</button>
                                         <button class="sim-share-btn" data-share="${c.id}" title="Поделиться билдом">Поделиться</button>
                                         <button class="sim-import-btn" data-import="${c.id}" title="Импортировать билд">Импорт</button>
                                         <div class="sim-bar-sep"></div>
@@ -420,6 +420,86 @@
         },
 
         // ------------------------------------------------------------
+        // Инлайн-имя билда (патч 11.6.2a).
+        // Панель .sim-top-bar — одна строка 38px, поэтому вместо window.prompt()
+        // на месте кнопки «Сохранить» появляется пара «input + OK»
+        // (CSS .sim-top-bar .sim-save-name: высота 28px, шрифт 12px).
+        // Кнопку не удаляем, а прячем: её обработчик привязывается в renderTree()
+        // (.onclick идемпотентно), а Enter / Esc / клик вне панели возвращают
+        // разметку в исходное состояние.
+        // ------------------------------------------------------------
+        showSaveInline(clsId) {
+            const saveBtn = document.querySelector(`.sim-save-btn[data-save="${clsId}"]`);
+            if (!saveBtn) return;
+            const bar = saveBtn.parentElement;
+            // Повторный клик по «Сохранить» не должен плодить вторую пару.
+            const existing = bar ? bar.querySelector('.sim-save-name') : null;
+            if (existing) { existing.focus(); return; }
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'sim-save-name';
+            input.placeholder = 'Название билда';
+            input.maxLength = 40;
+            input.value = (this._currentBuildNames && this._currentBuildNames[clsId]) || 'Мой билд';
+
+            const okBtn = document.createElement('button');
+            okBtn.type = 'button';
+            okBtn.className = 'sim-save-ok';
+            okBtn.textContent = 'OK';
+            okBtn.title = 'Сохранить билд';
+
+            saveBtn.style.display = 'none';
+            // Порядок: «Сохранить» (скрыта) → input → OK.
+            saveBtn.insertAdjacentElement('afterend', okBtn);
+            saveBtn.insertAdjacentElement('afterend', input);
+
+            const close = () => {
+                document.removeEventListener('pointerdown', onOutside, true);
+                input.remove();
+                okBtn.remove();
+                saveBtn.style.display = '';
+            };
+
+            const commit = () => {
+                const name = (input.value || '').trim();
+                if (!name) {
+                    UI.showToast('Введите имя билда', true);
+                    input.focus();
+                    return;
+                }
+                // Сначала убираем пару, потом рендерим: renderTree() перерисовывает
+                // дерево и список «Мои билды», панель должна быть как обычно.
+                close();
+                if (this.saveCurrentBuild(clsId, name)) {
+                    UI.showToast('💾 Билд сохранен');
+                    this.renderTree(clsId);
+                }
+            };
+
+            const onOutside = (e) => {
+                if (bar && !bar.contains(e.target)) close();
+            };
+
+            okBtn.onclick = commit;
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    commit();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    close();
+                }
+            });
+            // pointerdown, а не click: иначе клик по узлу дерева успел бы
+            // отработать (очки/тултип) раньше, чем закроется панель.
+            document.addEventListener('pointerdown', onOutside, true);
+
+            input.focus();
+            input.select();
+        },
+
+        // ------------------------------------------------------------
         // Обмен билдами без сервера: код в Base64 + ссылка #build=<код>.
         // Формат: { cls: '<класс>', sk: { <nodeId>: <ранг> } } → JSON →
         // encodeURIComponent (гарантирует ASCII, иначе btoa бросит исключение)
@@ -554,6 +634,18 @@
             return BH - BOT - Math.round(((req || 0) / 30) * 4 * TH);
         },
 
+        // Русская форма слова «очко» для плашки гейта яруса (патч 11.6.2a):
+        // 1 очко / 2 очка / 5 очков / 11 очков / 21 очко.
+        _pointsWord(n) {
+            const abs = Math.abs(n || 0);
+            const tail100 = abs % 100;
+            const tail10 = abs % 10;
+            if (tail100 >= 11 && tail100 <= 14) return 'очков';
+            if (tail10 === 1) return 'очко';
+            if (tail10 >= 2 && tail10 <= 4) return 'очка';
+            return 'очков';
+        },
+
         changeSkill(clsId, nodeId, delta, maxRank, preNode, branchReq, branchIds, event) {
             if (event) event.stopPropagation();
             if (!this.simulatedSkills[clsId]) this.simulatedSkills[clsId] = {};
@@ -680,6 +772,25 @@
                     + `<path class="tk-on" d="M50 ${rootY} V${this.yFor(openReq)}"/>`
                     + (openReq < 30 ? `<path class="tk-off" d="M50 ${this.yFor(openReq)} V${topY}"/>` : '');
 
+                // Замочки ярусов (патч 11.6.2a, отступ пересчитан в 11.6.2a.1) —
+                // аналог .skg нативного дерева. Плашка висит на стволе между ярусами,
+                // показываем её только для ЗАКРЫТЫХ ярусов и пишем ОСТАТОК.
+                // Геометрия при TH = 120 и кружке 54px (48 + 2×3):
+                //   низ верхнего узла  ≈ y + 73  (кружок 54 + ранги 11 + подпись 2×14)
+                //   верх кружка ниже   = y + TH − 27 = y + 93
+                // центр свободной полосы ≈ y + 83…84 = y + (48 + TH) / 2 — та же
+                // нативная формула, просто теперь она даёт 84px вместо 72px.
+                // Плашка ~21px высотой целиком ложится в полосу 73…96 и не наезжает
+                // ни на подпись навыка, ни на кружок следующего яруса.
+                let gates = '';
+                [...tiers.keys()].filter(req => req > 0).sort((a, b) => b - a).forEach(req => {
+                    if (branchPoints >= req) return; // ярус уже открыт — замок не нужен
+                    const gy = this.yFor(req) + Math.round((48 + TH) / 2);
+                    const need = req - branchPoints;
+                    const tip = `Откроется при ${req} ${this._pointsWord(req)} в ветке «${Utils.escapeHtml(branch.name)}» (сейчас ${branchPoints})`;
+                    gates += `<div class="sim-gate" data-req="${req}" style="top:${gy}px" title="${tip}">🔒 <span>${need} ${this._pointsWord(need)}</span></div>`;
+                });
+
                 // Отводы к боковым узлам — кривые Безье; prereq — прямые линии.
                 nodes.forEach(node => {
                     const rank = simTree[node.id] || 0;
@@ -704,7 +815,7 @@
                 html += `<div class="sim-branch">
                     <div class="sim-branch-header">${this.getBranchSvg(branch)}<div class="sim-branch-title">${branch.name}</div><div class="sim-branch-pts" title="Очков в ветке">${branchPoints}</div></div>
                     <div class="sim-in" style="height:${BH}px">
-                        <svg class="sim-lines" viewBox="0 0 100 ${BH}" preserveAspectRatio="none" aria-hidden="true">${lines}</svg>`;
+                        <svg class="sim-lines" viewBox="0 0 100 ${BH}" preserveAspectRatio="none" aria-hidden="true">${lines}</svg>${gates}`;
 
                 nodes.forEach(node => {
                     const rank = simTree[node.id] || 0;
@@ -810,16 +921,9 @@
                     ? `Удалить билд «${currentName}»`
                     : 'Удалить выбранный билд';
 
-                saveBtn.onclick = () => {
-                    // Панель однострочная — имя нового билда спрашиваем диалогом.
-                    const name = (window.prompt('Название билда:',
-                        (this._currentBuildNames && this._currentBuildNames[clsId]) || '') || '').trim();
-                    if (!name) { UI.showToast('Введите имя билда', true); return; }
-                    if (this.saveCurrentBuild(clsId, name)) {
-                        UI.showToast('💾 Билд сохранен');
-                        this.renderTree(clsId); // перерисовка для обновления списка
-                    }
-                };
+                // Патч 11.6.2a: вместо window.prompt() — инлайн-поле имени прямо
+                // в верхней панели (см. BuildSim.showSaveInline выше).
+                saveBtn.onclick = () => this.showSaveInline(clsId);
 
                 sel.onchange = () => {
                     // Плейсхолдер «— Мои билды —» = пустое дерево (ТЗ 11.6.1d, п. 2.2):
@@ -919,10 +1023,17 @@
             let y = nRect.top - 10;
             y = Math.max(edge, Math.min(y, vh - h - edge));
 
-            // Пересчёт из системы окна в систему родителя (padding-box модалки).
+            // Пересчёт из системы окна в систему родителя.
+            // v11.6.2a.3: в реальном UI планировщик живёт в #hp-buildsim-container
+            // (HeroPlanner), #buildsim-modal-body отсутствует — тултип крепится
+            // к document.body (см. _getTooltip), поэтому base = 0 и прокрутка
+            // дерева его координаты не смещает.
+            // Компенсация scrollLeft/scrollTop остаётся страховкой на случай,
+            // если host окажется скроллящимся контейнером.
             const hRect = host.getBoundingClientRect();
-            const baseX = (host === document.body) ? 0 : hRect.left + host.clientLeft;
-            const baseY = (host === document.body) ? 0 : hRect.top + host.clientTop;
+            const inBody = host === document.body;
+            const baseX = inBody ? 0 : hRect.left + host.clientLeft - (host.scrollLeft || 0);
+            const baseY = inBody ? 0 : hRect.top + host.clientTop - (host.scrollTop || 0);
 
             tip.style.left = Math.round(x - baseX) + 'px';
             tip.style.top = Math.round(y - baseY) + 'px';

@@ -91,12 +91,14 @@
      * v11.6.1: сетка дерева навыков сжата под 1920x1080 без скролла.
      * Нативные пропорции (reference/LegionFrontSRC/site/skills.js):
      * TH 140 / TOP 40 / BOT 80 -> BH 680.
-     * Сжатые: TH 95 / TOP 30 / BOT 45 -> BH = 30 + 4*95 + 45 = 455.
+     * v11.6.2a.1: шаг яруса увеличен 95 -> 120 (узлы выросли до 48px, а между
+     * подписью верхнего узла и кружком нижнего должно остаться место под
+     * замочек яруса), TOP 40 / BOT 50 -> BH = 40 + 4*120 + 50 = 570.
      */
-    const TH = 95;
-    const TOP = 30;
-    const BOT = 45;
-    const BH = TOP + 4 * TH + BOT; // 455
+    const TH = 120;
+    const TOP = 40;
+    const BOT = 50;
+    const BH = TOP + 4 * TH + BOT; // 570
     // Y-координаты ярусов req=30..0 (верх -> низ): BH - BOT - индекс_яруса * TH.
     const Y_MAP = { 30: TOP, 20: BH - BOT - 3 * TH, 10: BH - BOT - 2 * TH, 5: BH - BOT - TH, 0: BH - BOT };
     const SKIP_FX_PREFIXES = ['ctl_', 'act_', 'cd_'];
@@ -990,12 +992,23 @@
         .${DOM_IDS.customModal} ::-webkit-scrollbar-thumb:hover, .custom-modal ::-webkit-scrollbar-thumb:hover { background: #caa55c; }
         .custom-close { background: none; border: none; color: #ff8fa3; font-size: 24px; cursor: pointer; transition: color 0.2s; user-select: none; }
         .custom-close:hover { color: #fff; }
+        /* Тумблеры в окне настроек (патч 11.6.2a): кастомный switch вместо
+           нативного чекбокса. appearance: none убирает UA-отрисовку, дорожка
+           красится фоном, бегунок — псевдоэлементом ::after.
+           Включённое состояние — золотое, как кнопки аддона. */
+        .lg-toggle { appearance: none; -webkit-appearance: none; width: 36px; height: 20px; flex: none; margin: 0; background: #444; border: none; border-radius: 10px; position: relative; cursor: pointer; outline: none; transition: background 0.2s; }
+        .lg-toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: transform 0.2s; }
+        .lg-toggle:checked { background: #ffcf6a; }
+        .lg-toggle:checked::after { transform: translateX(16px); }
+        .lg-toggle:focus-visible { box-shadow: 0 0 0 2px #caa55c; }
         /* Пати: компактный крестик в правом верхнем углу заголовка (v11.6.0a). */
         .party-close { border-radius: 5px; transition: color 0.2s, background 0.2s; }
         .party-close:hover { color: #fff; background: rgba(255, 143, 163, 0.14); }
-        /* Планировщик билдов (v11.6.1d): модалка выше (95vh), чтобы дерево
-           навыков влезало целиком без внутреннего скролла. */
-        .custom-modal.sim-modal, .${DOM_IDS.customModal}.sim-modal { max-height: 95vh; }
+        /* Планировщик билдов: модалка BuildSim.open() в UI не используется
+           (HeroPlanner монтирует дерево в #hp-buildsim-container), поэтому
+           нерабочие правила для .sim-modal / #buildsim-modal-body удалены
+           в v11.6.2a.3. Живые правила скролла — в конце этого файла,
+           блок «ПЛАНИРОВЩИК БИЛДОВ — СКРОЛЛ». */
         .modal-tabs { display: flex; gap: 10px; margin-bottom: 15px; border-bottom: 1px solid #444; padding-bottom: 10px; flex-wrap: wrap; }
         .modal-tab { background: #2a2030; border: 1px solid #555; color: #ccc; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: all 0.2s; }
         .modal-tab:hover { background: #3a2c40; color: #fff; }
@@ -1005,10 +1018,10 @@
         /* ============================================================
            ДЕРЕВО НАВЫКОВ В СТИЛЕ НАТИВНОГО ЭКРАНА ИГРЫ (v11.6.1)
            Источник: reference/LegionFrontSRC/site/skills.css (.skx-*).
-           Сетка сжата под 1920x1080: TH=95, TOP=30, BOT=45, BH=455.
+           v11.6.2a.1: TH=120, TOP=40, BOT=50 -> BH=570 (узлы 48px).
            ============================================================ */
         /* v11.6.1d: внутренний скролл убран — при max-height: 95vh дерево
-           (панель 38 + отступы + шапки веток 28 + поле 455) влезает целиком.
+           (панель 38 + отступы + шапки веток 28 + поле 570) влезает целиком.
            overflow: visible, чтобы не обрезались свечения узлов. */
         .sim-tree-wrap { flex: 1; min-width: 0; background: #16121a !important; border: 1px solid #3d2f44; border-radius: 8px; box-shadow: inset 0 0 20px rgba(0,0,0,0.6); position: relative; overflow: visible; display: flex; flex-direction: column; }
         .sim-tree-inner { min-width: 820px; padding: 12px; display: flex; flex-direction: column; height: auto; flex-shrink: 0; background: transparent !important; position: relative; }
@@ -1026,6 +1039,11 @@
         .sim-save-btn { background: #caa55c; color: #1d1620; border: 1px solid #caa55c; }
         .sim-del-btn { background: transparent; color: #ff5a7a; border: 1px solid #ff5a7a; padding: 0 8px; }
         .sim-share-btn, .sim-import-btn { background: transparent; color: #caa55c; border: 1px solid #caa55c; }
+        /* Инлайн-имя билда (патч 11.6.2a): поле и OK встают на место кнопки
+           «Сохранить» внутри панели 38px. Селекторы с .sim-top-bar нужны,
+           чтобы перебить общие правила панели (height: 26px, width: 120px). */
+        .sim-top-bar .sim-save-name { width: 150px; flex: 0 1 150px; height: 28px; font-size: 12px; }
+        .sim-top-bar .sim-save-ok { height: 28px; background: #caa55c; color: #1d1620; border: 1px solid #caa55c; }
         .sim-reset-btn { background: rgba(255, 90, 122, 0.1); color: #ff5a7a; border: 1px solid #ff5a7a; margin-left: auto; }
         .sim-reset-btn:hover { background: rgba(255, 90, 122, 0.22); }
         /* Ветки: три колонки как в нативном дереве, цвет ветки — --br1..--br3. */
@@ -1040,8 +1058,8 @@
         .sim-branch-header .sim-svg { width: 18px; height: 18px; color: var(--bc, var(--tb-gold)); }
         .sim-branch-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .sim-branch-pts { min-width: 24px; height: 24px; padding: 0 5px; display: grid; place-items: center; border-radius: 12px; background: var(--bc, var(--tb-slate3)); color: var(--tb-ink); border: 2px solid var(--tb-ink); font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
-        /* Поле узлов: высота задаётся инлайном из BH (455px). */
-        .sim-in { position: relative; height: 455px; }
+        /* Поле узлов: высота задаётся инлайном из BH (570px). */
+        .sim-in { position: relative; height: 570px; }
         .sim-lines { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 1; }
         .sim-lines path { fill: none; vector-effect: non-scaling-stroke; stroke-linecap: round; }
         .sim-lines .tk-bg { stroke: var(--tb-slate3, #19211e); stroke-width: 14px; }
@@ -1053,13 +1071,25 @@
         .sim-lines .pre { stroke: var(--tb-chalk, #f4f1e4); stroke-opacity: 0.3; stroke-width: 2px; stroke-dasharray: 3 6; }
         .sim-lines .pre.op { stroke: var(--bc, var(--tb-chalk)); stroke-opacity: 0.75; }
         .sim-lines .pre.on { stroke: var(--bc, var(--tb-gold)); stroke-opacity: 1; stroke-width: 3px; stroke-dasharray: none; }
+        /* Гейты ярусов (патч 11.6.2a): плашка с замком на стволе между ярусами.
+           Повторяет .skg нативного дерева (reference/LegionFrontSRC/site/skills.css):
+           тёмный фон, пунктирная рамка, боковые «усики» на ствол.
+           z-index ниже узлов (2) — плашка не перекрывает иконки навыков. */
+        .sim-gate { position: absolute; left: 50%; z-index: 1; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 6px; background: #19211e; color: var(--tb-chalk, #f4f1e4); border: 2px dashed var(--tb-chalk2, #c9d2c3); font-size: 11px; font-weight: 800; line-height: 1; white-space: nowrap; cursor: help; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45); }
+        .sim-gate span { font-variant-numeric: tabular-nums; }
+        .sim-gate::before, .sim-gate::after { content: ''; position: absolute; top: 50%; width: 14px; height: 4px; margin-top: -2px; border-radius: 2px; background: var(--tb-chalk2, #c9d2c3); }
+        .sim-gate::before { right: 100%; }
+        .sim-gate::after { left: 100%; }
         /* SVG-иконки: обводка currentColor, solid-вариант с полупрозрачной заливкой. */
         .sim-svg { fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
         .sim-svg.so { fill: currentColor; fill-opacity: 0.18; }
-        /* Узел: круг как .skx-i в нативном дереве. */
-        .sim-node { position: absolute; z-index: 2; transform: translate(-50%, -21px); display: grid; justify-items: center; width: 92px; cursor: pointer; }
-        .sim-node-icon { position: relative; width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; background: var(--tb-slate2, #313f39); border: 3px solid var(--tb-chalk2, #c9d2c3); color: var(--tb-chalk, #f4f1e4); box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35); transition: translate 0.12s, box-shadow 0.12s; }
-        .sim-node-icon .sim-svg { width: 23px; height: 23px; }
+        /* Узел: круг как .skx-i в нативном дереве.
+           v11.6.2a.1: ширина 110px, кружок 48px (+3px бордюр = 54).
+           transform -24px держит центр кружка на линии яруса (y): -24 + 54/2 ≈ y+3,
+           как было при кружке 42px и сдвиге -21px. */
+        .sim-node { position: absolute; z-index: 2; transform: translate(-50%, -24px); display: grid; justify-items: center; width: 110px; cursor: pointer; }
+        .sim-node-icon { position: relative; width: 48px; height: 48px; display: grid; place-items: center; border-radius: 50%; background: var(--tb-slate2, #313f39); border: 3px solid var(--tb-chalk2, #c9d2c3); color: var(--tb-chalk, #f4f1e4); box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35); transition: translate 0.12s, box-shadow 0.12s; }
+        .sim-node-icon .sim-svg { width: 26px; height: 26px; }
         .sim-node:hover { z-index: 4; }
         .sim-node:hover .sim-node-icon { translate: 0 -2px; }
         .sim-node .sim-node-icon { border-color: color-mix(in srgb, var(--bc, var(--tb-chalk2)) 60%, var(--tb-slate2)); }
@@ -1076,7 +1106,7 @@
         .sim-node-ranks { display: flex; gap: 3px; margin-top: 2px; padding: 1px 4px; border-radius: 7px; background: var(--tb-slate, #25302c); }
         .sim-node-ranks i { width: 6px; height: 6px; border-radius: 50%; background: var(--tb-slate3, #19211e); border: 1.5px solid color-mix(in srgb, var(--tb-chalk) 45%, transparent); }
         .sim-node-ranks i.filled { background: var(--bc, var(--tb-gold)); border-color: var(--bc, var(--tb-gold)); }
-        .sim-node-name { max-width: 92px; margin-top: 2px; padding: 0 3px; font-size: 10.5px; line-height: 1.15; font-weight: 700; text-align: center; color: var(--tb-chalk, #f4f1e4); background: var(--tb-slate, #25302c); border-radius: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; hyphens: auto; overflow-wrap: anywhere; }
+        .sim-node-name { max-width: 110px; margin-top: 2px; padding: 0 3px; font-size: 12px; line-height: 1.15; font-weight: 700; text-align: center; color: var(--tb-chalk, #f4f1e4); background: var(--tb-slate, #25302c); border-radius: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; hyphens: auto; overflow-wrap: anywhere; }
         .sim-node.locked .sim-node-name { color: var(--tb-chalk2, #c9d2c3); opacity: 0.8; }
         .sim-card { position: fixed; background: #f5e9c8; color: #2a2010; border: 3px solid #2b1d18; border-radius: 12px; padding: 15px; width: 280px; z-index: 10001; box-shadow: 0 10px 25px rgba(0,0,0,0.6); display: none; }
         .sim-card h4 { margin: 0 0 5px 0; font-size: 16px; color: #2b1d18; display: flex; justify-content: space-between; }
@@ -1371,6 +1401,40 @@
             filter: drop-shadow(0 0 4px rgba(255, 207, 106, 0.7));
             vertical-align: middle;
             user-select: none;
+        }
+
+        /* ============================================================
+           ПЛАНИРОВЩИК БИЛДОВ — СКРОЛЛ (v11.6.2a.3)
+           Реальный DOM (Live DOM): HeroPlanner монтирует BuildSim в
+           #hp-buildsim-container, а внутри — .modal-tabs +
+           .tab-content.active > .sim-tree-wrap > .sim-tree-inner.
+           Класс .sim-modal и #buildsim-modal-body жили только в
+           неиспользуемом BuildSim.open(), поэтому правила a.2 не срабатывали:
+           #hp-buildsim-container (inline overflow: auto) не мог прокрутиться,
+           т.к. вложенный .tab-content.active { flex:1; overflow:hidden }
+           сжимался под высоту контейнера и обрезал нижний ярус.
+           Теперь высоту ограничиваем контейнеру, а скроллит .sim-tree-wrap:
+           он получает конечную высоту от контейнера и прокручивает дерево.
+           ============================================================ */
+        /* Контейнер планировщика: колонка с ограниченной высотой. */
+        #hp-buildsim-container {
+            display: flex !important;
+            flex-direction: column !important;
+            max-height: 85vh !important; /* на ноутбуках (768–900px) дерево уходит в скролл */
+            overflow: hidden !important;
+        }
+        /* Обёртка дерева — единственный скроллер планировщика. */
+        #hp-buildsim-container .sim-tree-wrap {
+            flex: 1 1 auto !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            min-height: 0 !important;
+            padding-bottom: 20px !important; /* последний ряд не прилипает к краю */
+        }
+        /* Внутренний контейнер не режет контент и отдаёт высоту обёртке. */
+        #hp-buildsim-container .sim-tree-inner {
+            overflow: visible !important;
+            height: auto !important;
         }
 
     `;
@@ -1685,12 +1749,12 @@
                     <button id="modal-7tv-btn" style="width:100%; padding:10px; background:#2a2030; border:1px solid #caa55c; color:#ffcf6a; border-radius:6px; cursor:pointer; text-align:left;">🎭 Настройки канала 7TV</button>
                     <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer;">
                         <span>🚫 Отключить перехват чата</span>
-                        <input type="checkbox" id="modal-chk-chat" style="width:16px; height:16px; accent-color:#ff5a7a;" ${chatDisabled ? 'checked' : ''}>
+                        <input type="checkbox" class="lg-toggle" id="modal-chk-chat" ${chatDisabled ? 'checked' : ''}>
                     </label>
                     <!-- v11.6.0g-4: подсветка ников пользователей аддона в чате -->
                     <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
                         <span>⚡ Подсветка ников Legion</span>
-                        <input type="checkbox" id="modal-chk-addon-hl" style="width:16px; height:16px; accent-color:#00f0ff;" ${addonHighlight ? 'checked' : ''}>
+                        <input type="checkbox" class="lg-toggle" id="modal-chk-addon-hl" ${addonHighlight ? 'checked' : ''}>
                     </label>
                     <!-- v11.6.1g: тумблер уведомлений о новых версиях.
                          Состояние ставит и сохраняет UI.openSettings() (localStorage
@@ -1698,7 +1762,7 @@
                          продолжает работать — просто молча. -->
                     <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
                         <span>🔔 Уведомлять о новых версиях</span>
-                        <input type="checkbox" id="modal-chk-update-notify" style="width:16px; height:16px; accent-color:#ffcf6a;">
+                        <input type="checkbox" class="lg-toggle" id="modal-chk-update-notify">
                     </label>
                 </div>
             `;
@@ -2929,7 +2993,7 @@
                                     <div class="sim-top-bar">
                                         <div class="sim-free-pts">Свободно: <b id="free-${c.id}">0</b> / ${MAX_POINTS}</div>
                                         <div class="sim-bar-sep"></div>
-                                        <button class="sim-save-btn" data-save="${c.id}" title="Сохранить билд (имя спросим)">Сохранить</button>
+                                        <button class="sim-save-btn" data-save="${c.id}" title="Сохранить билд">Сохранить</button>
                                         <button class="sim-share-btn" data-share="${c.id}" title="Поделиться билдом">Поделиться</button>
                                         <button class="sim-import-btn" data-import="${c.id}" title="Импортировать билд">Импорт</button>
                                         <div class="sim-bar-sep"></div>
@@ -3080,6 +3144,86 @@
         },
 
         // ------------------------------------------------------------
+        // Инлайн-имя билда (патч 11.6.2a).
+        // Панель .sim-top-bar — одна строка 38px, поэтому вместо window.prompt()
+        // на месте кнопки «Сохранить» появляется пара «input + OK»
+        // (CSS .sim-top-bar .sim-save-name: высота 28px, шрифт 12px).
+        // Кнопку не удаляем, а прячем: её обработчик привязывается в renderTree()
+        // (.onclick идемпотентно), а Enter / Esc / клик вне панели возвращают
+        // разметку в исходное состояние.
+        // ------------------------------------------------------------
+        showSaveInline(clsId) {
+            const saveBtn = document.querySelector(`.sim-save-btn[data-save="${clsId}"]`);
+            if (!saveBtn) return;
+            const bar = saveBtn.parentElement;
+            // Повторный клик по «Сохранить» не должен плодить вторую пару.
+            const existing = bar ? bar.querySelector('.sim-save-name') : null;
+            if (existing) { existing.focus(); return; }
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'sim-save-name';
+            input.placeholder = 'Название билда';
+            input.maxLength = 40;
+            input.value = (this._currentBuildNames && this._currentBuildNames[clsId]) || 'Мой билд';
+
+            const okBtn = document.createElement('button');
+            okBtn.type = 'button';
+            okBtn.className = 'sim-save-ok';
+            okBtn.textContent = 'OK';
+            okBtn.title = 'Сохранить билд';
+
+            saveBtn.style.display = 'none';
+            // Порядок: «Сохранить» (скрыта) → input → OK.
+            saveBtn.insertAdjacentElement('afterend', okBtn);
+            saveBtn.insertAdjacentElement('afterend', input);
+
+            const close = () => {
+                document.removeEventListener('pointerdown', onOutside, true);
+                input.remove();
+                okBtn.remove();
+                saveBtn.style.display = '';
+            };
+
+            const commit = () => {
+                const name = (input.value || '').trim();
+                if (!name) {
+                    UI.showToast('Введите имя билда', true);
+                    input.focus();
+                    return;
+                }
+                // Сначала убираем пару, потом рендерим: renderTree() перерисовывает
+                // дерево и список «Мои билды», панель должна быть как обычно.
+                close();
+                if (this.saveCurrentBuild(clsId, name)) {
+                    UI.showToast('💾 Билд сохранен');
+                    this.renderTree(clsId);
+                }
+            };
+
+            const onOutside = (e) => {
+                if (bar && !bar.contains(e.target)) close();
+            };
+
+            okBtn.onclick = commit;
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    commit();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    close();
+                }
+            });
+            // pointerdown, а не click: иначе клик по узлу дерева успел бы
+            // отработать (очки/тултип) раньше, чем закроется панель.
+            document.addEventListener('pointerdown', onOutside, true);
+
+            input.focus();
+            input.select();
+        },
+
+        // ------------------------------------------------------------
         // Обмен билдами без сервера: код в Base64 + ссылка #build=<код>.
         // Формат: { cls: '<класс>', sk: { <nodeId>: <ранг> } } → JSON →
         // encodeURIComponent (гарантирует ASCII, иначе btoa бросит исключение)
@@ -3214,6 +3358,18 @@
             return BH - BOT - Math.round(((req || 0) / 30) * 4 * TH);
         },
 
+        // Русская форма слова «очко» для плашки гейта яруса (патч 11.6.2a):
+        // 1 очко / 2 очка / 5 очков / 11 очков / 21 очко.
+        _pointsWord(n) {
+            const abs = Math.abs(n || 0);
+            const tail100 = abs % 100;
+            const tail10 = abs % 10;
+            if (tail100 >= 11 && tail100 <= 14) return 'очков';
+            if (tail10 === 1) return 'очко';
+            if (tail10 >= 2 && tail10 <= 4) return 'очка';
+            return 'очков';
+        },
+
         changeSkill(clsId, nodeId, delta, maxRank, preNode, branchReq, branchIds, event) {
             if (event) event.stopPropagation();
             if (!this.simulatedSkills[clsId]) this.simulatedSkills[clsId] = {};
@@ -3340,6 +3496,25 @@
                     + `<path class="tk-on" d="M50 ${rootY} V${this.yFor(openReq)}"/>`
                     + (openReq < 30 ? `<path class="tk-off" d="M50 ${this.yFor(openReq)} V${topY}"/>` : '');
 
+                // Замочки ярусов (патч 11.6.2a, отступ пересчитан в 11.6.2a.1) —
+                // аналог .skg нативного дерева. Плашка висит на стволе между ярусами,
+                // показываем её только для ЗАКРЫТЫХ ярусов и пишем ОСТАТОК.
+                // Геометрия при TH = 120 и кружке 54px (48 + 2×3):
+                //   низ верхнего узла  ≈ y + 73  (кружок 54 + ранги 11 + подпись 2×14)
+                //   верх кружка ниже   = y + TH − 27 = y + 93
+                // центр свободной полосы ≈ y + 83…84 = y + (48 + TH) / 2 — та же
+                // нативная формула, просто теперь она даёт 84px вместо 72px.
+                // Плашка ~21px высотой целиком ложится в полосу 73…96 и не наезжает
+                // ни на подпись навыка, ни на кружок следующего яруса.
+                let gates = '';
+                [...tiers.keys()].filter(req => req > 0).sort((a, b) => b - a).forEach(req => {
+                    if (branchPoints >= req) return; // ярус уже открыт — замок не нужен
+                    const gy = this.yFor(req) + Math.round((48 + TH) / 2);
+                    const need = req - branchPoints;
+                    const tip = `Откроется при ${req} ${this._pointsWord(req)} в ветке «${Utils.escapeHtml(branch.name)}» (сейчас ${branchPoints})`;
+                    gates += `<div class="sim-gate" data-req="${req}" style="top:${gy}px" title="${tip}">🔒 <span>${need} ${this._pointsWord(need)}</span></div>`;
+                });
+
                 // Отводы к боковым узлам — кривые Безье; prereq — прямые линии.
                 nodes.forEach(node => {
                     const rank = simTree[node.id] || 0;
@@ -3364,7 +3539,7 @@
                 html += `<div class="sim-branch">
                     <div class="sim-branch-header">${this.getBranchSvg(branch)}<div class="sim-branch-title">${branch.name}</div><div class="sim-branch-pts" title="Очков в ветке">${branchPoints}</div></div>
                     <div class="sim-in" style="height:${BH}px">
-                        <svg class="sim-lines" viewBox="0 0 100 ${BH}" preserveAspectRatio="none" aria-hidden="true">${lines}</svg>`;
+                        <svg class="sim-lines" viewBox="0 0 100 ${BH}" preserveAspectRatio="none" aria-hidden="true">${lines}</svg>${gates}`;
 
                 nodes.forEach(node => {
                     const rank = simTree[node.id] || 0;
@@ -3470,16 +3645,9 @@
                     ? `Удалить билд «${currentName}»`
                     : 'Удалить выбранный билд';
 
-                saveBtn.onclick = () => {
-                    // Панель однострочная — имя нового билда спрашиваем диалогом.
-                    const name = (window.prompt('Название билда:',
-                        (this._currentBuildNames && this._currentBuildNames[clsId]) || '') || '').trim();
-                    if (!name) { UI.showToast('Введите имя билда', true); return; }
-                    if (this.saveCurrentBuild(clsId, name)) {
-                        UI.showToast('💾 Билд сохранен');
-                        this.renderTree(clsId); // перерисовка для обновления списка
-                    }
-                };
+                // Патч 11.6.2a: вместо window.prompt() — инлайн-поле имени прямо
+                // в верхней панели (см. BuildSim.showSaveInline выше).
+                saveBtn.onclick = () => this.showSaveInline(clsId);
 
                 sel.onchange = () => {
                     // Плейсхолдер «— Мои билды —» = пустое дерево (ТЗ 11.6.1d, п. 2.2):
@@ -3579,10 +3747,17 @@
             let y = nRect.top - 10;
             y = Math.max(edge, Math.min(y, vh - h - edge));
 
-            // Пересчёт из системы окна в систему родителя (padding-box модалки).
+            // Пересчёт из системы окна в систему родителя.
+            // v11.6.2a.3: в реальном UI планировщик живёт в #hp-buildsim-container
+            // (HeroPlanner), #buildsim-modal-body отсутствует — тултип крепится
+            // к document.body (см. _getTooltip), поэтому base = 0 и прокрутка
+            // дерева его координаты не смещает.
+            // Компенсация scrollLeft/scrollTop остаётся страховкой на случай,
+            // если host окажется скроллящимся контейнером.
             const hRect = host.getBoundingClientRect();
-            const baseX = (host === document.body) ? 0 : hRect.left + host.clientLeft;
-            const baseY = (host === document.body) ? 0 : hRect.top + host.clientTop;
+            const inBody = host === document.body;
+            const baseX = inBody ? 0 : hRect.left + host.clientLeft - (host.scrollLeft || 0);
+            const baseY = inBody ? 0 : hRect.top + host.clientTop - (host.scrollTop || 0);
 
             tip.style.left = Math.round(x - baseX) + 'px';
             tip.style.top = Math.round(y - baseY) + 'px';

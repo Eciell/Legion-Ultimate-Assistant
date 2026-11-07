@@ -63,12 +63,14 @@
      * v11.6.1: сетка дерева навыков сжата под 1920x1080 без скролла.
      * Нативные пропорции (reference/LegionFrontSRC/site/skills.js):
      * TH 140 / TOP 40 / BOT 80 -> BH 680.
-     * Сжатые: TH 95 / TOP 30 / BOT 45 -> BH = 30 + 4*95 + 45 = 455.
+     * v11.6.2a.1: шаг яруса увеличен 95 -> 120 (узлы выросли до 48px, а между
+     * подписью верхнего узла и кружком нижнего должно остаться место под
+     * замочек яруса), TOP 40 / BOT 50 -> BH = 40 + 4*120 + 50 = 570.
      */
-    const TH = 95;
-    const TOP = 30;
-    const BOT = 45;
-    const BH = TOP + 4 * TH + BOT; // 455
+    const TH = 120;
+    const TOP = 40;
+    const BOT = 50;
+    const BH = TOP + 4 * TH + BOT; // 570
     // Y-координаты ярусов req=30..0 (верх -> низ): BH - BOT - индекс_яруса * TH.
     const Y_MAP = { 30: TOP, 20: BH - BOT - 3 * TH, 10: BH - BOT - 2 * TH, 5: BH - BOT - TH, 0: BH - BOT };
     const SKIP_FX_PREFIXES = ['ctl_', 'act_', 'cd_'];

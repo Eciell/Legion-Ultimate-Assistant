@@ -92,12 +92,12 @@
                     <button id="modal-7tv-btn" style="width:100%; padding:10px; background:#2a2030; border:1px solid #caa55c; color:#ffcf6a; border-radius:6px; cursor:pointer; text-align:left;">🎭 Настройки канала 7TV</button>
                     <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer;">
                         <span>🚫 Отключить перехват чата</span>
-                        <input type="checkbox" id="modal-chk-chat" style="width:16px; height:16px; accent-color:#ff5a7a;" ${chatDisabled ? 'checked' : ''}>
+                        <input type="checkbox" class="lg-toggle" id="modal-chk-chat" ${chatDisabled ? 'checked' : ''}>
                     </label>
                     <!-- v11.6.0g-4: подсветка ников пользователей аддона в чате -->
                     <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
                         <span>⚡ Подсветка ников Legion</span>
-                        <input type="checkbox" id="modal-chk-addon-hl" style="width:16px; height:16px; accent-color:#00f0ff;" ${addonHighlight ? 'checked' : ''}>
+                        <input type="checkbox" class="lg-toggle" id="modal-chk-addon-hl" ${addonHighlight ? 'checked' : ''}>
                     </label>
                     <!-- v11.6.1g: тумблер уведомлений о новых версиях.
                          Состояние ставит и сохраняет UI.openSettings() (localStorage
@@ -105,7 +105,7 @@
                          продолжает работать — просто молча. -->
                     <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
                         <span>🔔 Уведомлять о новых версиях</span>
-                        <input type="checkbox" id="modal-chk-update-notify" style="width:16px; height:16px; accent-color:#ffcf6a;">
+                        <input type="checkbox" class="lg-toggle" id="modal-chk-update-notify">
                     </label>
                 </div>
             `;

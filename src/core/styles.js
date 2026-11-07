@@ -20,12 +20,23 @@
         .${DOM_IDS.customModal} ::-webkit-scrollbar-thumb:hover, .custom-modal ::-webkit-scrollbar-thumb:hover { background: #caa55c; }
         .custom-close { background: none; border: none; color: #ff8fa3; font-size: 24px; cursor: pointer; transition: color 0.2s; user-select: none; }
         .custom-close:hover { color: #fff; }
+        /* Тумблеры в окне настроек (патч 11.6.2a): кастомный switch вместо
+           нативного чекбокса. appearance: none убирает UA-отрисовку, дорожка
+           красится фоном, бегунок — псевдоэлементом ::after.
+           Включённое состояние — золотое, как кнопки аддона. */
+        .lg-toggle { appearance: none; -webkit-appearance: none; width: 36px; height: 20px; flex: none; margin: 0; background: #444; border: none; border-radius: 10px; position: relative; cursor: pointer; outline: none; transition: background 0.2s; }
+        .lg-toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: transform 0.2s; }
+        .lg-toggle:checked { background: #ffcf6a; }
+        .lg-toggle:checked::after { transform: translateX(16px); }
+        .lg-toggle:focus-visible { box-shadow: 0 0 0 2px #caa55c; }
         /* Пати: компактный крестик в правом верхнем углу заголовка (v11.6.0a). */
         .party-close { border-radius: 5px; transition: color 0.2s, background 0.2s; }
         .party-close:hover { color: #fff; background: rgba(255, 143, 163, 0.14); }
-        /* Планировщик билдов (v11.6.1d): модалка выше (95vh), чтобы дерево
-           навыков влезало целиком без внутреннего скролла. */
-        .custom-modal.sim-modal, .${DOM_IDS.customModal}.sim-modal { max-height: 95vh; }
+        /* Планировщик билдов: модалка BuildSim.open() в UI не используется
+           (HeroPlanner монтирует дерево в #hp-buildsim-container), поэтому
+           нерабочие правила для .sim-modal / #buildsim-modal-body удалены
+           в v11.6.2a.3. Живые правила скролла — в конце этого файла,
+           блок «ПЛАНИРОВЩИК БИЛДОВ — СКРОЛЛ». */
         .modal-tabs { display: flex; gap: 10px; margin-bottom: 15px; border-bottom: 1px solid #444; padding-bottom: 10px; flex-wrap: wrap; }
         .modal-tab { background: #2a2030; border: 1px solid #555; color: #ccc; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: all 0.2s; }
         .modal-tab:hover { background: #3a2c40; color: #fff; }
@@ -35,10 +46,10 @@
         /* ============================================================
            ДЕРЕВО НАВЫКОВ В СТИЛЕ НАТИВНОГО ЭКРАНА ИГРЫ (v11.6.1)
            Источник: reference/LegionFrontSRC/site/skills.css (.skx-*).
-           Сетка сжата под 1920x1080: TH=95, TOP=30, BOT=45, BH=455.
+           v11.6.2a.1: TH=120, TOP=40, BOT=50 -> BH=570 (узлы 48px).
            ============================================================ */
         /* v11.6.1d: внутренний скролл убран — при max-height: 95vh дерево
-           (панель 38 + отступы + шапки веток 28 + поле 455) влезает целиком.
+           (панель 38 + отступы + шапки веток 28 + поле 570) влезает целиком.
            overflow: visible, чтобы не обрезались свечения узлов. */
         .sim-tree-wrap { flex: 1; min-width: 0; background: #16121a !important; border: 1px solid #3d2f44; border-radius: 8px; box-shadow: inset 0 0 20px rgba(0,0,0,0.6); position: relative; overflow: visible; display: flex; flex-direction: column; }
         .sim-tree-inner { min-width: 820px; padding: 12px; display: flex; flex-direction: column; height: auto; flex-shrink: 0; background: transparent !important; position: relative; }
@@ -56,6 +67,11 @@
         .sim-save-btn { background: #caa55c; color: #1d1620; border: 1px solid #caa55c; }
         .sim-del-btn { background: transparent; color: #ff5a7a; border: 1px solid #ff5a7a; padding: 0 8px; }
         .sim-share-btn, .sim-import-btn { background: transparent; color: #caa55c; border: 1px solid #caa55c; }
+        /* Инлайн-имя билда (патч 11.6.2a): поле и OK встают на место кнопки
+           «Сохранить» внутри панели 38px. Селекторы с .sim-top-bar нужны,
+           чтобы перебить общие правила панели (height: 26px, width: 120px). */
+        .sim-top-bar .sim-save-name { width: 150px; flex: 0 1 150px; height: 28px; font-size: 12px; }
+        .sim-top-bar .sim-save-ok { height: 28px; background: #caa55c; color: #1d1620; border: 1px solid #caa55c; }
         .sim-reset-btn { background: rgba(255, 90, 122, 0.1); color: #ff5a7a; border: 1px solid #ff5a7a; margin-left: auto; }
         .sim-reset-btn:hover { background: rgba(255, 90, 122, 0.22); }
         /* Ветки: три колонки как в нативном дереве, цвет ветки — --br1..--br3. */
@@ -70,8 +86,8 @@
         .sim-branch-header .sim-svg { width: 18px; height: 18px; color: var(--bc, var(--tb-gold)); }
         .sim-branch-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .sim-branch-pts { min-width: 24px; height: 24px; padding: 0 5px; display: grid; place-items: center; border-radius: 12px; background: var(--bc, var(--tb-slate3)); color: var(--tb-ink); border: 2px solid var(--tb-ink); font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
-        /* Поле узлов: высота задаётся инлайном из BH (455px). */
-        .sim-in { position: relative; height: 455px; }
+        /* Поле узлов: высота задаётся инлайном из BH (570px). */
+        .sim-in { position: relative; height: 570px; }
         .sim-lines { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 1; }
         .sim-lines path { fill: none; vector-effect: non-scaling-stroke; stroke-linecap: round; }
         .sim-lines .tk-bg { stroke: var(--tb-slate3, #19211e); stroke-width: 14px; }
@@ -83,13 +99,25 @@
         .sim-lines .pre { stroke: var(--tb-chalk, #f4f1e4); stroke-opacity: 0.3; stroke-width: 2px; stroke-dasharray: 3 6; }
         .sim-lines .pre.op { stroke: var(--bc, var(--tb-chalk)); stroke-opacity: 0.75; }
         .sim-lines .pre.on { stroke: var(--bc, var(--tb-gold)); stroke-opacity: 1; stroke-width: 3px; stroke-dasharray: none; }
+        /* Гейты ярусов (патч 11.6.2a): плашка с замком на стволе между ярусами.
+           Повторяет .skg нативного дерева (reference/LegionFrontSRC/site/skills.css):
+           тёмный фон, пунктирная рамка, боковые «усики» на ствол.
+           z-index ниже узлов (2) — плашка не перекрывает иконки навыков. */
+        .sim-gate { position: absolute; left: 50%; z-index: 1; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 6px; background: #19211e; color: var(--tb-chalk, #f4f1e4); border: 2px dashed var(--tb-chalk2, #c9d2c3); font-size: 11px; font-weight: 800; line-height: 1; white-space: nowrap; cursor: help; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45); }
+        .sim-gate span { font-variant-numeric: tabular-nums; }
+        .sim-gate::before, .sim-gate::after { content: ''; position: absolute; top: 50%; width: 14px; height: 4px; margin-top: -2px; border-radius: 2px; background: var(--tb-chalk2, #c9d2c3); }
+        .sim-gate::before { right: 100%; }
+        .sim-gate::after { left: 100%; }
         /* SVG-иконки: обводка currentColor, solid-вариант с полупрозрачной заливкой. */
         .sim-svg { fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
         .sim-svg.so { fill: currentColor; fill-opacity: 0.18; }
-        /* Узел: круг как .skx-i в нативном дереве. */
-        .sim-node { position: absolute; z-index: 2; transform: translate(-50%, -21px); display: grid; justify-items: center; width: 92px; cursor: pointer; }
-        .sim-node-icon { position: relative; width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; background: var(--tb-slate2, #313f39); border: 3px solid var(--tb-chalk2, #c9d2c3); color: var(--tb-chalk, #f4f1e4); box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35); transition: translate 0.12s, box-shadow 0.12s; }
-        .sim-node-icon .sim-svg { width: 23px; height: 23px; }
+        /* Узел: круг как .skx-i в нативном дереве.
+           v11.6.2a.1: ширина 110px, кружок 48px (+3px бордюр = 54).
+           transform -24px держит центр кружка на линии яруса (y): -24 + 54/2 ≈ y+3,
+           как было при кружке 42px и сдвиге -21px. */
+        .sim-node { position: absolute; z-index: 2; transform: translate(-50%, -24px); display: grid; justify-items: center; width: 110px; cursor: pointer; }
+        .sim-node-icon { position: relative; width: 48px; height: 48px; display: grid; place-items: center; border-radius: 50%; background: var(--tb-slate2, #313f39); border: 3px solid var(--tb-chalk2, #c9d2c3); color: var(--tb-chalk, #f4f1e4); box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35); transition: translate 0.12s, box-shadow 0.12s; }
+        .sim-node-icon .sim-svg { width: 26px; height: 26px; }
         .sim-node:hover { z-index: 4; }
         .sim-node:hover .sim-node-icon { translate: 0 -2px; }
         .sim-node .sim-node-icon { border-color: color-mix(in srgb, var(--bc, var(--tb-chalk2)) 60%, var(--tb-slate2)); }
@@ -106,7 +134,7 @@
         .sim-node-ranks { display: flex; gap: 3px; margin-top: 2px; padding: 1px 4px; border-radius: 7px; background: var(--tb-slate, #25302c); }
         .sim-node-ranks i { width: 6px; height: 6px; border-radius: 50%; background: var(--tb-slate3, #19211e); border: 1.5px solid color-mix(in srgb, var(--tb-chalk) 45%, transparent); }
         .sim-node-ranks i.filled { background: var(--bc, var(--tb-gold)); border-color: var(--bc, var(--tb-gold)); }
-        .sim-node-name { max-width: 92px; margin-top: 2px; padding: 0 3px; font-size: 10.5px; line-height: 1.15; font-weight: 700; text-align: center; color: var(--tb-chalk, #f4f1e4); background: var(--tb-slate, #25302c); border-radius: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; hyphens: auto; overflow-wrap: anywhere; }
+        .sim-node-name { max-width: 110px; margin-top: 2px; padding: 0 3px; font-size: 12px; line-height: 1.15; font-weight: 700; text-align: center; color: var(--tb-chalk, #f4f1e4); background: var(--tb-slate, #25302c); border-radius: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; hyphens: auto; overflow-wrap: anywhere; }
         .sim-node.locked .sim-node-name { color: var(--tb-chalk2, #c9d2c3); opacity: 0.8; }
         .sim-card { position: fixed; background: #f5e9c8; color: #2a2010; border: 3px solid #2b1d18; border-radius: 12px; padding: 15px; width: 280px; z-index: 10001; box-shadow: 0 10px 25px rgba(0,0,0,0.6); display: none; }
         .sim-card h4 { margin: 0 0 5px 0; font-size: 16px; color: #2b1d18; display: flex; justify-content: space-between; }
@@ -401,6 +429,40 @@
             filter: drop-shadow(0 0 4px rgba(255, 207, 106, 0.7));
             vertical-align: middle;
             user-select: none;
+        }
+
+        /* ============================================================
+           ПЛАНИРОВЩИК БИЛДОВ — СКРОЛЛ (v11.6.2a.3)
+           Реальный DOM (Live DOM): HeroPlanner монтирует BuildSim в
+           #hp-buildsim-container, а внутри — .modal-tabs +
+           .tab-content.active > .sim-tree-wrap > .sim-tree-inner.
+           Класс .sim-modal и #buildsim-modal-body жили только в
+           неиспользуемом BuildSim.open(), поэтому правила a.2 не срабатывали:
+           #hp-buildsim-container (inline overflow: auto) не мог прокрутиться,
+           т.к. вложенный .tab-content.active { flex:1; overflow:hidden }
+           сжимался под высоту контейнера и обрезал нижний ярус.
+           Теперь высоту ограничиваем контейнеру, а скроллит .sim-tree-wrap:
+           он получает конечную высоту от контейнера и прокручивает дерево.
+           ============================================================ */
+        /* Контейнер планировщика: колонка с ограниченной высотой. */
+        #hp-buildsim-container {
+            display: flex !important;
+            flex-direction: column !important;
+            max-height: 85vh !important; /* на ноутбуках (768–900px) дерево уходит в скролл */
+            overflow: hidden !important;
+        }
+        /* Обёртка дерева — единственный скроллер планировщика. */
+        #hp-buildsim-container .sim-tree-wrap {
+            flex: 1 1 auto !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            min-height: 0 !important;
+            padding-bottom: 20px !important; /* последний ряд не прилипает к краю */
+        }
+        /* Внутренний контейнер не режет контент и отдаёт высоту обёртке. */
+        #hp-buildsim-container .sim-tree-inner {
+            overflow: visible !important;
+            height: auto !important;
         }
 
     `;
