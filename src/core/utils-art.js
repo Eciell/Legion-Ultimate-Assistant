@@ -139,6 +139,10 @@
         // Обогатить строки таблицы аукциона: арт + иконки монет.
         // id/имя предмета приходят из data-атрибутов строки (auction.js),
         // data-lg-lot — метка «уже обработано».
+        // 11.6.2c.5: строка — карточка (.auc-item-flex > .auc-item-info),
+        // поэтому арт монтируется ПЕРВЫМ ребёнком .auc-item-flex (слева от
+        // .auc-item-info), а не в плоскую <td>. Плоский вариант оставлен
+        // фолбэком для старой разметки.
         enhanceAuctionRows(container, itemsMap) {
             if (!container) return;
             const rows = container.querySelectorAll('tr:not([data-lg-lot])');
@@ -147,9 +151,12 @@
             rows.forEach(row => {
                 row.setAttribute('data-lg-lot', '1');
                 const cells = row.querySelectorAll('td');
-                if (cells.length < 4) return; // строка «Ничего не найдено»
+                // Строка «Ничего не найдено» — одна ячейка, арта и цен нет.
+                if (cells.length < 3) return;
 
                 const itemCell = cells[0];
+                // Контейнер карточки: арт ставим перед .auc-item-info.
+                const flexBox = itemCell.querySelector('.auc-item-flex') || itemCell;
                 if (itemCell.querySelector('.b-lot-art')) return;
 
                 const itemId = row.getAttribute('data-lot-id') || '';
@@ -175,13 +182,20 @@
                 }
                 artDiv.title = lotName;
 
-                itemCell.style.display = 'flex';
-                itemCell.style.alignItems = 'center';
-                itemCell.style.gap = '8px';
-                itemCell.insertBefore(artDiv, itemCell.firstChild);
+                if (flexBox !== itemCell) {
+                    // 11.6.2c.5: карточка — арт слева от .auc-item-info.
+                    flexBox.insertBefore(artDiv, flexBox.firstChild);
+                } else {
+                    // Фолбэк: плоская ячейка (старая разметка).
+                    itemCell.style.display = 'flex';
+                    itemCell.style.alignItems = 'center';
+                    itemCell.style.gap = '8px';
+                    itemCell.insertBefore(artDiv, itemCell.firstChild);
+                }
 
-                // Декорируем цены
-                for (let i = 2; i <= 4 && i < cells.length; i++) {
+                // Декорируем цены: 11.6.2c.5 — в таблице 6 колонок, деньги
+                // только в «Цене» (индекс 1) и «Медиане» (индекс 2).
+                for (let i = 1; i <= 2 && i < cells.length; i++) {
                     this.decorateMoneyText(cells[i]);
                 }
             });

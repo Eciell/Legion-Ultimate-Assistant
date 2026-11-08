@@ -526,4 +526,106 @@
             padding-bottom: 60px !important;
         }
 
+        /* ============================================================
+           11.6.2c.5: UI/UX РЕДИЗАЙН «СКАНЕРА АУКЦИОНА»
+           Карточные строки в нативном стиле игры: полоска редкости слева,
+           двухстрочная карточка предмета, чипы второстепенных данных,
+           фильтры-чипы вместо серых чекбоксов и премиальная кнопка скана.
+           ВАЖНО: правила таблицы начинаются с .custom-modal — иначе их
+           перебивают общие правила модалок (.custom-modal td / th выше).
+           ============================================================ */
+        /* Окно сканера. Общее правило .custom-modal:not(.modal-compact) из
+           блока планировщика билдов растягивает ВСЕ обычные окна до 1400px
+           и 96vh; для 6-колоночного аукциона это лишнее — фиксируем 1000px,
+           чтобы таблица влезала без горизонтальной прокрутки. */
+        .custom-modal.auc-modal {
+            width: 1000px !important;
+            height: auto !important;
+            max-height: 92vh !important;
+        }
+        /* Скроллится сама таблица, а не окно целиком: иначе sticky-заголовок
+           «Предмет/Цена/…» перестаёт липнуть, и шапка уезжает вместе с лотом.
+           При коротком списке окно сжимается по контенту (flex: 0 1 auto). */
+        .custom-modal.auc-modal .table-container { flex: 0 1 auto; max-height: 62vh; min-height: 0; }
+        .custom-modal .auc-head { justify-content: flex-start !important; gap: 10px; }
+        .custom-modal .auc-head-title { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+        .auc-info-btn { width: 26px; height: 26px; flex: none; padding: 0; border-radius: 50%; background: rgba(202, 165, 92, 0.15); border: 1px solid #caa55c; color: #caa55c; font-family: Georgia, serif; font-size: 15px; font-weight: bold; line-height: 1; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s, color 0.15s; }
+        .auc-info-btn:hover { background: #caa55c; color: #1d1620; }
+        /* Кнопка полного скана: id + класс перебивают старое правило по id. */
+        #lg-auction-full-scan.auc-scan-btn { padding: 5px 14px; min-height: 0; background: linear-gradient(180deg, #3a2b39, #241a2b); border: 1px solid #caa55c; border-radius: 7px; color: #ffcf6a; font-family: inherit; font-size: 12px; font-weight: bold; letter-spacing: 0.02em; white-space: nowrap; cursor: pointer; box-shadow: inset 0 1px 0 rgba(255, 207, 106, 0.15), 0 2px 6px rgba(0, 0, 0, 0.4); transition: filter 0.15s, box-shadow 0.15s, opacity 0.2s; }
+        #lg-auction-full-scan.auc-scan-btn:hover:not(:disabled) { filter: brightness(1.18); box-shadow: 0 0 12px rgba(202, 165, 92, 0.35); }
+        #lg-auction-full-scan.auc-scan-btn:disabled { opacity: 0.55; cursor: not-allowed; filter: grayscale(0.3); }
+        /* ── Тулбар: поиск, селекты, фильтры-чипы, пагинация ── */
+        .auc-toolbar { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+        .auc-toolbar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+        .auc-search-input { flex: 1 1 220px; min-width: 170px; box-sizing: border-box; margin: 0; padding: 8px 12px; background: #16111c; border: 1px solid #3d2f44; border-radius: 8px; color: #f7eadf; font-family: inherit; font-size: 13px; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
+        .auc-search-input::placeholder { color: #7a6d86; }
+        .auc-search-input:focus { border-color: #caa55c; box-shadow: 0 0 0 2px rgba(202, 165, 92, 0.18); }
+        .auc-select { box-sizing: border-box; margin: 0; padding: 8px 10px; background: #16111c; border: 1px solid #3d2f44; border-radius: 8px; color: #e6dcc8; font-family: inherit; font-size: 12px; cursor: pointer; outline: none; transition: border-color 0.2s; }
+        .auc-select:hover { border-color: #caa55c; }
+        .auc-select:focus { border-color: #caa55c; }
+        .auc-select option { background: #16111c; color: #e6dcc8; }
+        /* Фильтры-чипы: сам чекбокс скрыт, активное состояние читается через
+           :has(input:checked) — без JS-обвязки. */
+        .auc-filter-chip { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px; background: #1b1522; border: 1px solid #3d2f44; color: #b3a6bf; font-size: 12px; font-weight: bold; cursor: pointer; user-select: none; transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s; }
+        .auc-filter-chip input { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; }
+        .auc-filter-chip:hover { border-color: #caa55c; color: #ffcf6a; }
+        .auc-filter-chip:has(input:checked) { background: rgba(202, 165, 92, 0.18); border-color: #caa55c; color: #ffcf6a; box-shadow: inset 0 0 8px rgba(202, 165, 92, 0.22); }
+        .auc-filter-chip:has(input:focus-visible) { outline: 2px solid #caa55c; outline-offset: 1px; }
+        .auc-pager { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+        .auc-page-btn { min-width: 32px; padding: 5px 10px; background: #1b1522; border: 1px solid #caa55c; border-radius: 8px; color: #caa55c; font-family: inherit; font-weight: bold; font-size: 12px; cursor: pointer; transition: background 0.15s, color 0.15s; }
+        .auc-page-btn:hover:not(:disabled) { background: #caa55c; color: #1d1620; }
+        .auc-page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .auc-page-info { color: #9c8fa8; font-size: 12px; white-space: nowrap; }
+        /* ── Таблица-карточки: 6 колонок ── */
+        .custom-modal .auc-table { width: 100%; border-collapse: separate; border-spacing: 0 4px; table-layout: fixed; font-size: 13px; }
+        .custom-modal .auc-table thead th { position: sticky; top: 0; z-index: 3; background: #241c2b; border: none; border-bottom: 1px solid #3d2f44; padding: 6px 10px; color: #caa55c; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+        .custom-modal .auc-table thead th.auc-col-action { text-align: center; cursor: default; }
+        /* Стрелка сортировки ↕ нужна только сортируемым колонкам. */
+        .custom-modal .auc-table th:not([data-sort])::after { content: ''; }
+        .custom-modal .auc-row td { background: #241c2b; border: none; border-top: 1px solid rgba(255, 255, 255, 0.05); padding: 5px 10px; vertical-align: middle; transition: background 0.15s; }
+        .custom-modal .auc-row td:first-child { border-left: 4px solid var(--rc, #c9ccd6); border-radius: 8px 0 0 8px; }
+        .custom-modal .auc-row td:last-child { border-radius: 0 8px 8px 0; }
+        .custom-modal .auc-row.is-cheap td { background: #23301f; }
+        .custom-modal .auc-row.is-cur td { background: #2b2433; }
+        .custom-modal .auc-row:hover td { background: #33283d; }
+        /* Цвет редкости: одна переменная --rc на строку (наследуется в ячейки). */
+        .auc-row[data-r="common"] { --rc: #c9ccd6; }
+        .auc-row[data-r="uncommon"] { --rc: #4cc95a; }
+        .auc-row[data-r="rare"] { --rc: #4aa3ff; }
+        .auc-row[data-r="epic"] { --rc: #b06bff; }
+        .auc-row[data-r="legendary"] { --rc: #ffb83d; }
+        /* ── Карточка предмета: арт + название + субтитр с чипами ── */
+        .auc-item-flex { display: flex; align-items: center; gap: 9px; min-width: 0; }
+        .auc-item-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+        .auc-item-title { display: flex; align-items: center; gap: 5px; color: var(--rc, #f7eadf); font-weight: bold; white-space: nowrap; overflow: hidden; }
+        .auc-item-name { overflow: hidden; text-overflow: ellipsis; }
+        .auc-item-qty { flex: none; color: #ffcf6a; font-size: 12px; font-weight: bold; }
+        .auc-item-sub { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; color: #9c8fa8; }
+        .auc-rarity-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--rc, #c9ccd6); box-shadow: 0 0 6px var(--rc, #c9ccd6); }
+        .auc-item-seller { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #auction-body .auc-item-flex .b-lot-art { margin-right: 0; }
+        /* Микро-бейджи второстепенных данных (вложено заточки, цена NPC). */
+        .auc-chip-tag { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: 999px; font-size: 10px; line-height: 1.5; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1); color: #d8c9a8; white-space: nowrap; }
+        .auc-chip-tag.invested { background: rgba(176, 107, 255, 0.12); border-color: rgba(176, 107, 255, 0.35); color: #d9c2ff; }
+        .auc-chip-tag.npc-cheap { background: rgba(76, 201, 90, 0.14); border-color: rgba(76, 201, 90, 0.45); color: #8ff2a0; font-weight: bold; }
+        /* ── Цена, медиана, выгода, таймер ── */
+        .auc-price-box { display: flex; flex-direction: column; gap: 1px; line-height: 1.25; }
+        .auc-price-total { color: #ffcf6a; font-weight: bold; white-space: nowrap; }
+        .auc-price-unit { color: #9c8fa8; font-size: 11px; white-space: nowrap; }
+        .auc-deal-badge { display: inline-block; min-width: 52px; padding: 2px 7px; border-radius: 6px; text-align: center; font-size: 12px; font-weight: bold; font-variant-numeric: tabular-nums; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12); color: #b9aec6; }
+        .auc-deal-badge.great { background: rgba(76, 201, 90, 0.16); border-color: rgba(76, 201, 90, 0.55); color: #6ff08a; text-shadow: 0 0 6px rgba(76, 201, 90, 0.45); }
+        .auc-deal-badge.good { background: rgba(139, 195, 74, 0.14); border-color: rgba(139, 195, 74, 0.45); color: #b6e06a; }
+        .auc-deal-badge.bad { background: rgba(255, 90, 122, 0.12); border-color: rgba(255, 90, 122, 0.4); color: #ff8fa3; }
+        .auc-time { color: #9c8fa8; font-size: 12px; white-space: nowrap; }
+        .auc-time.raffle { color: #e0a800; font-weight: bold; }
+        /* Кнопка покупки: размеры и фон остаются инлайновыми (состояния из JS),
+           здесь только форма и эффекты наведения. */
+        .auc-buy-btn { border-radius: 6px !important; transition: filter 0.15s, box-shadow 0.15s, opacity 0.2s; }
+        .auc-buy-btn:hover:not(:disabled) { filter: brightness(1.15); box-shadow: 0 0 10px rgba(76, 201, 90, 0.35); }
+        .auc-buy-btn:disabled { filter: grayscale(0.4); }
+        .auc-table-wrap { border: none; background: transparent; padding-right: 2px; }
+        .custom-modal .auc-table td.auc-empty { background: transparent; border-left: none; text-align: center; padding: 20px; color: #888; }
+        .auc-footer { margin-top: 8px; font-size: 12px; color: #8b7f96; text-align: right; }
+
     `;

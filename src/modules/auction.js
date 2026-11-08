@@ -1257,6 +1257,10 @@
                             median: basePrice,
                             discount: disc,
                             timeLeft: Utils.formatTimeLeft(l.u),
+                            // 11.6.2c.5: числовая метка конца торгов — по ней
+                            // сортирует колонка «Осталось» (th data-sort="u").
+                            // Раньше поля не было, и клик по колонке ничего не менял.
+                            u: l.u || 0,
                             seller: l.sn || l.s || '—',
                             // 11.5.5: логин продавца отдельно от отображаемого имени:
                             // «Мои лоты» сравнивают именно логин (me.user.login).
@@ -1293,92 +1297,89 @@
                 }
 
                 UI.showModal(`
-                    <h2 style="display:flex; align-items:center; gap:10px;">
-                        🔍 Сканер Аукциона
-                        <button id="auction-info-btn" title="Справка по аукциону" style="width:26px; height:26px; border-radius:50%; background:rgba(202,165,92,0.15); border:1px solid #caa55c; color:#caa55c; font-weight:bold; font-size:16px; font-family:serif; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all 0.2s;">i</button>
-                        <button id="lg-auction-full-scan" class="btn" title="Снять цены со всех лотов витрины (доступно раз в 30 минут)">📡 Сканировать весь аукцион</button>
+                    <h2 class="auc-head">
+                        <span class="auc-head-title">🔍 Сканер Аукциона</span>
+                        <button id="auction-info-btn" class="auc-info-btn" title="Справка по аукциону">i</button>
+                        <button id="lg-auction-full-scan" class="btn auc-scan-btn" title="Снять цены со всех лотов витрины (доступно раз в 30 минут)">📡 Сканировать весь аукцион</button>
                         <button class="custom-close" id="custom-close-btn" style="margin-left:auto;">✖</button>
                     </h2>
 
-                    <div style="display:flex; gap:10px; margin-bottom:15px; flex-wrap:wrap; align-items:center;">
-                        <input type="text" id="auction-search" class="search-bar" style="margin:0; flex:1; min-width:200px;" placeholder="Поиск по названию...">
+                    <div class="auc-toolbar">
+                        <div class="auc-toolbar-row">
+                            <input type="text" id="auction-search" class="auc-search-input" placeholder="🔍 Поиск по названию...">
 
-                        <select id="auction-filter-slot" class="search-bar" style="margin:0; width:auto; cursor:pointer;">
-                            <option value="">📦 Все слоты</option>
-                            <option value="weapon">Оружие</option>
-                            <option value="armor">Броня</option>
-                            <option value="shield">Щит</option>
-                            <option value="helmet">Шлем</option>
-                            <option value="trinket">Амулет</option>
-                            <option value="scroll">📜 Свитки / Печати</option>
-                            <option value="food">Еда / Зелья</option>
-                            <option value="material">Материал</option>
-                        </select>
+                            <select id="auction-filter-slot" class="auc-select">
+                                <option value="">📦 Все слоты</option>
+                                <option value="weapon">Оружие</option>
+                                <option value="armor">Броня</option>
+                                <option value="shield">Щит</option>
+                                <option value="helmet">Шлем</option>
+                                <option value="trinket">Амулет</option>
+                                <option value="scroll">📜 Свитки / Печати</option>
+                                <option value="food">Еда / Зелья</option>
+                                <option value="material">Материал</option>
+                            </select>
 
-                        <select id="auction-filter-rarity" class="search-bar" style="margin:0; width:auto; cursor:pointer;">
-                            <option value="">✨ Все редкости</option>
-                            <option value="common">Обычное</option>
-                            <option value="uncommon">Необычное</option>
-                            <option value="rare">Редкое</option>
-                            <option value="epic">Эпическое</option>
-                            <option value="legendary">Легендарное</option>
-                        </select>
+                            <select id="auction-filter-rarity" class="auc-select">
+                                <option value="">✨ Все редкости</option>
+                                <option value="common">Обычное</option>
+                                <option value="uncommon">Необычное</option>
+                                <option value="rare">Редкое</option>
+                                <option value="epic">Эпическое</option>
+                                <option value="legendary">Легендарное</option>
+                            </select>
 
-                        <select id="auction-filter-role" class="search-bar" style="margin:0; width:auto; cursor:pointer;">
-                            <option value="">🛡️ Все классы</option>
-                            <option value="legionary">Легионер</option>
-                            <option value="archer">Лучник</option>
-                            <option value="mage">Маг</option>
-                            <option value="priest">Жрец</option>
-                            <option value="rogue">Разбойник</option>
-                            <option value="necromancer">Некромант</option>
-                            <option value="paladin">Паладин</option>
-                        </select>
+                            <select id="auction-filter-role" class="auc-select">
+                                <option value="">🛡️ Все классы</option>
+                                <option value="legionary">Легионер</option>
+                                <option value="archer">Лучник</option>
+                                <option value="mage">Маг</option>
+                                <option value="priest">Жрец</option>
+                                <option value="rogue">Разбойник</option>
+                                <option value="necromancer">Некромант</option>
+                                <option value="paladin">Паладин</option>
+                            </select>
 
-                        <label style="display:flex; align-items:center; gap:5px; cursor:pointer; color:#ffcf6a; font-weight:bold; font-size:14px;">
-                            <input type="checkbox" id="auction-my-lots" ${this.showMyLotsOnly ? 'checked' : ''} style="width:16px; height:16px; accent-color:#caa55c;"> Мои лоты
-                        </label>
+                        </div>
 
-                        <label style="display:flex; align-items:center; gap:5px; cursor:pointer; color:#ffcf6a; font-weight:bold; font-size:14px;">
-                            <input type="checkbox" id="auction-favs" ${this.showFavoritesOnly ? 'checked' : ''} style="width:16px; height:16px; accent-color:#caa55c;"> ⭐ Избранное
-                        </label>
+                        <div class="auc-toolbar-row">
+                            <label class="auc-filter-chip"><input type="checkbox" id="auction-my-lots" ${this.showMyLotsOnly ? 'checked' : ''}><span>👤 Мои лоты</span></label>
+                            <label class="auc-filter-chip"><input type="checkbox" id="auction-favs" ${this.showFavoritesOnly ? 'checked' : ''}><span>⭐ Избранное</span></label>
+                            <label class="auc-filter-chip"><input type="checkbox" id="auction-only-deals"><span>🔥 Только выгодные</span></label>
+                            <label class="auc-filter-chip"><input type="checkbox" id="auction-sound" ${this.alertSoundEnabled ? 'checked' : ''}><span>🔔 Звук</span></label>
 
-                        <label style="display:flex; align-items:center; gap:5px; cursor:pointer; color:#ffcf6a; font-weight:bold; font-size:14px;">
-                            <input type="checkbox" id="auction-only-deals" style="width:16px; height:16px; accent-color:#caa55c;"> Только выгодные
-                        </label>
-
-                        <label style="display:flex; align-items:center; gap:5px; cursor:pointer; color:#ffcf6a; font-weight:bold; font-size:14px;">
-                            <input type="checkbox" id="auction-sound" ${this.alertSoundEnabled ? 'checked' : ''} style="width:16px; height:16px; accent-color:#caa55c;"> Звук
-                        </label>
-
-                        <div style="display:flex; gap:10px; align-items:center; margin-left:auto;">
-                            <button id="auction-prev" title="Предыдущая страница" style="background:#2a2030; border:1px solid #caa55c; color:#caa55c; padding:4px 10px; border-radius:4px; cursor:pointer; font-weight:bold;">◀</button>
-                            <span id="auction-page-info" style="color:#aaa; font-size:12px;">Стр. 1 из 1</span>
-                            <button id="auction-next" title="Следующая страница" style="background:#2a2030; border:1px solid #caa55c; color:#caa55c; padding:4px 10px; border-radius:4px; cursor:pointer; font-weight:bold;">▶</button>
+                            <div class="auc-pager">
+                                <button id="auction-prev" class="auc-page-btn" title="Предыдущая страница">◀</button>
+                                <span id="auction-page-info" class="auc-page-info">Стр. 1 из 1</span>
+                                <button id="auction-next" class="auc-page-btn" title="Следующая страница">▶</button>
+                            </div>
                         </div>
                     </div>
 
-                    <div class="table-container">
-                        <table>
+                    <div class="table-container auc-table-wrap">
+                        <table class="auc-table">
+                            <colgroup>
+                                <col>
+                                <col style="width:130px;">
+                                <col style="width:120px;">
+                                <col style="width:92px;">
+                                <col style="width:104px;">
+                                <col style="width:96px;">
+                            </colgroup>
                             <thead><tr>
-                                <th data-sort="name">Вещь</th>
-                                <th data-sort="qty">Кол-во</th>
-                                <th data-sort="totalPrice">Цена (общая)</th>
-                                <th data-sort="unitPrice">Цена за 1 шт</th>
+                                <th data-sort="name">Предмет</th>
+                                <th data-sort="totalPrice">Цена</th>
                                 <th data-sort="median" title="Медиана сети по наблюдениям за 7 дней (legion.ctrlfree.host). Без наблюдений — локальная медиана активных лотов">Медиана</th>
-                                <th data-sort="npcPrice">Магазин</th>
-                                <th data-sort="invested">Вложено</th>
                                 <th data-sort="discount">Выгода</th>
                                 <th data-sort="u">Осталось</th>
-                                <th>Продавец</th>
-                                <th style="width:75px; text-align:center;">Действие</th>
+                                <th class="auc-col-action">Действие</th>
                             </tr></thead>
                             <tbody id="auction-body"></tbody>
                         </table>
                     </div>
-                    <div style="margin-top:10px; font-size:12px; color:#888; text-align:right;">
+                    <div class="auc-footer">
                         Всего лотов: <span id="auction-count">0</span> · на странице до ${this.pageSize}
-                    </div>`);
+                    </div>`, { customClass: 'auc-modal' });
 
                 // Кнопка «i» в шапке: UI.showModal в начале зовёт closeModals(),
                 // поэтому справка просто заменяет витрину (клик по витрине не нужен).
@@ -1417,7 +1418,8 @@
                     }
 
                     if (!data.length) {
-                        tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; color:#888; padding:20px;">Ничего не найдено по заданным фильтрам.</td></tr>';
+                        // 11.6.2c.5: в таблице 6 колонок (было 11).
+                        tbody.innerHTML = '<tr><td colspan="6" class="auc-empty" style="text-align:center; color:#888; padding:20px;">Ничего не найдено по заданным фильтрам.</td></tr>';
                         return;
                     }
 
@@ -1426,9 +1428,10 @@
                     let html = '';
 
                     displayList.forEach(l => {
+                        // 11.6.2c.5: классы подсветки цены сохранены (cls) — они же
+                        // используются на бейдже «Выгода» вместе с .auc-deal-badge.
                         const cls = l.discount >= 20 ? 'deal-great' : (l.discount >= 10 ? 'deal-good' : (l.discount < 0 ? 'deal-bad' : 'stat-eq'));
-                        const qtyStr = l.qty > 1 ? `<b>${l.qty}</b>` : '1';
-                        const totalPriceStr = l.qty > 1 ? `${Utils.formatMoney(l.totalPrice)} <small style="color:#888">(${Utils.formatMoney(l.unitPrice)})</small>` : Utils.formatMoney(l.totalPrice);
+                        const dealCls = l.discount >= 20 ? 'great' : (l.discount >= 10 ? 'good' : (l.discount < 0 ? 'bad' : 'neutral'));
 
                         // 11.5.5: розыгрыш идёт, пока не истекло время ru;
                         // порог tml блокирует покупку у игроков на низком уровне.
@@ -1443,10 +1446,14 @@
                             || String(l.seller || '').toLowerCase() === this.myNick
                         );
                         const npcPrice = +l.npcPrice || this.cityStockMap.get(l.id) || 0;
-                        const npcHtml = npcPrice > 0
-                            ? `<span style="color:#8fd3ff;">${Utils.formatMoney(npcPrice)}</span>`
-                            : '<span style="color:#555;">—</span>';
                         const isCheap = npcPrice > 0 && l.unitPrice < npcPrice;
+                        // 11.6.2c.5: цена NPC больше не отдельная колонка — это чип
+                        // в карточке предмета. Нет цены NPC — чипа нет вовсе.
+                        const npcChip = npcPrice > 0
+                            ? (isCheap
+                                ? `<span class="auc-chip-tag npc-cheap" title="Лот дешевле, чем в магазине NPC (${Utils.formatMoney(npcPrice)})">🔥 Дешевле NPC</span>`
+                                : `<span class="auc-chip-tag" title="Цена в магазине NPC">🛒 ${Utils.formatMoney(npcPrice)}</span>`)
+                            : '';
 
                         // 11.6.2c.3: подсветка цены синхронизирована с колонкой
                         // «Выгода» — обе опираются на ОДИН ориентир (медиана сети
@@ -1470,15 +1477,18 @@
                                 : ' title="Медиана сети (7 дней): нет данных"');
 
                         // 11.5.5: «Вложено» — идеальная (минимальная) стоимость
-                        // заточки до +N (см. getLotEvaluation). У незаточенных — «—».
+                        // заточки до +N (см. getLotEvaluation). 11.6.2c.5: отдельной
+                        // колонки нет — у заточенных лотов это чип ⚒️ в карточке,
+                        // у незаточенных чип не рендерится.
                         const investedHtml = l.invested > 0
-                            ? `<span style="color:#ffcf6a;">${Utils.formatMoney(l.invested)}</span>`
-                            : `<span style="color:#555;">—</span>`;
+                            ? `<span class="auc-chip-tag invested" title="Идеальная стоимость заточки до +${l.e || 0}">⚒️ ${Utils.formatMoney(l.invested)}</span>`
+                            : '';
 
                         // Приоритет подсветки: дешевле магазина > мой лот.
-                        const rowStyle = isCheap
-                            ? 'background: rgba(76, 201, 90, 0.1);'
-                            : (isCur ? 'background:rgba(202,165,92,0.12);' : '');
+                        // 11.6.2c.5: раньше это был инлайн-фон <tr>, но у карточных
+                        // строк фон рисуют <td> (.auc-row td), поэтому подсветка
+                        // переехала в классы строки.
+                        const rowCls = 'auc-row' + (isCheap ? ' is-cheap' : (isCur ? ' is-cur' : ''));
 
                         let btnText = 'Купить';
                         let btnColor = '#28a745';
@@ -1505,9 +1515,9 @@
                             ? '<span style="color:#e0a800;">🎲 Розыгрыш</span>'
                             : Utils.escapeHtml(l.timeLeft);
 
-                        const rarityColors = { common: '#c9ccd6', uncommon: '#4cc95a', rare: '#4aa3ff', epic: '#b06bff', legendary: '#ffb83d' };
-                        const color = rarityColors[l.metaRarity] || '#fff';
-                        const rarityBadge = l.metaRarity ? `<span style="color:${color}; font-size:10px; border:1px solid ${color}; border-radius:4px; padding:0 4px; margin-left:5px; text-transform:capitalize;">${Utils.escapeHtml(l.metaRarity)}</span>` : '';
+                        // 11.6.2c.5: редкость задаёт цвет левой полоски и названия
+                        // (переменная --rc в styles.js), отдельный бейдж не нужен.
+                        const rarity = l.metaRarity || 'common';
 
                         // 11.5.5: история цен из /api/auction (hist) — по предмету,
                         // записи вида [цена, заточка]. Показываем 📊 с полной
@@ -1526,17 +1536,38 @@
                         const isFav = this.favorites.has(l.id);
                         const starHtml = `<span class="auc-fav-btn" data-id="${Utils.escapeHtml(l.id || '')}" title="${isFav ? 'Убрать из избранного' : 'В избранное'}" style="cursor:pointer; font-size:16px; margin-left:5px; color:${isFav ? '#ffd700' : '#555'};">${isFav ? '★' : '☆'}</span>`;
 
-                        html += `<tr data-lot-id="${Utils.escapeHtml(l.id || '')}" data-lot-name="${Utils.escapeHtml(l.name || '')}" style="${rowStyle}">
-                            <td>${l.icon ? `<img src="${Utils.safeUrl(l.icon)}" style="width:20px;vertical-align:middle;margin-right:5px;">` : ''}<b>${Utils.escapeHtml(l.name)}</b>${rarityBadge}${histIcon}${starHtml}</td>
-                            <td>${qtyStr}</td>
-                            <td style="color:#ffcf6a; font-weight:bold;">${totalPriceStr}</td>
-                            <td style="font-weight:bold;"${priceCls ? ` class="${priceCls}"` : ''}>${Utils.formatMoney(l.unitPrice)}</td>
-                            <td${medianTitle}>${medianHtml}</td>
-                            <td>${npcHtml}</td>
-                            <td style="color:#d8c9a8;">${investedHtml}</td>
-                            <td class="${cls}">${l.discount > 0 ? '-' : '+'}${Math.abs(l.discount)}%</td>
-                            <td style="color:#888;">${timeStr}</td>
-                            <td>${Utils.escapeHtml(l.seller || '')}</td>
+                        // 11.6.2c.5: карточная строка (6 колонок). Арт предмета
+                        // (.b-lot-art) вставляет enhanceAuctionRows() первым
+                        // ребёнком .auc-item-flex — то есть слева от .auc-item-info.
+                        html += `<tr class="${rowCls}" data-r="${rarity}" data-lot-id="${Utils.escapeHtml(l.id || '')}" data-lot-name="${Utils.escapeHtml(l.name || '')}">
+                            <td>
+                                <div class="auc-item-flex">
+                                    <div class="auc-item-info">
+                                        <div class="auc-item-title">
+                                            <span class="auc-item-name" title="${Utils.escapeHtml(l.name)}">${Utils.escapeHtml(l.name)}</span>
+                                            ${l.qty > 1 ? `<span class="auc-item-qty">×${l.qty}</span>` : ''}
+                                            ${histIcon}${starHtml}
+                                        </div>
+                                        <div class="auc-item-sub">
+                                            <span class="auc-rarity-dot"></span>
+                                            <span>${Utils.escapeHtml(l.metaRarity || '—')}</span>
+                                            <span class="auc-item-seller" title="Продавец">👤 ${Utils.escapeHtml(l.seller || '—')}</span>
+                                            ${investedHtml}${npcChip}
+                                        </div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="auc-price-box">
+                                    <span class="auc-price-total${priceCls ? ' ' + priceCls : ''}">${Utils.formatMoney(l.totalPrice)}</span>
+                                    ${l.qty > 1 ? `<span class="auc-price-unit">${Utils.formatMoney(l.unitPrice)} / шт</span>` : ''}
+                                </div>
+                            </td>
+                            <td${medianTitle}>
+                                <div class="auc-price-box">${medianHtml}</div>
+                            </td>
+                            <td><span class="auc-deal-badge ${dealCls} ${cls}">${l.discount > 0 ? '−' : '+'}${Math.abs(l.discount)}%</span></td>
+                            <td><span class="auc-time${isRaffle ? ' raffle' : ''}">${timeStr}</span></td>
                             <td style="text-align:center;">
                                 <button class="auc-buy-btn" data-buy-lot="${l.lotId || l.id}" data-price="${l.totalPrice}" data-name="${Utils.escapeHtml(l.name)}" data-raffle="${!!isRaffle}" data-raffle-end="${l.ru || 0}" style="background:${btnColor}; color:#fff; border:none; padding:4px 8px; border-radius:4px; cursor:${btnDisabled ? 'not-allowed' : 'pointer'}; font-size:12px; width:100%;" ${btnDisabled ? 'disabled' : ''}>${btnText}</button>
                             </td>
