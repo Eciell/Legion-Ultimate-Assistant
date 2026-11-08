@@ -1175,6 +1175,42 @@
         .deal-great { color: #4cc95a; font-weight: bold; text-shadow: 0 0 5px rgba(76, 201, 90, 0.5); }
         .deal-good { color: #8bc34a; font-weight: bold; }
         .deal-bad { color: #ff5a7a; }
+        /* 11.6.2c.2: медиана сети в витрине аукциона и строка медианы в
+           нативных тултипах предметов (#lg-tip игры и #lgi-tip инвентаря).
+           Порог подсветки: цена за штуку ниже медианы на 15% и больше —
+           зелёный, выше на 15% и больше — красный. */
+        .auction-deal { color: #6fd49a !important; font-weight: bold; }
+        .auction-overpriced { color: #ff5a7a !important; }
+        .auction-median-col { font-size: 12px; opacity: 0.8; }
+        /* 11.6.2c.4: кнопка «📡 Сканировать весь аукцион» в шапке сканера.
+           class="btn" — родной класс игры, но у него нет фона/рамки, поэтому
+           цвета аддона задаём по id (специфичность выше класса). :disabled —
+           кулдаун 30 минут или идущее сканирование. */
+        #lg-auction-full-scan {
+            min-height: 0;
+            padding: 5px 12px;
+            background: #2a2030;
+            border: 1px solid #caa55c;
+            border-radius: 6px;
+            color: #ffcf6a;
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: bold;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.2s, opacity 0.2s;
+        }
+        #lg-auction-full-scan:hover:not(:disabled) { background: #3d2f44; }
+        #lg-auction-full-scan:disabled { cursor: not-allowed; opacity: 0.55; }
+        .lg-market-median {
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            color: #ffcf6a;
+            font-size: 13px;
+            font-weight: bold;
+            pointer-events: none;
+        }
         .loader { display: flex; justify-content: center; align-items: center; height: 100px; font-size: 16px; color: #caa55c; font-weight: bold; }
         .${DOM_IDS.fabWrap}, .legion-fab-wrap { position: fixed; bottom: 20px; right: 20px; z-index: 10000; touch-action: none; user-select: none; }
         .${DOM_IDS.fabBtn}, .legion-fab-btn { width: 52px; height: 52px; border-radius: 50%; background: #1d1620; border: 2px solid #caa55c; color: #ffcf6a; font-size: 26px; display: flex; justify-content: center; align-items: center; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,0.75); transition: transform 0.2s, background 0.2s; position: relative; }
@@ -4339,6 +4375,10 @@
         // 11.5.5: оповещения о выгодных лотах. alertThreshold — минимальная
         // скидка в процентах, при которой показываем тост и играем сигнал.
         alertThreshold: 50,
+        // 11.6.2c.3: минимальная «Выгода» (в % от медианы сети, если она есть),
+        // при которой лот проходит фильтр «Только выгодные». Раньше порог был
+        // жёстко зашит числом 10 в update().
+        dealFilterMin: 10,
         // Звук можно выключить чекбоксом «Звук» в фильтрах; выбор живёт в
         // localStorage. Чтение обёрнуто в try: в приватном режиме/при
         // запрете хранилища getItem бросает исключение и ронял бы модуль.
@@ -4375,6 +4415,9 @@
         //   отправленные в POST /market/scan. Копится между открытиями
         //   витрины, поэтому пачка содержит несколько снимков цен.
         marketMedians: {},
+        // 11.6.2c.2: справочник предметов из последнего GET /api/auction —
+        // нужен строкам тултипов, чтобы узнать название предмета по id.
+        lastItemsMap: null,
         marketScanBuffer: [],
         marketScanSentAt: 0,
         marketScanPending: false,
@@ -4385,6 +4428,18 @@
         MARKET_MAX_IDS: 200,
         MARKET_TIMEOUT: 12000,
         MARKET_WAIT_MS: 1200,
+
+        // 11.6.2c.4: полное сканирование витрины (кнопка «📡 Сканировать весь
+        // аукцион»). Отметка о последнем скане живёт в localStorage, чтобы
+        // кулдаун переживал перезагрузку страницы; FULL_SCAN_MAX_LOTS —
+        // предохранитель «не заваливать сервер»: сервер принимает 500 записей
+        // за POST (MARKET_LIMITS.maxLotsPerScan), поэтому снимок уходит пачками.
+        FULL_SCAN_KEY: 'lgFullScanAt',
+        FULL_SCAN_COOLDOWN_MS: 30 * 60 * 1000,
+        FULL_SCAN_MAX_LOTS: 5000,
+        FULL_SCAN_MAX_PAGES: 25,
+        fullScanPending: false,
+        _fullScanTimer: null,
 
         // Базовая ценность (v) по редкости — фолбэк, если сервер не прислал
         // items[id].v (ивентовые и новые предметы). Значения из game-data.js
@@ -4399,6 +4454,9 @@
 
         init() {
             (document.getElementById(DOM_IDS.btnAuctionScan) || document.getElementById('btn-auction-scan'))?.addEventListener('click', () => this.open());
+            // 11.6.2c.2: дописываем «Медиана рынка» в нативные тултипы предметов
+            // (экипировка/сумка героя и окно инвентаря).
+            this.initItemTips();
         },
 
         // Загрузка ассортимента и официальных цен магазинов города (/api/city/stock)
@@ -4546,6 +4604,30 @@
         },
 
         /**
+         * Один лот витрины -> наблюдение { id, price } для /market/scan.
+         *
+         * Вынесено из collectMarketPrices, чтобы полное сканирование
+         * (11.6.2c.4) считало цену тем же правилом, но БЕЗ ограничения
+         * marketScanBuffer (он не больше пачки сервера — 500 записей).
+         *
+         * @param {object} lot лот из GET /api/auction
+         * @returns {{id: string, price: number}|null} null — лот не годится
+         */
+        lotObservation(lot) {
+            const id = String((lot && lot.i) || '').trim();
+            const total = Number(lot && lot.p);
+            if (!id || !Number.isFinite(total) || total <= 0) return null;
+
+            // Свои лоты не учитываем: иначе игрок сам себе двигал бы медиану.
+            const myNick = String(this.myNick || '').toLowerCase();
+            const seller = String((lot && lot.s) || '').toLowerCase();
+            if (myNick && seller === myNick) return null;
+
+            const qty = Math.max(1, Number(lot && lot.n) || 1);
+            return { id, price: Math.max(1, Math.round(total / qty)) };
+        },
+
+        /**
          * Снимок витрины -> наблюдения цен для POST /market/scan.
          *
          * Цена берётся ЗА ШТУКУ (l.p / l.n): в l.p лежит сумма за стопку, а
@@ -4561,26 +4643,18 @@
             const seen = new Set();
             if (!Array.isArray(lots) || !lots.length) return ids;
 
-            const myNick = String(this.myNick || '').toLowerCase();
             for (const lot of lots) {
-                const id = String((lot && lot.i) || '').trim();
-                const total = Number(lot && lot.p);
-                if (!id || !Number.isFinite(total) || total <= 0) continue;
+                const obs = this.lotObservation(lot);
+                if (!obs) continue;
 
-                const seller = String((lot && lot.s) || '').toLowerCase();
-                if (myNick && seller === myNick) continue;
-
-                const qty = Math.max(1, Number(lot && lot.n) || 1);
-                const unit = Math.max(1, Math.round(total / qty));
-
-                if (!seen.has(id)) {
-                    seen.add(id);
-                    ids.push(id);
+                if (!seen.has(obs.id)) {
+                    seen.add(obs.id);
+                    ids.push(obs.id);
                 }
                 // Буфер ограничен размером пачки сервера: лишние наблюдения
                 // просто не копим (следующее открытие витрины их повторит).
                 if (this.marketScanBuffer.length < this.MARKET_MAX_BATCH) {
-                    this.marketScanBuffer.push({ id, price: unit });
+                    this.marketScanBuffer.push(obs);
                 }
             }
             return ids;
@@ -4669,17 +4743,463 @@
             ]);
         },
 
+        /* ---------------------------------------------------------- */
+        /* 11.6.2c.4: полное сканирование витрины                     */
+        /* ---------------------------------------------------------- */
+
+        /**
+         * Время последнего успешного полного сканирования (мс) или 0.
+         * localStorage может быть запрещён (приватный режим) — тогда отметки
+         * просто нет и кулдаун не работает: ограничение живёт в браузере.
+         */
+        getFullScanAt() {
+            try {
+                const at = Number(localStorage.getItem(this.FULL_SCAN_KEY));
+                return Number.isFinite(at) && at > 0 ? at : 0;
+            } catch (e) {
+                return 0;
+            }
+        },
+
+        /** Остаток кулдауна в мс (0 — сканировать можно). */
+        getFullScanCooldownLeft() {
+            const at = this.getFullScanAt();
+            if (!at) return 0;
+            const left = this.FULL_SCAN_COOLDOWN_MS - (Date.now() - at);
+            return left > 0 ? left : 0;
+        },
+
+        /** Отметка кулдауна; при запрете хранилища молча пропускаем. */
+        markFullScanDone() {
+            try { localStorage.setItem(this.FULL_SCAN_KEY, String(Date.now())); }
+            catch (e) { dbg('[AUCTION] не удалось сохранить отметку полного скана:', e); }
+        },
+
+        /**
+         * Текст кнопки: «📡 Сканировать весь аукцион» / «⏳ Ждать N мин» /
+         * «⏳ Сканирую...». Минуты округляем вверх, чтобы «Ждать 0 мин» не
+         * появлялось за секунду до конца кулдауна.
+         */
+        fullScanButtonLabel() {
+            if (this.fullScanPending) return '⏳ Сканирую...';
+            const left = this.getFullScanCooldownLeft();
+            if (left > 0) return `⏳ Ждать ${Math.ceil(left / 60000)} мин`;
+            return '📡 Сканировать весь аукцион';
+        },
+
+        /** Приводит кнопку в шапке сканера к текущему состоянию. */
+        refreshFullScanButton() {
+            const btn = document.getElementById('lg-auction-full-scan');
+            if (!btn) return;
+            btn.textContent = this.fullScanButtonLabel();
+            btn.disabled = this.fullScanPending || this.getFullScanCooldownLeft() > 0;
+        },
+
+        /**
+         * Тикер кулдауна: раз в секунду пересчитывает текст кнопки. Запускается
+         * при открытии сканера и сам останавливается, когда модалку закрыли
+         * (кнопки нет в DOM) или кулдаун вышел — тогда кнопка уже активна.
+         */
+        startFullScanTick() {
+            this.stopFullScanTick();
+            if (this.getFullScanCooldownLeft() <= 0) {
+                this.refreshFullScanButton();
+                return;
+            }
+            this._fullScanTimer = setInterval(() => {
+                if (!document.getElementById('lg-auction-full-scan')) {
+                    this.stopFullScanTick();
+                    return;
+                }
+                this.refreshFullScanButton();
+                if (this.getFullScanCooldownLeft() <= 0) this.stopFullScanTick();
+            }, 1000);
+        },
+
+        stopFullScanTick() {
+            if (this._fullScanTimer) {
+                clearInterval(this._fullScanTimer);
+                this._fullScanTimer = null;
+            }
+        },
+
+        /**
+         * Лоты ВСЕГО аукциона одним снимком.
+         *
+         * Игра запрашивает витрину без пагинации: site/auction.js делает один
+         * GET /api/auction и читает D.lots целиком, других страниц в клиенте
+         * нет (docs/API.md §12 — в ответе тоже нет page/next). Поэтому основная
+         * ветка — один fetch.
+         *
+         * Защита на будущее: если сервер когда-нибудь начнёт отдавать страницы
+         * (pages/next/total > lots.length), добираем их циклом ?page=N, пока
+         * приходят новые лоты. Дубли отсекаем по id лота, поэтому эндпоинт,
+         * игнорирующий ?page, не зациклит нас: страница без новых лотов — конец.
+         *
+         * @returns {Promise<Array<object>>} лоты (не больше FULL_SCAN_MAX_LOTS)
+         */
+        async fetchAllAuctionLots() {
+            const first = await Utils.fetchApi('/api/auction');
+            if (!first || first.ok === false) {
+                throw new Error((first && (first.error || first.message)) || 'аукцион не ответил');
+            }
+
+            const firstLots = first.lots || (first.body && first.body.lots) || [];
+            const lots = Array.isArray(firstLots) ? firstLots.slice(0, this.FULL_SCAN_MAX_LOTS) : [];
+            const seen = new Set(lots.map((l) => String((l && l.id) || '')));
+
+            const body = first.body || {};
+            const pages = Number(first.pages || body.pages) || 0;
+            const total = Number(first.total || body.total) || 0;
+            const hasNext = first.next !== undefined || body.next !== undefined;
+            if (!(pages > 1 || total > lots.length || hasNext)) return lots;
+
+            for (let page = 2; page <= this.FULL_SCAN_MAX_PAGES; page++) {
+                if (lots.length >= this.FULL_SCAN_MAX_LOTS) break;
+                const res = await Utils.fetchApi('/api/auction?page=' + page);
+                const list = (res && (res.lots || (res.body && res.body.lots))) || [];
+                if (!Array.isArray(list) || !list.length) break;
+
+                let added = 0;
+                for (const lot of list) {
+                    const key = String((lot && lot.id) || '');
+                    if (key && seen.has(key)) continue;
+                    if (key) seen.add(key);
+                    lots.push(lot);
+                    added++;
+                    if (lots.length >= this.FULL_SCAN_MAX_LOTS) break;
+                }
+                if (!added) break;
+            }
+            return lots;
+        },
+
+        /**
+         * Наблюдения цен по полному снимку витрины: без ограничения буфера в
+         * 500 записей, но не больше FULL_SCAN_MAX_LOTS лотов.
+         */
+        collectFullScanPrices(lots) {
+            const out = [];
+            if (!Array.isArray(lots)) return out;
+            for (const lot of lots) {
+                if (out.length >= this.FULL_SCAN_MAX_LOTS) break;
+                const obs = this.lotObservation(lot);
+                if (obs) out.push(obs);
+            }
+            return out;
+        },
+
+        /**
+         * Отправка наблюдений пачками по MARKET_MAX_BATCH (500 — предел
+         * POST /market/scan, MARKET_LIMITS.maxLotsPerScan). Последовательно,
+         * а не параллельно: сервер пишет каждую пачку транзакцией, залп из
+         * десяти запросов ему не нужен.
+         *
+         * @param {Array<{id: string, price: number}>} observations
+         * @returns {Promise<number>} сколько наблюдений принял сервер
+         */
+        async sendFullScanLots(observations) {
+            let sent = 0;
+            for (let i = 0; i < observations.length; i += this.MARKET_MAX_BATCH) {
+                const batch = observations.slice(i, i + this.MARKET_MAX_BATCH);
+                const res = await this._marketRequest('POST', '/market/scan', { lots: batch });
+                const counted = Number(res && res.count);
+                sent += Number.isFinite(counted) ? counted : batch.length;
+            }
+            return sent;
+        },
+
+        /**
+         * Свежие медианы для предметов полного снимка (GET /market/medians).
+         *
+         * Список режем по MARKET_MAX_IDS (200 — больше сервер за запрос не
+         * принимает) и МЕРДЖИМ результат в marketMedians, а не заменяем его:
+         * в памяти могут быть медианы предметов, которых в снимке уже нет.
+         *
+         * @param {string[]} ids
+         */
+        async refreshMediansForIds(ids) {
+            const unique = [];
+            const seen = new Set();
+            for (const raw of Array.isArray(ids) ? ids : []) {
+                const id = String(raw || '').trim();
+                if (!id || seen.has(id)) continue;
+                seen.add(id);
+                unique.push(id);
+            }
+
+            const merged = { ...this.marketMedians };
+            for (let i = 0; i < unique.length; i += this.MARKET_MAX_IDS) {
+                const chunk = unique.slice(i, i + this.MARKET_MAX_IDS);
+                const res = await this._marketRequest('GET', '/market/medians?ids=' + encodeURIComponent(chunk.join(',')));
+                const medians = res && res.medians;
+                if (!medians || typeof medians !== 'object') continue;
+                for (const id of chunk) {
+                    const price = Math.round(Number(medians[id]));
+                    if (Number.isFinite(price) && price > 0) merged[id] = price;
+                }
+            }
+            this.marketMedians = merged;
+        },
+
+        /**
+         * Полное сканирование витрины (ТЗ 11.6.2c.4).
+         *
+         * 1. Кулдаун 30 минут (localStorage lgFullScanAt): повторный клик
+         *    только показывает тост и ничего не отправляет.
+         * 2. Один снимок /api/auction (в игре нет пагинации), максимум 5000 лотов.
+         * 3. Цены уходят пачками по 500; после успеха — отметка кулдауна,
+         *    свежие медианы и перерисовка таблицы через onRendered().
+         *
+         * @param {Function} [onRendered] перерисовать витрину (update из open())
+         */
+        async runFullScan(onRendered) {
+            if (this.fullScanPending) return;
+            if (this.getFullScanCooldownLeft() > 0) {
+                UI.showToast('Сканирование доступно раз в 30 минут', true);
+                this.refreshFullScanButton();
+                this.startFullScanTick();
+                return;
+            }
+
+            this.fullScanPending = true;
+            this.refreshFullScanButton();
+            try {
+                const lots = await this.fetchAllAuctionLots();
+                const observations = this.collectFullScanPrices(lots);
+                if (!observations.length) {
+                    UI.showToast('На аукционе нет лотов для сканирования', true);
+                    return;
+                }
+
+                const sent = await this.sendFullScanLots(observations);
+
+                // Отметку кулдауна ставим ТОЛЬКО после успешной отправки: если
+                // наш сервер лежит, игрок не должен ждать 30 минут впустую.
+                this.markFullScanDone();
+                // Полный снимок уже ушёл — обычный флаш этих же цен не нужен.
+                this.marketScanBuffer = [];
+                this.marketScanSentAt = Date.now();
+
+                UI.showToast(`✅ Успешно просканировано ${sent} лотов`, false);
+
+                // Медианы ждём не дольше MARKET_WAIT_MS: перерисовка не должна
+                // висеть на медленном сервере — тогда останутся старые медианы.
+                const ids = [...new Set(observations.map((o) => o.id))];
+                await Promise.race([
+                    this.refreshMediansForIds(ids).catch((e) => {
+                        dbg('[AUCTION] Медианы после полного скана недоступны:', e);
+                    }),
+                    new Promise((resolve) => setTimeout(resolve, this.MARKET_WAIT_MS))
+                ]);
+
+                if (typeof onRendered === 'function') {
+                    try { onRendered(); } catch (e) { dbg('[AUCTION] Перерисовка после скана:', e); }
+                }
+            } catch (e) {
+                dbg('[AUCTION] Полное сканирование не удалось:', e);
+                UI.showToast('Не удалось просканировать аукцион: ' + (e && e.message ? e.message : e), true);
+            } finally {
+                this.fullScanPending = false;
+                this.startFullScanTick();
+                this.refreshFullScanButton();
+            }
+        },
+
+        /**
+         * 11.6.2c.2: медиана сети по предмету из marketMedians.
+         * 0 — наблюдений за 7 дней нет (колонка показывает «—»).
+         *
+         * @param {string} itemId
+         * @returns {number}
+         */
+        getMarketMedian(itemId) {
+            if (!itemId) return 0;
+            const price = +this.marketMedians[itemId] || 0;
+            return price > 0 ? price : 0;
+        },
+
         /**
          * title для ячейки «Медиана»: медиана сети из памяти модуля.
-         * Пустая строка, если по предмету наблюдений нет (v11.6.2c.1).
+         * Пустая строка, если по предмету наблюдений нет (v11.6.2c.2).
          *
          * @param {string} itemId
          * @returns {string}
          */
         marketMedianTitle(itemId) {
-            const net = +this.marketMedians[itemId] || 0;
+            const net = this.getMarketMedian(itemId);
             if (net <= 0) return '';
-            return ` title="Медиана сети (7 дн.): ${Utils.formatMoney(net)}"`;
+            return ` title="Медиана сети (7 дней): ${Utils.formatMoney(net)}"`;
+        },
+
+        // 11.6.2c.2: строка «Медиана рынка» в НАТИВНЫХ тултипах предметов.
+        //
+        // Игра рисует подсказки сама: #lg-tip (site/app.js — экипировка и
+        // сумка героя) и #lgi-tip (lib/inventory.js — окно инвентаря).
+        // Оба наполняются через innerHTML, поэтому единственная точка
+        // перехвата — MutationObserver на document.body: как только игра
+        // переписала содержимое подсказки, мы дописываем в её конец строку.
+        //
+        // id предмета в разметке подсказки нет, поэтому:
+        //   1) игра помечает наведённый элемент aria-describedby="<id
+        //      подсказки>" (tipPlace в app.js) -> читаем data-sel (это uid
+        //      экземпляра) и ищем предмет в инвентаре героя (G.ME.hero.items);
+        //   2) если якорь не помог — сравниваем заголовок подсказки с
+        //      названиями предметов, по которым есть медиана (tipNameIndex).
+        // ------------------------------------------------------------
+        initItemTips() {
+            // Повторный boot() не должен плодить наблюдателей.
+            if (this._tipObserver || typeof MutationObserver === 'undefined') return;
+
+            const check = () => {
+                try {
+                    const lgTip = document.getElementById('lg-tip');
+                    if (lgTip) this.attachMarketMedian(lgTip);
+                    const lgiTip = document.getElementById('lgi-tip');
+                    if (lgiTip) this.attachMarketMedian(lgiTip);
+                    // Карточка предмета в нативной подсказке (.tip.card) —
+                    // отдельный режим #lg-tip, проверяем и по селектору.
+                    document.querySelectorAll('.tip.card').forEach(el => this.attachMarketMedian(el));
+                } catch (e) {
+                    dbg('[AUCTION] строка медианы в тултипе:', e);
+                }
+            };
+
+            // Мутаций на странице много (лента чата и т.п.), поэтому проверку
+            // склеиваем в один кадр: иначе на каждое сообщение шёл бы обход DOM.
+            let scheduled = false;
+            const checkSoon = () => {
+                if (scheduled) return;
+                scheduled = true;
+                const run = () => { scheduled = false; check(); };
+                if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+                else setTimeout(run, 16);
+            };
+
+            const observer = new MutationObserver(checkSoon);
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true,
+                characterData: true,
+                attributes: true,
+                attributeFilter: ['hidden', 'class']
+            });
+            this._tipObserver = observer;
+        },
+
+        /**
+         * Дописать строку «📈 Медиана рынка: …» в подсказку, если для её
+         * предмета есть медиана сети. Повторный вызов безопасен: маркер
+         * .lg-market-median не даёт вставить строку дважды.
+         *
+         * @param {Element} tipEl #lg-tip / #lgi-tip / .tip.card
+         */
+        attachMarketMedian(tipEl) {
+            if (!tipEl || tipEl.hidden) return;
+            if (!tipEl.textContent || !tipEl.textContent.trim()) return;
+            if (tipEl.querySelector('.lg-market-median')) return;
+
+            const itemId = this.resolveTipItemId(tipEl);
+            if (!itemId) return;
+            const price = this.getMarketMedian(itemId);
+            if (price <= 0) return;
+
+            const line = document.createElement('div');
+            line.className = 'lg-market-median';
+            line.textContent = `📈 Медиана рынка: ${Utils.formatMoney(price)}`;
+            tipEl.appendChild(line);
+        },
+
+        /**
+         * id предмета по подсказке: сначала якорь (aria-describedby), затем
+         * совпадение заголовка с известным названием.
+         *
+         * @param {Element} tipEl
+         * @returns {string} '' — предмет не опознан
+         */
+        resolveTipItemId(tipEl) {
+            // 1. Якорь подсказки: игра ставит aria-describedby="lg-tip" на
+            //    наведённую ячейку, инвентарь — aria-describedby="lgi-tip".
+            const tipId = tipEl.id;
+            if (tipId) {
+                let anchor = null;
+                try {
+                    anchor = document.querySelector(`[aria-describedby="${tipId}"]`);
+                } catch (e) {
+                    anchor = null;
+                }
+                if (anchor) {
+                    // Прямые data-атрибуты предмета (наши строки и сторонние аддоны).
+                    const direct = anchor.getAttribute('data-item-id')
+                        || anchor.getAttribute('data-lg-item')
+                        || anchor.getAttribute('data-item')
+                        || '';
+                    if (direct && this.getMarketMedian(direct) > 0) return direct;
+
+                    // Строка нашей витрины аукциона: id предмета в data-lot-id.
+                    const lotRow = anchor.closest('[data-lot-id]');
+                    const lotId = lotRow && lotRow.getAttribute('data-lot-id');
+                    if (lotId && this.getMarketMedian(lotId) > 0) return lotId;
+
+                    // data-sel — uid экземпляра предмета (app.js: data-sel="${it.uid}").
+                    const uid = anchor.getAttribute('data-sel');
+                    const items = G.ME?.hero?.items;
+                    if (uid && Array.isArray(items)) {
+                        const found = items.find(it => it && it.uid === uid);
+                        if (found && found.id && this.getMarketMedian(found.id) > 0) return found.id;
+                    }
+                }
+            }
+
+            // 2. По названию из заголовка подсказки.
+            const title = this.tipTitleText(tipEl);
+            if (!title) return '';
+            return this.tipNameIndex()[title] || '';
+        },
+
+        /**
+         * Текст заголовка подсказки в нормализованном виде:
+         *   .t-n      — имя предмета в тултипе игры (site/app.js),
+         *   .lgi-th b — имя в тултипе инвентаря (lib/inventory.js).
+         */
+        tipTitleText(tipEl) {
+            const node = tipEl.querySelector('.t-n, .lgi-th b, h4, b');
+            if (!node) return '';
+            return this.normalizeItemName(node.textContent || '');
+        },
+
+        /**
+         * Индекс «нормализованное название -> id предмета» по всем id, для
+         * которых есть медиана. Строится лениво и пересобирается, когда
+         * меняется набор id (новый скан витрины) или справочник предметов.
+         */
+        tipNameIndex() {
+            const itemsKey = this.lastItemsMap ? Object.keys(this.lastItemsMap).length : 0;
+            const key = Object.keys(this.marketMedians).sort().join(',') + '|' + itemsKey;
+            if (this._tipNameIndex && this._tipNameIndexKey === key) return this._tipNameIndex;
+
+            const map = {};
+            for (const id of Object.keys(this.marketMedians)) {
+                const name = this.normalizeItemName(Utils.getItemName(id, this.lastItemsMap));
+                if (name && !map[name]) map[name] = id;
+            }
+            this._tipNameIndex = map;
+            this._tipNameIndexKey = key;
+            return map;
+        },
+
+        /**
+         * Название к сравнимому виду: без регистра и «ё», без хвостов «+3»
+         * (заточка) и «×5» (количество).
+         */
+        normalizeItemName(value) {
+            return String(value == null ? '' : value)
+                .toLowerCase()
+                .replace(/ё/g, 'е')
+                .replace(/\s*\+\s*\d+\s*$/, '')
+                .replace(/\s*[×x]\s*\d+\s*$/, '')
+                .replace(/\s+/g, ' ')
+                .trim();
         },
 
         // 11.5.5: базовая стоимость предмета (v) для расчёта «Вложено».
@@ -4792,6 +5312,54 @@
             };
         },
 
+        /**
+         * 11.6.2c.3: процент выгоды лота — единый расчёт для колонки
+         * «Выгода», фильтра «Только выгодные», сортировки и оповещений.
+         *
+         * Приоритет ориентира (сверху вниз):
+         *   1. медиана сети (marketMedians[id]) — общая статистика игроков с
+         *      аддоном за 7 дней (GET /market/medians). Именно её показывает
+         *      колонка «Медиана», поэтому «Выгода» обязана считаться от неё:
+         *      иначе строки расходятся (баг «Стеклянного шарика» — 39с 64
+         *      против медианы 44с 8 показывалось минусом, хотя лот дешевле
+         *      на 10%, потому что discount шёл от vals/лавки NPC);
+         *   2. справедливая цена из getLotEvaluation (лавка NPC -> vals ->
+         *      локальная медиана активных лотов) — если сети нет;
+         *   3. локальная медиана группы лотов — последний фолбэк.
+         *
+         * unitPrice — цена ЗА ШТУКУ (l.p / l.n), медианы тоже за штуку,
+         * поэтому сравниваем напрямую, без умножения на количество.
+         *
+         * @param {object} lot лот из groups (с unitPrice)
+         * @param {object} ev результат getLotEvaluation
+         * @param {number} median локальная медиана группы (за штуку)
+         * @returns {{discount:number, ref:number, refSource:string}}
+         */
+        computeDiscount(lot, ev, median) {
+            const unitPrice = +lot?.unitPrice || 0;
+            const netMedian = this.getMarketMedian(lot?.i);
+
+            let ref = 0;
+            let refSource = 'none';
+            if (netMedian > 0) {
+                ref = netMedian;
+                refSource = 'net';
+            } else if (ev && ev.fairUnit > 0) {
+                ref = ev.fairUnit;
+                refSource = ev.sourceType || 'fair';
+            } else if (median > 0) {
+                ref = median;
+                refSource = 'market';
+            }
+
+            if (ref <= 0 || unitPrice <= 0) return { discount: 0, ref, refSource };
+
+            // Процент считается от ориентира (а не от цены лота): «-10%» —
+            // лот дешевле медианы на 10%, «+5%» — дороже на 5%.
+            const discount = Math.round(((ref - unitPrice) / ref) * 100);
+            return { discount, ref, refSource };
+        },
+
         // Парсинг предметов переехал в core/utils-art.js (v11.6.0, этап 4),
         // чтобы не было цикла utils-art.getItemName -> Auction.getItemName:
         //    Auction.getItemName(id, itemsMap) -> Utils.getItemName(id, itemsMap)
@@ -4872,10 +5440,10 @@
                 ['Кол-во', 'Сколько штук в лоте (если стак)'],
                 ['Цена (общая)', 'Стоимость всего лота'],
                 ['Цена за 1 шт', 'Цена одной штуки (для стаков)'],
-                ['Медиана', 'Ориентир цены: базовая цена лавки NPC → базовая ценность предмета → медиана активных лотов. Заточка в ориентир НЕ входит'],
+                ['Медиана', 'Медиана сети по наблюдениям за 7 дней (наш сервер). Если наблюдений нет — приглушённая локальная медиана активных лотов, иначе «—». Цена лота за штуку ниже медианы на 15% и больше — зелёная, выше на 15% и больше — красная'],
                 ['Магазин', 'Цена NPC в официальной лавке (голубая). Строки дешевле магазина подсвечены зелёным'],
                 ['Вложено', 'Идеальная (минимальная) стоимость заточки до текущего +N: сумма цен уровней без учёта шансов'],
-                ['Выгода', 'На сколько % цена лота ниже ориентира (зелёный = выгодно, красный = дорого)'],
+                ['Выгода', 'На сколько % цена лота за штуку ниже ориентира: сначала медиана сети (7 дней), затем лавка NPC/справочная ценность/медиана активных лотов. Зелёный от 10%, красный — дороже ориентира'],
                 ['Осталось', 'До конца лота. Если идёт розыгрыш — бейдж 🎲 Розыгрыш'],
                 ['Продавец', 'Ник игрока, выставившего лот'],
                 ['Действие', 'Купить / 🎲 Хочу (заявка) / Ваш лот / Ур. < N (низкий уровень торговли)']
@@ -4964,6 +5532,9 @@
                     return UI.showModal('<h2>Аукцион пуст <button class="custom-close" id="custom-close-btn">✖</button></h2>');
                 }
                 const itemsMap = res.items || res.body?.items || (res.data && res.data.items) || {};
+                // 11.6.2c.2: кэш справочника — по нему тултипы предметов
+                // сопоставляют название с id при поиске медианы.
+                this.lastItemsMap = itemsMap;
                 // 11.5.5: история последних цен по предметам — { id: [[цена, заточка], …] }.
                 const histMap = res.hist || res.body?.hist || {};
                 // Конфиг канала: сбор за выставление, комиссия, сроки, лимит лотов.
@@ -5014,8 +5585,14 @@
 
                     group.lots.forEach(l => {
                         const ev = this.getLotEvaluation(l, res, activeMap);
-                        const basePrice = ev.fairUnit > 0 ? ev.fairUnit : median;
-                        const disc = ev.fairUnit > 0 ? ev.discount : (median > 0 ? Math.round(((median - l.unitPrice) / median) * 100) : 0);
+                        // 11.6.2c.3: «Выгода» и «Медиана» считаются от ОДНОГО
+                        // ориентира — медианы сети, если она есть. В поле median
+                        // кладём тот же ориентир, чтобы сортировка по колонке
+                        // «Медиана» и подсветка ±15% (11.6.2c.2) не расходились
+                        // с числом в колонке «Выгода».
+                        const discCalc = this.computeDiscount(l, ev, median);
+                        const basePrice = discCalc.ref > 0 ? discCalc.ref : (ev.fairUnit > 0 ? ev.fairUnit : median);
+                        const disc = discCalc.discount;
                         const en = Number(l.en || l.e || l.enchant || 0);
 
                         processed.push({
@@ -5037,6 +5614,9 @@
                             metaRarity: meta.rarity,
                             metaRole: meta.role,
                             sourceType: ev.sourceType,
+                            // 11.6.2c.3: от чего именно посчитана «Выгода» —
+                            // net (медиана сети) / shop / val / market / none.
+                            refSource: discCalc.refSource,
                             lotId: l.id,
                             // 11.5.5: ru — время окончания розыгрыша (0/undefined у
                             // обычного лота), wn — число заявок «Хочу» в розыгрыше.
@@ -5065,6 +5645,7 @@
                     <h2 style="display:flex; align-items:center; gap:10px;">
                         🔍 Сканер Аукциона
                         <button id="auction-info-btn" title="Справка по аукциону" style="width:26px; height:26px; border-radius:50%; background:rgba(202,165,92,0.15); border:1px solid #caa55c; color:#caa55c; font-weight:bold; font-size:16px; font-family:serif; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all 0.2s;">i</button>
+                        <button id="lg-auction-full-scan" class="btn" title="Снять цены со всех лотов витрины (доступно раз в 30 минут)">📡 Сканировать весь аукцион</button>
                         <button class="custom-close" id="custom-close-btn" style="margin-left:auto;">✖</button>
                     </h2>
 
@@ -5133,7 +5714,7 @@
                                 <th data-sort="qty">Кол-во</th>
                                 <th data-sort="totalPrice">Цена (общая)</th>
                                 <th data-sort="unitPrice">Цена за 1 шт</th>
-                                <th data-sort="median">Медиана</th>
+                                <th data-sort="median" title="Медиана сети по наблюдениям за 7 дней (legion.ctrlfree.host). Без наблюдений — локальная медиана активных лотов">Медиана</th>
                                 <th data-sort="npcPrice">Магазин</th>
                                 <th data-sort="invested">Вложено</th>
                                 <th data-sort="discount">Выгода</th>
@@ -5216,6 +5797,27 @@
                             : '<span style="color:#555;">—</span>';
                         const isCheap = npcPrice > 0 && l.unitPrice < npcPrice;
 
+                        // 11.6.2c.3: подсветка цены синхронизирована с колонкой
+                        // «Выгода» — обе опираются на ОДИН ориентир (медиана сети
+                        // в приоритете), поэтому строки больше не противоречат
+                        // друг другу. Порог ±15% из 11.6.2c.2 сохранён: discount
+                        // > 0 — лот дешевле ориентира.
+                        const netMedian = this.getMarketMedian(l.id);
+                        let priceCls = '';
+                        if (l.discount >= 15) priceCls = 'auction-deal';
+                        else if (l.discount <= -15) priceCls = 'auction-overpriced';
+                        // Ячейка «Медиана»: медиана сети; если её нет — приглушённая
+                        // локальная; если нет и локальной — прочерк.
+                        const medianHtml = netMedian > 0
+                            ? `<span class="auction-median-col">${Utils.formatMoney(netMedian)}</span>`
+                            : (l.median > 0
+                                ? `<span class="auction-median-col" style="opacity:0.45;">${Utils.formatMoney(l.median)}</span>`
+                                : '<span style="color:#555;">—</span>');
+                        const medianTitle = this.marketMedianTitle(l.id)
+                            || (l.median > 0
+                                ? ' title="Медиана сети (7 дней): нет данных — показана локальная медиана активных лотов"'
+                                : ' title="Медиана сети (7 дней): нет данных"');
+
                         // 11.5.5: «Вложено» — идеальная (минимальная) стоимость
                         // заточки до +N (см. getLotEvaluation). У незаточенных — «—».
                         const investedHtml = l.invested > 0
@@ -5277,8 +5879,8 @@
                             <td>${l.icon ? `<img src="${Utils.safeUrl(l.icon)}" style="width:20px;vertical-align:middle;margin-right:5px;">` : ''}<b>${Utils.escapeHtml(l.name)}</b>${rarityBadge}${histIcon}${starHtml}</td>
                             <td>${qtyStr}</td>
                             <td style="color:#ffcf6a; font-weight:bold;">${totalPriceStr}</td>
-                            <td style="font-weight:bold;">${Utils.formatMoney(l.unitPrice)}</td>
-                            <td${this.marketMedianTitle(l.id)}>${Utils.formatMoney(l.median)}</td>
+                            <td style="font-weight:bold;"${priceCls ? ` class="${priceCls}"` : ''}>${Utils.formatMoney(l.unitPrice)}</td>
+                            <td${medianTitle}>${medianHtml}</td>
                             <td>${npcHtml}</td>
                             <td style="color:#d8c9a8;">${investedHtml}</td>
                             <td class="${cls}">${l.discount > 0 ? '-' : '+'}${Math.abs(l.discount)}%</td>
@@ -5373,7 +5975,7 @@
                         // Универсальные предметы (без роли) должны проходить фильтр класса
                         if (fRole && l.metaRole && l.metaRole !== fRole) return false;
 
-                        if (onlyDeals && l.discount < 10) return false;
+                        if (onlyDeals && l.discount < this.dealFilterMin) return false;
                         // 11.5.5: «Мои лоты» — продавец совпадает с логином из /api/me.
                         // Сравниваем и логин, и отображаемое имя: сервер отдаёт их
                         // раздельно (s / sn), а имя героя может не совпадать с логином.
@@ -5410,6 +6012,16 @@
                     this.currentPage++;
                     update();
                 });
+
+                // 11.6.2c.4: полное сканирование витрины. Кнопка disabled на
+                // время кулдауна (30 минут), тикер раз в секунду обновляет её
+                // текст; update() перерисовывает таблицу, чтобы после скана
+                // показать свежие медианы сети.
+                document.getElementById('lg-auction-full-scan')?.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.runFullScan(update);
+                });
+                this.startFullScanTick();
 
                 // Настройка звука оповещений: сохраняем в localStorage, чтобы
                 // выбор жил между сканами (по умолчанию звук включён).

@@ -200,6 +200,42 @@
         .deal-great { color: #4cc95a; font-weight: bold; text-shadow: 0 0 5px rgba(76, 201, 90, 0.5); }
         .deal-good { color: #8bc34a; font-weight: bold; }
         .deal-bad { color: #ff5a7a; }
+        /* 11.6.2c.2: медиана сети в витрине аукциона и строка медианы в
+           нативных тултипах предметов (#lg-tip игры и #lgi-tip инвентаря).
+           Порог подсветки: цена за штуку ниже медианы на 15% и больше —
+           зелёный, выше на 15% и больше — красный. */
+        .auction-deal { color: #6fd49a !important; font-weight: bold; }
+        .auction-overpriced { color: #ff5a7a !important; }
+        .auction-median-col { font-size: 12px; opacity: 0.8; }
+        /* 11.6.2c.4: кнопка «📡 Сканировать весь аукцион» в шапке сканера.
+           class="btn" — родной класс игры, но у него нет фона/рамки, поэтому
+           цвета аддона задаём по id (специфичность выше класса). :disabled —
+           кулдаун 30 минут или идущее сканирование. */
+        #lg-auction-full-scan {
+            min-height: 0;
+            padding: 5px 12px;
+            background: #2a2030;
+            border: 1px solid #caa55c;
+            border-radius: 6px;
+            color: #ffcf6a;
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: bold;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.2s, opacity 0.2s;
+        }
+        #lg-auction-full-scan:hover:not(:disabled) { background: #3d2f44; }
+        #lg-auction-full-scan:disabled { cursor: not-allowed; opacity: 0.55; }
+        .lg-market-median {
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            color: #ffcf6a;
+            font-size: 13px;
+            font-weight: bold;
+            pointer-events: none;
+        }
         .loader { display: flex; justify-content: center; align-items: center; height: 100px; font-size: 16px; color: #caa55c; font-weight: bold; }
         .${DOM_IDS.fabWrap}, .legion-fab-wrap { position: fixed; bottom: 20px; right: 20px; z-index: 10000; touch-action: none; user-select: none; }
         .${DOM_IDS.fabBtn}, .legion-fab-btn { width: 52px; height: 52px; border-radius: 50%; background: #1d1620; border: 2px solid #caa55c; color: #ffcf6a; font-size: 26px; display: flex; justify-content: center; align-items: center; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,0.75); transition: transform 0.2s, background 0.2s; position: relative; }
