@@ -49,11 +49,13 @@
            v11.6.2a.5: TH=135, TOP=40, BOT=50 -> BH=630 (узлы 48px).
            ============================================================ */
         /* v11.6.1d: внутренний скролл убран — дерево (панель 38 + отступы +
-           шапки веток 28 + поле 630) прокручивается вместе с модалкой (96vh).
+           шапки веток 28 + поле 630) прокручивается вместе с модалкой
+           (v11.6.3a: max-height: calc(100vh - 40px), height: auto).
            overflow: visible, чтобы не обрезались свечения узлов. */
         .sim-tree-wrap { flex: 1; min-width: 0; background: #16121a !important; border: 1px solid #3d2f44; border-radius: 8px; box-shadow: inset 0 0 20px rgba(0,0,0,0.6); position: relative; overflow: visible; display: flex; flex-direction: column; }
-        /* v11.6.2a.5: min-width 950px — три ветки не сжимаются «в кашу». */
-        .sim-tree-inner { min-width: 950px; padding: 12px; display: flex; flex-direction: column; height: auto; flex-shrink: 0; background: transparent !important; position: relative; }
+        /* v11.6.3b: min-width 800px (было 950) — дерево больше не сжимает
+           сайдбар классов на средних экранах; три ветки всё ещё не «в кашу». */
+        .sim-tree-inner { min-width: 800px; padding: 12px; display: flex; flex-direction: column; height: auto; flex-shrink: 0; background: transparent !important; position: relative; }
         /* Верхняя панель: ровно одна строка 38px (очки / билды / обмен). */
         .sim-top-bar { display: flex; align-items: center; gap: 8px; height: 38px; min-height: 38px; margin-bottom: 10px; padding: 0 8px; background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px; position: relative; z-index: 10; }
         .sim-free-pts { font-size: 12px; color: var(--tb-chalk2, #c9d2c3); white-space: nowrap; }
@@ -167,17 +169,103 @@
         .sim-tooltip button:disabled { opacity: 0.45; cursor: not-allowed; }
         .sim-tooltip-close { position: absolute; top: 6px; right: 8px; font-size: 13px; line-height: 1; color: #c9b184; cursor: pointer; user-select: none; }
         .sim-tooltip-close:hover { color: #fff; }
-        /* Табы классов планировщика: компактные (34px), с SVG-иконкой класса. */
-        .modal-tab.sim-tab { height: 34px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; box-sizing: border-box; }
-        .modal-tab.sim-tab .sim-svg { width: 16px; height: 16px; }
-        /* Цвет класса в --c (инлайн-стиль таба из BuildSim.classColors, v11.6.1d),
-           цвет текста на заливке — в --ct (BuildSim.classTextColors, v11.6.1e):
-           неактивный — тёмная подложка + цветная рамка/текст,
+        /* ============================================================
+           ПЛАНИРОВЩИК БИЛДОВ — ВЕРТИКАЛЬНЫЙ САЙДБАР КЛАССОВ (v11.6.3b)
+           Горизонтальная строка табов заменена slim-сайдбаром слева
+           (Вариант А): освобождает 50–60px по высоте под дерево навыков.
+           Раскладка: .sim-layout (flex-строка) -> .sim-sidebar (170px) +
+           .sim-main-content (дерево + панель статов, своя прокрутка).
+           ============================================================ */
+        .sim-layout {
+            display: flex !important;
+            align-items: stretch;     /* main-content тянется по высоте — иначе не скроллится */
+            gap: 12px;
+            flex: 1 !important;       /* занимает всю высоту контейнера BuildSim */
+            min-height: 0 !important; /* без этого flex-потомок не даст внутренний скролл */
+            width: 100%;
+        }
+        .sim-sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            flex: 0 0 170px;         /* фиксированная ширина: дерево не сжимает сайдбар */
+            width: 170px;
+            min-width: 0;
+            max-height: 100%;
+            overflow-y: auto;        /* страховка, если классов станет больше, чем влезает */
+            overflow-x: hidden;
+            align-self: flex-start;  /* не растягиваем по высоте дерева */
+            position: sticky;        /* сайдбар «прилипает»: скроллится только дерево */
+            top: 0;
+            padding: 2px 6px 2px 0;
+            box-sizing: border-box;
+        }
+        /* Правая часть: дерево + панель статов. Прокрутка живёт ЗДЕСЬ, чтобы
+           модалка не скроллилась целиком (v11.6.3b). */
+        .sim-main-content {
+            flex: 1 1 auto;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            min-height: 0;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            padding-right: 2px;
+        }
+        /* Разделитель «Экипировка | классы» в сайдбаре. */
+        .sim-sidebar-sep {
+            flex: none;
+            height: 1px;
+            margin: 2px;
+            background: linear-gradient(90deg, transparent, #3d2f44 15%, #3d2f44 85%, transparent);
+        }
+        /* Кнопка класса в сайдбаре: вертикальный список, цветная полоска слева.
+           Цвет класса в --c (инлайн-стиль таба из BuildSim.classColors),
+           цвет текста на заливке — в --ct (BuildSim.classTextColors):
+           неактивный — тёмная подложка + цветная полоска/текст,
            активный — заливка цветом класса; текст тёмный на светлых цветах
            (Жрец, Паладин, Разбойник) и белый на тёмных (Некромант). */
-        .modal-tab.sim-tab { border: 2px solid var(--c, #caa55c); color: var(--c, #ffcf6a); background: rgba(0, 0, 0, 0.25); }
-        .modal-tab.sim-tab:hover { border-color: var(--c, #caa55c); color: var(--c, #ffcf6a); background: rgba(0, 0, 0, 0.45); }
-        .modal-tab.sim-tab.active { background: var(--c, #caa55c); border-color: var(--c, #caa55c); color: var(--ct, #12100e); }
+        .sim-sidebar .modal-tab.sim-tab {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 8px;
+            width: 100%;
+            height: 34px;
+            min-height: 34px;
+            padding: 0 10px;
+            box-sizing: border-box;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-left: 3px solid var(--c, #caa55c);
+            border-radius: 6px;
+            background: rgba(0, 0, 0, 0.25);
+            color: var(--c, #ffcf6a);
+            font-size: 13px;
+            font-weight: 700;
+            font-family: inherit;
+            text-align: left;
+            white-space: nowrap;
+            overflow: hidden;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+        }
+        .sim-sidebar .modal-tab.sim-tab:hover {
+            background: rgba(0, 0, 0, 0.45);
+            border-color: rgba(255, 255, 255, 0.14);
+            border-left-color: var(--c, #caa55c);
+            color: var(--c, #ffcf6a);
+        }
+        .sim-sidebar .modal-tab.sim-tab.active {
+            background: var(--c, #caa55c);
+            border-color: var(--c, #caa55c);
+            border-left-color: var(--c, #caa55c);
+            color: var(--ct, #12100e);
+        }
+        .sim-sidebar .modal-tab.sim-tab .sim-svg {
+            width: 16px;
+            height: 16px;
+            flex: none;
+        }
         .sim-load-select option { background: #0f0f15; color: #fff; }
         .build-right { width: 250px; flex-shrink: 0; background: #1e1724; padding: 15px; border-radius: 8px; border: 1px solid #3d2f44; height: fit-content; }
         /* Панель статов справа */
@@ -474,35 +562,56 @@
         }
 
         /* ============================================================
-           ПЛАНИРОВЩИК БИЛДОВ — ПОЛНЫЙ СКРОЛЛ МОДАЛКИ (v11.6.2a.5)
-           Скроллится вся модалка целиком, включая заголовок и табы.
-           Внутренние контейнеры не режут высоту (overflow: visible).
-           Нижний ряд узлов получает запас и не обрезается.
+           ПЛАНИРОВЩИК БИЛДОВ — СКРОЛЛ ДЕРЕВА + ГРАНИЦЫ МОДАЛКИ (v11.6.3b)
+           v11.6.3a: высота модалки = min(контент, 100vh - 40px).
+           v11.6.3b: прокрутка переехала ВНУТРЬ (.sim-main-content) — модалка
+           больше не скроллится целиком, поэтому заголовок и сайдбар классов
+           всегда остаются на месте, а дерево едет отдельно.
+           Чтобы внутренний скролл включился, ограничение высоты должно
+           доходить до .sim-main-content: каждое звено цепочки
+           модалка -> #tab-hero-build -> #hp-buildsim-container -> .sim-layout
+           обязано иметь min-height: 0 (иначе flex-потомок не даст себя сжать).
            ============================================================ */
-        /* 1. Модалка занимает почти весь экран; скроллит её сама (v11.6.2a.5).
+        /* 1. Модалка: высота по контенту, но не выше окна минус 40px.
+           box-sizing: border-box обязателен: padding 20px + рамка 2px должны
+           входить в calc(100vh - 40px), иначе окно вылезает за экран на 44px
+           и низ обрезается (именно это видел Firefox на 125%).
+           v11.6.3b: overflow-y у модалки убран — скроллит .sim-main-content.
+           overflow задан ЯВНО как hidden на обе оси: если оставить один
+           overflow-x: hidden, CSS до-считает overflow-y как auto и модалка
+           снова начнёт скроллиться сама (двойной скролл).
            Компактные окна (.modal-compact: настройки, пати, разведка) не
            растягиваем — иначе их 450px-раскладка ломается. */
         .${DOM_IDS.customModal}:not(.modal-compact), .custom-modal:not(.modal-compact) {
-            max-height: 96vh !important; /* Занимает почти весь экран по высоте */
-            height: 96vh !important;
+            max-height: calc(100vh - 40px) !important; /* Жёсткий потолок по высоте окна */
+            height: auto !important;                   /* Тянется по контенту, а не 96vh */
+            overflow: hidden !important;               /* Модалка не скроллится: скролл — внутри */
+            display: flex !important;
+            flex-direction: column !important;
+            box-sizing: border-box !important;
             max-width: 95vw !important;
             width: 1400px !important;    /* Шире, чтобы ветки не сжимались */
-            overflow-y: auto !important;
-            overflow-x: auto !important;
         }
-        /* 2. Снимаем flex-сжатие и overflow: hidden с вкладок планировщика */
-        #tab-hero-build {
-            overflow: visible !important;
-            flex: none !important;
-            height: auto !important;
-        }
+        /* 2. Вкладки планировщика и контейнер BuildSim — звенья flex-колонки.
+           Главное здесь: flex: 1 1 auto + min-height: 0, чтобы ограничение
+           высоты модалки доходило до .sim-layout и .sim-main-content — иначе
+           внутренний скролл «не включается» и низ дерева обрезается.
+           display/flex-direction задаём ТОЛЬКО активной вкладке (селектор с
+           .active): правило по одному #id перебило бы
+           .tab-content { display: none } и вкладка «Билды» оставалась бы
+           видимой при переключении на «Заточку». */
+        #tab-hero-build.active,
+        #tab-hero-ench.active,
         #hp-buildsim-container {
             display: flex !important;
             flex-direction: column !important;
-            max-height: none !important;
-            overflow: visible !important;
-            flex: none !important;
+            flex: 1 1 auto !important;
+            min-height: 0 !important;
             height: auto !important;
+            max-height: none !important;
+            overflow: hidden !important;
+        }
+        #hp-buildsim-container {
             padding-bottom: 10px !important;
         }
         #hp-buildsim-container .tab-content.active {
@@ -510,20 +619,22 @@
             flex: none !important;
             height: auto !important;
         }
-        /* 3. Обертка дерева больше не изолирует внутренний скролл */
+        /* 3. Обертка дерева: без внутреннего скролла и без flex-сжатия,
+           чтобы не было «скролла в скролле» (v11.6.3a). */
         #hp-buildsim-container .sim-tree-wrap {
             overflow: visible !important;
-            flex: 1 1 auto !important;
+            flex: none !important;
             min-height: auto !important;
             padding-bottom: 0 !important;
         }
         /* 4. Запас хода под нижний ряд узлов (узлы выступают за sim-in 630px).
-           v11.6.2a.5: подписи больше не клипаются по 2 строки, поэтому запас
-           увеличен 45 -> 60px — трёхстрочное имя в нижнем ярусе не срезается. */
+           v11.6.2a.5: подписи больше не клипаются по 2 строки, запас 45 -> 60px.
+           v11.6.3a: 60 -> 80px — жесткий запас под нижний ряд, чтобы скролл
+           модалки гарантированно «доехал» до иконок и подписей. */
         #hp-buildsim-container .sim-tree-inner {
             overflow: visible !important;
             height: auto !important;
-            padding-bottom: 60px !important;
+            padding-bottom: 80px !important;
         }
 
         /* ============================================================

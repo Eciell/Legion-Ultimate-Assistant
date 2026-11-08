@@ -43,6 +43,11 @@
     // золотистые акценты, hover как у «Создать пати»); HP-панель и журнал
     // живут в общем контейнере .party-hud-container и перетаскиваются за
     // заголовки, позиция — GM_setValue('lgPartyHudPos').
+    // v11.6.3c: HP-синхронизация переведена на события PerformanceObserver
+    // (запросы игры к /api/me и /api/qact): панель обновляется сразу после
+    // ответа игры, а не по таймеру. Интервал 3 с оставлен фолбэком и растянут
+    // до 30 с (АФК, скрытая вкладка, игра перестала слать запросы). Серии
+    // запросов при загрузке страницы гасит троттлинг 2 с в _hpTick().
     // ============================================================
     const Party = {
         BASE_URL_KEY: 'lgPartyBaseUrl',
@@ -55,8 +60,19 @@
         // в server/index.js (env LGU_API_KEY) — иначе любой запрос получит 401.
         API_KEY: 'LGU-default-secret-key-change-me',
         REQUEST_TIMEOUT: 12000,
-        // Период синхронизации HP (ТЗ 11.6.0b: раз в 3 секунды).
-        HP_SYNC_MS: 3000,
+        // v11.6.3c: штатный триггер — PerformanceObserver (ответы игры на
+        // /api/me и /api/qact), поэтому интервал стал страховкой на случай,
+        // когда игра перестала слать запросы (АФК, вкладка в фоне, зависший
+        // бой). ТЗ 11.6.0b ставило здесь 3000 мс.
+        HP_SYNC_MS: 30000,
+        // Троттлинг _hpTick(): игра отдаёт несколько /api/me подряд при
+        // загрузке страницы, а каждый тик — это POST + GET на наш сервер.
+        // 3000, а не 2000 (11.6.3-release): наш собственный _fetchMe() тоже
+        // пишет resource-запись /api/me, и при окне 2 с медленный ответ успевал
+        // «дозреть» после тика — observer запускал следующий тик от нашего же
+        // запроса. 3 с гарантированно больше латентности и совпадает со старым
+        // периодом опроса.
+        HP_TICK_MIN_MS: 3000,
         // Сервер хранит ник только в нижнем регистре (server/index.js).
         LOGIN_RE: /^[a-z0-9_]{1,32}$/,
         // Код приглашения (inviteToken) = 16 случайных байт = 32 hex-символа
@@ -80,8 +96,10 @@
         LOG_DEFAULT_COLOR: '#e8e8ea',
 
         // Рантайм-поля. Объявлены явно, чтобы в отладке не ловить undefined.
-        _hpTimer: null,      // setInterval HP-синхронизации
+        _hpTimer: null,      // setInterval HP-синхронизации (фолбэк, 30 с)
         _hpBusy: false,      // тик уже в работе (медленная сеть)
+        _lastHpTick: 0,      // Date.now() прошлого тика — троттлинг HP_TICK_MIN_MS
+        _perfObserver: null, // PerformanceObserver: resource-записи /api/me, /api/qact
         _cachedLogin: '',    // последний ник из /api/me — для синхронного рендера
         // Промис фонового /api/me для .party-self-nick: повторные open() не
         // должны плодить одинаковые запросы, пока первый ещё в полёте.
@@ -615,8 +633,8 @@
         _applyHudPosition(hud = null) {
             const el = hud || document.getElementById(this.HUD_ID);
             if (!el) return;
-            // Пока тащат, сохранённую позицию не навязываем: рендер раз в 3 с
-            // иначе дёргал бы панель из-под курсора.
+            // Пока тащат, сохранённую позицию не навязываем: рендер приходит по
+            // событиям игры и иначе дёргал бы панель из-под курсора.
             if (el.classList.contains('party-dragging')) return;
 
             const pos = this._gmGet(this.DRAG_KEY, null);
@@ -759,8 +777,8 @@
          * Делегированный клик по кнопке «Хил» (v11.6.0d).
          *
          * Слушатель живёт на самой панели, а не на кнопках: _renderPanel()
-         * переписывает innerHTML каждые 3 с, и отдельные обработчики текли бы/
-         * терялись. dataset-флаг не даёт навесить второй такой же слушатель,
+         * переписывает innerHTML на каждом тике, и отдельные обработчики текли
+         * бы/терялись. dataset-флаг не даёт навесить второй такой же слушатель,
          * если панель уже существовала в DOM (перезапуск скрипта на странице).
          */
         _bindPanelClick(el) {
@@ -1069,9 +1087,12 @@
         },
 
         /**
-         * Запускает синхронизацию HP: раз в 3 с отправляем свой hp/maxHp и
-         * перерисовываем общую панель из GET /party/:id/state.
-         * Повторный вызов безопасен: второй интервал не создаётся.
+         * Запускает синхронизацию HP: отправляем свой hp/maxHp и перерисовываем
+         * общую панель из GET /party/:id/state.
+         *
+         * v11.6.3c: тик запускается по событию (ответ игры на /api/me, /api/qact)
+         * через PerformanceObserver; интервал HP_SYNC_MS (30 с) — только фолбэк.
+         * Повторный вызов безопасен: второй интервал и observer не создаются.
          * Вызывается из _writeState() (создали/вошли) и init() (перезагрузка).
          */
         startHpSync() {
@@ -1083,20 +1104,91 @@
             if (this._hpTimer) return;
 
             this._ensurePanel();
+            // v11.6.3c: сначала подписываемся на запросы игры, потом ставим
+            // интервал-фолбэк — так первый ответ /api/me не будет пропущен.
+            this._startHpObserver();
             this._hpTimer = setInterval(() => { this._hpTick(); }, this.HP_SYNC_MS);
-            // Первый тик — сразу, иначе панель пустует первые 3 секунды.
+            // Первый тик — сразу, иначе панель пустует до первого запроса игры.
             this._hpTick();
         },
 
-        /** Остановить интервал и скрыть панели (выход, 401, перезапуск). */
+        /**
+         * v11.6.3c: штатный триггер HP-синхронизации.
+         *
+         * PerformanceObserver читает resource-записи страницы (включая уже
+         * случившиеся — buffered) и дергает _hpTick() на запросы игры,
+         * меняющие состояние героя:
+         *   • /api/me   — снимок hp/maxHp/quest/ghost/role;
+         *   • /api/qact — действия в походе (удар, шаг, каст хила).
+         * Серии запросов при загрузке страницы гасит троттлинг в _hpTick().
+         */
+        _startHpObserver() {
+            if (this._perfObserver) return; // уже слушаем
+            if (typeof PerformanceObserver !== 'function') {
+                console.warn('[LGU] PerformanceObserver не поддерживается — HP обновляется по таймеру');
+                return;
+            }
+
+            this._perfObserver = new PerformanceObserver((list) => {
+                for (const entry of list.getEntries()) {
+                    // includes, а не ===: name — полный URL вида
+                    // https://play.multidonate.ru/c/<канал>/api/me?...
+                    // Лишние совпадения (/api/members и т.п.) отсекает
+                    // троттлинг: лишний тик не чаще раза в HP_TICK_MIN_MS.
+                    if (entry.name.includes('/api/me') || entry.name.includes('/api/qact')) {
+                        this._hpTick();
+                        break; // одной пачки записей достаточно для одного тика
+                    }
+                }
+            });
+
+            try {
+                // buffered: true — догоняем записи, случившиеся до observe()
+                // (первый экран игры уже успел запросить /api/me).
+                this._perfObserver.observe({ type: 'resource', buffered: true });
+            } catch (e) {
+                console.warn('[LGU] PerformanceObserver не поддерживается', e);
+                // observe() не поднялся — остаёмся на интервале-фолбэке.
+                this._perfObserver = null;
+            }
+        },
+
+        /** v11.6.3c: отключить observer (выход, 401, перезапуск скрипта). */
+        _stopHpObserver() {
+            if (this._perfObserver) {
+                try { this._perfObserver.disconnect(); } catch (e) {}
+                this._perfObserver = null;
+            }
+        },
+
+        /**
+         * Остановить интервал, observer и скрыть панели (выход, 401, перезапуск).
+         */
         stopHpSync() {
             if (this._hpTimer) {
                 clearInterval(this._hpTimer);
                 this._hpTimer = null;
             }
+            this._stopHpObserver();
             this._hidePanel();
             // leave/401: журнал прошлой пати очищается и прячется.
             this._hideLogPanel();
+        },
+
+        /**
+         * v11.6.3c: полное выключение модуля (shutdown() в main.js).
+         *
+         * Без этого после перезапуска скрипта старый инстанс продолжал бы
+         * слушать resource-записи страницы и слать HP на сервер.
+         * ТЗ 11.6.3c, п.2: observer освобождаем явно; stopHpSync() ниже —
+         * страховка на случай, если observer уже отключён.
+         */
+        destroy() {
+            if (this._perfObserver) {
+                this._perfObserver.disconnect();
+                this._perfObserver = null;
+            }
+            this.stopHpSync();
         },
 
         /**
@@ -1175,12 +1267,22 @@
         /**
          * Один такт синхронизации: /api/me -> POST state -> GET state -> рендер.
          *
+         * Запускается событием PerformanceObserver (ответ игры на /api/me или
+         * /api/qact) и фолбэк-интервалом HP_SYNC_MS; не чаще HP_TICK_MIN_MS.
+         *
          * Ошибки сети и валидации намеренно «тихие» (console.warn): панель
-         * обновляется раз в 3 с, тосты каждые 3 с были бы невыносимы.
+         * обновляется часто, тосты на каждую ошибку были бы невыносимы.
          * Исключение — 401: он означает кик/удалённую пати, здесь нужен и
          * тост, и полный локальный сброс (его делает _request()).
          */
         async _hpTick() {
+            // v11.6.3c: троттлинг. Observer срабатывает на каждый /api/me, а
+            // игра при загрузке страницы может отдать несколько подряд —
+            // без ограничения это серия POST state + GET state на наш сервер.
+            const now = Date.now();
+            if (this._lastHpTick && now - this._lastHpTick < this.HP_TICK_MIN_MS) return; // Не чаще раза в 3 секунды
+            this._lastHpTick = now;
+
             // Предыдущий тик ещё ждёт сеть (медленный сервер) — второй не нужен.
             if (this._hpBusy) return;
             const party = this._readState();
@@ -1269,7 +1371,7 @@
             }
 
             // Кнопку возвращаем в исходный вид: busy-рендер («...») остался
-            // только от версий с запросом, панель перерисовывается каждые 3 с.
+            // только от версий с запросом, панель перерисовывается по событиям.
             if (button && button.isConnected) {
                 button.disabled = false;
                 button.textContent = '❤';
@@ -1283,10 +1385,16 @@
         /** Кнопка «Пати» в FAB-меню (modules/auction.js — тот же паттерн). */
         init() {
             // Перезапуск скрипта (single-instance guard в main.js) не убивает
-            // таймеры старого инстанса: два интервала HP = двойной POST раз в 3 с.
+            // таймеры старого инстанса: два интервала HP и два observer'а =
+            // двойной POST state на наш сервер. v11.6.3c: destroy() гасит и
+            // интервал, и PerformanceObserver; stopHpSync() — фолбэк для
+            // инстанса, поднятого старой версией скрипта.
             const prev = G.__LEGION__?.Party;
             if (prev && prev !== this) {
-                try { prev.stopHpSync?.(); } catch (e) {}
+                try {
+                    if (typeof prev.destroy === 'function') prev.destroy();
+                    else prev.stopHpSync?.();
+                } catch (e) {}
             }
 
             const btn = document.getElementById(DOM_IDS.btnParty) || document.getElementById('btn-party');

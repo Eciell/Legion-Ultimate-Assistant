@@ -222,8 +222,13 @@
                 const bag = h.items.filter(x => !x.on && x.wearable);
                 const allClasses = (this.skillsCache.classes || []).filter(c => c.branches && c.branches.length > 0);
 
-                // Табы классов: компактные (34px) с нативной SVG-иконкой класса.
+                // Табы классов: slim-сайдбар слева (v11.6.3b). Кнопки остаются
+                // .modal-tab.sim-tab[data-tab] — обработчики кликов ниже и
+                // автозагрузка билда из ссылки (_autoLoadClass) ищут по классу
+                // и потому подхватывают новую разметку без изменений.
                 let tabsHtml = `<button class="modal-tab sim-tab active" data-tab="gear">${this.getClassSvg('gear')}Экипировка</button>`;
+                // Разделитель между системной вкладкой «Экипировка» и классами.
+                tabsHtml += `<div class="sim-sidebar-sep"></div>`;
                 allClasses.forEach(c => {
                     // --c: цвет класса из classColors (стили таба — в styles.js);
                     // --ct: цвет текста на заливке (classTextColors, ТЗ 11.6.1e).
@@ -289,9 +294,19 @@
                         </div>`;
                 });
 
+                // v11.6.3b: двухоконный лейкаут — сайдбар классов слева, дерево
+                // и панель статов справа. Кнопки остались .modal-tab.sim-tab
+                // с data-tab, поэтому обработчики ниже и автозагрузка билда из
+                // ссылки (.modal-tab[data-tab=…]) находят их внутри <aside>.
                 container.innerHTML = `
-                    <div class="modal-tabs">${tabsHtml}</div>
-                    ${contentHtml}
+                    <div class="sim-layout">
+                        <aside class="sim-sidebar">
+                            ${tabsHtml}
+                        </aside>
+                        <main class="sim-main-content">
+                            ${contentHtml}
+                        </main>
+                    </div>
                 `;
 
                 container.querySelectorAll('.modal-tab').forEach(tab => {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Legion: Ultimate Assistant (Chat, Auction, Pocket City)
 // @namespace    http://tampermonkey.net/
-// @version      11.6.2
+// @version      11.6.3
 // @description  QoL-аддон для Легиона: Умный чат, Сканер аукциона, Разведка, Планировщик, Карманный город. Без авто-копания.
 // @connect      7tv.io
 // @connect      cdn.7tv.app
@@ -1125,11 +1125,13 @@
            v11.6.2a.5: TH=135, TOP=40, BOT=50 -> BH=630 (узлы 48px).
            ============================================================ */
         /* v11.6.1d: внутренний скролл убран — дерево (панель 38 + отступы +
-           шапки веток 28 + поле 630) прокручивается вместе с модалкой (96vh).
+           шапки веток 28 + поле 630) прокручивается вместе с модалкой
+           (v11.6.3a: max-height: calc(100vh - 40px), height: auto).
            overflow: visible, чтобы не обрезались свечения узлов. */
         .sim-tree-wrap { flex: 1; min-width: 0; background: #16121a !important; border: 1px solid #3d2f44; border-radius: 8px; box-shadow: inset 0 0 20px rgba(0,0,0,0.6); position: relative; overflow: visible; display: flex; flex-direction: column; }
-        /* v11.6.2a.5: min-width 950px — три ветки не сжимаются «в кашу». */
-        .sim-tree-inner { min-width: 950px; padding: 12px; display: flex; flex-direction: column; height: auto; flex-shrink: 0; background: transparent !important; position: relative; }
+        /* v11.6.3b: min-width 800px (было 950) — дерево больше не сжимает
+           сайдбар классов на средних экранах; три ветки всё ещё не «в кашу». */
+        .sim-tree-inner { min-width: 800px; padding: 12px; display: flex; flex-direction: column; height: auto; flex-shrink: 0; background: transparent !important; position: relative; }
         /* Верхняя панель: ровно одна строка 38px (очки / билды / обмен). */
         .sim-top-bar { display: flex; align-items: center; gap: 8px; height: 38px; min-height: 38px; margin-bottom: 10px; padding: 0 8px; background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px; position: relative; z-index: 10; }
         .sim-free-pts { font-size: 12px; color: var(--tb-chalk2, #c9d2c3); white-space: nowrap; }
@@ -1243,17 +1245,103 @@
         .sim-tooltip button:disabled { opacity: 0.45; cursor: not-allowed; }
         .sim-tooltip-close { position: absolute; top: 6px; right: 8px; font-size: 13px; line-height: 1; color: #c9b184; cursor: pointer; user-select: none; }
         .sim-tooltip-close:hover { color: #fff; }
-        /* Табы классов планировщика: компактные (34px), с SVG-иконкой класса. */
-        .modal-tab.sim-tab { height: 34px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; box-sizing: border-box; }
-        .modal-tab.sim-tab .sim-svg { width: 16px; height: 16px; }
-        /* Цвет класса в --c (инлайн-стиль таба из BuildSim.classColors, v11.6.1d),
-           цвет текста на заливке — в --ct (BuildSim.classTextColors, v11.6.1e):
-           неактивный — тёмная подложка + цветная рамка/текст,
+        /* ============================================================
+           ПЛАНИРОВЩИК БИЛДОВ — ВЕРТИКАЛЬНЫЙ САЙДБАР КЛАССОВ (v11.6.3b)
+           Горизонтальная строка табов заменена slim-сайдбаром слева
+           (Вариант А): освобождает 50–60px по высоте под дерево навыков.
+           Раскладка: .sim-layout (flex-строка) -> .sim-sidebar (170px) +
+           .sim-main-content (дерево + панель статов, своя прокрутка).
+           ============================================================ */
+        .sim-layout {
+            display: flex !important;
+            align-items: stretch;     /* main-content тянется по высоте — иначе не скроллится */
+            gap: 12px;
+            flex: 1 !important;       /* занимает всю высоту контейнера BuildSim */
+            min-height: 0 !important; /* без этого flex-потомок не даст внутренний скролл */
+            width: 100%;
+        }
+        .sim-sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            flex: 0 0 170px;         /* фиксированная ширина: дерево не сжимает сайдбар */
+            width: 170px;
+            min-width: 0;
+            max-height: 100%;
+            overflow-y: auto;        /* страховка, если классов станет больше, чем влезает */
+            overflow-x: hidden;
+            align-self: flex-start;  /* не растягиваем по высоте дерева */
+            position: sticky;        /* сайдбар «прилипает»: скроллится только дерево */
+            top: 0;
+            padding: 2px 6px 2px 0;
+            box-sizing: border-box;
+        }
+        /* Правая часть: дерево + панель статов. Прокрутка живёт ЗДЕСЬ, чтобы
+           модалка не скроллилась целиком (v11.6.3b). */
+        .sim-main-content {
+            flex: 1 1 auto;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            min-height: 0;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            padding-right: 2px;
+        }
+        /* Разделитель «Экипировка | классы» в сайдбаре. */
+        .sim-sidebar-sep {
+            flex: none;
+            height: 1px;
+            margin: 2px;
+            background: linear-gradient(90deg, transparent, #3d2f44 15%, #3d2f44 85%, transparent);
+        }
+        /* Кнопка класса в сайдбаре: вертикальный список, цветная полоска слева.
+           Цвет класса в --c (инлайн-стиль таба из BuildSim.classColors),
+           цвет текста на заливке — в --ct (BuildSim.classTextColors):
+           неактивный — тёмная подложка + цветная полоска/текст,
            активный — заливка цветом класса; текст тёмный на светлых цветах
            (Жрец, Паладин, Разбойник) и белый на тёмных (Некромант). */
-        .modal-tab.sim-tab { border: 2px solid var(--c, #caa55c); color: var(--c, #ffcf6a); background: rgba(0, 0, 0, 0.25); }
-        .modal-tab.sim-tab:hover { border-color: var(--c, #caa55c); color: var(--c, #ffcf6a); background: rgba(0, 0, 0, 0.45); }
-        .modal-tab.sim-tab.active { background: var(--c, #caa55c); border-color: var(--c, #caa55c); color: var(--ct, #12100e); }
+        .sim-sidebar .modal-tab.sim-tab {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 8px;
+            width: 100%;
+            height: 34px;
+            min-height: 34px;
+            padding: 0 10px;
+            box-sizing: border-box;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-left: 3px solid var(--c, #caa55c);
+            border-radius: 6px;
+            background: rgba(0, 0, 0, 0.25);
+            color: var(--c, #ffcf6a);
+            font-size: 13px;
+            font-weight: 700;
+            font-family: inherit;
+            text-align: left;
+            white-space: nowrap;
+            overflow: hidden;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+        }
+        .sim-sidebar .modal-tab.sim-tab:hover {
+            background: rgba(0, 0, 0, 0.45);
+            border-color: rgba(255, 255, 255, 0.14);
+            border-left-color: var(--c, #caa55c);
+            color: var(--c, #ffcf6a);
+        }
+        .sim-sidebar .modal-tab.sim-tab.active {
+            background: var(--c, #caa55c);
+            border-color: var(--c, #caa55c);
+            border-left-color: var(--c, #caa55c);
+            color: var(--ct, #12100e);
+        }
+        .sim-sidebar .modal-tab.sim-tab .sim-svg {
+            width: 16px;
+            height: 16px;
+            flex: none;
+        }
         .sim-load-select option { background: #0f0f15; color: #fff; }
         .build-right { width: 250px; flex-shrink: 0; background: #1e1724; padding: 15px; border-radius: 8px; border: 1px solid #3d2f44; height: fit-content; }
         /* Панель статов справа */
@@ -1550,35 +1638,56 @@
         }
 
         /* ============================================================
-           ПЛАНИРОВЩИК БИЛДОВ — ПОЛНЫЙ СКРОЛЛ МОДАЛКИ (v11.6.2a.5)
-           Скроллится вся модалка целиком, включая заголовок и табы.
-           Внутренние контейнеры не режут высоту (overflow: visible).
-           Нижний ряд узлов получает запас и не обрезается.
+           ПЛАНИРОВЩИК БИЛДОВ — СКРОЛЛ ДЕРЕВА + ГРАНИЦЫ МОДАЛКИ (v11.6.3b)
+           v11.6.3a: высота модалки = min(контент, 100vh - 40px).
+           v11.6.3b: прокрутка переехала ВНУТРЬ (.sim-main-content) — модалка
+           больше не скроллится целиком, поэтому заголовок и сайдбар классов
+           всегда остаются на месте, а дерево едет отдельно.
+           Чтобы внутренний скролл включился, ограничение высоты должно
+           доходить до .sim-main-content: каждое звено цепочки
+           модалка -> #tab-hero-build -> #hp-buildsim-container -> .sim-layout
+           обязано иметь min-height: 0 (иначе flex-потомок не даст себя сжать).
            ============================================================ */
-        /* 1. Модалка занимает почти весь экран; скроллит её сама (v11.6.2a.5).
+        /* 1. Модалка: высота по контенту, но не выше окна минус 40px.
+           box-sizing: border-box обязателен: padding 20px + рамка 2px должны
+           входить в calc(100vh - 40px), иначе окно вылезает за экран на 44px
+           и низ обрезается (именно это видел Firefox на 125%).
+           v11.6.3b: overflow-y у модалки убран — скроллит .sim-main-content.
+           overflow задан ЯВНО как hidden на обе оси: если оставить один
+           overflow-x: hidden, CSS до-считает overflow-y как auto и модалка
+           снова начнёт скроллиться сама (двойной скролл).
            Компактные окна (.modal-compact: настройки, пати, разведка) не
            растягиваем — иначе их 450px-раскладка ломается. */
         .${DOM_IDS.customModal}:not(.modal-compact), .custom-modal:not(.modal-compact) {
-            max-height: 96vh !important; /* Занимает почти весь экран по высоте */
-            height: 96vh !important;
+            max-height: calc(100vh - 40px) !important; /* Жёсткий потолок по высоте окна */
+            height: auto !important;                   /* Тянется по контенту, а не 96vh */
+            overflow: hidden !important;               /* Модалка не скроллится: скролл — внутри */
+            display: flex !important;
+            flex-direction: column !important;
+            box-sizing: border-box !important;
             max-width: 95vw !important;
             width: 1400px !important;    /* Шире, чтобы ветки не сжимались */
-            overflow-y: auto !important;
-            overflow-x: auto !important;
         }
-        /* 2. Снимаем flex-сжатие и overflow: hidden с вкладок планировщика */
-        #tab-hero-build {
-            overflow: visible !important;
-            flex: none !important;
-            height: auto !important;
-        }
+        /* 2. Вкладки планировщика и контейнер BuildSim — звенья flex-колонки.
+           Главное здесь: flex: 1 1 auto + min-height: 0, чтобы ограничение
+           высоты модалки доходило до .sim-layout и .sim-main-content — иначе
+           внутренний скролл «не включается» и низ дерева обрезается.
+           display/flex-direction задаём ТОЛЬКО активной вкладке (селектор с
+           .active): правило по одному #id перебило бы
+           .tab-content { display: none } и вкладка «Билды» оставалась бы
+           видимой при переключении на «Заточку». */
+        #tab-hero-build.active,
+        #tab-hero-ench.active,
         #hp-buildsim-container {
             display: flex !important;
             flex-direction: column !important;
-            max-height: none !important;
-            overflow: visible !important;
-            flex: none !important;
+            flex: 1 1 auto !important;
+            min-height: 0 !important;
             height: auto !important;
+            max-height: none !important;
+            overflow: hidden !important;
+        }
+        #hp-buildsim-container {
             padding-bottom: 10px !important;
         }
         #hp-buildsim-container .tab-content.active {
@@ -1586,20 +1695,22 @@
             flex: none !important;
             height: auto !important;
         }
-        /* 3. Обертка дерева больше не изолирует внутренний скролл */
+        /* 3. Обертка дерева: без внутреннего скролла и без flex-сжатия,
+           чтобы не было «скролла в скролле» (v11.6.3a). */
         #hp-buildsim-container .sim-tree-wrap {
             overflow: visible !important;
-            flex: 1 1 auto !important;
+            flex: none !important;
             min-height: auto !important;
             padding-bottom: 0 !important;
         }
         /* 4. Запас хода под нижний ряд узлов (узлы выступают за sim-in 630px).
-           v11.6.2a.5: подписи больше не клипаются по 2 строки, поэтому запас
-           увеличен 45 -> 60px — трёхстрочное имя в нижнем ярусе не срезается. */
+           v11.6.2a.5: подписи больше не клипаются по 2 строки, запас 45 -> 60px.
+           v11.6.3a: 60 -> 80px — жесткий запас под нижний ряд, чтобы скролл
+           модалки гарантированно «доехал» до иконок и подписей. */
         #hp-buildsim-container .sim-tree-inner {
             overflow: visible !important;
             height: auto !important;
-            padding-bottom: 60px !important;
+            padding-bottom: 80px !important;
         }
 
         /* ============================================================
@@ -3262,8 +3373,13 @@
                 const bag = h.items.filter(x => !x.on && x.wearable);
                 const allClasses = (this.skillsCache.classes || []).filter(c => c.branches && c.branches.length > 0);
 
-                // Табы классов: компактные (34px) с нативной SVG-иконкой класса.
+                // Табы классов: slim-сайдбар слева (v11.6.3b). Кнопки остаются
+                // .modal-tab.sim-tab[data-tab] — обработчики кликов ниже и
+                // автозагрузка билда из ссылки (_autoLoadClass) ищут по классу
+                // и потому подхватывают новую разметку без изменений.
                 let tabsHtml = `<button class="modal-tab sim-tab active" data-tab="gear">${this.getClassSvg('gear')}Экипировка</button>`;
+                // Разделитель между системной вкладкой «Экипировка» и классами.
+                tabsHtml += `<div class="sim-sidebar-sep"></div>`;
                 allClasses.forEach(c => {
                     // --c: цвет класса из classColors (стили таба — в styles.js);
                     // --ct: цвет текста на заливке (classTextColors, ТЗ 11.6.1e).
@@ -3329,9 +3445,19 @@
                         </div>`;
                 });
 
+                // v11.6.3b: двухоконный лейкаут — сайдбар классов слева, дерево
+                // и панель статов справа. Кнопки остались .modal-tab.sim-tab
+                // с data-tab, поэтому обработчики ниже и автозагрузка билда из
+                // ссылки (.modal-tab[data-tab=…]) находят их внутри <aside>.
                 container.innerHTML = `
-                    <div class="modal-tabs">${tabsHtml}</div>
-                    ${contentHtml}
+                    <div class="sim-layout">
+                        <aside class="sim-sidebar">
+                            ${tabsHtml}
+                        </aside>
+                        <main class="sim-main-content">
+                            ${contentHtml}
+                        </main>
+                    </div>
                 `;
 
                 container.querySelectorAll('.modal-tab').forEach(tab => {
@@ -7828,6 +7954,11 @@ const Players = {
     // золотистые акценты, hover как у «Создать пати»); HP-панель и журнал
     // живут в общем контейнере .party-hud-container и перетаскиваются за
     // заголовки, позиция — GM_setValue('lgPartyHudPos').
+    // v11.6.3c: HP-синхронизация переведена на события PerformanceObserver
+    // (запросы игры к /api/me и /api/qact): панель обновляется сразу после
+    // ответа игры, а не по таймеру. Интервал 3 с оставлен фолбэком и растянут
+    // до 30 с (АФК, скрытая вкладка, игра перестала слать запросы). Серии
+    // запросов при загрузке страницы гасит троттлинг 2 с в _hpTick().
     // ============================================================
     const Party = {
         BASE_URL_KEY: 'lgPartyBaseUrl',
@@ -7840,8 +7971,19 @@ const Players = {
         // в server/index.js (env LGU_API_KEY) — иначе любой запрос получит 401.
         API_KEY: 'LGU-default-secret-key-change-me',
         REQUEST_TIMEOUT: 12000,
-        // Период синхронизации HP (ТЗ 11.6.0b: раз в 3 секунды).
-        HP_SYNC_MS: 3000,
+        // v11.6.3c: штатный триггер — PerformanceObserver (ответы игры на
+        // /api/me и /api/qact), поэтому интервал стал страховкой на случай,
+        // когда игра перестала слать запросы (АФК, вкладка в фоне, зависший
+        // бой). ТЗ 11.6.0b ставило здесь 3000 мс.
+        HP_SYNC_MS: 30000,
+        // Троттлинг _hpTick(): игра отдаёт несколько /api/me подряд при
+        // загрузке страницы, а каждый тик — это POST + GET на наш сервер.
+        // 3000, а не 2000 (11.6.3-release): наш собственный _fetchMe() тоже
+        // пишет resource-запись /api/me, и при окне 2 с медленный ответ успевал
+        // «дозреть» после тика — observer запускал следующий тик от нашего же
+        // запроса. 3 с гарантированно больше латентности и совпадает со старым
+        // периодом опроса.
+        HP_TICK_MIN_MS: 3000,
         // Сервер хранит ник только в нижнем регистре (server/index.js).
         LOGIN_RE: /^[a-z0-9_]{1,32}$/,
         // Код приглашения (inviteToken) = 16 случайных байт = 32 hex-символа
@@ -7865,8 +8007,10 @@ const Players = {
         LOG_DEFAULT_COLOR: '#e8e8ea',
 
         // Рантайм-поля. Объявлены явно, чтобы в отладке не ловить undefined.
-        _hpTimer: null,      // setInterval HP-синхронизации
+        _hpTimer: null,      // setInterval HP-синхронизации (фолбэк, 30 с)
         _hpBusy: false,      // тик уже в работе (медленная сеть)
+        _lastHpTick: 0,      // Date.now() прошлого тика — троттлинг HP_TICK_MIN_MS
+        _perfObserver: null, // PerformanceObserver: resource-записи /api/me, /api/qact
         _cachedLogin: '',    // последний ник из /api/me — для синхронного рендера
         // Промис фонового /api/me для .party-self-nick: повторные open() не
         // должны плодить одинаковые запросы, пока первый ещё в полёте.
@@ -8400,8 +8544,8 @@ const Players = {
         _applyHudPosition(hud = null) {
             const el = hud || document.getElementById(this.HUD_ID);
             if (!el) return;
-            // Пока тащат, сохранённую позицию не навязываем: рендер раз в 3 с
-            // иначе дёргал бы панель из-под курсора.
+            // Пока тащат, сохранённую позицию не навязываем: рендер приходит по
+            // событиям игры и иначе дёргал бы панель из-под курсора.
             if (el.classList.contains('party-dragging')) return;
 
             const pos = this._gmGet(this.DRAG_KEY, null);
@@ -8544,8 +8688,8 @@ const Players = {
          * Делегированный клик по кнопке «Хил» (v11.6.0d).
          *
          * Слушатель живёт на самой панели, а не на кнопках: _renderPanel()
-         * переписывает innerHTML каждые 3 с, и отдельные обработчики текли бы/
-         * терялись. dataset-флаг не даёт навесить второй такой же слушатель,
+         * переписывает innerHTML на каждом тике, и отдельные обработчики текли
+         * бы/терялись. dataset-флаг не даёт навесить второй такой же слушатель,
          * если панель уже существовала в DOM (перезапуск скрипта на странице).
          */
         _bindPanelClick(el) {
@@ -8854,9 +8998,12 @@ const Players = {
         },
 
         /**
-         * Запускает синхронизацию HP: раз в 3 с отправляем свой hp/maxHp и
-         * перерисовываем общую панель из GET /party/:id/state.
-         * Повторный вызов безопасен: второй интервал не создаётся.
+         * Запускает синхронизацию HP: отправляем свой hp/maxHp и перерисовываем
+         * общую панель из GET /party/:id/state.
+         *
+         * v11.6.3c: тик запускается по событию (ответ игры на /api/me, /api/qact)
+         * через PerformanceObserver; интервал HP_SYNC_MS (30 с) — только фолбэк.
+         * Повторный вызов безопасен: второй интервал и observer не создаются.
          * Вызывается из _writeState() (создали/вошли) и init() (перезагрузка).
          */
         startHpSync() {
@@ -8868,20 +9015,91 @@ const Players = {
             if (this._hpTimer) return;
 
             this._ensurePanel();
+            // v11.6.3c: сначала подписываемся на запросы игры, потом ставим
+            // интервал-фолбэк — так первый ответ /api/me не будет пропущен.
+            this._startHpObserver();
             this._hpTimer = setInterval(() => { this._hpTick(); }, this.HP_SYNC_MS);
-            // Первый тик — сразу, иначе панель пустует первые 3 секунды.
+            // Первый тик — сразу, иначе панель пустует до первого запроса игры.
             this._hpTick();
         },
 
-        /** Остановить интервал и скрыть панели (выход, 401, перезапуск). */
+        /**
+         * v11.6.3c: штатный триггер HP-синхронизации.
+         *
+         * PerformanceObserver читает resource-записи страницы (включая уже
+         * случившиеся — buffered) и дергает _hpTick() на запросы игры,
+         * меняющие состояние героя:
+         *   • /api/me   — снимок hp/maxHp/quest/ghost/role;
+         *   • /api/qact — действия в походе (удар, шаг, каст хила).
+         * Серии запросов при загрузке страницы гасит троттлинг в _hpTick().
+         */
+        _startHpObserver() {
+            if (this._perfObserver) return; // уже слушаем
+            if (typeof PerformanceObserver !== 'function') {
+                console.warn('[LGU] PerformanceObserver не поддерживается — HP обновляется по таймеру');
+                return;
+            }
+
+            this._perfObserver = new PerformanceObserver((list) => {
+                for (const entry of list.getEntries()) {
+                    // includes, а не ===: name — полный URL вида
+                    // https://play.multidonate.ru/c/<канал>/api/me?...
+                    // Лишние совпадения (/api/members и т.п.) отсекает
+                    // троттлинг: лишний тик не чаще раза в HP_TICK_MIN_MS.
+                    if (entry.name.includes('/api/me') || entry.name.includes('/api/qact')) {
+                        this._hpTick();
+                        break; // одной пачки записей достаточно для одного тика
+                    }
+                }
+            });
+
+            try {
+                // buffered: true — догоняем записи, случившиеся до observe()
+                // (первый экран игры уже успел запросить /api/me).
+                this._perfObserver.observe({ type: 'resource', buffered: true });
+            } catch (e) {
+                console.warn('[LGU] PerformanceObserver не поддерживается', e);
+                // observe() не поднялся — остаёмся на интервале-фолбэке.
+                this._perfObserver = null;
+            }
+        },
+
+        /** v11.6.3c: отключить observer (выход, 401, перезапуск скрипта). */
+        _stopHpObserver() {
+            if (this._perfObserver) {
+                try { this._perfObserver.disconnect(); } catch (e) {}
+                this._perfObserver = null;
+            }
+        },
+
+        /**
+         * Остановить интервал, observer и скрыть панели (выход, 401, перезапуск).
+         */
         stopHpSync() {
             if (this._hpTimer) {
                 clearInterval(this._hpTimer);
                 this._hpTimer = null;
             }
+            this._stopHpObserver();
             this._hidePanel();
             // leave/401: журнал прошлой пати очищается и прячется.
             this._hideLogPanel();
+        },
+
+        /**
+         * v11.6.3c: полное выключение модуля (shutdown() в main.js).
+         *
+         * Без этого после перезапуска скрипта старый инстанс продолжал бы
+         * слушать resource-записи страницы и слать HP на сервер.
+         * ТЗ 11.6.3c, п.2: observer освобождаем явно; stopHpSync() ниже —
+         * страховка на случай, если observer уже отключён.
+         */
+        destroy() {
+            if (this._perfObserver) {
+                this._perfObserver.disconnect();
+                this._perfObserver = null;
+            }
+            this.stopHpSync();
         },
 
         /**
@@ -8960,12 +9178,22 @@ const Players = {
         /**
          * Один такт синхронизации: /api/me -> POST state -> GET state -> рендер.
          *
+         * Запускается событием PerformanceObserver (ответ игры на /api/me или
+         * /api/qact) и фолбэк-интервалом HP_SYNC_MS; не чаще HP_TICK_MIN_MS.
+         *
          * Ошибки сети и валидации намеренно «тихие» (console.warn): панель
-         * обновляется раз в 3 с, тосты каждые 3 с были бы невыносимы.
+         * обновляется часто, тосты на каждую ошибку были бы невыносимы.
          * Исключение — 401: он означает кик/удалённую пати, здесь нужен и
          * тост, и полный локальный сброс (его делает _request()).
          */
         async _hpTick() {
+            // v11.6.3c: троттлинг. Observer срабатывает на каждый /api/me, а
+            // игра при загрузке страницы может отдать несколько подряд —
+            // без ограничения это серия POST state + GET state на наш сервер.
+            const now = Date.now();
+            if (this._lastHpTick && now - this._lastHpTick < this.HP_TICK_MIN_MS) return; // Не чаще раза в 3 секунды
+            this._lastHpTick = now;
+
             // Предыдущий тик ещё ждёт сеть (медленный сервер) — второй не нужен.
             if (this._hpBusy) return;
             const party = this._readState();
@@ -9054,7 +9282,7 @@ const Players = {
             }
 
             // Кнопку возвращаем в исходный вид: busy-рендер («...») остался
-            // только от версий с запросом, панель перерисовывается каждые 3 с.
+            // только от версий с запросом, панель перерисовывается по событиям.
             if (button && button.isConnected) {
                 button.disabled = false;
                 button.textContent = '❤';
@@ -9068,10 +9296,16 @@ const Players = {
         /** Кнопка «Пати» в FAB-меню (modules/auction.js — тот же паттерн). */
         init() {
             // Перезапуск скрипта (single-instance guard в main.js) не убивает
-            // таймеры старого инстанса: два интервала HP = двойной POST раз в 3 с.
+            // таймеры старого инстанса: два интервала HP и два observer'а =
+            // двойной POST state на наш сервер. v11.6.3c: destroy() гасит и
+            // интервал, и PerformanceObserver; stopHpSync() — фолбэк для
+            // инстанса, поднятого старой версией скрипта.
             const prev = G.__LEGION__?.Party;
             if (prev && prev !== this) {
-                try { prev.stopHpSync?.(); } catch (e) {}
+                try {
+                    if (typeof prev.destroy === 'function') prev.destroy();
+                    else prev.stopHpSync?.();
+                } catch (e) {}
             }
 
             const btn = document.getElementById(DOM_IDS.btnParty) || document.getElementById('btn-party');
@@ -12549,6 +12783,10 @@ const Players = {
                 // MutationObserver нативной ленты (иначе после перезапуска
                 // скрипта остались бы два интервала).
                 Chat.destroy();
+                // 11.6.3c: гасим PerformanceObserver и HP-интервал Пати — иначе
+                // старый инстанс продолжал бы слушать запросы игры (/api/me,
+                // /api/qact) и слать state на наш сервер после перезапуска.
+                Party.destroy();
                 document.querySelectorAll('.' + DOM_IDS.customModal + ', .sim-card, .' + DOM_IDS.chatWidget + ', .float-btns, .' + DOM_IDS.fabWrap + ', #' + DOM_IDS.playerHud + ', .' + DOM_IDS.hudLog + ', #' + DOM_IDS.hudLog + ', .hud-log, .custom-modal, .chat-widget, .legion-fab-wrap, #legion-player-hud').forEach(el => el.remove());
                 legionApi._booted = false;
             }
