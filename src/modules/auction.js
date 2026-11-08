@@ -6,6 +6,9 @@
     // POST /market/scan не чаще раза в 5 минут, а медианы по всем игрокам с
     // аддоном подтягиваются GET /market/medians и кладутся в marketMedians
     // (тултип колонки «Медиана»). Расчёты выгоды по-прежнему локальные.
+    //
+    // v11.6.2d: медианы отдаются наружу через Auction.getMedian(id) — ими
+    // пользуется Планировщик героя (цены звёзд и сфер заточки в калькуляторе).
     // ============================================================
     const Auction = {
         cityStockMap: new Map(),
@@ -340,9 +343,15 @@
         /**
          * GET /market/medians?ids=… — медианы по всем игрокам с аддоном.
          *
-         * Результат кладём в this.marketMedians ({ id: цена }). null от сервера
+         * Результат МЕРДЖИМ в this.marketMedians ({ id: цена }). null от сервера
          * («наблюдений за 7 дней нет») в объект не попадает: отсутствие ключа
          * и означает «данных нет», тултип в этом случае не рисуется.
+         *
+         * 11.6.2d: раньше объект ЗАМЕНЯЛСЯ ответом на один запрос. Планировщик
+         * героя запрашивает всего два id (звезда/сфера), и такая замена стёрла
+         * бы медианы всех лотов витрины — тултипы «Медиана рынка» пропали бы до
+         * следующего открытия аукциона. Мердж безопасен и для витрины: цены
+         * живут 7 дней на сервере, поэтому старый ключ не «протухает» мгновенно.
          *
          * @param {string[]} ids
          */
@@ -362,7 +371,7 @@
             const medians = res && res.medians;
             if (!medians || typeof medians !== 'object') return;
 
-            const next = {};
+            const next = { ...this.marketMedians };
             for (const id of list) {
                 const price = Math.round(Number(medians[id]));
                 if (Number.isFinite(price) && price > 0) next[id] = price;
@@ -668,6 +677,22 @@
             if (!itemId) return 0;
             const price = +this.marketMedians[itemId] || 0;
             return price > 0 ? price : 0;
+        },
+
+        /**
+         * 11.6.2d: публичный доступ к медиане для других модулей.
+         *
+         * Планировщик героя (вкладка «Заточка») берёт отсюда цены звёзд и сфер.
+         * 0 означает «наблюдений за 7 дней нет» — вызывающий обязан подставить
+         * свою базовую цену (фолбэк), иначе стоимость попытки обнулится.
+         *
+         * @param {string} itemId
+         * @returns {number}
+         */
+        getMedian(itemId) {
+            if (!itemId) return 0;
+            const price = Number(this.marketMedians[itemId]);
+            return Number.isFinite(price) && price > 0 ? price : 0;
         },
 
         /**

@@ -4050,6 +4050,18 @@
         COST_STAR: 300,
         COST_SPHERE: 900,
 
+        // 11.6.2d: id ресурсов заточки в игре (рынок/аукцион, сумка).
+        // Найдено в game-src: site/b-shop.js.txt (плитки материалов лавки) —
+        // «Счастливая звезда» = enchant_star, «Сфера сохранения» =
+        // enchant_sphere. Это те же id, под которыми предметы лежат на ауке,
+        // поэтому по ним можно спросить медиану у нашего сервера.
+        MATERIAL_IDS: { star: 'enchant_star', sphere: 'enchant_sphere' },
+        // Медианы аука меняются медленно, а Планировщик открывают часто:
+        // не чаще одного запроса в 5 минут (кэш живёт в памяти модуля).
+        MEDIANS_TTL: 5 * 60 * 1000,
+        _mediansAt: 0,
+        _mediansPending: null,
+
         // Округление подтверждено живой игрой: и статы, и цена считаются через
         // Math.round. Все вызовы идут сюда — если поведение изменится, правим здесь.
         enchantStat(base, en, statKey) {
@@ -4084,6 +4096,122 @@
         expectedAttempts(level) {
             const p = this.enchantChance(level) / 100;
             return p > 0 ? 1 / p : Infinity;
+        },
+
+        /* ---------------------------------------------------------- */
+        /* 11.6.2d: динамические цены ресурсов (медиана аукциона)      */
+        /* ---------------------------------------------------------- */
+
+        /**
+         * Медиана аукциона по ресурсу заточки: 'star' | 'sphere'.
+         * 0 — наблюдений за 7 дней нет, сервер не ответил или модуль Auction
+         * недоступен (урезанная сборка).
+         *
+         * Auction объявлен в modules/auction.js, а тот в сборке идёт ПОСЛЕ
+         * hero-planner.js: обращаемся к нему только из методов (на момент
+         * вызова все константы IIFE уже созданы), а try/catch страхует от
+         * TDZ, если функцию дёрнут раньше времени.
+         *
+         * @param {'star'|'sphere'} kind
+         * @returns {number}
+         */
+        resourceMedian(kind) {
+            const id = this.MATERIAL_IDS[kind];
+            if (!id) return 0;
+            try {
+                if (typeof Auction === 'undefined' || !Auction) return 0;
+                if (typeof Auction.getMedian !== 'function') return 0;
+                return Auction.getMedian(id) || 0;
+            } catch (e) {
+                return 0;
+            }
+        },
+
+        /**
+         * Цена ресурса заточки в меди.
+         *
+         * Фолбэк (11.6.2d): если медианы аука нет или она нулевая — берём
+         * базовую цену кузнеца (COST_STAR / COST_SPHERE, они же
+         * game-data.js → enchant.coins: 300 и 900). Ноль в стоимость попытки
+         * попасть не может, иначе «Суммарно» занижалось бы.
+         *
+         * @param {'star'|'sphere'} kind
+         * @returns {number}
+         */
+        resourcePrice(kind) {
+            const base = kind === 'star' ? this.COST_STAR : this.COST_SPHERE;
+            return this.resourceMedian(kind) || base;
+        },
+
+        /**
+         * Подтянуть медианы звёзды и сферы с нашего сервера
+         * (GET /market/medians, см. Auction.fetchMarketMedians).
+         *
+         * Троттлинг: не чаще раза в MEDIANS_TTL; параллельные вызовы
+         * переиспользуют один промис (пользователь может щёлкать по табам).
+         * Промис НИКОГДА не реджектится — Планировщик обязан рисоваться и на
+         * базовых ценах, когда аукцион молчит.
+         *
+         * @param {boolean} force игнорировать TTL
+         * @returns {Promise<void>}
+         */
+        refreshMaterialMedians(force = false) {
+            if (this._mediansPending) return this._mediansPending;
+            if (!force && Date.now() - this._mediansAt < this.MEDIANS_TTL) return Promise.resolve();
+
+            const ids = [this.MATERIAL_IDS.star, this.MATERIAL_IDS.sphere];
+            const run = (async () => {
+                try {
+                    if (typeof Auction === 'undefined' || !Auction) return;
+                    if (typeof Auction.fetchMarketMedians !== 'function') return;
+                    await Auction.fetchMarketMedians(ids);
+                    // Отметку ставим только после успешного ответа: при ошибке
+                    // следующий вход в Планировщик повторит запрос.
+                    this._mediansAt = Date.now();
+                } catch (e) {
+                    dbg('[HERO PLANNER] Медианы ресурсов недоступны:', e);
+                }
+            })();
+
+            // Признак «запрос в полёте» снимаем в микрозадаче, а не в finally:
+            // тело могло завершиться СИНХРОННО (например, модуль Auction не
+            // подключён), и finally успел бы обнулить поле раньше, чем оно
+            // получит ссылку на промис — он залип бы навсегда.
+            this._mediansPending = run;
+            const clear = () => { this._mediansPending = null; };
+            run.then(clear, clear);
+            return run;
+        },
+
+        /**
+         * Бейдж источника цены ресурса для UI:
+         *   📈 — цена взята с аукциона (медиана сети за 7 дней);
+         *   🏪 — базовая цена кузнеца (аукцион не ответил / нет наблюдений).
+         * В title — сумма и пояснение, поэтому бейдж работает как тултип.
+         *
+         * @param {'star'|'sphere'} kind
+         * @returns {string} html
+         */
+        priceBadge(kind) {
+            const net = this.resourceMedian(kind);
+            if (net > 0) {
+                return `<span title="Цена взята с аукциона (медиана сети за 7 дней): ${Utils.formatMoney(net)}" style="cursor:help;">`
+                    + `📈 <b style="color:#7ad1ff;">${Utils.formatMoney(net)}</b></span>`;
+            }
+            const base = kind === 'star' ? this.COST_STAR : this.COST_SPHERE;
+            return `<span title="Базовые цены (аукцион не отвечает): цена кузнеца ${Utils.formatMoney(base)}" style="cursor:help; color:#999;">`
+                + `🏪 ${Utils.formatMoney(base)}</span>`;
+        },
+
+        /**
+         * Строка цен ресурсов для вкладки «Заточка» (обновляется в renderTable,
+         * когда медианы аука пришли с сервера).
+         *
+         * @returns {string} html
+         */
+        matsPriceHtml() {
+            return `<span>⭐ Счастливая звезда: ${this.priceBadge('star')}</span>`
+                + `<span>🌐 Сфера сохранения: ${this.priceBadge('sphere')}</span>`;
         },
 
         init() {
@@ -4146,6 +4274,13 @@
                             </label>
                         </div>
 
+                        <!-- 11.6.2d: цены ресурсов заточки. 📈 — медиана аука,
+                             🏪 — базовая цена кузнеца (фолбэк). Содержимое
+                             обновляет renderTable после ответа сервера. -->
+                        <div id="hp-mats-price" style="display:flex; gap:18px; align-items:center; font-size:12px; color:#ccc; background:#1e1724; border:1px solid #3d2f44; border-radius:6px; padding:6px 12px; margin-bottom:10px;">
+                            ${this.matsPriceHtml()}
+                        </div>
+
                         <!-- Суб-табы локаций -->
                         <div style="display:flex; gap:6px; border-bottom:1px solid #44374a; padding-bottom:8px;">
                             <button class="hp-loc-btn active" data-loc="equipped" style="background:#caa55c; color:#1d1620; border:none; padding:6px 12px; border-radius:4px; font-weight:bold; cursor:pointer;">🛡️ Надето</button>
@@ -4176,6 +4311,10 @@
                 // .modal-tab/.tab-content, и глобальные селекторы сбросили бы их.
                 const ownTabs = modal?.querySelector('.modal-tabs');
                 const ownContents = () => Array.from(modal?.children || []).filter(el => el.classList.contains('tab-content'));
+                // 11.6.2d: при входе на вкладку «Заточка» подтягиваем цены
+                // звёзды/сферы с аукциона. Реальная реализация — ниже, после
+                // renderTable (ей нужно перерисовать таблицу).
+                let onEnchTabOpen = () => {};
                 ownTabs?.querySelectorAll('.modal-tab').forEach(tab => {
                     tab.addEventListener('click', () => {
                         ownTabs.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
@@ -4183,6 +4322,7 @@
                         tab.classList.add('active');
                         const target = document.getElementById(`tab-${tab.dataset.tab}`);
                         if (target) target.classList.add('active');
+                        if (tab.dataset.tab === 'hero-ench') onEnchTabOpen();
                     });
                 });
 
@@ -4198,6 +4338,13 @@
                 // Рендер таблицы заточки для выбранного предмета
                 const renderTable = () => {
                     if (!outEl) return;
+
+                    // 11.6.2d: после ответа /market/medians цены ресурсов могли
+                    // смениться — обновляем строку под переключателем режимов
+                    // (она живёт вне outEl, поэтому перерисовывается отдельно).
+                    const matsEl = document.getElementById('hp-mats-price');
+                    if (matsEl) matsEl.innerHTML = this.matsPriceHtml();
+
                     const item = selectedItem;
                     if (!item) {
                         outEl.innerHTML = `<div style="color:#888; text-align:center; padding:20px;">В этой локации нет предметов для заточки.</div>`;
@@ -4239,9 +4386,15 @@
                         const useStar = isExpected && this.allocatedStars[lv];
                         const useSphere = isExpected && this.allocatedSpheres[lv];
 
+                        // 11.6.2d: цена ресурса — медиана аука, если по нему есть
+                        // наблюдения за 7 дней, иначе базовая цена кузнеца
+                        // (resourcePrice сам делает фолбэк).
+                        const starPrice = this.resourcePrice('star');
+                        const spherePrice = this.resourcePrice('sphere');
+
                         // Применяем ресурсы
-                        if (useStar) { chance += 25; cost += this.COST_STAR; starsUsed++; }
-                        if (useSphere) { cost += this.COST_SPHERE; spheresUsed++; }
+                        if (useStar) { chance += 25; cost += starPrice; starsUsed++; }
+                        if (useSphere) { cost += spherePrice; spheresUsed++; }
 
                         // Сумма с учетом выбранных стратегий
                         cumulativeStrat += cost;
@@ -4250,6 +4403,14 @@
                         const totalCostStr = isExpected
                             ? Utils.formatMoney(cumulativeStrat)
                             : Utils.formatMoney(cumulativeIdeal);
+
+                        // 📈 у цены — в этой строке стоимость включает ресурс,
+                        // взятый с аукциона (тултип объясняет источник).
+                        const aucUsed = (useStar && this.resourceMedian('star') > 0)
+                            || (useSphere && this.resourceMedian('sphere') > 0);
+                        const costCell = `${Utils.formatMoney(cost)}${aucUsed
+                            ? ' <span title="Цена взята с аукциона (медиана сети за 7 дней)" style="cursor:help; font-size:11px;">📈</span>'
+                            : ''}`;
 
                         const statsLine = Object.entries(baseStats).map(([k, base]) => {
                             const final = this.enchantStat(base, lv, k);  // передаем ключ
@@ -4273,7 +4434,7 @@
                             <td><b>+${lv}</b>${isCur ? ' <small style="color:#ffcf6a;">(текущая)</small>' : ''}</td>
                             <td>${Math.min(100, chance)}%</td>
                             <td style="color:#4cc95a; font-weight:bold;">+${bonusPct}%</td>
-                            <td>${Utils.formatMoney(cost)}</td>
+                            <td>${costCell}</td>
                             ${stratCells}
                             <td style="color:#ffcf6a; font-weight:bold;">${totalCostStr}</td>
                             <td style="font-size:12px; color:#ccc;">${statsLine}</td>
@@ -4301,13 +4462,15 @@
                         </table>
                         ${isExpected
                             ? `<div style="margin-top:10px; font-size:11px; color:#888; line-height:1.5;">
-                            ⭐ Звезда: +25% к шансу, +300 к цене. 🌐 Сфера: защита от поломки, +900 к цене.<br>
+                            ⭐ Звезда: +25% к шансу, +${Utils.formatMoney(this.resourcePrice('star'))} к цене. 🌐 Сфера: защита от поломки, +${Utils.formatMoney(this.resourcePrice('sphere'))} к цене.<br>
+                            Цены ресурсов: 📈 — медиана аукциона (наблюдения за 7 дней), 🏪 — базовая цена кузнеца (аукцион не отвечает).<br>
                             «Суммарно» = стоимость всех попыток с +1 до +N с учетом выбранных вами ресурсов.<br>
                             Расширенные статы (крит, уклонение, пробивание и пр.) получают ¼ бонуса заточки (enchK = 0.25).
                         </div>`
                             : `<div style="margin-top:10px; font-size:11px; color:#888; line-height:1.5;">
                             Стоимость = <code>max(10, round(v × price% / 100))</code>. Округление статов — <code>Math.round</code> (подтверждено игрой).<br>
                             <b>«Суммарно до +N»</b> = сумма всех базовых стоимостей с +1 до +N (без учета шансов и поломок, «идеальная» стоимость).<br>
+                            Звёзды и сферы учитываются в режиме «🧠 С учётом шансов»: 📈 — медиана аукциона, 🏪 — базовая цена кузнеца.<br>
                             Расширенные статы (крит, уклонение, пробивание и пр.) получают ¼ бонуса заточки (enchK = 0.25).
                         </div>`}
                     `;
@@ -4339,6 +4502,19 @@
                             });
                         });
                     }
+                };
+
+                // 11.6.2d: при входе на вкладку «Заточка» тянем цены звёзды и
+                // сферы с аукциона и перерисовываем таблицу. Пока ответа нет (или
+                // если сервер молчит) в UI стоят базовые цены кузнеца.
+                // refreshMaterialMedians троттлит запросы (5 минут) и никогда не
+                // реджектится, поэтому .then срабатывает и при ошибке.
+                onEnchTabOpen = () => {
+                    this.refreshMaterialMedians().then(() => {
+                        // Модалку могли закрыть, пока ходили на сервер.
+                        if (!outEl || !outEl.isConnected) return;
+                        renderTable();
+                    });
                 };
 
                 // Рендер плитки предметов
@@ -4455,6 +4631,11 @@
                 renderGrid();
                 renderTable();
 
+                // 11.6.2d: прогреваем медианы аука сразу при открытии окна —
+                // тогда при переключении на «Заточку» цены уже актуальные.
+                // Запрос троттлится (MEDIANS_TTL), префетч при ошибке молчит.
+                this.refreshMaterialMedians();
+
             } catch (err) {
                 dbg('[HERO PLANNER] Ошибка:', err);
                 UI.showModal(`<h2>❌ Ошибка <button class="custom-close" id="custom-close-btn">✖</button></h2><p>${Utils.escapeHtml(err.message)}</p>`);
@@ -4471,6 +4652,9 @@
     // POST /market/scan не чаще раза в 5 минут, а медианы по всем игрокам с
     // аддоном подтягиваются GET /market/medians и кладутся в marketMedians
     // (тултип колонки «Медиана»). Расчёты выгоды по-прежнему локальные.
+    //
+    // v11.6.2d: медианы отдаются наружу через Auction.getMedian(id) — ими
+    // пользуется Планировщик героя (цены звёзд и сфер заточки в калькуляторе).
     // ============================================================
     const Auction = {
         cityStockMap: new Map(),
@@ -4805,9 +4989,15 @@
         /**
          * GET /market/medians?ids=… — медианы по всем игрокам с аддоном.
          *
-         * Результат кладём в this.marketMedians ({ id: цена }). null от сервера
+         * Результат МЕРДЖИМ в this.marketMedians ({ id: цена }). null от сервера
          * («наблюдений за 7 дней нет») в объект не попадает: отсутствие ключа
          * и означает «данных нет», тултип в этом случае не рисуется.
+         *
+         * 11.6.2d: раньше объект ЗАМЕНЯЛСЯ ответом на один запрос. Планировщик
+         * героя запрашивает всего два id (звезда/сфера), и такая замена стёрла
+         * бы медианы всех лотов витрины — тултипы «Медиана рынка» пропали бы до
+         * следующего открытия аукциона. Мердж безопасен и для витрины: цены
+         * живут 7 дней на сервере, поэтому старый ключ не «протухает» мгновенно.
          *
          * @param {string[]} ids
          */
@@ -4827,7 +5017,7 @@
             const medians = res && res.medians;
             if (!medians || typeof medians !== 'object') return;
 
-            const next = {};
+            const next = { ...this.marketMedians };
             for (const id of list) {
                 const price = Math.round(Number(medians[id]));
                 if (Number.isFinite(price) && price > 0) next[id] = price;
@@ -5133,6 +5323,22 @@
             if (!itemId) return 0;
             const price = +this.marketMedians[itemId] || 0;
             return price > 0 ? price : 0;
+        },
+
+        /**
+         * 11.6.2d: публичный доступ к медиане для других модулей.
+         *
+         * Планировщик героя (вкладка «Заточка») берёт отсюда цены звёзд и сфер.
+         * 0 означает «наблюдений за 7 дней нет» — вызывающий обязан подставить
+         * свою базовую цену (фолбэк), иначе стоимость попытки обнулится.
+         *
+         * @param {string} itemId
+         * @returns {number}
+         */
+        getMedian(itemId) {
+            if (!itemId) return 0;
+            const price = Number(this.marketMedians[itemId]);
+            return Number.isFinite(price) && price > 0 ? price : 0;
         },
 
         /**
