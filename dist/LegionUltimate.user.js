@@ -18,6 +18,7 @@
 // @grant        GM_getValue
 // @grant        GM_notification
 // @grant        GM_openInTab
+// @grant        GM_setClipboard
 // @updateURL    https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js
 // @downloadURL  https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js
 // ==/UserScript==
@@ -983,6 +984,92 @@
 
             return updated;
         },
+
+        /**
+         * Вставка текста в поле команды похода (#qSayIn, см. site/quest.js).
+         *
+         * Игра блокирует вставку: noPaste на paste/drop + beforeinput
+         * insertFromPaste. Поэтому значение пишем нативным сеттером из
+         * цепочки прототипов самого элемента (realm-safe: не зависит от
+         * песочницы Tampermonkey) и вручную шлём input/change.
+         * inputType = 'insertText' под запрет вставки не попадает, а
+         * saySend() читает inp.value напрямую — команда уйдёт по Enter.
+         *
+         * Если поля нет (не в походе / чат похода скрыт) — копируем текст в
+         * буфер: GM_setClipboard (если выдан @grant), затем Clipboard API,
+         * затем execCommand-фолбэк на временном textarea.
+         *
+         * @param {string} text команда, например «лечить @ник» или «удар»
+         * @returns {boolean} true — вставлено в поле; false — скопировано в буфер
+         */
+        insertToQuestChat(text) {
+            const value = String(text == null ? '' : text);
+            const input = document.querySelector('#qSayIn, .q-say input, #tab-quest input[type="text"], .q-say textarea');
+
+            if (input) {
+                input.focus();
+                try {
+                    let proto = Object.getPrototypeOf(input);
+                    let desc = null;
+                    while (proto && !desc) {
+                        desc = Object.getOwnPropertyDescriptor(proto, 'value');
+                        proto = Object.getPrototypeOf(proto);
+                    }
+                    if (desc && desc.set) desc.set.call(input, value);
+                    else input.value = value;
+
+                    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: value, inputType: 'insertText' }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                } catch (e) {
+                    input.value = value;
+                }
+                return true;
+            }
+
+            const toast = (msg, isError) => {
+                if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, !!isError);
+            };
+            const okMsg = 'Поле чата не найдено, текст скопирован';
+
+            // Самый старый путь: скрытый textarea + execCommand('copy').
+            const legacyCopy = () => {
+                let ok = false;
+                try {
+                    const ta = document.createElement('textarea');
+                    ta.value = value;
+                    ta.setAttribute('readonly', '');
+                    ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try { ok = document.execCommand('copy'); } catch (e2) {}
+                    ta.remove();
+                } catch (e3) {}
+                toast(ok ? okMsg : `Не удалось скопировать. Текст: ${value}`, !ok);
+                return ok;
+            };
+
+            // 1. GM_setClipboard — синхронный; доступен только если выдан @grant.
+            try {
+                if (typeof GM_setClipboard === 'function') {
+                    GM_setClipboard(value);
+                    toast(okMsg, false);
+                    return false;
+                }
+            } catch (e) {}
+
+            // 2. Clipboard API (нужен secure context и разрешение браузера).
+            try {
+                if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                    navigator.clipboard.writeText(value).then(
+                        () => toast(okMsg, false),
+                        () => legacyCopy()
+                    );
+                    return false;
+                }
+            } catch (e) {}
+
+            return legacyCopy();
+        },
     };
     Object.assign(Utils, UtilsChat);
 
@@ -1617,6 +1704,37 @@
         .custom-modal .auc-table td.auc-empty { background: transparent; border-left: none; text-align: center; padding: 20px; color: #888; }
         .auc-footer { margin-top: 8px; font-size: 12px; color: #8b7f96; text-align: right; }
 
+        /* ============================================================
+           11.6.2b: БОЕВОЙ АССИСТЕНТ (modules/combat-assistant.js)
+           Контейнер висит по центру сверху и прозрачен для мыши, чтобы не
+           перекрывать нативный UI похода; кликабельна только карточка
+           подсказки (pointer-events: auto) с кнопкой «Вставить в чат».
+           ============================================================ */
+        #lg-combat-assistant {
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: none;
+        }
+        .lg-combat-banner {
+            background: #c81e1e; color: #fff; font: 900 24px/1.2 Arial; padding: 12px 24px;
+            border: 3px solid #ff5a5a; border-radius: 12px; box-shadow: 0 0 30px rgba(255,50,50,0.8);
+            text-transform: uppercase; animation: lgPulse 1s infinite alternate;
+        }
+        @keyframes lgPulse { from { transform: scale(1); opacity: 0.9; } to { transform: scale(1.05); opacity: 1; } }
+        .lg-combat-suggest {
+            background: rgba(18,26,22,0.95); border: 2px solid #ffcf6a; color: #fff; padding: 8px 16px;
+            border-radius: 8px; display: flex; gap: 12px; align-items: center; pointer-events: auto; font: bold 14px Arial;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+        .lg-combat-btn { background: #ffcf6a; color: #000; border: none; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: transform 0.1s; }
+        .lg-combat-btn:active { transform: scale(0.95); }
+
     `;
 
     // ===== src/core/hooks.js =====
@@ -1943,6 +2061,14 @@
                     <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
                         <span>🔔 Уведомлять о новых версиях</span>
                         <input type="checkbox" class="lg-toggle" id="modal-chk-update-notify">
+                    </label>
+                    <!-- 11.6.2b: боевой ассистент в походах (подсказки по механикам
+                         боссов). Состояние ставит и сохраняет UI.openSettings()
+                         (localStorage 'LEGION_COMBAT_ASSIST'), читает каждую секунду
+                         modules/combat-assistant.js. -->
+                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
+                        <span>⚔️ Боевой ассистент в походах</span>
+                        <input type="checkbox" class="lg-toggle" id="modal-chk-combat-assist">
                     </label>
                 </div>
             `;
@@ -2425,6 +2551,16 @@
             notifyChk?.addEventListener('change', (e) => {
                 localStorage.setItem('LEGION_UPDATE_NOTIFY', String(e.target.checked));
             });
+
+            // 11.6.2b: боевой ассистент в походах. Дефолт — включено (ключа ещё нет);
+            // значение читает CombatAssistant._tick() при каждом тике.
+            const combatChk = modal.querySelector('#modal-chk-combat-assist');
+            if (combatChk) {
+                combatChk.checked = localStorage.getItem('LEGION_COMBAT_ASSIST') !== 'false';
+                combatChk.addEventListener('change', (e) => {
+                    localStorage.setItem('LEGION_COMBAT_ASSIST', String(e.target.checked));
+                });
+            }
         },
         // 🏰 Карманный город вынесен в modules/pocket-city.js (v11.6.0, этап 3):
         //    UI.openPocketCity()     -> PocketCity.open()
@@ -7394,6 +7530,258 @@ const Players = {
         }
     };
 
+    // ===== src/modules/combat-assistant.js =====
+    // ============================================================
+    // 6.6. МОДУЛЬ: БОЕВОЙ АССИСТЕНТ (modules/combat-assistant.js)
+    //
+    // Подсказки по механикам боссов в походе (патч 11.6.2b): раз в секунду
+    // читает состояние похода штатным геттером игры LGQuest._view()
+    // (структура — docs/API.md, раздел «Объект состояния похода»).
+    // Вывод — поверх экрана: либо красный баннер «НЕ ПИШИ!», либо готовая
+    // команда с кнопкой «Вставить в чат».
+    //
+    // Подключается после core/ui.js и modules/pocket-city.js (SHARED_MODULES
+    // в build.js). Игровые объекты берём из G (core/constants.js — это
+    // unsafeWindow): после @grant window — песочница, LGQuest в ней не виден.
+    // ============================================================
+    const CombatAssistant = {
+        _el: null,
+        _timer: null,
+        // Подпись текущей отрисовки: защита от мерцания на каждом тике.
+        _currentState: null,
+
+        init() {
+            // Повторный init (перезапуск скрипта) не должен плодить таймеры.
+            if (this._el) return;
+            this._el = document.createElement('div');
+            this._el.id = 'lg-combat-assistant';
+            document.body.appendChild(this._el);
+            this._timer = setInterval(() => this._tick(), 1000);
+        },
+
+        // Гасим интервал и DOM при перезапуске скрипта (см. shutdown в main.js),
+        // иначе старый таймер продолжал бы тикать рядом с новым.
+        destroy() {
+            if (this._timer) clearInterval(this._timer);
+            this._timer = null;
+            if (this._el && this._el.parentNode) this._el.parentNode.removeChild(this._el);
+            this._el = null;
+            this._currentState = null;
+        },
+
+        _tick() {
+            // Тумблер в настройках аддона (ключ LEGION_COMBAT_ASSIST, дефолт — вкл).
+            const enabled = localStorage.getItem('LEGION_COMBAT_ASSIST') !== 'false';
+            if (!enabled) {
+                this._clear();
+                return;
+            }
+
+            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
+            const quest = pageWin.LGQuest;
+            if (!quest || typeof quest._view !== 'function') {
+                this._clear();
+                return;
+            }
+
+            try {
+                const q = quest._view();
+                // Ассистент нужен только полноправному участнику похода:
+                // party = 'q' (очередь), 'ghost' (призрак), 'out' — не наш бой.
+                if (!q || !q.on || q.party !== 'in') {
+                    this._clear();
+                    return;
+                }
+
+                this._render(this._evaluate(q));
+            } catch (e) {
+                console.warn('[LGU] CombatAssistant error:', e);
+            }
+        },
+
+        /**
+         * Решение по текущему состоянию похода.
+         * Порядок приоритетов: смерть -> запрет ввода -> механики -> обычный ход.
+         *
+         * @param {object} q состояние похода из LGQuest._view()
+         * @returns {{action: 'IDLE'|'SILENCE'|'COMMAND', text?: string, hint?: string}}
+         */
+        _evaluate(q) {
+            // 1. Смерть героя. Проверки повторяют deadIn() из site/quest.js:
+            //    обычный бой — b.hp === 0 ("dead"), босс — bg.in и bg.my <= 0.
+            const isDead = (q.b && q.b.st !== 'end' && q.b.hp === 0) ||
+                           (q.bg && q.bg.st !== 'end' && q.bg.in && !(q.bg.my > 0));
+            if (isDead) return { action: 'IDLE' };
+
+            // 2. Газ в ловушке: писать нельзя, пока он не рассеется.
+            if (q.tr && q.tr.gas && (q.tr.st === 'act' || q.tr.st === 'wait')) {
+                return { action: 'SILENCE', text: 'ГАЗ! НЕ ПИШИ!' };
+            }
+
+            // 3. Режим тишины босса. Логика 1:1 с sayHush() из site/quest.js:
+            //    финт (mech.fake), семейство 'silence' (кроме M94/M55 — там
+            //    молчать не нужно) и текстовая подсказка «не пиши / молчите».
+            const M = q.bg && q.bg.mech;
+            if (M) {
+                if (M.fake === true) {
+                    return { action: 'SILENCE', text: 'ФИНТ! НЕ ПИШИ!' };
+                }
+                const silentFam = M.fam === 'silence' && M.id !== 'M94' && M.id !== 'M55';
+                const silentTip = /ничего не пиш|молчите|не пишите/i.test(M.tip || '');
+                if (silentFam || silentTip) {
+                    return { action: 'SILENCE', text: 'ТИШИНА! НЕ ПИШИ!' };
+                }
+            }
+
+            // 3.1. Финт/тишина на телеграфе обычного боя (docs/API.md: tele.fake,
+            //      tele.hush). Писать слово в этом случае запрещено.
+            if (q.b && q.b.tele && (q.b.tele.fake === true || q.b.tele.hush === true)) {
+                return { action: 'SILENCE', text: 'ФИНТ! НЕ ПИШИ!' };
+            }
+
+            // 4. Фонари Джека-Фонарщика: hw.lan.lit — 6 фонарей, false = погас.
+            //    Команда зажигает один фонарь, поэтому берём первый погасший.
+            if (q.bg && q.bg.hw && q.bg.hw.lan && Array.isArray(q.bg.hw.lan.lit)) {
+                const offIdx = q.bg.hw.lan.lit.map((v, i) => (v ? 0 : i + 1)).filter(Boolean);
+                if (offIdx.length > 0) {
+                    return { action: 'COMMAND', text: `зажечь ${offIdx[0]}`, hint: 'Погас фонарь' };
+                }
+            }
+
+            // 5. Укус волка: bite — кусаемые площадки, area — своя площадка.
+            //    Прыгаем на свободную И достижимую площадку: соседей берём из
+            //    zn.a = [[номер, соседи, полигон]] — та же схема, что в zonesHtml().
+            if (q.bg && Array.isArray(q.bg.bite) && q.bg.area) {
+                if (q.bg.bite.includes(q.bg.area)) {
+                    const Z = q.bg.zn || {};
+                    const gone = Array.isArray(Z.gone) ? Z.gone : [];
+                    const zones = Array.isArray(Z.a) ? Z.a : [];
+                    const myRow = zones.find(a => Array.isArray(a) && a[0] === q.bg.area);
+                    const neighbours = (myRow && Array.isArray(myRow[1])) ? myRow[1] : [];
+                    const safe = zones
+                        .map(a => (Array.isArray(a) ? a[0] : 0))
+                        .filter(z => z && z !== q.bg.area && !q.bg.bite.includes(z) && !gone.includes(z));
+                    const reachable = neighbours.length ? safe.filter(z => neighbours.includes(z)) : safe;
+                    const target = reachable.length ? reachable[0] : safe[0];
+                    if (target) {
+                        return { action: 'COMMAND', text: `прыжок ${target}`, hint: 'Укус волка! Прыгай' };
+                    }
+                }
+            }
+
+            // 6. Крылья (механика HPG10): у каждого крыла своя квота got/need.
+            //    Если на своём крыле квота набрана, а на другом — нет,
+            //    перепрыгиваем в первое недобранное крыло (W.z — площадки крыла).
+            if (q.bg && M && M.id === 'HPG10' && q.bg.wings) {
+                const W = q.bg.wings;
+                const wingsZ = Array.isArray(W.z) ? W.z : [];
+                const myWingIdx = q.bg.area
+                    ? wingsZ.findIndex(z => Array.isArray(z) && z.includes(q.bg.area))
+                    : -1;
+                if (myWingIdx >= 0 && (W.got?.[myWingIdx] || 0) >= (W.need?.[myWingIdx] || 0)) {
+                    const openWingIdx = wingsZ.findIndex((z, i) => (W.got?.[i] || 0) < (W.need?.[i] || 0));
+                    const target = openWingIdx >= 0 ? (wingsZ[openWingIdx] || [])[0] : null;
+                    if (target) {
+                        return { action: 'COMMAND', text: `прыжок ${target}`, hint: 'Крыло закрыто! Смени позицию' };
+                    }
+                }
+            }
+
+            // 7. Осадные орудия и приспешники: adds = [[имя, count, hpRatio]].
+            //    count = 0 — осадное орудие/ворота (бьётся без номера),
+            //    count > 0 — приспешники («удар ИМЯ N»); hpRatio <= 0 — уже добит.
+            if (q.bg && Array.isArray(q.bg.adds)) {
+                const alive = q.bg.adds.filter(a => Array.isArray(a) && a[2] > 0);
+                const siege = alive.find(a => !(+a[1] > 0));
+                if (siege) return { action: 'COMMAND', text: `удар ${siege[0]}`, hint: 'Цель осады' };
+                const mob = alive.find(a => +a[1] > 0);
+                if (mob) return { action: 'COMMAND', text: `удар ${mob[0]} 1`, hint: 'Убей приспешника' };
+            }
+
+            // 8. Телеграф в обычном бою: слово парирования (b.tele.word).
+            //    'tele2' в текущем клиенте не встречается, оставлен на всякий случай.
+            if (q.b && (q.b.st === 'tele' || q.b.st === 'tele2') && q.b.tele && q.b.tele.word) {
+                return { action: 'COMMAND', text: q.b.tele.word, hint: 'Ответ на телеграф' };
+            }
+
+            // 9. Напоминание о своём ходе (b.turn пуст — ход в раунде не сделан).
+            if (q.b && q.b.st === 'party' && !q.b.turn) {
+                return { action: 'COMMAND', text: 'удар', hint: 'Твой ход' };
+            }
+
+            return { action: 'IDLE' };
+        },
+
+        _clear() {
+            if (this._el && this._el.innerHTML) this._el.innerHTML = '';
+            // Сбрасываем подпись: иначе после паузы та же команда не отрисуется.
+            this._currentState = null;
+        },
+
+        /**
+         * Вставка подсказки в поле команды похода.
+         *
+         * v11.6.2b.1: сама логика (нативный сеттер value + input/change,
+         * обход запрета вставки в quest.js) вынесена в общий хелпер
+         * core/utils-chat.js — он же нужен кнопке «❤» в модуле пати.
+         */
+        _insert(text) {
+            if (typeof Utils === 'undefined' || typeof Utils.insertToQuestChat !== 'function') return;
+            const inserted = Utils.insertToQuestChat(text);
+            // Если поля нет — хелпер уже показал тост про копирование в буфер.
+            if (inserted && typeof UI !== 'undefined' && UI.showToast) {
+                UI.showToast(`Вставлено: ${text} — Enter, чтобы отправить`);
+            }
+        },
+
+        _render(res) {
+            if (!this._el) return;
+            if (!res || res.action === 'IDLE') {
+                this._clear();
+                return;
+            }
+
+            const esc = (s) => (typeof Utils !== 'undefined' && Utils.escapeHtml ? Utils.escapeHtml(s) : String(s == null ? '' : s));
+
+            if (res.action === 'SILENCE') {
+                // Баннер перерисовываем только при смене текста (антимерцание),
+                // но ГАЗ -> ФИНТ -> ТИШИНА обязаны подменять друг друга.
+                const sign = `silence|${res.text}`;
+                if (this._currentState === sign) return;
+                this._currentState = sign;
+                this._el.innerHTML = `<div class="lg-combat-banner">${esc(res.text)}</div>`;
+                return;
+            }
+
+            if (res.action === 'COMMAND') {
+                // Не перерисовывать, если состояние не изменилось.
+                const sign = `${res.hint || ''}|${res.text}`;
+                if (this._currentState === sign) return;
+                this._currentState = sign;
+
+                this._el.innerHTML = `
+                    <div class="lg-combat-suggest">
+                        <div>
+                            <div style="font-size:12px; opacity:0.8;">${esc(res.hint || '')}</div>
+                            <div style="color:#ffcf6a;">${esc(res.text)}</div>
+                        </div>
+                        <button class="lg-combat-btn" id="lg-combat-insert">Вставить в чат</button>
+                    </div>
+                `;
+
+                const btn = this._el.querySelector('#lg-combat-insert');
+                if (btn) btn.onclick = () => this._insert(res.text);
+            }
+        }
+    };
+
+    // Для доступа из консоли страницы: window аддона — песочница, поэтому
+    // публикуем в page-context через G (unsafeWindow), как это делает main.js.
+    try {
+        const caWin = (typeof G !== 'undefined' && G) ? G : window;
+        caWin.LegionCombatAssistant = CombatAssistant;
+    } catch (e) {}
+
     // ===== src/modules/party.js =====
     // ============================================================
     // 9. МОДУЛЬ: ПАТИ (группы игроков, шаг 1)
@@ -7429,11 +7817,11 @@ const Players = {
     // события в POST /party/:id/log (quest_start/quest_end/death/heal).
     // v11.6.0c.1: добавлен тип damage («HP -N») — урон уменьшением hp.
     // v11.6.0d: взаимный хил. В строке HP-панели у раненого союзника появляется
-    // кнопка «❤» -> _healMember() -> POST /c/<канал>/api/qact
-    // {k:'b', a:'sk', w:'лечение', t:<ник>}. Успех пишется в журнал типом
-    // heal_cast. Кнопка только если цель не мы, цель ранена, свой герой в
-    // походе (вне похода игра отклоняет запрос) и наш класс — жрец
-    // (v11.6.0g-2: _prevMe.role === 'priest').
+    // кнопка «❤». v11.6.2b.1: прямой POST /api/qact убран — кнопка теперь
+    // подставляет в поле похода команду «лечить @ник» через общий хелпер
+    // Utils.insertToQuestChat() (core/utils-chat.js), отправляет игрок по Enter.
+    // Кнопка только если цель не мы, цель ранена, свой герой в походе и наш
+    // класс — жрец (v11.6.0g-2: _prevMe.role === 'priest').
     // Под HP-панелью — блок «Журнал» с ленивой догрузкой GET .../log?since=.
     // v11.6.0g-2: UI-патч. В интерфейсе «inviteToken» называется «Код
     // приглашения»; модалка переведена на классы core/styles.js (тёмный фон,
@@ -7494,8 +7882,10 @@ const Players = {
         LOG_PANEL_ID: `${RAND_ID}-party-log-panel`,
         _prevMe: null,       // предыдущий снимок /api/me для детектора событий
         // v11.6.0d: логины, по которым прямо сейчас идёт POST /api/qact.
-        // Панель перерисовывается раз в 3 с, и без этого набора двойной клик
-        // (или клик сразу после рендера) отправил бы второй запрос лечения.
+        // v11.6.2b.1: хил переведён на вставку текста («лечить @ник»), набор
+        // больше не заполняется, а _renderPanel по-прежнему читает его в
+        // busy-проверке кнопки «❤» (всегда false).
+        // TODO: REMOVE — удалить поле и busy-ветку в _renderPanel вместе.
         _healBusy: new Set(),
         _logOpen: true,      // панель развёрнута (свёрнутая не опрашивает сервер)
         _logBusy: false,     // GET/POST журнала уже в полёте
@@ -8221,7 +8611,7 @@ const Players = {
                     && rawHp < rawMax;
                 const healBtn = showHeal
                     ? `<button type="button" class="${this.HEAL_BTN_CLASS}" data-party-heal="${login}"`
-                        + ` title="Лечить ${login}"${busy ? ' disabled' : ''}>${busy ? '...' : '❤'}</button>`
+                        + ` title="Вставить команду лечения в чат"${busy ? ' disabled' : ''}>${busy ? '...' : '❤'}</button>`
                     : '';
 
                 return `<div style="margin-bottom:6px;">
@@ -8640,78 +9030,34 @@ const Players = {
         /* ---------------------------------------------------------- */
 
         /**
-         * Лечение союзника: POST /c/<канал>/api/qact.
+         * «Лечение» союзника: вставляем команду похода в поле чата.
          *
-         * Тело — «кнопка» похода: k:'b' (button), a:'sk' (навык), w:'лечение'
-         * (подпись кнопки), t:<ник цели>. Запрос идёт с того же origin, что и
-         * страница игры, поэтому обычный fetch с credentials:'include' (CORS
-         * тут не при чём), а не Utils.fetchApi — это не /api/… путь пати.
-         *
-         * Ответ {ok:true, id} = «действие встало в очередь» (AGENTS.md §3):
-         * игра применит хил не сразу, поэтому HP-панель обновляем с задержкой
-         * 1 с, иначе GET state вернёт ещё старое HP.
-         *
-         * Ошибки игры (нет похода, кулдаун, цель умерла/вне зоны) приходят как
-         * {ok:false, error} или не-2xx — показываем их тостом через _runAction.
+         * v11.6.2b.1: прямой POST /c/<канал>/api/qact {k:'b',a:'sk',w:'лечение'}
+         * убран. Игра сама разбирает текстовую команду «лечить @ник» (qsay),
+         * а ручной запрос дублировал действие (кулдаун / двойной хил) и мог
+         * разойтись с состоянием стрима. Теперь кнопка «❤» только подставляет
+         * текст — отправляет игрок по Enter, как любую команду похода.
          *
          * @param {string} targetLogin ник цели из data-party-heal
-         * @param {HTMLButtonElement|null} button кнопка (блокируется на время запроса)
+         * @param {HTMLButtonElement|null} button кнопка (возвращается в исходный вид)
          */
-        async _healMember(targetLogin, button) {
+        _healMember(targetLogin, button) {
             const target = String(targetLogin || '').trim();
             if (!target) return;
 
-            const key = target.toLowerCase();
-            // Клик пришёл, пока предыдущий запрос по этой же цели в полёте:
-            // второй POST не нужен (панель перерисовывается раз в 3 с).
-            if (this._healBusy.has(key)) return;
-            this._healBusy.add(key);
+            const healCommand = `лечить @${target}`;
+            // Поля может не быть (не в походе / чат похода скрыт): тогда хелпер
+            // сам скопирует команду в буфер и покажет тост.
+            const inserted = Utils.insertToQuestChat(healCommand);
+            if (inserted) {
+                UI.showToast(`Текст «${healCommand}» вставлен в чат. Нажмите Enter.`, false);
+            }
 
-            try {
-                await this._runAction(button, null, async () => {
-                    try {
-                        const channel = this._channelLogin();
-                        if (!channel) throw new Error('игра не загрузилась');
-
-                        const url = `/c/${encodeURIComponent(channel)}/api/qact`;
-                        const body = { k: 'b', a: 'sk', w: 'лечение', t: target };
-
-                        const res = await fetch(url, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            credentials: 'include',
-                            body: JSON.stringify(body)
-                        });
-                        const data = await res.json().catch(() => ({}));
-
-                        if (!res.ok || data.ok === false) {
-                            // Ошибка игры: нет похода, кулдаун, цель умерла и т.д.
-                            throw new Error(data.error || `HTTP ${res.status}`);
-                        }
-
-                        // Успех: пишем в журнал пати. Сбой журнала не отменяет хил
-                        // (_postLogEvent возвращает false, а не бросает).
-                        await this._postLogEvent('heal_cast', `Лечит ${target}`);
-
-                        // Принудительно обновить HP-панель через 1 с (ждём, пока
-                        // игра применит хил). _hpTick(), а не _runTick(): в этом
-                        // модуле такт синхронизации называется именно _hpTick().
-                        setTimeout(() => { this._hpTick(); }, 1000);
-                    } catch (err) {
-                        // Тост показывает сам _runAction (errorBox = null),
-                        // поэтому префикс из ТЗ добавляем ровно один раз — здесь.
-                        throw new Error(`Не удалось: ${err?.message || err}`);
-                    }
-                }, '...');
-            } finally {
-                this._healBusy.delete(key);
-                // Кнопку могла перерисовать панель, пока шёл запрос: busy-флаг
-                // уже снят, но узел в DOM вернём в исходный вид (в _runAction
-                // prevText мог оказаться '...' от busy-рендера).
-                if (button && button.isConnected) {
-                    button.disabled = false;
-                    button.textContent = '❤';
-                }
+            // Кнопку возвращаем в исходный вид: busy-рендер («...») остался
+            // только от версий с запросом, панель перерисовывается каждые 3 с.
+            if (button && button.isConnected) {
+                button.disabled = false;
+                button.textContent = '❤';
             }
         },
 
@@ -12051,7 +12397,7 @@ const Players = {
     //   core/ui-templates.js -> UITemplates (HTML: FAB-меню, модалки, HUD)
     //   core/ui.js     -> UI
     //   modules/*      -> BuildSim, HeroPlanner, Auction, Players,
-    //                     PocketCity, Party, Miner, Chat
+    //                     PocketCity, CombatAssistant, Party, Miner, Chat
     // ============================================================
 
     // 5.3. Защита от повторного запуска (single-instance guard)
@@ -12149,6 +12495,9 @@ const Players = {
         Players.init();
         // 🎉 Пати: кнопка в FAB-меню, клиент сервера из server/ (шаг 1).
         Party.init();
+        // ⚔️ Боевой ассистент (11.6.2b): подсказки по механикам боссов в походе.
+        //    Отдельного пункта меню нет — тумблер в «⚙️ Настройках аддона».
+        CombatAssistant.init();
         Chat.init();
 
         Chat.interceptEventSource();
@@ -12172,6 +12521,7 @@ const Players = {
             Auction,
             Players,
             PocketCity,
+            CombatAssistant,
             Party,
             Chat,
             DOM_IDS,
@@ -12192,6 +12542,9 @@ const Players = {
                     Chat._popoutWin = null;
                 }
                 Chat.stopBackgroundLiveListener();
+                // 11.6.2b: гасим интервал боевого ассистента и убираем его контейнер,
+                // иначе после перезапуска скрипта тикали бы два таймера.
+                CombatAssistant.destroy();
                 // ТЗ 11.6.0g-3: гасим поллинг /heartbeat + /users и
                 // MutationObserver нативной ленты (иначе после перезапуска
                 // скрипта остались бы два интервала).

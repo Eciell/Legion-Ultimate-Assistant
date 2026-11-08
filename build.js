@@ -85,6 +85,10 @@ const SHARED_MODULES = [
     // v11.6.0: логика «Карманного города» вынесена из ui.js в отдельный модуль.
     // Модули грузятся после core/ui.js, поэтому UI/UITemplates уже объявлены.
     'modules/pocket-city.js',
+    // 11.6.2b: «Боевой ассистент» (modules/combat-assistant.js) — подсказки по
+    // механикам боссов в походе. Нужны только G/Utils/UI из core (уже
+    // объявлены) и LGQuest из page-context; main.js вызывает init() в boot().
+    'modules/combat-assistant.js',
     // v11.6.0: «Пати» (modules/party.js) — клиент собственного сервера через
     // GM_xmlhttpRequest. Нужны только Utils/DOM_IDS/UI из core (уже объявлены),
     // других модулей не касается; main.js вызывает Party.init() последним,

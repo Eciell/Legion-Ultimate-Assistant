@@ -107,6 +107,14 @@
                         <span>🔔 Уведомлять о новых версиях</span>
                         <input type="checkbox" class="lg-toggle" id="modal-chk-update-notify">
                     </label>
+                    <!-- 11.6.2b: боевой ассистент в походах (подсказки по механикам
+                         боссов). Состояние ставит и сохраняет UI.openSettings()
+                         (localStorage 'LEGION_COMBAT_ASSIST'), читает каждую секунду
+                         modules/combat-assistant.js. -->
+                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
+                        <span>⚔️ Боевой ассистент в походах</span>
+                        <input type="checkbox" class="lg-toggle" id="modal-chk-combat-assist">
+                    </label>
                 </div>
             `;
         },

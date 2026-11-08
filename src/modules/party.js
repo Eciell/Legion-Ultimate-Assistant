@@ -32,11 +32,11 @@
     // события в POST /party/:id/log (quest_start/quest_end/death/heal).
     // v11.6.0c.1: добавлен тип damage («HP -N») — урон уменьшением hp.
     // v11.6.0d: взаимный хил. В строке HP-панели у раненого союзника появляется
-    // кнопка «❤» -> _healMember() -> POST /c/<канал>/api/qact
-    // {k:'b', a:'sk', w:'лечение', t:<ник>}. Успех пишется в журнал типом
-    // heal_cast. Кнопка только если цель не мы, цель ранена, свой герой в
-    // походе (вне похода игра отклоняет запрос) и наш класс — жрец
-    // (v11.6.0g-2: _prevMe.role === 'priest').
+    // кнопка «❤». v11.6.2b.1: прямой POST /api/qact убран — кнопка теперь
+    // подставляет в поле похода команду «лечить @ник» через общий хелпер
+    // Utils.insertToQuestChat() (core/utils-chat.js), отправляет игрок по Enter.
+    // Кнопка только если цель не мы, цель ранена, свой герой в походе и наш
+    // класс — жрец (v11.6.0g-2: _prevMe.role === 'priest').
     // Под HP-панелью — блок «Журнал» с ленивой догрузкой GET .../log?since=.
     // v11.6.0g-2: UI-патч. В интерфейсе «inviteToken» называется «Код
     // приглашения»; модалка переведена на классы core/styles.js (тёмный фон,
@@ -97,8 +97,10 @@
         LOG_PANEL_ID: `${RAND_ID}-party-log-panel`,
         _prevMe: null,       // предыдущий снимок /api/me для детектора событий
         // v11.6.0d: логины, по которым прямо сейчас идёт POST /api/qact.
-        // Панель перерисовывается раз в 3 с, и без этого набора двойной клик
-        // (или клик сразу после рендера) отправил бы второй запрос лечения.
+        // v11.6.2b.1: хил переведён на вставку текста («лечить @ник»), набор
+        // больше не заполняется, а _renderPanel по-прежнему читает его в
+        // busy-проверке кнопки «❤» (всегда false).
+        // TODO: REMOVE — удалить поле и busy-ветку в _renderPanel вместе.
         _healBusy: new Set(),
         _logOpen: true,      // панель развёрнута (свёрнутая не опрашивает сервер)
         _logBusy: false,     // GET/POST журнала уже в полёте
@@ -824,7 +826,7 @@
                     && rawHp < rawMax;
                 const healBtn = showHeal
                     ? `<button type="button" class="${this.HEAL_BTN_CLASS}" data-party-heal="${login}"`
-                        + ` title="Лечить ${login}"${busy ? ' disabled' : ''}>${busy ? '...' : '❤'}</button>`
+                        + ` title="Вставить команду лечения в чат"${busy ? ' disabled' : ''}>${busy ? '...' : '❤'}</button>`
                     : '';
 
                 return `<div style="margin-bottom:6px;">
@@ -1243,78 +1245,34 @@
         /* ---------------------------------------------------------- */
 
         /**
-         * Лечение союзника: POST /c/<канал>/api/qact.
+         * «Лечение» союзника: вставляем команду похода в поле чата.
          *
-         * Тело — «кнопка» похода: k:'b' (button), a:'sk' (навык), w:'лечение'
-         * (подпись кнопки), t:<ник цели>. Запрос идёт с того же origin, что и
-         * страница игры, поэтому обычный fetch с credentials:'include' (CORS
-         * тут не при чём), а не Utils.fetchApi — это не /api/… путь пати.
-         *
-         * Ответ {ok:true, id} = «действие встало в очередь» (AGENTS.md §3):
-         * игра применит хил не сразу, поэтому HP-панель обновляем с задержкой
-         * 1 с, иначе GET state вернёт ещё старое HP.
-         *
-         * Ошибки игры (нет похода, кулдаун, цель умерла/вне зоны) приходят как
-         * {ok:false, error} или не-2xx — показываем их тостом через _runAction.
+         * v11.6.2b.1: прямой POST /c/<канал>/api/qact {k:'b',a:'sk',w:'лечение'}
+         * убран. Игра сама разбирает текстовую команду «лечить @ник» (qsay),
+         * а ручной запрос дублировал действие (кулдаун / двойной хил) и мог
+         * разойтись с состоянием стрима. Теперь кнопка «❤» только подставляет
+         * текст — отправляет игрок по Enter, как любую команду похода.
          *
          * @param {string} targetLogin ник цели из data-party-heal
-         * @param {HTMLButtonElement|null} button кнопка (блокируется на время запроса)
+         * @param {HTMLButtonElement|null} button кнопка (возвращается в исходный вид)
          */
-        async _healMember(targetLogin, button) {
+        _healMember(targetLogin, button) {
             const target = String(targetLogin || '').trim();
             if (!target) return;
 
-            const key = target.toLowerCase();
-            // Клик пришёл, пока предыдущий запрос по этой же цели в полёте:
-            // второй POST не нужен (панель перерисовывается раз в 3 с).
-            if (this._healBusy.has(key)) return;
-            this._healBusy.add(key);
+            const healCommand = `лечить @${target}`;
+            // Поля может не быть (не в походе / чат похода скрыт): тогда хелпер
+            // сам скопирует команду в буфер и покажет тост.
+            const inserted = Utils.insertToQuestChat(healCommand);
+            if (inserted) {
+                UI.showToast(`Текст «${healCommand}» вставлен в чат. Нажмите Enter.`, false);
+            }
 
-            try {
-                await this._runAction(button, null, async () => {
-                    try {
-                        const channel = this._channelLogin();
-                        if (!channel) throw new Error('игра не загрузилась');
-
-                        const url = `/c/${encodeURIComponent(channel)}/api/qact`;
-                        const body = { k: 'b', a: 'sk', w: 'лечение', t: target };
-
-                        const res = await fetch(url, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            credentials: 'include',
-                            body: JSON.stringify(body)
-                        });
-                        const data = await res.json().catch(() => ({}));
-
-                        if (!res.ok || data.ok === false) {
-                            // Ошибка игры: нет похода, кулдаун, цель умерла и т.д.
-                            throw new Error(data.error || `HTTP ${res.status}`);
-                        }
-
-                        // Успех: пишем в журнал пати. Сбой журнала не отменяет хил
-                        // (_postLogEvent возвращает false, а не бросает).
-                        await this._postLogEvent('heal_cast', `Лечит ${target}`);
-
-                        // Принудительно обновить HP-панель через 1 с (ждём, пока
-                        // игра применит хил). _hpTick(), а не _runTick(): в этом
-                        // модуле такт синхронизации называется именно _hpTick().
-                        setTimeout(() => { this._hpTick(); }, 1000);
-                    } catch (err) {
-                        // Тост показывает сам _runAction (errorBox = null),
-                        // поэтому префикс из ТЗ добавляем ровно один раз — здесь.
-                        throw new Error(`Не удалось: ${err?.message || err}`);
-                    }
-                }, '...');
-            } finally {
-                this._healBusy.delete(key);
-                // Кнопку могла перерисовать панель, пока шёл запрос: busy-флаг
-                // уже снят, но узел в DOM вернём в исходный вид (в _runAction
-                // prevText мог оказаться '...' от busy-рендера).
-                if (button && button.isConnected) {
-                    button.disabled = false;
-                    button.textContent = '❤';
-                }
+            // Кнопку возвращаем в исходный вид: busy-рендер («...») остался
+            // только от версий с запросом, панель перерисовывается каждые 3 с.
+            if (button && button.isConnected) {
+                button.disabled = false;
+                button.textContent = '❤';
             }
         },
 

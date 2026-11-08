@@ -628,4 +628,35 @@
         .custom-modal .auc-table td.auc-empty { background: transparent; border-left: none; text-align: center; padding: 20px; color: #888; }
         .auc-footer { margin-top: 8px; font-size: 12px; color: #8b7f96; text-align: right; }
 
+        /* ============================================================
+           11.6.2b: БОЕВОЙ АССИСТЕНТ (modules/combat-assistant.js)
+           Контейнер висит по центру сверху и прозрачен для мыши, чтобы не
+           перекрывать нативный UI похода; кликабельна только карточка
+           подсказки (pointer-events: auto) с кнопкой «Вставить в чат».
+           ============================================================ */
+        #lg-combat-assistant {
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: none;
+        }
+        .lg-combat-banner {
+            background: #c81e1e; color: #fff; font: 900 24px/1.2 Arial; padding: 12px 24px;
+            border: 3px solid #ff5a5a; border-radius: 12px; box-shadow: 0 0 30px rgba(255,50,50,0.8);
+            text-transform: uppercase; animation: lgPulse 1s infinite alternate;
+        }
+        @keyframes lgPulse { from { transform: scale(1); opacity: 0.9; } to { transform: scale(1.05); opacity: 1; } }
+        .lg-combat-suggest {
+            background: rgba(18,26,22,0.95); border: 2px solid #ffcf6a; color: #fff; padding: 8px 16px;
+            border-radius: 8px; display: flex; gap: 12px; align-items: center; pointer-events: auto; font: bold 14px Arial;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+        .lg-combat-btn { background: #ffcf6a; color: #000; border: none; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: transform 0.1s; }
+        .lg-combat-btn:active { transform: scale(0.95); }
+
     `;

@@ -239,6 +239,16 @@
             notifyChk?.addEventListener('change', (e) => {
                 localStorage.setItem('LEGION_UPDATE_NOTIFY', String(e.target.checked));
             });
+
+            // 11.6.2b: боевой ассистент в походах. Дефолт — включено (ключа ещё нет);
+            // значение читает CombatAssistant._tick() при каждом тике.
+            const combatChk = modal.querySelector('#modal-chk-combat-assist');
+            if (combatChk) {
+                combatChk.checked = localStorage.getItem('LEGION_COMBAT_ASSIST') !== 'false';
+                combatChk.addEventListener('change', (e) => {
+                    localStorage.setItem('LEGION_COMBAT_ASSIST', String(e.target.checked));
+                });
+            }
         },
         // 🏰 Карманный город вынесен в modules/pocket-city.js (v11.6.0, этап 3):
         //    UI.openPocketCity()     -> PocketCity.open()

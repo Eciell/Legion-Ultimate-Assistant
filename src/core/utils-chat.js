@@ -311,5 +311,91 @@
 
             return updated;
         },
+
+        /**
+         * Вставка текста в поле команды похода (#qSayIn, см. site/quest.js).
+         *
+         * Игра блокирует вставку: noPaste на paste/drop + beforeinput
+         * insertFromPaste. Поэтому значение пишем нативным сеттером из
+         * цепочки прототипов самого элемента (realm-safe: не зависит от
+         * песочницы Tampermonkey) и вручную шлём input/change.
+         * inputType = 'insertText' под запрет вставки не попадает, а
+         * saySend() читает inp.value напрямую — команда уйдёт по Enter.
+         *
+         * Если поля нет (не в походе / чат похода скрыт) — копируем текст в
+         * буфер: GM_setClipboard (если выдан @grant), затем Clipboard API,
+         * затем execCommand-фолбэк на временном textarea.
+         *
+         * @param {string} text команда, например «лечить @ник» или «удар»
+         * @returns {boolean} true — вставлено в поле; false — скопировано в буфер
+         */
+        insertToQuestChat(text) {
+            const value = String(text == null ? '' : text);
+            const input = document.querySelector('#qSayIn, .q-say input, #tab-quest input[type="text"], .q-say textarea');
+
+            if (input) {
+                input.focus();
+                try {
+                    let proto = Object.getPrototypeOf(input);
+                    let desc = null;
+                    while (proto && !desc) {
+                        desc = Object.getOwnPropertyDescriptor(proto, 'value');
+                        proto = Object.getPrototypeOf(proto);
+                    }
+                    if (desc && desc.set) desc.set.call(input, value);
+                    else input.value = value;
+
+                    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: value, inputType: 'insertText' }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                } catch (e) {
+                    input.value = value;
+                }
+                return true;
+            }
+
+            const toast = (msg, isError) => {
+                if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, !!isError);
+            };
+            const okMsg = 'Поле чата не найдено, текст скопирован';
+
+            // Самый старый путь: скрытый textarea + execCommand('copy').
+            const legacyCopy = () => {
+                let ok = false;
+                try {
+                    const ta = document.createElement('textarea');
+                    ta.value = value;
+                    ta.setAttribute('readonly', '');
+                    ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try { ok = document.execCommand('copy'); } catch (e2) {}
+                    ta.remove();
+                } catch (e3) {}
+                toast(ok ? okMsg : `Не удалось скопировать. Текст: ${value}`, !ok);
+                return ok;
+            };
+
+            // 1. GM_setClipboard — синхронный; доступен только если выдан @grant.
+            try {
+                if (typeof GM_setClipboard === 'function') {
+                    GM_setClipboard(value);
+                    toast(okMsg, false);
+                    return false;
+                }
+            } catch (e) {}
+
+            // 2. Clipboard API (нужен secure context и разрешение браузера).
+            try {
+                if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                    navigator.clipboard.writeText(value).then(
+                        () => toast(okMsg, false),
+                        () => legacyCopy()
+                    );
+                    return false;
+                }
+            } catch (e) {}
+
+            return legacyCopy();
+        },
     };
     Object.assign(Utils, UtilsChat);

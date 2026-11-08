@@ -18,6 +18,7 @@
 // @grant        GM_getValue
 // @grant        GM_notification
 // @grant        GM_openInTab
+// @grant        GM_setClipboard
 // @updateURL    https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js
 // @downloadURL  https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js
 // ==/UserScript==

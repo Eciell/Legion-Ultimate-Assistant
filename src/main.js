@@ -13,7 +13,7 @@
     //   core/ui-templates.js -> UITemplates (HTML: FAB-меню, модалки, HUD)
     //   core/ui.js     -> UI
     //   modules/*      -> BuildSim, HeroPlanner, Auction, Players,
-    //                     PocketCity, Party, Miner, Chat
+    //                     PocketCity, CombatAssistant, Party, Miner, Chat
     // ============================================================
 
     // 5.3. Защита от повторного запуска (single-instance guard)
@@ -111,6 +111,9 @@
         Players.init();
         // 🎉 Пати: кнопка в FAB-меню, клиент сервера из server/ (шаг 1).
         Party.init();
+        // ⚔️ Боевой ассистент (11.6.2b): подсказки по механикам боссов в походе.
+        //    Отдельного пункта меню нет — тумблер в «⚙️ Настройках аддона».
+        CombatAssistant.init();
         Chat.init();
 
         Chat.interceptEventSource();
@@ -134,6 +137,7 @@
             Auction,
             Players,
             PocketCity,
+            CombatAssistant,
             Party,
             Chat,
             DOM_IDS,
@@ -154,6 +158,9 @@
                     Chat._popoutWin = null;
                 }
                 Chat.stopBackgroundLiveListener();
+                // 11.6.2b: гасим интервал боевого ассистента и убираем его контейнер,
+                // иначе после перезапуска скрипта тикали бы два таймера.
+                CombatAssistant.destroy();
                 // ТЗ 11.6.0g-3: гасим поллинг /heartbeat + /users и
                 // MutationObserver нативной ленты (иначе после перезапуска
                 // скрипта остались бы два интервала).
