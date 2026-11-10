@@ -13,7 +13,12 @@
             // Те же правила, что и в getItemArtSvg: после @grant объекты игры
             // живут только в unsafeWindow.
             const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-            const nativeCtx = G.__lgAucContext || G.__lgCityContext || G.__lgMineContext;
+            // 11.6.4b: __lgMineContext / __lgCityContext больше не заполняются —
+            // хуки LGMine.open и LGCity.open сняты ради античита шахты.
+            // Остаётся контекст аукциона (hookAuc.render) и текущий экранный
+            // контекст игры G.X (у него есть api()). Если ни того, ни другого
+            // нет — уходим в обычный fetch ниже (Utils.apiPath соберёт URL).
+            const nativeCtx = G.__lgAucContext || G.X;
             if (nativeCtx && typeof nativeCtx.api === 'function') {
                 try {
                     const bodyObj = body ? (typeof body === 'string' ? JSON.parse(body) : body) : undefined;

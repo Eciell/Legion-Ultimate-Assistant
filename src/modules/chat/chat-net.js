@@ -2,8 +2,12 @@
     // 7.3 МОДУЛЬ: ЧАТ — сеть: перехватчики и живой поток
     // ============================================================
     // Вынесено из modules/chat.js (v11.6.0, этап 2 декомпозиции).
-    // Слой-миксин: перехват fetch / EventSource / WebSocket, живой поток
-    // /api/live и разбор входящих в общий Chat.handleIncoming().
+    // Слой-миксин: перехват EventSource / WebSocket, живой поток /api/live,
+    // наблюдение за сетевой активностью игры (PerformanceObserver) и разбор
+    // входящих в общий Chat.handleIncoming().
+    // 11.6.4b: перехват window.fetch удалён — античит шахты палит подмену
+    // fetch по отсутствию [native code] (см. блок «Наблюдение за сетевой
+    // активностью игры» ниже).
     // this внутри методов — это Chat (Object.assign в chat/chat.js).
 
     // v11.6.0g-3: период поллинга «кто играет с аддоном» (ТЗ — раз в 30 с).
@@ -14,6 +18,11 @@
     // хранится в localStorage 'lgUpdateCheck', чтобы проверка не зависела от
     // перезапуска поллинга (переключение вкладок, повторный init чата).
     const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+
+    // 11.6.4b: минимальный интервал между нашими syncMe() по сигналу
+    // PerformanceObserver. Игра зовёт /api/me часто (SSE `me`, действия, HUD),
+    // а нам хватает знать логин и класс — 10 секунд более чем достаточно.
+    const GAME_ME_SYNC_MS = 10000;
 
     // v11.6.0g-6: ключ доступа к нашему серверу. Должен совпадать с API_KEY в
     // server/index.js (env LGU_API_KEY). Это фильтр от случайных ботов, а не
@@ -456,163 +465,99 @@
             if (pageWin !== window) { try { window.WebSocket = WSProxy; } catch (e) {} }
         },
 
-        interceptFetch() {
-            if (this._fetchIntercepted) return;
-            // См. interceptEventSource: в sandbox патчим fetch страницы (unsafeWindow).
-            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
-            const origFetch = pageWin.fetch || window.fetch;
-            if (!origFetch || origFetch.__lgChatProxied) return;
-            this._fetchIntercepted = true;
-            const self = this;
-            const wrappedFetch = async function(...args) {
-                const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
-                const res = await origFetch.apply(this, args);
+        /* ---------------------------------------------------------- */
+        /* Наблюдение за сетевой активностью игры (11.6.4b)            */
+        /* ---------------------------------------------------------- */
+        // Античит шахты (reference/.../site/mine.js) считает подмену
+        // window.fetch детектом:
+        //   natv(window.fetch) === false && window.fetch !== LG_FETCH.w -> pi |= 1
+        // Поэтому хук fetch снят полностью. Вместо него — пассивное наблюдение
+        // через PerformanceObserver (тот же приём, что в modules/party.js для
+        // /api/me и /api/qact): слушаем resource-записи браузера и НИЧЕГО не
+        // перезаписываем — ни fetch, ни ответы.
 
-                // Задача 3: Ранний выход при отправке сообщений (не клонировать и не парсить)
-                if (url.includes('/api/city/say') || url.includes('/api/mine/chat/say')) {
-                    return res;
-                }
+        /** Слушатель resource-записей браузера. */
+        _perfObserver: null,
+        /** Date.now() последней синхронизации /api/me (троттлинг). */
+        _lastMeSync: 0,
 
-                // 0. Перехват живого потока, игроков онлайн и входящих ЛС (работает всегда)
-                const isLive = url.includes('/api/live');
-                if (url.includes('/api/city/') || url.includes('/api/mine/') || isLive) {
-                    res.clone().json().then(data => {
-                        if (data) {
-                            const loc = url.includes('/api/mine/') ? 'mine' : (isLive ? self.resolveLiveChannel(data) : 'city');
+        /**
+         * Поднимает наблюдатель за запросами игры. Идемпотентен.
+         *
+         * Что даёт без fetch-хука:
+         *   • игра сходила в /api/me         -> наш syncMe() (ник и класс);
+         *   • игра общается с городом/шахтой -> живой поток обязан быть поднят
+         *     (если свой EventSource отвалился и поллинг не крутится — поднимаем).
+         *
+         * Тела чужих ответов прочитать нельзя (PerformanceObserver отдаёт только
+         * метаданные). Данные чата приходят своим EventSource на /api/live,
+         * история города — POST /api/city/enter в loadHistory(), топ шахты и
+         * «сколько народу в шахте» — SSE-событием mine через
+         * Utils.updateOnlinePlayers(). Отдельный перехват ответов не нужен.
+         */
+        startNetworkObserver() {
+            if (this._perfObserver) return;
+            if (typeof PerformanceObserver !== 'function') {
+                // Старые браузеры: чат живёт на своём EventSource, деградация мягкая.
+                dbg('[CHAT] PerformanceObserver не поддерживается — работаем без наблюдателя');
+                return;
+            }
 
-                            // Задача 2 & Задача 4: общее количество и топ-игроки шахты из /api/mine/state
-                            if (url.includes('/api/mine/state')) {
-                                const d = data.body || data.data || data;
-                                if (d) {
-                                    if (typeof d.here === 'number') {
-                                        window.__lgMineTotalHere = d.here;
-                                    } else if (d.st && typeof d.st.here === 'number') {
-                                        window.__lgMineTotalHere = d.st.here;
-                                    }
-                                    const topList = d.st?.top || d.top;
-                                    if (Array.isArray(topList)) {
-                                        const now = Date.now();
-                                        topList.forEach(item => {
-                                            const nick = (typeof item === 'string')
-                                                ? item.trim()
-                                                : (item && (item[0] || item.l || item.login || item.nick || item.name || item.n));
-                                            if (nick && typeof nick === 'string' && nick.trim().length >= 2 && nick.trim().toLowerCase() !== 'me') {
-                                                window.__lgOnlinePlayers.set(nick.trim().toLowerCase(), { loc: 'mine', ts: now });
-                                            }
-                                        });
-                                    }
-                                }
-                            }
-
-                            Utils.updateOnlinePlayers(data, loc);
-                            Utils.processIncomingDMs(data);
-
-                            // Чат живого потока разбираем только при включённом перехвате.
-                            if (isLive && !self.disabled) {
-                                if (data.c) self.currentMineId = data.c;
-                                const chats = Utils.extractChatDeep(data);
-                                chats.forEach(m => {
-                                    const parsed = Utils.extractChatFields(m);
-                                    if (parsed.text) {
-                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, loc, parsed.k, parsed.to, parsed.rank);
-                                    }
-                                });
-                            }
-
-                            // История города из /api/city/enter: разбираем в этом же
-                            // .then(), используя уже прочитанные data. Раньше ниже был
-                            // отдельный блок со вторым res.clone().json() на тот же
-                            // ответ — двойной парсинг и лишняя нагрузка.
-                            // isHistory=true: это история, а не новое сообщение —
-                            // в кэш/счётчик непрочитанных она попадать не должна
-                            // (и ЛС отсюда повторно в Players не отдаются).
-                            if (url.includes('/api/city/enter') && data.ok && Array.isArray(data.chat)) {
-                                data.chat.forEach(m => {
-                                    const parsed = Utils.extractChatFields(m);
-                                    if (!parsed.text) return;
-                                    const ch = parsed.channel || 'city';
-                                    // loadHistory() разбирает тот же ответ, поэтому
-                                    // пропускаем то, что уже лежит в this.messages:
-                                    // по id ИЛИ по автору+тексту (у старых сообщений
-                                    // id может отсутствовать).
-                                    const known = self.messages.some(cur =>
-                                        (parsed.id && cur.id && cur.id === parsed.id) ||
-                                        (!cur._pending && cur.author === parsed.author && cur.text === parsed.text &&
-                                            (cur.channel || 'city') === ch)
-                                    );
-                                    if (known) return;
-                                    self.handleIncoming(parsed.author, parsed.text, true, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
-                                });
-                            }
+            try {
+                this._perfObserver = new PerformanceObserver((list) => {
+                    for (const entry of list.getEntries()) {
+                        const name = entry && entry.name ? entry.name : '';
+                        // includes, а не ===: name — полный URL вида
+                        // https://play.multidonate.ru/c/<канал>/api/me?...
+                        if (name.includes('/api/me')) {
+                            this._onGameMeTraffic();
+                            break;
                         }
-                    }).catch(() => {});
-                }
-
-                try {
-                    // 1. Отслеживание ID текущей шахты для навигации
-                    if (url.includes('/api/mine/')) {
-                        const mMatch = url.match(/[?&]c=([^&]+)/);
-                        if (mMatch) {
-                            try { self.currentMineId = decodeURIComponent(mMatch[1]); } catch(e){}
+                        if (name.includes('/api/city/') || name.includes('/api/mine/') || name.includes('/api/live')) {
+                            this._onGameChatTraffic();
+                            break;
                         }
                     }
+                });
+                // buffered: false — прошлые записи не нужны, слушаем только новые.
+                this._perfObserver.observe({ type: 'resource', buffered: false });
+            } catch (e) {
+                dbg('[CHAT] PerformanceObserver не запустился:', e);
+                this._perfObserver = null;
+            }
+        },
 
-                    // 2. Профиль персонажа (/api/me)
-                    if (url.includes('/api/me')) {
-                        res.clone().json().then(data => {
-                            const hero = data?.hero || data?.body?.hero || data?.me;
-                            if (hero) {
-                                window.__lgHero = hero;
-                                // v11.6.0g-5: ник берём из user.login (/api/me), а
-                                // не из hero.name: подсветка и «свои» сообщения
-                                // должны сравниваться с тем логином, под которым
-                                // игрок реально сидит в чате. ME — фолбэк, если
-                                // ответ пришёл без user (старые сборки/кэш).
-                                const user = data?.user || (typeof G !== 'undefined' && G.ME?.user);
-                                const userLogin = user?.login || user?.name;
-                                if (userLogin) self.myNick = String(userLogin).trim().toLowerCase();
-                                if (hero.class) self.myRole = hero.class;
-                                const hud = document.getElementById(DOM_IDS.playerHud) || document.getElementById('legion-player-hud');
-                                if (hud && hud.style.display !== 'none' && typeof UI !== 'undefined' && UI.renderPlayerHudContent) {
-                                    UI.renderPlayerHudContent(hud, hero);
-                                }
-                            }
-                        }).catch(() => {});
-                    }
+        /** Гасит наблюдатель (выход, перезапуск скрипта). */
+        stopNetworkObserver() {
+            if (!this._perfObserver) return;
+            try { this._perfObserver.disconnect(); } catch (e) {}
+            this._perfObserver = null;
+        },
 
-                    // Парсим чат всегда, если перехват не отключён.
-                    // Закрытый виджет не помеха: сообщения нужны для счётчика непрочитанных.
-                    if (self.disabled) {
-                        return res;
-                    }
+        /**
+         * Игра обновила /api/me — освежаем свой ник и класс своим запросом.
+         *
+         * Троттлинг GAME_ME_SYNC_MS: игру /api/me зовут часто (SSE `me`, любое
+         * действие, HUD), а нам достаточно знать логин и класс. Свой запрос
+         * тоже даёт resource-запись /api/me — троттлинг заодно не даёт
+         * наблюдателю раскрутиться в бесконечный цикл.
+         */
+        _onGameMeTraffic() {
+            const now = Date.now();
+            if (now - this._lastMeSync < GAME_ME_SYNC_MS) return;
+            this._lastMeSync = now;
+            this.syncMe();
+        },
 
-                    // 4. Состояние шахты и вход в шахту (сообщения чата шахты в data.chat.chat или data.m)
-                    if (url.includes('/api/mine/state') || url.includes('/api/mine/enter') || url.includes('/api/mine/chat')) {
-                        res.clone().json().then(data => {
-                            if (!data || !data.ok) return;
-                            if (data.c) self.currentMineId = data.c;
-                            const chats = Utils.extractChatDeep(data);
-                            if (chats.length > 0) {
-                                chats.forEach(m => {
-                                    const parsed = Utils.extractChatFields(m);
-                                    if (parsed.text) {
-                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, 'mine', parsed.k, parsed.to, parsed.rank);
-                                    }
-                                });
-                            }
-                        }).catch(() => {});
-                    }
-
-                    // 5. Вход в город (/api/city/enter) — история чата разбирается
-                    // в первом .then() этого перехватчика, отдельный res.clone()
-                    // здесь больше не нужен (устранён двойной парсинг ответа).
-                } catch(e) {}
-
-                return res;
-            };
-            try { wrappedFetch.__lgChatProxied = true; } catch (e) {}
-            try { pageWin.fetch = wrappedFetch; } catch (e) {}
-            if (pageWin !== window) { try { window.fetch = wrappedFetch; } catch (e) {} }
+        /**
+         * Игра общается с городом/шахтой — игрок активен, живой поток ему нужен.
+         * Если свой EventSource отвалился и поллинг не крутится,
+         * startBackgroundLiveListener() поднимет поток заново (внутри гарды).
+         */
+        _onGameChatTraffic() {
+            if (this.disabled) return;
+            if (this._liveES || this._liveRunning) return;
+            this.startBackgroundLiveListener();
         },
 
         /* ---------------------------------------------------------- */
@@ -712,7 +657,8 @@
                 }
             } catch (e) {}
 
-            // 2. Ник, полученный ранее (syncMe / перехват /api/me).
+            // 2. Ник, полученный ранее (syncMe / собственный GET /api/me).
+            // 11.6.4b: перехвата /api/me больше нет — данные берём своим запросом.
             if (this.myNick) {
                 const known = String(this.myNick).trim().toLowerCase();
                 if (known) return known;

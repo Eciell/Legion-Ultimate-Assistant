@@ -8,8 +8,9 @@
     //   • chat-pip.js — DOM/PiP-окно, рендер и отправка.
     // Слои — обычные объекты, методы которых рассчитывают на this === Chat,
     // поэтому склеиваются через Object.assign ниже. Внешний контракт
-    // (Chat.popoutChat / renderMessages / interceptFetch для ui.js,
+    // (Chat.popoutChat / renderMessages / startNetworkObserver для ui.js,
     // players.js и main.js) при этом не меняется.
+    // 11.6.4b: interceptFetch удалён, его место занял startNetworkObserver.
 
     const Chat = {
         badge: null,
@@ -142,8 +143,9 @@
         //   • кнопка «Вынести чат» и настройки 7TV;
         //   • эмоуты 7TV + синхронизация ника;
         //   • детектор внешнего чата.
-        // interceptFetch / interceptEventSource / interceptWebSocket вызываются
-        // из main.js сразу после init() — они идемпотентны и остаются включёнными.
+        // interceptEventSource / interceptWebSocket вызываются из main.js сразу
+        // после init() — они идемпотентны и остаются включёнными. 11.6.4b:
+        // interceptFetch удалён (античит шахты), вместо него startNetworkObserver.
         init() {
             if (this._inited) return;
             this._inited = true;
@@ -379,6 +381,10 @@
          */
         destroy() {
             this.stopAddonUsersPolling();
+            // 11.6.4b: гасим PerformanceObserver, иначе старый инстанс продолжал
+            // бы слушать запросы игры (/api/me, /api/city, /api/mine) после
+            // перезапуска скрипта.
+            this.stopNetworkObserver();
         },
     };
 

@@ -67,18 +67,64 @@
         },
 
         /**
+         * Смерть героя: обычный бой — b.hp === 0, босс — bg.in и bg.my <= 0.
+         * Проверки повторяют deadIn() из site/quest.js.
+         */
+        _isDead(q) {
+            return (q.b && q.b.st !== 'end' && q.b.hp === 0) ||
+                   (q.bg && q.bg.st !== 'end' && q.bg.in && !(q.bg.my > 0));
+        },
+
+        /**
+         * Предупреждение о дебаффе отряда из нового состояния похода.
+         *
+         * После неудачного привала игра пишет v.wk = [локаций_осталось,
+         * %_снижения_урона]. Пока первый элемент > 0, весь урон отряда
+         * снижен — предупреждаем игрока рядом с подсказкой.
+         *
+         * @param {object} q состояние похода из LGQuest._view()
+         * @returns {string} '' или готовая строка предупреждения
+         */
+        _weaknessHint(q) {
+            // v.wk — вложенный снимок, но часть клиентов отдаёт wk на верхнем
+            // уровне; поддерживаем оба варианта, чтобы не зависеть от версии.
+            const wk = (q && (q.wk || (q.v && q.v.wk))) || null;
+            if (!Array.isArray(wk) || !(+wk[0] > 0)) return '';
+            const locs = +wk[0];
+            const pct = +wk[1] || 0;
+            return `Урон снижен на ${pct}% (${locs} лок.)`;
+        },
+
+        /**
+         * Решение по текущему состоянию похода + предупреждение о дебаффе.
+         *
+         * Оборачивает _evaluateCore: к hint добавляется строка про v.wk.
+         * Если других подсказок нет (IDLE), показываем отдельную заметку,
+         * чтобы ослабление не терялось между ходами.
+         *
+         * @param {object} q состояние похода из LGQuest._view()
+         * @returns {{action: 'IDLE'|'NOTE'|'SILENCE'|'COMMAND', text?: string, hint?: string}}
+         */
+        _evaluate(q) {
+            const res = this._evaluateCore(q);
+            const warn = this._weaknessHint(q);
+            if (!warn) return res;
+            if (res && res.action === 'IDLE') return this._isDead(q) ? res : { action: 'NOTE', text: warn };
+            if (!res) return { action: 'NOTE', text: warn };
+            res.hint = res.hint ? `${warn} · ${res.hint}` : warn;
+            return res;
+        },
+
+        /**
          * Решение по текущему состоянию похода.
          * Порядок приоритетов: смерть -> запрет ввода -> механики -> обычный ход.
          *
          * @param {object} q состояние похода из LGQuest._view()
          * @returns {{action: 'IDLE'|'SILENCE'|'COMMAND', text?: string, hint?: string}}
          */
-        _evaluate(q) {
-            // 1. Смерть героя. Проверки повторяют deadIn() из site/quest.js:
-            //    обычный бой — b.hp === 0 ("dead"), босс — bg.in и bg.my <= 0.
-            const isDead = (q.b && q.b.st !== 'end' && q.b.hp === 0) ||
-                           (q.bg && q.bg.st !== 'end' && q.bg.in && !(q.bg.my > 0));
-            if (isDead) return { action: 'IDLE' };
+        _evaluateCore(q) {
+            // 1. Смерть героя.
+            if (this._isDead(q)) return { action: 'IDLE' };
 
             // 2. Газ в ловушке: писать нельзя, пока он не рассеется.
             if (q.tr && q.tr.gas && (q.tr.st === 'act' || q.tr.st === 'wait')) {
@@ -209,6 +255,16 @@
             }
 
             const esc = (s) => (typeof Utils !== 'undefined' && Utils.escapeHtml ? Utils.escapeHtml(s) : String(s == null ? '' : s));
+
+            if (res.action === 'NOTE') {
+                // v11.6.3: дебафф ослабления (v.wk) без активной подсказки —
+                // показываем отдельную жёлтую заметку, а не баннер «НЕ ПИШИ».
+                const sign = `note|${res.text}`;
+                if (this._currentState === sign) return;
+                this._currentState = sign;
+                this._el.innerHTML = `<div class="lg-combat-note">⚠️ ${esc(res.text)}</div>`;
+                return;
+            }
 
             if (res.action === 'SILENCE') {
                 // Баннер перерисовываем только при смене текста (антимерцание),

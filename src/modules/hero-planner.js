@@ -67,6 +67,77 @@
             return this.ENCH.chance[Math.min(15, +level || 0)] || 0;
         },
 
+        /* ---------------------------------------------------------- */
+        /* v11.6.3: штраф экипировки (gearPenalty из lib/game-data.js) */
+        /* ---------------------------------------------------------- */
+
+        /**
+         * Штраф за один предмет «не для класса».
+         *
+         * Правила игры:
+         *  - armor −25%, helmet −10%, shield −15% к основному стату;
+         *  - магический фокус (slot === 'shield' && gear === 'cloth') —
+         *    вторая рука мага/жреца: проверяется по cloth-ветке, поэтому
+         *    для cloth-классов штрафа нет;
+         *  - обычный щит разрешён только legionary/paladin (shieldOk).
+         *
+         * @param {string} role hero.role
+         * @param {object} item предмет из /api/me
+         * @returns {{pct:number, bad:boolean, focus:boolean, want:string, slot:string}}
+         */
+        gearPenaltyFor(role, item) {
+            const out = { pct: 0, bad: false, focus: false, want: '', slot: '' };
+            if (!role || !item) return out;
+            const pen = GAME_DATA.GEAR_PEN[item.slot] || 0;
+            const want = GAME_DATA.CLASS_GEAR[role] || '';
+            const focus = isFocusItem(item);
+            out.want = want;
+            out.focus = focus;
+            out.slot = item.slot;
+            if (!pen) return out;
+
+            let bad;
+            if (item.slot === 'shield') {
+                bad = focus
+                    ? (!!want && want !== 'cloth')
+                    : !GAME_DATA.CLASS_SHIELD[role];
+            } else {
+                const g = item.gear || 'any';
+                bad = !!want && g !== 'any' && g !== want;
+            }
+            out.bad = bad;
+            out.pct = bad ? pen : 0;
+            return out;
+        },
+
+        /**
+         * Суммарный штраф по списку НАДЕТЫХ предметов с потолком
+         * GEAR_PEN_CAP. Возвращает { pct, parts: [{ item, pct }] }.
+         */
+        gearPenaltyTotal(role, items) {
+            const parts = [];
+            let pct = 0;
+            for (const it of Array.isArray(items) ? items : []) {
+                const r = this.gearPenaltyFor(role, it);
+                if (!r.bad) continue;
+                pct += r.pct;
+                parts.push({ item: it, pct: r.pct });
+            }
+            return { pct: Math.min(GAME_DATA.GEAR_PEN_CAP, pct), parts };
+        },
+
+        // Короткая строка-резюме для панели «Заточка».
+        gearSummaryHtml(role, items) {
+            const eff = this.gearPenaltyTotal(role, items);
+            if (!eff.parts.length) {
+                return '<span style="color:#8ff2a0;">✓ Экипировка подходит классу: штрафа нет.</span>';
+            }
+            const list = eff.parts
+                .map(p => `${Utils.escapeHtml(p.item.name || p.item.slot)} −${p.pct}%`)
+                .join(', ');
+            return `<span style="color:#ffb3a0;">⚠ Штраф к основному стату: −${eff.pct}%</span> <span style="color:#888;">(${list})</span>`;
+        },
+
         // Ожидаемое число попыток (при 0% — Infinity)
         expectedAttempts(level) {
             const p = this.enchantChance(level) / 100;
@@ -256,6 +327,12 @@
                             ${this.matsPriceHtml()}
                         </div>
 
+                        <!-- v11.6.3: суммарный штраф надетой экипировки.
+                             Фокус (shield + cloth) для магов/жрецов штрафа не даёт. -->
+                        <div id="hp-gear-summary" style="font-size:12px; background:#1e1724; border:1px solid #3d2f44; border-radius:6px; padding:6px 12px; margin-bottom:10px;">
+                            ${this.gearSummaryHtml(h.role, equipped)}
+                        </div>
+
                         <!-- Суб-табы локаций -->
                         <div style="display:flex; gap:6px; border-bottom:1px solid #44374a; padding-bottom:8px;">
                             <button class="hp-loc-btn active" data-loc="equipped" style="background:#caa55c; color:#1d1620; border:none; padding:6px 12px; border-radius:4px; font-weight:bold; cursor:pointer;">🛡️ Надето</button>
@@ -418,9 +495,24 @@
 
                     const stratHeaders = isExpected ? `<th>⭐</th><th>🌐</th>` : '';
 
+                    // v11.6.3: штраф/фокус и привязка выбранного предмета.
+                    // Фокус (shield + cloth) для магов/жрецов считается по
+                    // cloth-ветке — штраф за «щит» им не начисляется.
+                    const gp = this.gearPenaltyFor(h.role, item);
+                    const statLabel = ['mage', 'priest', 'necromancer'].includes(h.role) ? 'маг. урона' : 'физ. урона';
+                    let gearNote = '';
+                    if (gp.bad) {
+                        gearNote = `<div style="font-size:11px; color:#ffb3a0; margin-top:2px;">⚠ Не для вашего класса: −${gp.pct}% ${statLabel}${gp.focus ? ' (фокус — только для ткани)' : ''}</div>`;
+                    } else if (gp.focus) {
+                        gearNote = `<div style="font-size:11px; color:#8ff2a0; margin-top:2px;">✦ Магический фокус: вторая рука, штрафа для ткани нет</div>`;
+                    }
+                    const boundNote = isBoundItem(item)
+                        ? `<div style="font-size:11px; color:#ffb3a0; margin-top:2px;">🔒 ${BOUND_LINE}</div>`
+                        : '';
+
                     outEl.innerHTML = `
                         <div style="background:#26202e; border:1px solid #44374a; border-radius:6px; padding:8px 12px; margin-bottom:10px; font-size:12px; display:flex; justify-content:space-between;">
-                            <div><b style="color:#ffcf6a;">${Utils.escapeHtml(item.name)}</b> (v: ${item.v}, тек: +${curEn})</div>
+                            <div><b style="color:#ffcf6a;">${Utils.escapeHtml(item.name)}</b> (v: ${item.v}, тек: +${curEn})${gearNote}${boundNote}</div>
                             ${isExpected ? `<div>Использовано: ⭐ ${starsUsed}/${this.userStars} | 🌐 ${spheresUsed}/${this.userSpheres}</div>` : ''}
                         </div>
                         <table>
@@ -515,8 +607,16 @@
                         const art = Utils.getItemArtHtml({ i: it.id ?? it.i, name: it.name }, it);
                         const border = isSel ? '2px solid #caa55c' : '1px solid #44374a';
                         const bg = isSel ? 'rgba(202,165,92,0.15)' : '#1e1724';
+                        // v11.6.3: 🔒 — легендарка привязана (не передаётся),
+                        // ✦ — магический фокус (вторая рука, shield + cloth).
+                        const bound = isBoundItem(it);
+                        const focus = isFocusItem(it);
+                        const badges = (bound ? `<span title="${BOUND_LINE}" style="position:absolute; top:2px; right:2px; font-size:10px;">🔒</span>` : '')
+                            + (focus ? `<span title="Магический фокус" style="position:absolute; top:2px; left:2px; font-size:10px;">✦</span>` : '');
+                        const tip = `${it.name}${bound ? ' · ' + BOUND_LINE : ''}${focus ? ' · магический фокус' : ''}`;
 
-                        return `<div class="hp-item-card" data-uid="${Utils.escapeHtml(it.uid)}" title="${Utils.escapeHtml(it.name)}" style="cursor:pointer; min-width:70px; display:flex; flex-direction:column; align-items:center; padding:8px 4px; background:${bg}; border:${border}; border-radius:6px; transition:all 0.15s;">
+                        return `<div class="hp-item-card" data-uid="${Utils.escapeHtml(it.uid)}" title="${Utils.escapeHtml(tip)}" style="position:relative; cursor:pointer; min-width:70px; display:flex; flex-direction:column; align-items:center; padding:8px 4px; background:${bg}; border:${border}; border-radius:6px; transition:all 0.15s;">
+                            ${badges}
                             <div style="width:32px; height:32px; display:flex; align-items:center; justify-content:center; margin-bottom:6px; overflow:hidden;">
                                 ${art || '📦'}
                             </div>

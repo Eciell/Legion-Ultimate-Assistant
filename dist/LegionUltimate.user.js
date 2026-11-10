@@ -130,8 +130,47 @@
         // Расширенные характеристики (xstats) из game-data.js.
         // Заточка для них применяется с множителем enchK = 0.25 (÷4).
         XSTAT_KEYS: new Set(['crit', 'critDmg', 'dodge', 'pierce', 'healPow', 'luck', 'resist']),
-        ENCHANT_K: 0.25
+        ENCHANT_K: 0.25,
+
+        /*
+         * v11.6.3: правила снаряжения из lib/game-data.js.
+         *
+         * CLASS_GEAR — тип брони класса (classGear), CLASS_SHIELD — право
+         * носить тяжёлый щит (shieldOk). Для мага/жреца/некроманта щит
+         * запрещён, но тканевый «щит» — это магический фокус (isFocusItem),
+         * поэтому проверяется по cloth-ветке, а не по shieldOk().
+         *
+         * GEAR_PEN — штраф к основному стату за чужой слот (armor/helmet/
+         * shield), GEAR_PEN_CAP — потолок суммарного штрафа.
+         */
+        CLASS_GEAR: { legionary: 'heavy', archer: 'light', mage: 'cloth', priest: 'cloth', rogue: 'light', necromancer: 'cloth', paladin: 'heavy' },
+        CLASS_SHIELD: { legionary: true, paladin: true },
+        GEAR_PEN: { armor: 25, helmet: 10, shield: 15 },
+        GEAR_PEN_CAP: 50,
+        GEAR_NAMES: { heavy: 'тяжёлое', light: 'лёгкое', cloth: 'ткань', any: 'для всех' }
     };
+
+    /*
+     * ------------------------------------------------------------
+     * v11.6.3: ПРИВЯЗКА ПРЕДМЕТОВ (новое правило игры).
+     *
+     * bound(it) = legendary && slot !== 'material' && !it.mat:
+     * легендарная экипировка персональная, её нельзя передать через
+     * трейд, выставить на аукцион или сдать в утиль. Материалы
+     * (slot === 'material' либо флаг mat) под правило не попадают.
+     * Если сервер уже прислал явный флаг bound:true — верим ему.
+     * ------------------------------------------------------------
+     */
+    const isBoundItem = (it) => !!(it && (it.bound === true ||
+        (it.rarity === 'legendary' && it.slot !== 'material' && !it.mat)));
+    const BOUND_LINE = 'Привязана: не передаётся';
+
+    /*
+     * v11.6.3: магический фокус (isFocus в game-data.js) — предмет
+     * в слоте shield с gear === 'cloth'. Для магов/жрецов он заменяет
+     * щит: штраф за «чужой» shield не начисляется, проверка идёт по cloth.
+     */
+    const isFocusItem = (it) => !!(it && it.slot === 'shield' && it.gear === 'cloth');
 
     // Единый объект утилит: наполняется модулями utils-* сразу после
     // объявления, поэтому к вызову кода из main.js он содержит всё нужное.
@@ -237,7 +276,12 @@
             // Те же правила, что и в getItemArtSvg: после @grant объекты игры
             // живут только в unsafeWindow.
             const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-            const nativeCtx = G.__lgAucContext || G.__lgCityContext || G.__lgMineContext;
+            // 11.6.4b: __lgMineContext / __lgCityContext больше не заполняются —
+            // хуки LGMine.open и LGCity.open сняты ради античита шахты.
+            // Остаётся контекст аукциона (hookAuc.render) и текущий экранный
+            // контекст игры G.X (у него есть api()). Если ни того, ни другого
+            // нет — уходим в обычный fetch ниже (Utils.apiPath соберёт URL).
+            const nativeCtx = G.__lgAucContext || G.X;
             if (nativeCtx && typeof nativeCtx.api === 'function') {
                 try {
                     const bodyObj = body ? (typeof body === 'string' ? JSON.parse(body) : body) : undefined;
@@ -313,14 +357,15 @@
                 // объекты страницы. Используем unsafeWindow (или G), если он доступен.
                 const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
 
-                // 1. Контексты игры: аукцион / город / шахта.
+                // 1. Контексты игры: аукцион и текущий экранный контекст G.X.
+                // 11.6.4b: __lgCityContext/__lgMineContext удалены вместе с
+                // хуками LGCity.open / LGMine.open (детект античита шахты).
                 // Вызов каждого контекста изолирован: упавший art() не должен
                 // обрывать цепочку и лишать предмет картинки.
                 const ctxs = [
                     G.__lgAucContext,
-                    G.__lgCityContext,
-                    G.__lgMineContext,
-                    G.X,        // глобальный арт-резолвер игры
+                    G.X,        // глобальный контекст/арт-резолвер игры
+                    G.LGCity,   // город сам умеет art() (фолбэк контекста города)
                     G.LGtine,   // запасной глобальный резолвер
                     { art: G.art, owner: G },     // глобальный метод игры
                     { art: G.fig, owner: G },     // запасной
@@ -645,30 +690,11 @@
     };
     Object.assign(Utils, UtilsArt);
 
-    // ===== fix: приоритет арта из шахты для обеих сборок =====
-    // Раньше патч жил в Personal-модуле miner.js, из-за чего в Ultimate
-    // __lgMineContext.art не использовался вовсе. Идемпотентен: повторный
-    // запуск (или запуск рядом с другим патчем) не плодит обёртки.
-    (function patchMineArtResolver() {
-        if (Utils.__mineCtxPatched || typeof Utils.getItemArtSvg !== 'function') return;
-        Utils.__mineCtxPatched = true;
-
-        const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-        const origGetSvg = Utils.getItemArtSvg.bind(Utils);
-
-        Utils.getItemArtSvg = function (lot, def) {
-            try {
-                const ctx = G.__lgMineContext;
-                if (ctx && typeof ctx.art === 'function') {
-                    const l = lot || {};
-                    const it = { id: l.i, ...(def || {}), en: +l.en || 0 };
-                    const svg = ctx.art(it);
-                    if (isRealItemSvg(svg)) return svg;
-                }
-            } catch (e) {}
-            return origGetSvg(lot, def);
-        };
-    })();
+    // 11.6.4b: патч patchMineArtResolver удалён. Он оборачивал
+    // Utils.getItemArtSvg ради приоритета __lgMineContext.art, а сам
+    // __lgMineContext заполнялся хуком LGMine.open — именно его античит
+    // шахты и ловит (M.open !== open). Контекст шахты теперь берётся из
+    // G.X внутри ctxs (см. getItemArtSvg выше), обёртка не нужна.
 
     // ===== src/core/utils-chat.js =====
     // ============================================================
@@ -1295,6 +1321,45 @@
             margin: 2px;
             background: linear-gradient(90deg, transparent, #3d2f44 15%, #3d2f44 85%, transparent);
         }
+        /* v11.6.3: метка класса-владельца общих очков (режим sk.md =
+           'shared') и плашка-предупреждение над деревом. Аналог нативных
+           .skc-ow / .busybar.sk-sh из skills.js. */
+        .sim-sidebar .modal-tab.sim-tab .sim-tab-own {
+            margin-left: auto;
+            flex: none;
+            min-width: 16px;
+            padding: 0 4px;
+            border-radius: 8px;
+            background: #7ee08a;
+            color: #12100e;
+            font-size: 11px;
+            font-weight: 900;
+            line-height: 16px;
+            text-align: center;
+        }
+        .sim-sidebar .modal-tab.sim-tab .sim-tab-lock {
+            margin-left: auto;
+            flex: none;
+            font-size: 11px;
+            line-height: 16px;
+            opacity: 0.75;
+        }
+        .sim-shared-host { flex: none; }
+        .sim-shared-note {
+            margin: 0 0 8px;
+            padding: 7px 10px;
+            border: 1px solid rgba(255, 190, 90, 0.45);
+            border-radius: 6px;
+            background: rgba(120, 70, 20, 0.35);
+            color: #ffd9a0;
+            font-size: 12px;
+            line-height: 1.35;
+        }
+        .sim-shared-note.own {
+            border-color: rgba(120, 220, 140, 0.45);
+            background: rgba(30, 90, 40, 0.3);
+            color: #b9f0c0;
+        }
         /* Кнопка класса в сайдбаре: вертикальный список, цветная полоска слева.
            Цвет класса в --c (инлайн-стиль таба из BuildSim.classColors),
            цвет текста на заливке — в --ct (BuildSim.classTextColors):
@@ -1796,6 +1861,8 @@
         .auc-chip-tag { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: 999px; font-size: 10px; line-height: 1.5; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1); color: #d8c9a8; white-space: nowrap; }
         .auc-chip-tag.invested { background: rgba(176, 107, 255, 0.12); border-color: rgba(176, 107, 255, 0.35); color: #d9c2ff; }
         .auc-chip-tag.npc-cheap { background: rgba(76, 201, 90, 0.14); border-color: rgba(76, 201, 90, 0.45); color: #8ff2a0; font-weight: bold; }
+        /* v11.6.3: привязанная легендарка — красноватый бейдж-замок. */
+        .auc-chip-tag.bound { background: rgba(255, 120, 90, 0.14); border-color: rgba(255, 120, 90, 0.45); color: #ffb3a0; font-weight: bold; }
         /* ── Цена, медиана, выгода, таймер ── */
         .auc-price-box { display: flex; flex-direction: column; gap: 1px; line-height: 1.25; }
         .auc-price-total { color: #ffcf6a; font-weight: bold; white-space: nowrap; }
@@ -1845,6 +1912,13 @@
         }
         .lg-combat-btn { background: #ffcf6a; color: #000; border: none; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: transform 0.1s; }
         .lg-combat-btn:active { transform: scale(0.95); }
+        /* v11.6.3: заметка о дебаффе отряда (v.wk) — не блокирует ввод. */
+        .lg-combat-note {
+            background: rgba(60, 48, 18, 0.95); border: 2px solid #ffcf6a; color: #ffe6a8;
+            padding: 8px 14px; border-radius: 8px; font: bold 13px Arial;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5); pointer-events: none;
+            max-width: min(560px, 90vw); text-align: center;
+        }
 
     `;
 
@@ -1852,51 +1926,14 @@
     // ============================================================
     // 0.1. ПЕРЕХВАТ НАРИВНЫХ КОНТЕКСТОВ ИГРЫ (Обход 429/409 ошибок)
     // G объявлен в core/constants.js (подключается первым) — здесь не дублируем.
-    // ============================================================
-
-    // ------------------------------------------------------------
-    // 0.1.1. LGMine (шахта)
     //
-    // Хук вынесен из общего гарда __lgHookedProps: шахта может
-    // загрузиться позже аддона, поэтому и объявление свойства,
-    // и «сторож» ниже обязаны отработать в любом случае.
-    // ------------------------------------------------------------
-    let rawLGMine = G.LGMine;
-
-    const hookMine = (val) => {
-        rawLGMine = val;
-        if (val && !val.__hooked && typeof val.open === 'function') {
-            val.__hooked = true;
-            const orig = val.open;
-            val.open = function (x, c) {
-                // Контекст игры может содержать api() и/или art() — берём любой
-                // из аргументов (в Ultimate арт приходит именно через .art).
-                const ctx = (x && typeof x === 'object' && (typeof x.api === 'function' || typeof x.art === 'function')) ? x
-                          : (c && typeof c === 'object' && (typeof c.api === 'function' || typeof c.art === 'function')) ? c
-                          : null;
-                if (ctx) G.__lgMineContext = ctx;
-                return orig.apply(this, arguments);
-            };
-        }
-    };
-
-    if (rawLGMine) hookMine(rawLGMine);
-
-    try {
-        Object.defineProperty(G, 'LGMine', {
-            configurable: true,
-            enumerable: true,
-            get: () => rawLGMine,
-            set: (v) => hookMine(v)
-        });
-    } catch (e) {}
-
-    // Сторож: LGMine мог загрузиться до аддона либо получить open позже.
-    if (!G.__lgMineWatchdog) {
-        G.__lgMineWatchdog = setInterval(() => {
-            if (G.LGMine && !G.LGMine.__hooked) hookMine(G.LGMine);
-        }, 1000);
-    }
+    // 11.6.4b: хук LGMine.open УДАЛЁН. Античит шахты (reference/.../mine.js)
+    // сравнивает идентичность методов напрямую:
+    //   M.open !== open || M.onEvent !== onEvent  ->  pi |= 4
+    // Поэтому объект LGMine больше не оборачивается и не переобъявляется:
+    // контекст шахты (api/art) читается безопасно из существующих глобальных
+    // переменных — G.X в core/utils-api.js и core/utils-art.js.
+    // ============================================================
 
     if (!G.__lgHookedProps) {
         G.__lgHookedProps = true;
@@ -1909,13 +1946,10 @@
             if (!val || val.__hooked) return;
             val.__hooked = true;
 
-            if (typeof val.open === 'function') {
-                const orig = val.open;
-                val.open = function (r, cx) {
-                    if (cx) G.__lgCityContext = cx;
-                    return orig.apply(this, arguments);
-                };
-            }
+            // 11.6.4b: подмена LGCity.open тоже снята (любая подмена open на
+            // игровых объектах — детект). Контекст города берём из G.X/LGCity
+            // по месту вызова, см. core/utils-api.js, modules/players.js,
+            // modules/chat/chat-pip.js.
 
             // Перехват городского SSE (кто зашел в город / вышел)
             if (typeof val.onEvent === 'function' && !val.__onEventHooked) {
@@ -1964,21 +1998,25 @@
             (typeof o.data === 'function' || typeof o.act === 'function' ||
              typeof o.api === 'function' || typeof o.hero === 'function');
 
-        // Фасад app.js (window.LG) отдаёт текущий QX через qx() — это
-        // единственный способ достать контекст, если init() уже прошёл
-        // до загрузки аддона. Любая ошибка фасада не должна ломать игру.
-        const questCtxFromFacade = () => {
-            try {
-                const qx = G.LG && typeof G.LG.qx === 'function' ? G.LG.qx() : null;
-                return isQuestCtx(qx) ? qx : null;
-            } catch (e) {
-                return null;
-            }
-        };
+        // v11.6.3: фасада LG.qx() в актуальном клиенте больше нет —
+        // window.LG = { restyle, rerender } (см. reference/LegionFrontSRC/site/
+        // app.js). Контекст QX сохраняем только из штатного init(ctx), а
+        // «мы в походе» подтверждаем живым снимком оригинального _view().
+        // Ссылку на оригинал держим локально: рекурсии через G.LGQuest нет.
 
         const hookQuest = (val) => {
             rawLGQuest = val;
             if (!val || val.__hooked) return;
+
+            const origView = typeof val._view === 'function' ? val._view : null;
+            const questLive = () => {
+                try {
+                    const q = origView ? origView.call(val) : null;
+                    return !!(q && q.on);
+                } catch (e) {
+                    return false;
+                }
+            };
 
             let patched = false;
 
@@ -1986,12 +2024,16 @@
             if (typeof val.init === 'function') {
                 const origInit = val.init;
                 val.init = function (ctx) {
-                    // Если init позвали без QX — пробуем фасад.
-                    const qx = isQuestCtx(ctx) ? ctx : questCtxFromFacade();
-                    if (qx) {
-                        G.__lgQuestContext = qx;
+                    // Штатный QX приходит аргументом. Если init позвали без
+                    // него, но снимок _view() говорит «поход идёт» — ставим
+                    // маркер, не выдумывая несуществующий фасад.
+                    if (isQuestCtx(ctx)) {
+                        G.__lgQuestContext = ctx;
                         G.__lgQuestOn = true;
                         dbg('LGQuest.init: контекст похода сохранён');
+                    } else if (questLive()) {
+                        G.__lgQuestOn = true;
+                        dbg('LGQuest.init: активный поход подтверждён _view()');
                     }
                     return origInit.apply(this, arguments);
                 };
@@ -1999,16 +2041,14 @@
             }
 
             // 2) _view() — перехватываем вызов, чтобы точно знать, что
-            //    мы внутри похода (и добираем контекст, если его нет).
+            //    мы внутри похода. v11.6.3: сам вызов _view() уже доказывает
+            //    активный поход (игра зовёт его на каждом тике) — фасад qx()
+            //    больше не нужен.
             if (typeof val._view === 'function') {
-                const origView = val._view;
+                const origViewCall = val._view;
                 val._view = function () {
-                    if (!G.__lgQuestContext) {
-                        const qx = questCtxFromFacade();
-                        if (qx) G.__lgQuestContext = qx;
-                    }
                     G.__lgQuestOn = true;
-                    return origView.apply(this, arguments);
+                    return origViewCall.apply(this, arguments);
                 };
                 patched = true;
             }
@@ -3161,6 +3201,13 @@
         _autoLoadClass: null, // класс, чей билд пришёл ссылкой #build=… (вкладку открываем после создания табов)
         _tooltipTimer: null, // setTimeout hover-тултипа узла (500 мс, ТЗ 11.6.1e)
         _tooltipState: null, // { clsId, nodeId, mode: 'hover'|'click' } — что сейчас показано
+        // v11.6.3: режим навыков из hero.sk.md. 'shared' — один общий пул
+        // очков по уровню героя, вложить можно только в одно дерево.
+        // 'class' (и старый 'hero') — прежняя модель, лимит MAX_POINTS.
+        skillMode: 'class',
+        pointsLimit: MAX_POINTS,
+        ownerClass: '', // класс, в чьё дерево уже вложены общие очки (md === 'shared')
+        _nativeSkillsWarm: null, // промис прогрева ленивого LGSkills (не блокирует UI)
 
         statNames: { hp: 'Макс. HP', atk: 'Физ. урон', mag: 'Магия', def: 'Броня', crit: 'Крит %', critDmg: 'Сила крита', dodge: 'Уклонение', pierce: 'Пробивание', healPow: 'Сила лечения', luck: 'Удача', resist: 'Сопротивление' },
         fxNames: { melee: 'Физ. урон %', magic: 'Магия %', hp: 'Макс. HP %', def: 'Броня', healPow: 'Сила лечения %', healIn: 'Вх. лечение %', crit: 'Крит %', critDmg: 'Сила крита', skel: 'Урон скелетов %', skelT: 'Время скелетов', leech: 'Вампиризм %', block: 'Снижение урона %', dodge: 'Уклонение %', lead: 'Урон по боссам %', first: 'Урон 1-й ход %', dmg: 'Весь урон %', pierce: 'Пробивание %', resist: 'Сопротивление', healCrit: 'Крит лечения %', regen: 'Регенерация %', low: 'Урон при низком HP %', a_siyanie: 'Сияние +%', a_obereg: 'Оберег +%', a_dlan: 'Длань +%', a_aura: 'Аура +%', aura: 'Аура −урон %', a_svet: 'Свет +%', a_vspyshka: 'Вспышка +%', a_oznob: 'Озноб +%', a_pricel: 'Прицел +%', a_grad: 'Град +%', a_natisk: 'Натиск +%', a_stoyka: 'Стойка +%', a_vspinu: 'Вспину +%', a_yad: 'Яд +%', a_vytyanut: 'Вытянуть +%', a_podnyat: 'Поднять +%', poison: 'Отрава %', steal: 'Кража %', loot: 'Добыча %', skelN: 'Скелетов +', volley: 'Залп +%', shieldBlock: 'Щит блок %', trapDodge: 'Ловушки %', steady: 'Промах→удар %', cleave: 'Замах %', cleaveBoss: 'Замах по боссу %', penBoss: 'Бронебой по боссу %', drain: 'Вытягивание %', hex: 'Проклятие +%', holy: 'По нежити +%', poisonT: 'Время отравы' },
@@ -3208,6 +3255,17 @@
             sun: '<circle cx="12" cy="12" r="3.8"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>',
             drop: '<path d="M12 3.5s-6 6.6-6 10.6a6 6 0 0 0 12 0c0-4-6-10.6-6-10.6z"/>',
             coin: '<circle cx="12" cy="12" r="8"/><path d="M14.5 9.5c-.6-.9-1.5-1.3-2.5-1.3-1.5 0-2.5.8-2.5 1.9 0 2.7 5.2 1.3 5.2 4 0 1.1-1.1 1.9-2.7 1.9-1.1 0-2.1-.5-2.6-1.4M12 6.5v1.7M12 15.8v1.7"/>',
+            // v11.6.3: иконки из обновлённого skills.js (CHECK подтверждения,
+            // «часы» для cd_*, геометрические заглушки и точки/столбики).
+            check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+            clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2.5"/>',
+            leaf: '<path d="M5 19c0-8 5-13.5 14-14 .5 9-5 14-13 14z"/><path d="M5 19l8-8"/>',
+            ring: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2"/>',
+            hex: '<path d="M12 3l7.8 4.5v9L12 21l-7.8-4.5v-9z"/>',
+            tri: '<path d="M12 4l8.5 15h-17z"/>',
+            sq: '<rect x="5" y="5" width="14" height="14" rx="2.5"/>',
+            dots: '<circle cx="8" cy="8" r="2.6"/><circle cx="16" cy="8" r="2.6"/><circle cx="12" cy="16" r="2.6"/>',
+            bars: '<path d="M6 19V11M12 19V6M18 19v-5"/>',
             // --- Иконки веток (BI): ключ = id ветки из /api/skills ---
             blade: '<path d="M19.5 4.5 20 4l-.5 4.5L9.5 18.5l-4-4zM7.5 16.5l-3 3M4 15l5 5"/>',
             veteran: '<path d="M8 3h8l-1.5 6h-5zM12 9v3"/><circle cx="12" cy="16.5" r="4.2"/><path d="M12 14.6l.7 1.4 1.5.2-1.1 1 .3 1.5-1.4-.7-1.4.7.3-1.5-1.1-1 1.5-.2z"/>',
@@ -3231,7 +3289,8 @@
             diam: '<path d="M12 3.5l8.5 8.5-8.5 8.5L3.5 12z"/>'
         },
         // Иконки, которые в игре заливаются полупрозрачно (нативный класс .so).
-        SOLID_ICONS: ['sword', 'shield', 'heart', 'cross', 'star', 'bolt', 'crown', 'fire', 'spark'],
+        // v11.6.3: список синхронизирован с SOLID из skills.js.
+        SOLID_ICONS: ['sword', 'shield', 'heart', 'cross', 'star', 'bolt', 'crown', 'fire', 'spark', 'leaf', 'hex', 'tri', 'diam', 'sq', 'drop'],
         // fx-ключ -> иконка; порядок важен: срабатывает первое совпадение (FXI из skills.js).
         FX_ICONS: [
             [/^(melee|dmg|cleave|first|a_natisk|cd_natisk)$/, 'sword'],
@@ -3270,6 +3329,9 @@
             if (node.kind === 'cap') return 'crown';
             if (node.kind === 'act') return 'bolt';
             if (node.kind === 'ctl') return 'star';
+            // v11.6.3: нативное правило iconOf — навык с кулдауном (cd_*)
+            // рисуется «часами», даже если у него есть другой fx-ключ.
+            if (Object.keys(node.fx || {}).some(k => /^cd_/.test(k))) return 'clock';
             for (const k of Object.keys(node.fx || {})) {
                 for (const [re, icon] of this.FX_ICONS) if (re.test(k)) return icon;
             }
@@ -3330,6 +3392,87 @@
             if (body) await this.mount(body);
         },
 
+        // ------------------------------------------------------------
+        // v11.6.3: ленивый LGSkills и режим общих очков (sk.md).
+        // ------------------------------------------------------------
+
+        /**
+         * Прогрев нативного дерева навыков.
+         *
+         * В новом клиенте skills.js грузится лениво (`lazy('skills')` из
+         * app.js) и до открытия вкладки «Навыки» window.LGSkills === undefined.
+         * Свой каталог мы всё равно берём из /api/skills, поэтому прогрев —
+         * необязательный фон: он нужен лишь затем, чтобы нативная вкладка
+         * героя не оставалась пустой после открытия аддона.
+         *
+         * ВАЖНО: lazy() в app.js — локальная функция IIFE и наружу не
+         * экспортируется. Сначала проверяем G.lazy (на случай, если клиент
+         * её всё-таки отдаст), а при отсутствии молчим: данные уже пришли
+         * через Utils.fetchApi('/api/skills').
+         */
+        warmNativeSkills() {
+            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
+            try {
+                if (pageWin.LGSkills) return Promise.resolve(true);
+                if (this._nativeSkillsWarm) return this._nativeSkillsWarm;
+                if (typeof pageWin.lazy === 'function') {
+                    this._nativeSkillsWarm = Promise.resolve(pageWin.lazy('skills'))
+                        .catch(() => false)
+                        .finally(() => { this._nativeSkillsWarm = null; });
+                    return this._nativeSkillsWarm;
+                }
+            } catch (e) {
+                dbg('[BUILD SIM] прогрев LGSkills не удался:', e);
+            }
+            return Promise.resolve(false);
+        },
+
+        /**
+         * Режим очков навыков из /api/me -> hero.sk.
+         *
+         * md === 'shared' (новое): очки общие по уровню героя, лимит =
+         * max(1, sk.lv || hero.level). Вложить их можно только в одно
+         * дерево — класс-владелец определяется по ненулевым рангам sk.t.
+         * Иначе — прежняя модель с MAX_POINTS.
+         */
+        readSkillMode(hero) {
+            const sk = (hero && hero.sk) || {};
+            this.skillMode = sk.md || 'class';
+            this.ownerClass = '';
+            if (this.skillMode === 'shared') {
+                this.pointsLimit = Math.max(1, +sk.lv || +hero.level || 1);
+                this.ownerClass = this.ownerOf(sk);
+            } else {
+                this.pointsLimit = MAX_POINTS;
+            }
+            return { mode: this.skillMode, limit: this.pointsLimit, owner: this.ownerClass };
+        },
+
+        // Класс, в чьё дерево уже вложены общие очки (ownerOf из skills.js):
+        // первый класс sk.t, у которого есть ранг > 0.
+        ownerOf(sk) {
+            if (!sk || sk.md !== 'shared' || !sk.t) return '';
+            for (const [cls, ranks] of Object.entries(sk.t)) {
+                if (ranks && Object.values(ranks).some(r => +r > 0)) return cls;
+            }
+            return '';
+        },
+
+        // Заблокирован ли класс для вложения при shared-режиме.
+        isClassLocked(clsId) {
+            return this.skillMode === 'shared' && !!this.ownerClass && this.ownerClass !== clsId;
+        },
+
+        // Плашка-предупреждение над деревом класса (аналог sharedNote из skills.js).
+        sharedNoticeHtml(clsId) {
+            if (this.skillMode !== 'shared' || !this.ownerClass) return '';
+            const owner = this.classNames[this.ownerClass] || this.ownerClass;
+            if (this.ownerClass !== clsId) {
+                return `<p class="sim-shared-note" role="status">Очки уже в дереве «${Utils.escapeHtml(owner)}» — сбрось очки навыков, чтобы вложить в этот класс</p>`;
+            }
+            return `<p class="sim-shared-note own" role="status">Общие очки вложены сюда · лимит ${this.pointsLimit} по уровню героя</p>`;
+        },
+
         async mount(container) {
             if (!container) return;
             // Ссылка вида …#build=<код> — обмен билдами без сервера. Код читаем
@@ -3342,6 +3485,9 @@
             // Сохранённые билды поднимаем до парсинга /api/me и /api/skills,
             // чтобы UI успел отрисовать список «Мои билды» при первом renderTree.
             this.loadSavedBuilds();
+            // v11.6.3: нативное дерево грузится лениво. Прогрев — фоном,
+            // результат не ждём: каталог навыков берём из /api/skills.
+            this.warmNativeSkills();
             // Тултип узла от прошлой сессии не должен «воскресать» при повторном
             // открытии модалки (state хранится на объекте BuildSim).
             this.hideTooltip();
@@ -3354,6 +3500,9 @@
             try {
                 const me = await Utils.fetchApi('/api/me');
                 if (!me || !me.ok || !me.hero) throw new Error('Нет героя');
+                // v11.6.3: режим очков читаем ДО decodeBuild — импорт из
+                // ссылки ограничен тем же лимитом, что и ручное вложение.
+                this.readSkillMode(me.hero);
                 if (!this.skillsCache) this.skillsCache = await Utils.fetchApi('/api/skills');
                 if (!this.skillsCache || !this.skillsCache.classes) throw new Error('Нет данных о навыках');
 
@@ -3385,7 +3534,15 @@
                     // --ct: цвет текста на заливке (classTextColors, ТЗ 11.6.1e).
                     const color = this.classColors[c.id] || '#caa55c';
                     const textColor = this.classTextColors[c.id] || '#12100e';
-                    tabsHtml += `<button class="modal-tab sim-tab" data-tab="${c.id}" style="--c:${color};--ct:${textColor}">${this.getClassSvg(c.id)}${this.classNames[c.id] || c.name || c.id}</button>`;
+                    // v11.6.3: в shared-режиме помечаем дерево, в которое уже
+                    // вложены общие очки (аналог .skc-ow из нативных навыков),
+                    // и замком — все остальные классы (.skc-p.oth).
+                    const owned = this.skillMode === 'shared' && this.ownerClass === c.id;
+                    const lockedTab = this.skillMode === 'shared' && !!this.ownerClass && this.ownerClass !== c.id;
+                    const tabBadge = owned
+                        ? '<span class="sim-tab-own" title="Очки навыков вложены в этот класс">✓</span>'
+                        : (lockedTab ? '<span class="sim-tab-lock" title="Очки навыков уже вложены в другой класс">🔒</span>' : '');
+                    tabsHtml += `<button class="modal-tab sim-tab" data-tab="${c.id}" style="--c:${color};--ct:${textColor}">${this.getClassSvg(c.id)}${this.classNames[c.id] || c.name || c.id}${tabBadge}</button>`;
                 });
 
                 let contentHtml = `
@@ -3423,7 +3580,7 @@
                                 <div class="sim-tree-inner">
                                     <!-- Верхняя панель: одна строка 38px (очки / билды / обмен). -->
                                     <div class="sim-top-bar">
-                                        <div class="sim-free-pts">Свободно: <b id="free-${c.id}">0</b> / ${MAX_POINTS}</div>
+                                        <div class="sim-free-pts">Свободно: <b id="free-${c.id}">0</b> / ${this.pointsLimit}</div>
                                         <div class="sim-bar-sep"></div>
                                         <button class="sim-save-btn" data-save="${c.id}" title="Сохранить билд">Сохранить</button>
                                         <button class="sim-share-btn" data-share="${c.id}" title="Поделиться билдом">Поделиться</button>
@@ -3435,6 +3592,7 @@
                                         <button class="sim-del-btn" data-del="${c.id}" title="Удалить выбранный билд">🗑️</button>
                                         <button class="sim-reset-btn" data-reset="${c.id}" title="Сбросить все навыки">Сбросить всё</button>
                                     </div>
+                                    <div class="sim-shared-host" id="shared-${c.id}">${this.sharedNoticeHtml(c.id)}</div>
                                     <div class="sim-branches" id="tree-${c.id}"></div>
                                 </div>
                             </div>
@@ -3684,7 +3842,7 @@
 
         // Код приходит извне (ссылка от другого игрока), поэтому декодируем
         // с проверками: известный класс, целые ранги в пределах node.max,
-        // сумма очков не больше MAX_POINTS.
+        // сумма очков не больше pointsLimit (MAX_POINTS в обычном режиме).
         // Возвращает id класса, к которому относится билд, либо null.
         decodeBuild(code) {
             if (!code || typeof code !== 'string') return null;
@@ -3722,7 +3880,8 @@
                 });
 
                 // «Перекачанный» билд (больше очков, чем даёт игра) не принимаем.
-                if (total > MAX_POINTS) return null;
+                // v11.6.3: лимит зависит от режима (shared -> уровень героя).
+                if (total > this.pointsLimit) return null;
 
                 this.simulatedSkills[cls] = clean;
                 // Импорт — не сохранённый билд: «🗑️» не должен целиться
@@ -3818,6 +3977,13 @@
             const simTree = this.simulatedSkills[clsId];
             const current = simTree[nodeId] || 0;
             if (delta > 0) {
+                // v11.6.3: в shared-режиме очки уже лежат в другом дереве —
+                // игра не даст вложить их сюда, пока навыки не сброшены.
+                if (this.isClassLocked(clsId)) {
+                    const owner = this.classNames[this.ownerClass] || this.ownerClass;
+                    UI.showToast(`Очки уже в дереве «${owner}» — сбрось очки навыков, чтобы вложить в этот класс`, true);
+                    return;
+                }
                 if (current >= maxRank) return;
                 if (preNode && !(simTree[preNode] > 0)) return;
                 if (branchIds && branchReq > 0) {
@@ -3828,7 +3994,7 @@
                     if (branchPts < branchReq) return;
                 }
                 let spent = 0; Object.values(simTree).forEach(v => spent += v);
-                if (spent >= MAX_POINTS) return;
+                if (spent >= this.pointsLimit) return;
             }
             if (delta < 0) {
                 // Полная симуляция снятия: строим дерево «как будто очко уже снято»
@@ -3899,6 +4065,10 @@
         renderTree(clsId) {
             const clsData = this.skillsCache.classes.find(c => c.id === clsId);
             if (!clsData) return;
+            // v11.6.3: перед рендером дерева убеждаемся, что нативный LGSkills
+            // не остался в ленивом состоянии. Прогрев идемпотентен и нашу
+            // отрисовку не блокирует (данные уже есть из /api/skills).
+            this.warmNativeSkills();
             const container = document.getElementById(`tree-${clsId}`);
             if (!container) return;
             // Число колонок-веток как в нативном дереве (--nb), обычно 3.
@@ -3906,10 +4076,16 @@
 
             if (!this.simulatedSkills[clsId]) this.simulatedSkills[clsId] = {};
             const simTree = this.simulatedSkills[clsId];
+            // v11.6.3: в shared-режиме чужое дерево целиком заблокировано,
+            // а плашка над ним объясняет причину (может появиться позже).
+            const clsLocked = this.isClassLocked(clsId);
+            const sharedHost = document.getElementById(`shared-${clsId}`);
+            if (sharedHost) sharedHost.innerHTML = this.sharedNoticeHtml(clsId);
 
             let spent = 0; Object.values(simTree).forEach(v => spent += v);
             const freeEl = document.getElementById(`free-${clsId}`);
-            if (freeEl) freeEl.textContent = MAX_POINTS - spent;
+            // Нативно при shared + чужом дереве свободных очков ровно 0.
+            if (freeEl) freeEl.textContent = clsLocked ? 0 : this.pointsLimit - spent;
 
             let html = '';
             const simStats = {};
@@ -3999,10 +4175,11 @@
                     for (let i = 0; i < node.max; i++) ranksHtml += `<i class="${i < rank ? 'filled' : ''}"></i>`;
 
                     // Состояния как в нативном дереве: lock / has / max / can (available).
-                    const state = (locked ? ' locked' : '')
+                    // v11.6.3: чужое дерево в shared-режиме — как заблокированное.
+                    const state = ((locked || clsLocked) ? ' locked' : '')
                         + (rank > 0 ? ' has' : '')
                         + (maxed ? ' maxed' : '')
-                        + (!locked && !maxed ? ' available' : '');
+                        + (!locked && !clsLocked && !maxed ? ' available' : '');
                     const x = xMap.get(node.id);
                     const y = this.yFor(node.req);
 
@@ -4229,10 +4406,15 @@
             branch.nodes.forEach(n => branchPoints += (simTree[n.id] || 0));
             const locked = branchPoints < node.req || (node.pre && !(simTree[node.pre] > 0));
             const maxed = rank >= node.max;
+            // v11.6.3: в shared-режиме чужое дерево нельзя качать вообще.
+            const clsLocked = this.isClassLocked(clsId);
 
             let reqText = '';
-            if (branchPoints < node.req) reqText = `Требуется очков в ветке: ${node.req}`;
-            if (node.pre && !(simTree[node.pre] > 0)) reqText = `Сначала изучите предыдущий навык.`;
+            if (clsLocked) {
+                const owner = this.classNames[this.ownerClass] || this.ownerClass;
+                reqText = `Очки уже в дереве «${owner}» — сбрось очки навыков, чтобы вложить в этот класс`;
+            } else if (branchPoints < node.req) reqText = `Требуется очков в ветке: ${node.req}`;
+            if (!clsLocked && node.pre && !(simTree[node.pre] > 0)) reqText = `Сначала изучите предыдущий навык.`;
 
             const tip = this._getTooltip();
             tip.dataset.cls = clsId;
@@ -4245,7 +4427,7 @@
                 ${reqText ? `<div class="req">${reqText}</div>` : ''}
                 ${withControls ? `<div class="controls">
                     <button type="button" data-action="minus" ${rank === 0 ? 'disabled' : ''}>− Убрать</button>
-                    <button type="button" data-action="plus" ${maxed || locked ? 'disabled' : ''}>+ Вложить</button>
+                    <button type="button" data-action="plus" ${maxed || locked || clsLocked ? 'disabled' : ''}>+ Вложить</button>
                 </div>` : ''}`;
 
             // Позиция — после вставки контента: нужны реальные offsetWidth/Height.
@@ -4352,6 +4534,77 @@
         // Шанс успеха, % (без способов, обычная заточка)
         enchantChance(level) {
             return this.ENCH.chance[Math.min(15, +level || 0)] || 0;
+        },
+
+        /* ---------------------------------------------------------- */
+        /* v11.6.3: штраф экипировки (gearPenalty из lib/game-data.js) */
+        /* ---------------------------------------------------------- */
+
+        /**
+         * Штраф за один предмет «не для класса».
+         *
+         * Правила игры:
+         *  - armor −25%, helmet −10%, shield −15% к основному стату;
+         *  - магический фокус (slot === 'shield' && gear === 'cloth') —
+         *    вторая рука мага/жреца: проверяется по cloth-ветке, поэтому
+         *    для cloth-классов штрафа нет;
+         *  - обычный щит разрешён только legionary/paladin (shieldOk).
+         *
+         * @param {string} role hero.role
+         * @param {object} item предмет из /api/me
+         * @returns {{pct:number, bad:boolean, focus:boolean, want:string, slot:string}}
+         */
+        gearPenaltyFor(role, item) {
+            const out = { pct: 0, bad: false, focus: false, want: '', slot: '' };
+            if (!role || !item) return out;
+            const pen = GAME_DATA.GEAR_PEN[item.slot] || 0;
+            const want = GAME_DATA.CLASS_GEAR[role] || '';
+            const focus = isFocusItem(item);
+            out.want = want;
+            out.focus = focus;
+            out.slot = item.slot;
+            if (!pen) return out;
+
+            let bad;
+            if (item.slot === 'shield') {
+                bad = focus
+                    ? (!!want && want !== 'cloth')
+                    : !GAME_DATA.CLASS_SHIELD[role];
+            } else {
+                const g = item.gear || 'any';
+                bad = !!want && g !== 'any' && g !== want;
+            }
+            out.bad = bad;
+            out.pct = bad ? pen : 0;
+            return out;
+        },
+
+        /**
+         * Суммарный штраф по списку НАДЕТЫХ предметов с потолком
+         * GEAR_PEN_CAP. Возвращает { pct, parts: [{ item, pct }] }.
+         */
+        gearPenaltyTotal(role, items) {
+            const parts = [];
+            let pct = 0;
+            for (const it of Array.isArray(items) ? items : []) {
+                const r = this.gearPenaltyFor(role, it);
+                if (!r.bad) continue;
+                pct += r.pct;
+                parts.push({ item: it, pct: r.pct });
+            }
+            return { pct: Math.min(GAME_DATA.GEAR_PEN_CAP, pct), parts };
+        },
+
+        // Короткая строка-резюме для панели «Заточка».
+        gearSummaryHtml(role, items) {
+            const eff = this.gearPenaltyTotal(role, items);
+            if (!eff.parts.length) {
+                return '<span style="color:#8ff2a0;">✓ Экипировка подходит классу: штрафа нет.</span>';
+            }
+            const list = eff.parts
+                .map(p => `${Utils.escapeHtml(p.item.name || p.item.slot)} −${p.pct}%`)
+                .join(', ');
+            return `<span style="color:#ffb3a0;">⚠ Штраф к основному стату: −${eff.pct}%</span> <span style="color:#888;">(${list})</span>`;
         },
 
         // Ожидаемое число попыток (при 0% — Infinity)
@@ -4543,6 +4796,12 @@
                             ${this.matsPriceHtml()}
                         </div>
 
+                        <!-- v11.6.3: суммарный штраф надетой экипировки.
+                             Фокус (shield + cloth) для магов/жрецов штрафа не даёт. -->
+                        <div id="hp-gear-summary" style="font-size:12px; background:#1e1724; border:1px solid #3d2f44; border-radius:6px; padding:6px 12px; margin-bottom:10px;">
+                            ${this.gearSummaryHtml(h.role, equipped)}
+                        </div>
+
                         <!-- Суб-табы локаций -->
                         <div style="display:flex; gap:6px; border-bottom:1px solid #44374a; padding-bottom:8px;">
                             <button class="hp-loc-btn active" data-loc="equipped" style="background:#caa55c; color:#1d1620; border:none; padding:6px 12px; border-radius:4px; font-weight:bold; cursor:pointer;">🛡️ Надето</button>
@@ -4705,9 +4964,24 @@
 
                     const stratHeaders = isExpected ? `<th>⭐</th><th>🌐</th>` : '';
 
+                    // v11.6.3: штраф/фокус и привязка выбранного предмета.
+                    // Фокус (shield + cloth) для магов/жрецов считается по
+                    // cloth-ветке — штраф за «щит» им не начисляется.
+                    const gp = this.gearPenaltyFor(h.role, item);
+                    const statLabel = ['mage', 'priest', 'necromancer'].includes(h.role) ? 'маг. урона' : 'физ. урона';
+                    let gearNote = '';
+                    if (gp.bad) {
+                        gearNote = `<div style="font-size:11px; color:#ffb3a0; margin-top:2px;">⚠ Не для вашего класса: −${gp.pct}% ${statLabel}${gp.focus ? ' (фокус — только для ткани)' : ''}</div>`;
+                    } else if (gp.focus) {
+                        gearNote = `<div style="font-size:11px; color:#8ff2a0; margin-top:2px;">✦ Магический фокус: вторая рука, штрафа для ткани нет</div>`;
+                    }
+                    const boundNote = isBoundItem(item)
+                        ? `<div style="font-size:11px; color:#ffb3a0; margin-top:2px;">🔒 ${BOUND_LINE}</div>`
+                        : '';
+
                     outEl.innerHTML = `
                         <div style="background:#26202e; border:1px solid #44374a; border-radius:6px; padding:8px 12px; margin-bottom:10px; font-size:12px; display:flex; justify-content:space-between;">
-                            <div><b style="color:#ffcf6a;">${Utils.escapeHtml(item.name)}</b> (v: ${item.v}, тек: +${curEn})</div>
+                            <div><b style="color:#ffcf6a;">${Utils.escapeHtml(item.name)}</b> (v: ${item.v}, тек: +${curEn})${gearNote}${boundNote}</div>
                             ${isExpected ? `<div>Использовано: ⭐ ${starsUsed}/${this.userStars} | 🌐 ${spheresUsed}/${this.userSpheres}</div>` : ''}
                         </div>
                         <table>
@@ -4802,8 +5076,16 @@
                         const art = Utils.getItemArtHtml({ i: it.id ?? it.i, name: it.name }, it);
                         const border = isSel ? '2px solid #caa55c' : '1px solid #44374a';
                         const bg = isSel ? 'rgba(202,165,92,0.15)' : '#1e1724';
+                        // v11.6.3: 🔒 — легендарка привязана (не передаётся),
+                        // ✦ — магический фокус (вторая рука, shield + cloth).
+                        const bound = isBoundItem(it);
+                        const focus = isFocusItem(it);
+                        const badges = (bound ? `<span title="${BOUND_LINE}" style="position:absolute; top:2px; right:2px; font-size:10px;">🔒</span>` : '')
+                            + (focus ? `<span title="Магический фокус" style="position:absolute; top:2px; left:2px; font-size:10px;">✦</span>` : '');
+                        const tip = `${it.name}${bound ? ' · ' + BOUND_LINE : ''}${focus ? ' · магический фокус' : ''}`;
 
-                        return `<div class="hp-item-card" data-uid="${Utils.escapeHtml(it.uid)}" title="${Utils.escapeHtml(it.name)}" style="cursor:pointer; min-width:70px; display:flex; flex-direction:column; align-items:center; padding:8px 4px; background:${bg}; border:${border}; border-radius:6px; transition:all 0.15s;">
+                        return `<div class="hp-item-card" data-uid="${Utils.escapeHtml(it.uid)}" title="${Utils.escapeHtml(tip)}" style="position:relative; cursor:pointer; min-width:70px; display:flex; flex-direction:column; align-items:center; padding:8px 4px; background:${bg}; border:${border}; border-radius:6px; transition:all 0.15s;">
+                            ${badges}
                             <div style="width:32px; height:32px; display:flex; align-items:center; justify-content:center; margin-bottom:6px; overflow:hidden;">
                                 ${art || '📦'}
                             </div>
@@ -6090,9 +6372,52 @@
             });
         },
 
+        /**
+         * v11.6.3: заглушка для персонажа без доступа к аукциону.
+         *
+         * В городе вход в аукцион проверяет hero.au; без флага комната
+         * закрыта, и сканер не должен висеть на пустом ответе /api/auction.
+         */
+        _showHeroClosed() {
+            UI.showModal(`
+                <h2>🔒 Аукцион закрыт <button class="custom-close" id="custom-close-btn">✖</button></h2>
+                <div style="margin:10px 0; padding:12px 14px; border:1px solid rgba(255,190,90,0.45); border-radius:8px; background:rgba(120,70,20,0.35); color:#ffd9a0; line-height:1.45;">
+                    Аукцион пока закрыт для вашего персонажа (требуется разблокировка в игре).
+                </div>
+                <p style="color:#aaa; font-size:12px; margin:0;">
+                    Игра отдаёт доступ флагом <code>hero.au</code> в <code>/api/me</code>.
+                    Когда аукцион откроется, сканер заработает без перезапуска аддона.
+                </p>
+            `, { compact: true });
+        },
+
+        /**
+         * v11.6.3: причина, по которой предмет нельзя выставить.
+         *
+         * Легендарная экипировка привязана к персонажу (bound в
+         * game-data.js): её нельзя передать, продать на аукционе или
+         * сдать в утиль. Материалы под правило не попадают.
+         *
+         * @returns {string} '' — можно продавать, иначе текст для тултипа.
+         */
+        sellBlockedReason(item) {
+            return isBoundItem(item) ? BOUND_LINE : '';
+        },
+
         async open() {
             UI.showModal(`<h2>🔍 Сканер Аукциона <button class="custom-close" id="custom-close-btn">✖</button></h2><div class="loader">Считаем цены...</div>`);
             try {
+                // v11.6.3: состояние героя нужно ДО запроса витрины — в игре
+                // появился флаг доступа hero.au. Без него комната аукциона
+                // закрыта заглушкой, а /api/auction отдаёт отказ/пустоту.
+                const me = await this.fetchMeState().catch(() => null);
+                this.myLevel = +me?.hero?.level || 1;
+                this.tradeMinLevel = +me?.hero?.tml || 0;
+                this.myNick = String(me?.login || '').toLowerCase();
+                if (me && me.hero && !me.hero.au) {
+                    this._showHeroClosed();
+                    return;
+                }
                 if (!this.cityStockLoaded) {
                     await this.fetchCityStock();
                     // fetchCityStock ограничен таймаутом (8 с): если цены магазина
@@ -6102,15 +6427,7 @@
                         dbg('[AUCTION] Цены магазинов недоступны — считаем без них');
                     }
                 }
-                // 11.5.5: витрину и состояние героя тянем параллельно — уровень
-                // (hero.level), порог обмена (hero.tml) и логин (user.login) нужны
-                // до первой отрисовки (фильтр «Мои лоты» сравнивает с продавцом).
-                const mePromise = this.fetchMeState();
                 const res = await Utils.fetchApi('/api/auction');
-                const me = await mePromise.catch(() => null);
-                this.myLevel = +me?.hero?.level || 1;
-                this.tradeMinLevel = +me?.hero?.tml || 0;
-                this.myNick = String(me?.login || '').toLowerCase();
                 const lots = res.lots || res.body?.lots;
                 if (!lots || !Array.isArray(lots) || !lots.length) {
                     return UI.showModal('<h2>Аукцион пуст <button class="custom-close" id="custom-close-btn">✖</button></h2>');
@@ -6166,6 +6483,15 @@
                         || (itemsMap && itemsMap[group.id] && itemsMap[group.id].rarity)
                         || '';
                     const meta = Utils.getItemMeta(group.id, serverRarity); // Получаем слот, редкость, класс
+                    // v11.6.3: привязанная легендарка не продаётся. Если сервер
+                    // всё же прислал такой лот — помечаем и блокируем покупку,
+                    // чтобы не ловить отказ уже после клика.
+                    const bound = !!this.sellBlockedReason({
+                        rarity: meta.rarity,
+                        slot: meta.slot,
+                        // Явный флаг сервера (если когда-нибудь появится у лота).
+                        bound: group.lots.some(l => l.bound === true)
+                    });
 
                     group.lots.forEach(l => {
                         const ev = this.getLotEvaluation(l, res, activeMap);
@@ -6201,6 +6527,8 @@
                             metaSlot: meta.slot,
                             metaRarity: meta.rarity,
                             metaRole: meta.role,
+                            // v11.6.3: bound из game-data.js (legendary, не материал).
+                            bound,
                             sourceType: ev.sourceType,
                             // 11.6.2c.3: от чего именно посчитана «Выгода» —
                             // net (медиана сети) / shop / val / market / none.
@@ -6388,6 +6716,12 @@
                                 : `<span class="auc-chip-tag" title="Цена в магазине NPC">🛒 ${Utils.formatMoney(npcPrice)}</span>`)
                             : '';
 
+                        // v11.6.3: привязанная легендарка (bound) — показываем
+                        // бейдж и блокируем покупку: сервер такую вещь не отдаст.
+                        const boundChip = l.bound
+                            ? `<span class="auc-chip-tag bound" title="${BOUND_LINE}">🔒 Привязана</span>`
+                            : '';
+
                         // 11.6.2c.3: подсветка цены синхронизирована с колонкой
                         // «Выгода» — обе опираются на ОДИН ориентир (медиана сети
                         // в приоритете), поэтому строки больше не противоречат
@@ -6427,7 +6761,12 @@
                         let btnColor = '#28a745';
                         let btnDisabled = false;
 
-                        if (isCur) {
+                        if (l.bound) {
+                            // v11.6.3: привязанную вещь купить нельзя.
+                            btnText = '🔒 Привязана';
+                            btnColor = '#555';
+                            btnDisabled = true;
+                        } else if (isCur) {
                             // Свой лот сервер всё равно не даст купить — не шлём запрос.
                             btnText = 'Ваш лот';
                             btnColor = '#555';
@@ -6485,7 +6824,7 @@
                                             <span class="auc-rarity-dot"></span>
                                             <span>${Utils.escapeHtml(l.metaRarity || '—')}</span>
                                             <span class="auc-item-seller" title="Продавец">👤 ${Utils.escapeHtml(l.seller || '—')}</span>
-                                            ${investedHtml}${npcChip}
+                                            ${investedHtml}${npcChip}${boundChip}
                                         </div>
                                     </div>
                                 </div>
@@ -6858,8 +7197,10 @@ const Players = {
 
             // 2. Из st.dg (свежие данные с сервера) — обновляем Map как 'api'
             try {
-                // Глубокое состояние шахты кладёт miner.js в page-context (G.__lgMineState),
-                // window.__lgMineState — лишь песочничная копия; читаем page-версию первой.
+                // 11.6.4b: miner.js удалён, поэтому G.__lgMineState обычно пуст —
+                // состояние шахты приходит SSE-событием `mine`, а его разбирает
+                // Utils.updateOnlinePlayers() (см. шаг 1 выше). Ветка оставлена
+                // как фолбэк для сборок, где состояние кто-то положил вручную.
                 const st = G.__lgMineState || window.__lgMineState;
                 if (st && st.dg && (!st.at || now - st.at < 15000)) { // если снимок свежий (менее 15 сек)
                     Object.values(st.dg).flat().forEach(l => {
@@ -7063,8 +7404,9 @@ const Players = {
 
             // ПРОГРЕВ СЕССИИ: без этого сервер считает, что мы в городе, и выдает 409
             try {
-                // ВАЖНО: чистый fetch, а не Utils.fetchApi: тот возьмёт контекст ШАХТЫ
-                // (__lgMineContext), прогрев уйдёт не туда, и отправка в город даст 409.
+                // ВАЖНО: чистый fetch, а не Utils.fetchApi: тот может уйти через
+                // нативный контекст игры (G.__lgAucContext / G.X) мимо сессии
+                // города, прогрев тогда не сработает и отправка даст 409.
                 const warmRes = await fetch('/api/city/enter', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -7726,18 +8068,64 @@ const Players = {
         },
 
         /**
+         * Смерть героя: обычный бой — b.hp === 0, босс — bg.in и bg.my <= 0.
+         * Проверки повторяют deadIn() из site/quest.js.
+         */
+        _isDead(q) {
+            return (q.b && q.b.st !== 'end' && q.b.hp === 0) ||
+                   (q.bg && q.bg.st !== 'end' && q.bg.in && !(q.bg.my > 0));
+        },
+
+        /**
+         * Предупреждение о дебаффе отряда из нового состояния похода.
+         *
+         * После неудачного привала игра пишет v.wk = [локаций_осталось,
+         * %_снижения_урона]. Пока первый элемент > 0, весь урон отряда
+         * снижен — предупреждаем игрока рядом с подсказкой.
+         *
+         * @param {object} q состояние похода из LGQuest._view()
+         * @returns {string} '' или готовая строка предупреждения
+         */
+        _weaknessHint(q) {
+            // v.wk — вложенный снимок, но часть клиентов отдаёт wk на верхнем
+            // уровне; поддерживаем оба варианта, чтобы не зависеть от версии.
+            const wk = (q && (q.wk || (q.v && q.v.wk))) || null;
+            if (!Array.isArray(wk) || !(+wk[0] > 0)) return '';
+            const locs = +wk[0];
+            const pct = +wk[1] || 0;
+            return `Урон снижен на ${pct}% (${locs} лок.)`;
+        },
+
+        /**
+         * Решение по текущему состоянию похода + предупреждение о дебаффе.
+         *
+         * Оборачивает _evaluateCore: к hint добавляется строка про v.wk.
+         * Если других подсказок нет (IDLE), показываем отдельную заметку,
+         * чтобы ослабление не терялось между ходами.
+         *
+         * @param {object} q состояние похода из LGQuest._view()
+         * @returns {{action: 'IDLE'|'NOTE'|'SILENCE'|'COMMAND', text?: string, hint?: string}}
+         */
+        _evaluate(q) {
+            const res = this._evaluateCore(q);
+            const warn = this._weaknessHint(q);
+            if (!warn) return res;
+            if (res && res.action === 'IDLE') return this._isDead(q) ? res : { action: 'NOTE', text: warn };
+            if (!res) return { action: 'NOTE', text: warn };
+            res.hint = res.hint ? `${warn} · ${res.hint}` : warn;
+            return res;
+        },
+
+        /**
          * Решение по текущему состоянию похода.
          * Порядок приоритетов: смерть -> запрет ввода -> механики -> обычный ход.
          *
          * @param {object} q состояние похода из LGQuest._view()
          * @returns {{action: 'IDLE'|'SILENCE'|'COMMAND', text?: string, hint?: string}}
          */
-        _evaluate(q) {
-            // 1. Смерть героя. Проверки повторяют deadIn() из site/quest.js:
-            //    обычный бой — b.hp === 0 ("dead"), босс — bg.in и bg.my <= 0.
-            const isDead = (q.b && q.b.st !== 'end' && q.b.hp === 0) ||
-                           (q.bg && q.bg.st !== 'end' && q.bg.in && !(q.bg.my > 0));
-            if (isDead) return { action: 'IDLE' };
+        _evaluateCore(q) {
+            // 1. Смерть героя.
+            if (this._isDead(q)) return { action: 'IDLE' };
 
             // 2. Газ в ловушке: писать нельзя, пока он не рассеется.
             if (q.tr && q.tr.gas && (q.tr.st === 'act' || q.tr.st === 'wait')) {
@@ -7868,6 +8256,16 @@ const Players = {
             }
 
             const esc = (s) => (typeof Utils !== 'undefined' && Utils.escapeHtml ? Utils.escapeHtml(s) : String(s == null ? '' : s));
+
+            if (res.action === 'NOTE') {
+                // v11.6.3: дебафф ослабления (v.wk) без активной подсказки —
+                // показываем отдельную жёлтую заметку, а не баннер «НЕ ПИШИ».
+                const sign = `note|${res.text}`;
+                if (this._currentState === sign) return;
+                this._currentState = sign;
+                this._el.innerHTML = `<div class="lg-combat-note">⚠️ ${esc(res.text)}</div>`;
+                return;
+            }
 
             if (res.action === 'SILENCE') {
                 // Баннер перерисовываем только при смене текста (антимерцание),
@@ -9669,7 +10067,7 @@ const Players = {
         }
     };
 
-    // ===== src/modules/miner.js (исключён из этой сборки, используется заглушка) =====
+    // ===== src/modules/miner.js (удалён в 11.6.4b: античит, используется заглушка) =====
     const Miner = {
         abortController: null,
         init() {
@@ -10073,8 +10471,12 @@ const Players = {
     // 7.3 МОДУЛЬ: ЧАТ — сеть: перехватчики и живой поток
     // ============================================================
     // Вынесено из modules/chat.js (v11.6.0, этап 2 декомпозиции).
-    // Слой-миксин: перехват fetch / EventSource / WebSocket, живой поток
-    // /api/live и разбор входящих в общий Chat.handleIncoming().
+    // Слой-миксин: перехват EventSource / WebSocket, живой поток /api/live,
+    // наблюдение за сетевой активностью игры (PerformanceObserver) и разбор
+    // входящих в общий Chat.handleIncoming().
+    // 11.6.4b: перехват window.fetch удалён — античит шахты палит подмену
+    // fetch по отсутствию [native code] (см. блок «Наблюдение за сетевой
+    // активностью игры» ниже).
     // this внутри методов — это Chat (Object.assign в chat/chat.js).
 
     // v11.6.0g-3: период поллинга «кто играет с аддоном» (ТЗ — раз в 30 с).
@@ -10085,6 +10487,11 @@ const Players = {
     // хранится в localStorage 'lgUpdateCheck', чтобы проверка не зависела от
     // перезапуска поллинга (переключение вкладок, повторный init чата).
     const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+
+    // 11.6.4b: минимальный интервал между нашими syncMe() по сигналу
+    // PerformanceObserver. Игра зовёт /api/me часто (SSE `me`, действия, HUD),
+    // а нам хватает знать логин и класс — 10 секунд более чем достаточно.
+    const GAME_ME_SYNC_MS = 10000;
 
     // v11.6.0g-6: ключ доступа к нашему серверу. Должен совпадать с API_KEY в
     // server/index.js (env LGU_API_KEY). Это фильтр от случайных ботов, а не
@@ -10527,163 +10934,99 @@ const Players = {
             if (pageWin !== window) { try { window.WebSocket = WSProxy; } catch (e) {} }
         },
 
-        interceptFetch() {
-            if (this._fetchIntercepted) return;
-            // См. interceptEventSource: в sandbox патчим fetch страницы (unsafeWindow).
-            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
-            const origFetch = pageWin.fetch || window.fetch;
-            if (!origFetch || origFetch.__lgChatProxied) return;
-            this._fetchIntercepted = true;
-            const self = this;
-            const wrappedFetch = async function(...args) {
-                const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
-                const res = await origFetch.apply(this, args);
+        /* ---------------------------------------------------------- */
+        /* Наблюдение за сетевой активностью игры (11.6.4b)            */
+        /* ---------------------------------------------------------- */
+        // Античит шахты (reference/.../site/mine.js) считает подмену
+        // window.fetch детектом:
+        //   natv(window.fetch) === false && window.fetch !== LG_FETCH.w -> pi |= 1
+        // Поэтому хук fetch снят полностью. Вместо него — пассивное наблюдение
+        // через PerformanceObserver (тот же приём, что в modules/party.js для
+        // /api/me и /api/qact): слушаем resource-записи браузера и НИЧЕГО не
+        // перезаписываем — ни fetch, ни ответы.
 
-                // Задача 3: Ранний выход при отправке сообщений (не клонировать и не парсить)
-                if (url.includes('/api/city/say') || url.includes('/api/mine/chat/say')) {
-                    return res;
-                }
+        /** Слушатель resource-записей браузера. */
+        _perfObserver: null,
+        /** Date.now() последней синхронизации /api/me (троттлинг). */
+        _lastMeSync: 0,
 
-                // 0. Перехват живого потока, игроков онлайн и входящих ЛС (работает всегда)
-                const isLive = url.includes('/api/live');
-                if (url.includes('/api/city/') || url.includes('/api/mine/') || isLive) {
-                    res.clone().json().then(data => {
-                        if (data) {
-                            const loc = url.includes('/api/mine/') ? 'mine' : (isLive ? self.resolveLiveChannel(data) : 'city');
+        /**
+         * Поднимает наблюдатель за запросами игры. Идемпотентен.
+         *
+         * Что даёт без fetch-хука:
+         *   • игра сходила в /api/me         -> наш syncMe() (ник и класс);
+         *   • игра общается с городом/шахтой -> живой поток обязан быть поднят
+         *     (если свой EventSource отвалился и поллинг не крутится — поднимаем).
+         *
+         * Тела чужих ответов прочитать нельзя (PerformanceObserver отдаёт только
+         * метаданные). Данные чата приходят своим EventSource на /api/live,
+         * история города — POST /api/city/enter в loadHistory(), топ шахты и
+         * «сколько народу в шахте» — SSE-событием mine через
+         * Utils.updateOnlinePlayers(). Отдельный перехват ответов не нужен.
+         */
+        startNetworkObserver() {
+            if (this._perfObserver) return;
+            if (typeof PerformanceObserver !== 'function') {
+                // Старые браузеры: чат живёт на своём EventSource, деградация мягкая.
+                dbg('[CHAT] PerformanceObserver не поддерживается — работаем без наблюдателя');
+                return;
+            }
 
-                            // Задача 2 & Задача 4: общее количество и топ-игроки шахты из /api/mine/state
-                            if (url.includes('/api/mine/state')) {
-                                const d = data.body || data.data || data;
-                                if (d) {
-                                    if (typeof d.here === 'number') {
-                                        window.__lgMineTotalHere = d.here;
-                                    } else if (d.st && typeof d.st.here === 'number') {
-                                        window.__lgMineTotalHere = d.st.here;
-                                    }
-                                    const topList = d.st?.top || d.top;
-                                    if (Array.isArray(topList)) {
-                                        const now = Date.now();
-                                        topList.forEach(item => {
-                                            const nick = (typeof item === 'string')
-                                                ? item.trim()
-                                                : (item && (item[0] || item.l || item.login || item.nick || item.name || item.n));
-                                            if (nick && typeof nick === 'string' && nick.trim().length >= 2 && nick.trim().toLowerCase() !== 'me') {
-                                                window.__lgOnlinePlayers.set(nick.trim().toLowerCase(), { loc: 'mine', ts: now });
-                                            }
-                                        });
-                                    }
-                                }
-                            }
-
-                            Utils.updateOnlinePlayers(data, loc);
-                            Utils.processIncomingDMs(data);
-
-                            // Чат живого потока разбираем только при включённом перехвате.
-                            if (isLive && !self.disabled) {
-                                if (data.c) self.currentMineId = data.c;
-                                const chats = Utils.extractChatDeep(data);
-                                chats.forEach(m => {
-                                    const parsed = Utils.extractChatFields(m);
-                                    if (parsed.text) {
-                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, loc, parsed.k, parsed.to, parsed.rank);
-                                    }
-                                });
-                            }
-
-                            // История города из /api/city/enter: разбираем в этом же
-                            // .then(), используя уже прочитанные data. Раньше ниже был
-                            // отдельный блок со вторым res.clone().json() на тот же
-                            // ответ — двойной парсинг и лишняя нагрузка.
-                            // isHistory=true: это история, а не новое сообщение —
-                            // в кэш/счётчик непрочитанных она попадать не должна
-                            // (и ЛС отсюда повторно в Players не отдаются).
-                            if (url.includes('/api/city/enter') && data.ok && Array.isArray(data.chat)) {
-                                data.chat.forEach(m => {
-                                    const parsed = Utils.extractChatFields(m);
-                                    if (!parsed.text) return;
-                                    const ch = parsed.channel || 'city';
-                                    // loadHistory() разбирает тот же ответ, поэтому
-                                    // пропускаем то, что уже лежит в this.messages:
-                                    // по id ИЛИ по автору+тексту (у старых сообщений
-                                    // id может отсутствовать).
-                                    const known = self.messages.some(cur =>
-                                        (parsed.id && cur.id && cur.id === parsed.id) ||
-                                        (!cur._pending && cur.author === parsed.author && cur.text === parsed.text &&
-                                            (cur.channel || 'city') === ch)
-                                    );
-                                    if (known) return;
-                                    self.handleIncoming(parsed.author, parsed.text, true, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
-                                });
-                            }
+            try {
+                this._perfObserver = new PerformanceObserver((list) => {
+                    for (const entry of list.getEntries()) {
+                        const name = entry && entry.name ? entry.name : '';
+                        // includes, а не ===: name — полный URL вида
+                        // https://play.multidonate.ru/c/<канал>/api/me?...
+                        if (name.includes('/api/me')) {
+                            this._onGameMeTraffic();
+                            break;
                         }
-                    }).catch(() => {});
-                }
-
-                try {
-                    // 1. Отслеживание ID текущей шахты для навигации
-                    if (url.includes('/api/mine/')) {
-                        const mMatch = url.match(/[?&]c=([^&]+)/);
-                        if (mMatch) {
-                            try { self.currentMineId = decodeURIComponent(mMatch[1]); } catch(e){}
+                        if (name.includes('/api/city/') || name.includes('/api/mine/') || name.includes('/api/live')) {
+                            this._onGameChatTraffic();
+                            break;
                         }
                     }
+                });
+                // buffered: false — прошлые записи не нужны, слушаем только новые.
+                this._perfObserver.observe({ type: 'resource', buffered: false });
+            } catch (e) {
+                dbg('[CHAT] PerformanceObserver не запустился:', e);
+                this._perfObserver = null;
+            }
+        },
 
-                    // 2. Профиль персонажа (/api/me)
-                    if (url.includes('/api/me')) {
-                        res.clone().json().then(data => {
-                            const hero = data?.hero || data?.body?.hero || data?.me;
-                            if (hero) {
-                                window.__lgHero = hero;
-                                // v11.6.0g-5: ник берём из user.login (/api/me), а
-                                // не из hero.name: подсветка и «свои» сообщения
-                                // должны сравниваться с тем логином, под которым
-                                // игрок реально сидит в чате. ME — фолбэк, если
-                                // ответ пришёл без user (старые сборки/кэш).
-                                const user = data?.user || (typeof G !== 'undefined' && G.ME?.user);
-                                const userLogin = user?.login || user?.name;
-                                if (userLogin) self.myNick = String(userLogin).trim().toLowerCase();
-                                if (hero.class) self.myRole = hero.class;
-                                const hud = document.getElementById(DOM_IDS.playerHud) || document.getElementById('legion-player-hud');
-                                if (hud && hud.style.display !== 'none' && typeof UI !== 'undefined' && UI.renderPlayerHudContent) {
-                                    UI.renderPlayerHudContent(hud, hero);
-                                }
-                            }
-                        }).catch(() => {});
-                    }
+        /** Гасит наблюдатель (выход, перезапуск скрипта). */
+        stopNetworkObserver() {
+            if (!this._perfObserver) return;
+            try { this._perfObserver.disconnect(); } catch (e) {}
+            this._perfObserver = null;
+        },
 
-                    // Парсим чат всегда, если перехват не отключён.
-                    // Закрытый виджет не помеха: сообщения нужны для счётчика непрочитанных.
-                    if (self.disabled) {
-                        return res;
-                    }
+        /**
+         * Игра обновила /api/me — освежаем свой ник и класс своим запросом.
+         *
+         * Троттлинг GAME_ME_SYNC_MS: игру /api/me зовут часто (SSE `me`, любое
+         * действие, HUD), а нам достаточно знать логин и класс. Свой запрос
+         * тоже даёт resource-запись /api/me — троттлинг заодно не даёт
+         * наблюдателю раскрутиться в бесконечный цикл.
+         */
+        _onGameMeTraffic() {
+            const now = Date.now();
+            if (now - this._lastMeSync < GAME_ME_SYNC_MS) return;
+            this._lastMeSync = now;
+            this.syncMe();
+        },
 
-                    // 4. Состояние шахты и вход в шахту (сообщения чата шахты в data.chat.chat или data.m)
-                    if (url.includes('/api/mine/state') || url.includes('/api/mine/enter') || url.includes('/api/mine/chat')) {
-                        res.clone().json().then(data => {
-                            if (!data || !data.ok) return;
-                            if (data.c) self.currentMineId = data.c;
-                            const chats = Utils.extractChatDeep(data);
-                            if (chats.length > 0) {
-                                chats.forEach(m => {
-                                    const parsed = Utils.extractChatFields(m);
-                                    if (parsed.text) {
-                                        self.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, 'mine', parsed.k, parsed.to, parsed.rank);
-                                    }
-                                });
-                            }
-                        }).catch(() => {});
-                    }
-
-                    // 5. Вход в город (/api/city/enter) — история чата разбирается
-                    // в первом .then() этого перехватчика, отдельный res.clone()
-                    // здесь больше не нужен (устранён двойной парсинг ответа).
-                } catch(e) {}
-
-                return res;
-            };
-            try { wrappedFetch.__lgChatProxied = true; } catch (e) {}
-            try { pageWin.fetch = wrappedFetch; } catch (e) {}
-            if (pageWin !== window) { try { window.fetch = wrappedFetch; } catch (e) {} }
+        /**
+         * Игра общается с городом/шахтой — игрок активен, живой поток ему нужен.
+         * Если свой EventSource отвалился и поллинг не крутится,
+         * startBackgroundLiveListener() поднимет поток заново (внутри гарды).
+         */
+        _onGameChatTraffic() {
+            if (this.disabled) return;
+            if (this._liveES || this._liveRunning) return;
+            this.startBackgroundLiveListener();
         },
 
         /* ---------------------------------------------------------- */
@@ -10783,7 +11126,8 @@ const Players = {
                 }
             } catch (e) {}
 
-            // 2. Ник, полученный ранее (syncMe / перехват /api/me).
+            // 2. Ник, полученный ранее (syncMe / собственный GET /api/me).
+            // 11.6.4b: перехвата /api/me больше нет — данные берём своим запросом.
             if (this.myNick) {
                 const known = String(this.myNick).trim().toLowerCase();
                 if (known) return known;
@@ -12232,8 +12576,9 @@ const Players = {
     //   • chat-pip.js — DOM/PiP-окно, рендер и отправка.
     // Слои — обычные объекты, методы которых рассчитывают на this === Chat,
     // поэтому склеиваются через Object.assign ниже. Внешний контракт
-    // (Chat.popoutChat / renderMessages / interceptFetch для ui.js,
+    // (Chat.popoutChat / renderMessages / startNetworkObserver для ui.js,
     // players.js и main.js) при этом не меняется.
+    // 11.6.4b: interceptFetch удалён, его место занял startNetworkObserver.
 
     const Chat = {
         badge: null,
@@ -12366,8 +12711,9 @@ const Players = {
         //   • кнопка «Вынести чат» и настройки 7TV;
         //   • эмоуты 7TV + синхронизация ника;
         //   • детектор внешнего чата.
-        // interceptFetch / interceptEventSource / interceptWebSocket вызываются
-        // из main.js сразу после init() — они идемпотентны и остаются включёнными.
+        // interceptEventSource / interceptWebSocket вызываются из main.js сразу
+        // после init() — они идемпотентны и остаются включёнными. 11.6.4b:
+        // interceptFetch удалён (античит шахты), вместо него startNetworkObserver.
         init() {
             if (this._inited) return;
             this._inited = true;
@@ -12603,6 +12949,10 @@ const Players = {
          */
         destroy() {
             this.stopAddonUsersPolling();
+            // 11.6.4b: гасим PerformanceObserver, иначе старый инстанс продолжал
+            // бы слушать запросы игры (/api/me, /api/city, /api/mine) после
+            // перезапуска скрипта.
+            this.stopNetworkObserver();
         },
     };
 
@@ -12627,11 +12977,12 @@ const Players = {
     //   core/utils-art.js    -> Utils.getItemArtSvg / getItemArtHtml / getItemName / getItemIcon + декор UI
     //   core/utils-chat.js   -> Utils.chatHash / extractChatFields / extractChatDeep / updateOnlinePlayers / processIncomingDMs
     //   core/styles.js -> STYLES
-    //   core/hooks.js  -> перехватчики LGCity / LGAuction / LGQuest / LGMine
+    //   core/hooks.js  -> перехватчики LGCity / LGAuction / LGQuest
+    //                     (LGMine снят в 11.6.4b — античит шахты)
     //   core/ui-templates.js -> UITemplates (HTML: FAB-меню, модалки, HUD)
     //   core/ui.js     -> UI
     //   modules/*      -> BuildSim, HeroPlanner, Auction, Players,
-    //                     PocketCity, CombatAssistant, Party, Miner, Chat
+    //                     PocketCity, CombatAssistant, Party, Miner (заглушка), Chat
     // ============================================================
 
     // 5.3. Защита от повторного запуска (single-instance guard)
@@ -12736,7 +13087,11 @@ const Players = {
 
         Chat.interceptEventSource();
         Chat.interceptWebSocket();
-        Chat.interceptFetch();
+        // 11.6.4b: подмена window.fetch удалена (античит шахты палит её по
+        // отсутствию [native code]). Вместо хука — пассивный PerformanceObserver:
+        // ловит запросы игры к /api/me и к городу/шахте и обновляет данные
+        // своими запросами, ничего не перезаписывая.
+        Chat.startNetworkObserver();
         // Слушаем живой поток всегда (нужно для непрочитанных при закрытом виджете)
         if (!Chat.disabled) {
             Chat.startBackgroundLiveListener();

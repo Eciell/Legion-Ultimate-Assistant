@@ -1182,9 +1182,52 @@
             });
         },
 
+        /**
+         * v11.6.3: заглушка для персонажа без доступа к аукциону.
+         *
+         * В городе вход в аукцион проверяет hero.au; без флага комната
+         * закрыта, и сканер не должен висеть на пустом ответе /api/auction.
+         */
+        _showHeroClosed() {
+            UI.showModal(`
+                <h2>🔒 Аукцион закрыт <button class="custom-close" id="custom-close-btn">✖</button></h2>
+                <div style="margin:10px 0; padding:12px 14px; border:1px solid rgba(255,190,90,0.45); border-radius:8px; background:rgba(120,70,20,0.35); color:#ffd9a0; line-height:1.45;">
+                    Аукцион пока закрыт для вашего персонажа (требуется разблокировка в игре).
+                </div>
+                <p style="color:#aaa; font-size:12px; margin:0;">
+                    Игра отдаёт доступ флагом <code>hero.au</code> в <code>/api/me</code>.
+                    Когда аукцион откроется, сканер заработает без перезапуска аддона.
+                </p>
+            `, { compact: true });
+        },
+
+        /**
+         * v11.6.3: причина, по которой предмет нельзя выставить.
+         *
+         * Легендарная экипировка привязана к персонажу (bound в
+         * game-data.js): её нельзя передать, продать на аукционе или
+         * сдать в утиль. Материалы под правило не попадают.
+         *
+         * @returns {string} '' — можно продавать, иначе текст для тултипа.
+         */
+        sellBlockedReason(item) {
+            return isBoundItem(item) ? BOUND_LINE : '';
+        },
+
         async open() {
             UI.showModal(`<h2>🔍 Сканер Аукциона <button class="custom-close" id="custom-close-btn">✖</button></h2><div class="loader">Считаем цены...</div>`);
             try {
+                // v11.6.3: состояние героя нужно ДО запроса витрины — в игре
+                // появился флаг доступа hero.au. Без него комната аукциона
+                // закрыта заглушкой, а /api/auction отдаёт отказ/пустоту.
+                const me = await this.fetchMeState().catch(() => null);
+                this.myLevel = +me?.hero?.level || 1;
+                this.tradeMinLevel = +me?.hero?.tml || 0;
+                this.myNick = String(me?.login || '').toLowerCase();
+                if (me && me.hero && !me.hero.au) {
+                    this._showHeroClosed();
+                    return;
+                }
                 if (!this.cityStockLoaded) {
                     await this.fetchCityStock();
                     // fetchCityStock ограничен таймаутом (8 с): если цены магазина
@@ -1194,15 +1237,7 @@
                         dbg('[AUCTION] Цены магазинов недоступны — считаем без них');
                     }
                 }
-                // 11.5.5: витрину и состояние героя тянем параллельно — уровень
-                // (hero.level), порог обмена (hero.tml) и логин (user.login) нужны
-                // до первой отрисовки (фильтр «Мои лоты» сравнивает с продавцом).
-                const mePromise = this.fetchMeState();
                 const res = await Utils.fetchApi('/api/auction');
-                const me = await mePromise.catch(() => null);
-                this.myLevel = +me?.hero?.level || 1;
-                this.tradeMinLevel = +me?.hero?.tml || 0;
-                this.myNick = String(me?.login || '').toLowerCase();
                 const lots = res.lots || res.body?.lots;
                 if (!lots || !Array.isArray(lots) || !lots.length) {
                     return UI.showModal('<h2>Аукцион пуст <button class="custom-close" id="custom-close-btn">✖</button></h2>');
@@ -1258,6 +1293,15 @@
                         || (itemsMap && itemsMap[group.id] && itemsMap[group.id].rarity)
                         || '';
                     const meta = Utils.getItemMeta(group.id, serverRarity); // Получаем слот, редкость, класс
+                    // v11.6.3: привязанная легендарка не продаётся. Если сервер
+                    // всё же прислал такой лот — помечаем и блокируем покупку,
+                    // чтобы не ловить отказ уже после клика.
+                    const bound = !!this.sellBlockedReason({
+                        rarity: meta.rarity,
+                        slot: meta.slot,
+                        // Явный флаг сервера (если когда-нибудь появится у лота).
+                        bound: group.lots.some(l => l.bound === true)
+                    });
 
                     group.lots.forEach(l => {
                         const ev = this.getLotEvaluation(l, res, activeMap);
@@ -1293,6 +1337,8 @@
                             metaSlot: meta.slot,
                             metaRarity: meta.rarity,
                             metaRole: meta.role,
+                            // v11.6.3: bound из game-data.js (legendary, не материал).
+                            bound,
                             sourceType: ev.sourceType,
                             // 11.6.2c.3: от чего именно посчитана «Выгода» —
                             // net (медиана сети) / shop / val / market / none.
@@ -1480,6 +1526,12 @@
                                 : `<span class="auc-chip-tag" title="Цена в магазине NPC">🛒 ${Utils.formatMoney(npcPrice)}</span>`)
                             : '';
 
+                        // v11.6.3: привязанная легендарка (bound) — показываем
+                        // бейдж и блокируем покупку: сервер такую вещь не отдаст.
+                        const boundChip = l.bound
+                            ? `<span class="auc-chip-tag bound" title="${BOUND_LINE}">🔒 Привязана</span>`
+                            : '';
+
                         // 11.6.2c.3: подсветка цены синхронизирована с колонкой
                         // «Выгода» — обе опираются на ОДИН ориентир (медиана сети
                         // в приоритете), поэтому строки больше не противоречат
@@ -1519,7 +1571,12 @@
                         let btnColor = '#28a745';
                         let btnDisabled = false;
 
-                        if (isCur) {
+                        if (l.bound) {
+                            // v11.6.3: привязанную вещь купить нельзя.
+                            btnText = '🔒 Привязана';
+                            btnColor = '#555';
+                            btnDisabled = true;
+                        } else if (isCur) {
                             // Свой лот сервер всё равно не даст купить — не шлём запрос.
                             btnText = 'Ваш лот';
                             btnColor = '#555';
@@ -1577,7 +1634,7 @@
                                             <span class="auc-rarity-dot"></span>
                                             <span>${Utils.escapeHtml(l.metaRarity || '—')}</span>
                                             <span class="auc-item-seller" title="Продавец">👤 ${Utils.escapeHtml(l.seller || '—')}</span>
-                                            ${investedHtml}${npcChip}
+                                            ${investedHtml}${npcChip}${boundChip}
                                         </div>
                                     </div>
                                 </div>

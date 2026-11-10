@@ -101,8 +101,47 @@
         // Расширенные характеристики (xstats) из game-data.js.
         // Заточка для них применяется с множителем enchK = 0.25 (÷4).
         XSTAT_KEYS: new Set(['crit', 'critDmg', 'dodge', 'pierce', 'healPow', 'luck', 'resist']),
-        ENCHANT_K: 0.25
+        ENCHANT_K: 0.25,
+
+        /*
+         * v11.6.3: правила снаряжения из lib/game-data.js.
+         *
+         * CLASS_GEAR — тип брони класса (classGear), CLASS_SHIELD — право
+         * носить тяжёлый щит (shieldOk). Для мага/жреца/некроманта щит
+         * запрещён, но тканевый «щит» — это магический фокус (isFocusItem),
+         * поэтому проверяется по cloth-ветке, а не по shieldOk().
+         *
+         * GEAR_PEN — штраф к основному стату за чужой слот (armor/helmet/
+         * shield), GEAR_PEN_CAP — потолок суммарного штрафа.
+         */
+        CLASS_GEAR: { legionary: 'heavy', archer: 'light', mage: 'cloth', priest: 'cloth', rogue: 'light', necromancer: 'cloth', paladin: 'heavy' },
+        CLASS_SHIELD: { legionary: true, paladin: true },
+        GEAR_PEN: { armor: 25, helmet: 10, shield: 15 },
+        GEAR_PEN_CAP: 50,
+        GEAR_NAMES: { heavy: 'тяжёлое', light: 'лёгкое', cloth: 'ткань', any: 'для всех' }
     };
+
+    /*
+     * ------------------------------------------------------------
+     * v11.6.3: ПРИВЯЗКА ПРЕДМЕТОВ (новое правило игры).
+     *
+     * bound(it) = legendary && slot !== 'material' && !it.mat:
+     * легендарная экипировка персональная, её нельзя передать через
+     * трейд, выставить на аукцион или сдать в утиль. Материалы
+     * (slot === 'material' либо флаг mat) под правило не попадают.
+     * Если сервер уже прислал явный флаг bound:true — верим ему.
+     * ------------------------------------------------------------
+     */
+    const isBoundItem = (it) => !!(it && (it.bound === true ||
+        (it.rarity === 'legendary' && it.slot !== 'material' && !it.mat)));
+    const BOUND_LINE = 'Привязана: не передаётся';
+
+    /*
+     * v11.6.3: магический фокус (isFocus в game-data.js) — предмет
+     * в слоте shield с gear === 'cloth'. Для магов/жрецов он заменяет
+     * щит: штраф за «чужой» shield не начисляется, проверка идёт по cloth.
+     */
+    const isFocusItem = (it) => !!(it && it.slot === 'shield' && it.gear === 'cloth');
 
     // Единый объект утилит: наполняется модулями utils-* сразу после
     // объявления, поэтому к вызову кода из main.js он содержит всё нужное.

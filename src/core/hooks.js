@@ -1,51 +1,14 @@
     // ============================================================
     // 0.1. ПЕРЕХВАТ НАРИВНЫХ КОНТЕКСТОВ ИГРЫ (Обход 429/409 ошибок)
     // G объявлен в core/constants.js (подключается первым) — здесь не дублируем.
-    // ============================================================
-
-    // ------------------------------------------------------------
-    // 0.1.1. LGMine (шахта)
     //
-    // Хук вынесен из общего гарда __lgHookedProps: шахта может
-    // загрузиться позже аддона, поэтому и объявление свойства,
-    // и «сторож» ниже обязаны отработать в любом случае.
-    // ------------------------------------------------------------
-    let rawLGMine = G.LGMine;
-
-    const hookMine = (val) => {
-        rawLGMine = val;
-        if (val && !val.__hooked && typeof val.open === 'function') {
-            val.__hooked = true;
-            const orig = val.open;
-            val.open = function (x, c) {
-                // Контекст игры может содержать api() и/или art() — берём любой
-                // из аргументов (в Ultimate арт приходит именно через .art).
-                const ctx = (x && typeof x === 'object' && (typeof x.api === 'function' || typeof x.art === 'function')) ? x
-                          : (c && typeof c === 'object' && (typeof c.api === 'function' || typeof c.art === 'function')) ? c
-                          : null;
-                if (ctx) G.__lgMineContext = ctx;
-                return orig.apply(this, arguments);
-            };
-        }
-    };
-
-    if (rawLGMine) hookMine(rawLGMine);
-
-    try {
-        Object.defineProperty(G, 'LGMine', {
-            configurable: true,
-            enumerable: true,
-            get: () => rawLGMine,
-            set: (v) => hookMine(v)
-        });
-    } catch (e) {}
-
-    // Сторож: LGMine мог загрузиться до аддона либо получить open позже.
-    if (!G.__lgMineWatchdog) {
-        G.__lgMineWatchdog = setInterval(() => {
-            if (G.LGMine && !G.LGMine.__hooked) hookMine(G.LGMine);
-        }, 1000);
-    }
+    // 11.6.4b: хук LGMine.open УДАЛЁН. Античит шахты (reference/.../mine.js)
+    // сравнивает идентичность методов напрямую:
+    //   M.open !== open || M.onEvent !== onEvent  ->  pi |= 4
+    // Поэтому объект LGMine больше не оборачивается и не переобъявляется:
+    // контекст шахты (api/art) читается безопасно из существующих глобальных
+    // переменных — G.X в core/utils-api.js и core/utils-art.js.
+    // ============================================================
 
     if (!G.__lgHookedProps) {
         G.__lgHookedProps = true;
@@ -58,13 +21,10 @@
             if (!val || val.__hooked) return;
             val.__hooked = true;
 
-            if (typeof val.open === 'function') {
-                const orig = val.open;
-                val.open = function (r, cx) {
-                    if (cx) G.__lgCityContext = cx;
-                    return orig.apply(this, arguments);
-                };
-            }
+            // 11.6.4b: подмена LGCity.open тоже снята (любая подмена open на
+            // игровых объектах — детект). Контекст города берём из G.X/LGCity
+            // по месту вызова, см. core/utils-api.js, modules/players.js,
+            // modules/chat/chat-pip.js.
 
             // Перехват городского SSE (кто зашел в город / вышел)
             if (typeof val.onEvent === 'function' && !val.__onEventHooked) {
@@ -113,21 +73,25 @@
             (typeof o.data === 'function' || typeof o.act === 'function' ||
              typeof o.api === 'function' || typeof o.hero === 'function');
 
-        // Фасад app.js (window.LG) отдаёт текущий QX через qx() — это
-        // единственный способ достать контекст, если init() уже прошёл
-        // до загрузки аддона. Любая ошибка фасада не должна ломать игру.
-        const questCtxFromFacade = () => {
-            try {
-                const qx = G.LG && typeof G.LG.qx === 'function' ? G.LG.qx() : null;
-                return isQuestCtx(qx) ? qx : null;
-            } catch (e) {
-                return null;
-            }
-        };
+        // v11.6.3: фасада LG.qx() в актуальном клиенте больше нет —
+        // window.LG = { restyle, rerender } (см. reference/LegionFrontSRC/site/
+        // app.js). Контекст QX сохраняем только из штатного init(ctx), а
+        // «мы в походе» подтверждаем живым снимком оригинального _view().
+        // Ссылку на оригинал держим локально: рекурсии через G.LGQuest нет.
 
         const hookQuest = (val) => {
             rawLGQuest = val;
             if (!val || val.__hooked) return;
+
+            const origView = typeof val._view === 'function' ? val._view : null;
+            const questLive = () => {
+                try {
+                    const q = origView ? origView.call(val) : null;
+                    return !!(q && q.on);
+                } catch (e) {
+                    return false;
+                }
+            };
 
             let patched = false;
 
@@ -135,12 +99,16 @@
             if (typeof val.init === 'function') {
                 const origInit = val.init;
                 val.init = function (ctx) {
-                    // Если init позвали без QX — пробуем фасад.
-                    const qx = isQuestCtx(ctx) ? ctx : questCtxFromFacade();
-                    if (qx) {
-                        G.__lgQuestContext = qx;
+                    // Штатный QX приходит аргументом. Если init позвали без
+                    // него, но снимок _view() говорит «поход идёт» — ставим
+                    // маркер, не выдумывая несуществующий фасад.
+                    if (isQuestCtx(ctx)) {
+                        G.__lgQuestContext = ctx;
                         G.__lgQuestOn = true;
                         dbg('LGQuest.init: контекст похода сохранён');
+                    } else if (questLive()) {
+                        G.__lgQuestOn = true;
+                        dbg('LGQuest.init: активный поход подтверждён _view()');
                     }
                     return origInit.apply(this, arguments);
                 };
@@ -148,16 +116,14 @@
             }
 
             // 2) _view() — перехватываем вызов, чтобы точно знать, что
-            //    мы внутри похода (и добираем контекст, если его нет).
+            //    мы внутри похода. v11.6.3: сам вызов _view() уже доказывает
+            //    активный поход (игра зовёт его на каждом тике) — фасад qx()
+            //    больше не нужен.
             if (typeof val._view === 'function') {
-                const origView = val._view;
+                const origViewCall = val._view;
                 val._view = function () {
-                    if (!G.__lgQuestContext) {
-                        const qx = questCtxFromFacade();
-                        if (qx) G.__lgQuestContext = qx;
-                    }
                     G.__lgQuestOn = true;
-                    return origView.apply(this, arguments);
+                    return origViewCall.apply(this, arguments);
                 };
                 patched = true;
             }

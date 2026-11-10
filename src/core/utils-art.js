@@ -32,14 +32,15 @@
                 // объекты страницы. Используем unsafeWindow (или G), если он доступен.
                 const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
 
-                // 1. Контексты игры: аукцион / город / шахта.
+                // 1. Контексты игры: аукцион и текущий экранный контекст G.X.
+                // 11.6.4b: __lgCityContext/__lgMineContext удалены вместе с
+                // хуками LGCity.open / LGMine.open (детект античита шахты).
                 // Вызов каждого контекста изолирован: упавший art() не должен
                 // обрывать цепочку и лишать предмет картинки.
                 const ctxs = [
                     G.__lgAucContext,
-                    G.__lgCityContext,
-                    G.__lgMineContext,
-                    G.X,        // глобальный арт-резолвер игры
+                    G.X,        // глобальный контекст/арт-резолвер игры
+                    G.LGCity,   // город сам умеет art() (фолбэк контекста города)
                     G.LGtine,   // запасной глобальный резолвер
                     { art: G.art, owner: G },     // глобальный метод игры
                     { art: G.fig, owner: G },     // запасной
@@ -364,27 +365,9 @@
     };
     Object.assign(Utils, UtilsArt);
 
-    // ===== fix: приоритет арта из шахты для обеих сборок =====
-    // Раньше патч жил в Personal-модуле miner.js, из-за чего в Ultimate
-    // __lgMineContext.art не использовался вовсе. Идемпотентен: повторный
-    // запуск (или запуск рядом с другим патчем) не плодит обёртки.
-    (function patchMineArtResolver() {
-        if (Utils.__mineCtxPatched || typeof Utils.getItemArtSvg !== 'function') return;
-        Utils.__mineCtxPatched = true;
+    // 11.6.4b: патч patchMineArtResolver удалён. Он оборачивал
+    // Utils.getItemArtSvg ради приоритета __lgMineContext.art, а сам
+    // __lgMineContext заполнялся хуком LGMine.open — именно его античит
+    // шахты и ловит (M.open !== open). Контекст шахты теперь берётся из
+    // G.X внутри ctxs (см. getItemArtSvg выше), обёртка не нужна.
 
-        const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-        const origGetSvg = Utils.getItemArtSvg.bind(Utils);
-
-        Utils.getItemArtSvg = function (lot, def) {
-            try {
-                const ctx = G.__lgMineContext;
-                if (ctx && typeof ctx.art === 'function') {
-                    const l = lot || {};
-                    const it = { id: l.i, ...(def || {}), en: +l.en || 0 };
-                    const svg = ctx.art(it);
-                    if (isRealItemSvg(svg)) return svg;
-                }
-            } catch (e) {}
-            return origGetSvg(lot, def);
-        };
-    })();

@@ -219,6 +219,45 @@
             margin: 2px;
             background: linear-gradient(90deg, transparent, #3d2f44 15%, #3d2f44 85%, transparent);
         }
+        /* v11.6.3: метка класса-владельца общих очков (режим sk.md =
+           'shared') и плашка-предупреждение над деревом. Аналог нативных
+           .skc-ow / .busybar.sk-sh из skills.js. */
+        .sim-sidebar .modal-tab.sim-tab .sim-tab-own {
+            margin-left: auto;
+            flex: none;
+            min-width: 16px;
+            padding: 0 4px;
+            border-radius: 8px;
+            background: #7ee08a;
+            color: #12100e;
+            font-size: 11px;
+            font-weight: 900;
+            line-height: 16px;
+            text-align: center;
+        }
+        .sim-sidebar .modal-tab.sim-tab .sim-tab-lock {
+            margin-left: auto;
+            flex: none;
+            font-size: 11px;
+            line-height: 16px;
+            opacity: 0.75;
+        }
+        .sim-shared-host { flex: none; }
+        .sim-shared-note {
+            margin: 0 0 8px;
+            padding: 7px 10px;
+            border: 1px solid rgba(255, 190, 90, 0.45);
+            border-radius: 6px;
+            background: rgba(120, 70, 20, 0.35);
+            color: #ffd9a0;
+            font-size: 12px;
+            line-height: 1.35;
+        }
+        .sim-shared-note.own {
+            border-color: rgba(120, 220, 140, 0.45);
+            background: rgba(30, 90, 40, 0.3);
+            color: #b9f0c0;
+        }
         /* Кнопка класса в сайдбаре: вертикальный список, цветная полоска слева.
            Цвет класса в --c (инлайн-стиль таба из BuildSim.classColors),
            цвет текста на заливке — в --ct (BuildSim.classTextColors):
@@ -720,6 +759,8 @@
         .auc-chip-tag { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: 999px; font-size: 10px; line-height: 1.5; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1); color: #d8c9a8; white-space: nowrap; }
         .auc-chip-tag.invested { background: rgba(176, 107, 255, 0.12); border-color: rgba(176, 107, 255, 0.35); color: #d9c2ff; }
         .auc-chip-tag.npc-cheap { background: rgba(76, 201, 90, 0.14); border-color: rgba(76, 201, 90, 0.45); color: #8ff2a0; font-weight: bold; }
+        /* v11.6.3: привязанная легендарка — красноватый бейдж-замок. */
+        .auc-chip-tag.bound { background: rgba(255, 120, 90, 0.14); border-color: rgba(255, 120, 90, 0.45); color: #ffb3a0; font-weight: bold; }
         /* ── Цена, медиана, выгода, таймер ── */
         .auc-price-box { display: flex; flex-direction: column; gap: 1px; line-height: 1.25; }
         .auc-price-total { color: #ffcf6a; font-weight: bold; white-space: nowrap; }
@@ -769,5 +810,12 @@
         }
         .lg-combat-btn { background: #ffcf6a; color: #000; border: none; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: transform 0.1s; }
         .lg-combat-btn:active { transform: scale(0.95); }
+        /* v11.6.3: заметка о дебаффе отряда (v.wk) — не блокирует ввод. */
+        .lg-combat-note {
+            background: rgba(60, 48, 18, 0.95); border: 2px solid #ffcf6a; color: #ffe6a8;
+            padding: 8px 14px; border-radius: 8px; font: bold 13px Arial;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5); pointer-events: none;
+            max-width: min(560px, 90vw); text-align: center;
+        }
 
     `;

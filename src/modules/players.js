@@ -136,8 +136,10 @@ const Players = {
 
             // 2. Из st.dg (свежие данные с сервера) — обновляем Map как 'api'
             try {
-                // Глубокое состояние шахты кладёт miner.js в page-context (G.__lgMineState),
-                // window.__lgMineState — лишь песочничная копия; читаем page-версию первой.
+                // 11.6.4b: miner.js удалён, поэтому G.__lgMineState обычно пуст —
+                // состояние шахты приходит SSE-событием `mine`, а его разбирает
+                // Utils.updateOnlinePlayers() (см. шаг 1 выше). Ветка оставлена
+                // как фолбэк для сборок, где состояние кто-то положил вручную.
                 const st = G.__lgMineState || window.__lgMineState;
                 if (st && st.dg && (!st.at || now - st.at < 15000)) { // если снимок свежий (менее 15 сек)
                     Object.values(st.dg).flat().forEach(l => {
@@ -341,8 +343,9 @@ const Players = {
 
             // ПРОГРЕВ СЕССИИ: без этого сервер считает, что мы в городе, и выдает 409
             try {
-                // ВАЖНО: чистый fetch, а не Utils.fetchApi: тот возьмёт контекст ШАХТЫ
-                // (__lgMineContext), прогрев уйдёт не туда, и отправка в город даст 409.
+                // ВАЖНО: чистый fetch, а не Utils.fetchApi: тот может уйти через
+                // нативный контекст игры (G.__lgAucContext / G.X) мимо сессии
+                // города, прогрев тогда не сработает и отправка даст 409.
                 const warmRes = await fetch('/api/city/enter', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },

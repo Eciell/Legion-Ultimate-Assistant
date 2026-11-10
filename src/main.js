@@ -9,11 +9,12 @@
     //   core/utils-art.js    -> Utils.getItemArtSvg / getItemArtHtml / getItemName / getItemIcon + декор UI
     //   core/utils-chat.js   -> Utils.chatHash / extractChatFields / extractChatDeep / updateOnlinePlayers / processIncomingDMs
     //   core/styles.js -> STYLES
-    //   core/hooks.js  -> перехватчики LGCity / LGAuction / LGQuest / LGMine
+    //   core/hooks.js  -> перехватчики LGCity / LGAuction / LGQuest
+    //                     (LGMine снят в 11.6.4b — античит шахты)
     //   core/ui-templates.js -> UITemplates (HTML: FAB-меню, модалки, HUD)
     //   core/ui.js     -> UI
     //   modules/*      -> BuildSim, HeroPlanner, Auction, Players,
-    //                     PocketCity, CombatAssistant, Party, Miner, Chat
+    //                     PocketCity, CombatAssistant, Party, Miner (заглушка), Chat
     // ============================================================
 
     // 5.3. Защита от повторного запуска (single-instance guard)
@@ -118,7 +119,11 @@
 
         Chat.interceptEventSource();
         Chat.interceptWebSocket();
-        Chat.interceptFetch();
+        // 11.6.4b: подмена window.fetch удалена (античит шахты палит её по
+        // отсутствию [native code]). Вместо хука — пассивный PerformanceObserver:
+        // ловит запросы игры к /api/me и к городу/шахте и обновляет данные
+        // своими запросами, ничего не перезаписывая.
+        Chat.startNetworkObserver();
         // Слушаем живой поток всегда (нужно для непрочитанных при закрытом виджете)
         if (!Chat.disabled) {
             Chat.startBackgroundLiveListener();

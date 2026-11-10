@@ -50,7 +50,10 @@ const CHAT_MODULES = [
     'modules/chat/chat.js'
 ];
 
-const MINER_FILE = 'modules/miner.js';
+// 11.6.4b: modules/miner.js удалён из репозитория (перехват LGMineBiome.paint /
+// LGMine.open и подмена window.fetch палились античитом шахты). В обеих сборках
+// на его месте стоит заглушка MINER_STUB (см. ниже).
+//
 // Личный модуль: подключается только в Personal и только если файл существует.
 const QUEST_FILE = 'modules/quest.js';
 
@@ -103,9 +106,9 @@ const SHARED_MODULES = [
 /**
  * Состав сборок — жёсткие списки файлов.
  *
- * В Ultimate miner.js и quest.js не входят вообще: если такого файла нет,
- * сборка публичной версии от этого не меняется (список проверяется целиком,
- * любой отсутствующий файл -> фатальная ошибка).
+ * В обеих сборках miner.js отсутствует (файл удалён в 11.6.4b), quest.js
+ * входит только в Personal и только если файл создан (список проверяется
+ * целиком, любой отсутствующий обязательный файл -> фатальная ошибка).
  */
 const TARGETS = {
     ultimate: {
@@ -113,31 +116,26 @@ const TARGETS = {
         header: HEADER_ULTIMATE,
         modules: [...SHARED_MODULES],
         optionalModules: [],
-        // main.js обращается к Miner в boot()/shutdown() — на месте модуля заглушка.
-        minerStub: true,
-        // Заглушка вставляется перед первым слоем чата (там раньше стоял chat.js).
-        minerStubBefore: CHAT_MODULES[0],
         title: 'Ultimate (публичная, без Майнера)'
     },
     personal: {
         output: 'LegionPersonal.user.js',
         header: HEADER_PERSONAL,
-        // miner.js грузится после чата: модуль только объявляет объект Miner,
-        // а вызывает его main.js (идёт последним), поэтому порядок не важен.
-        modules: [...SHARED_MODULES, MINER_FILE],
+        // 11.6.4b: miner.js удалён из обеих сборок целиком — вместо него
+        // MINER_STUB (main.js всё ещё зовёт Miner.init/stopMining).
+        modules: [...SHARED_MODULES],
         optionalModules: [QUEST_FILE],
-        minerStub: false,
-        title: 'Personal (личная, с Майнером)'
+        title: 'Personal (личная, без Майнера)'
     }
 };
 
 /**
- * Заглушка вместо miner.js для Ultimate-сборки.
+ * Заглушка вместо удалённого miner.js — вставляется в ОБЕ сборки.
  *
- * Сам модуль в публичную версию не входит, но main.js обращается к Miner в
- * boot() и shutdown() — без заглушки Ultimate падал бы с ReferenceError.
- * Заглушка повторяет публичный контракт (init/stopMining/abortController)
- * и убирает из меню кнопку «Умная Шахта». Кода авто-копания здесь нет.
+ * main.js обращается к Miner в boot() и shutdown() — без заглушки сборка
+ * падала бы с ReferenceError. Заглушка повторяет публичный контракт
+ * (init/stopMining/abortController) и убирает из меню кнопку «Умная Шахта».
+ * Кода авто-копания и хуков шахты здесь нет: 11.6.4b снял их ради античита.
  */
 const MINER_STUB = [
     '    const Miner = {',
@@ -182,11 +180,11 @@ function assemble(target) {
     // 4. Модули строго по списку сборки. readSource() падает, если файла нет:
     //    для Ultimate это фатальная ошибка, никаких «мягких» пропусков.
     for (const relPath of target.modules) {
-        // Ultimate собирается без miner.js — на его месте ставим заглушку,
-        // иначе boot()/shutdown() из main.js упадут с ReferenceError.
+        // 11.6.4b: miner.js удалён из репозитория, но boot()/shutdown() из
+        // main.js всё ещё обращаются к Miner — на его месте всегда заглушка.
         // Якорь — первый слой чата (раньше здесь и стоял modules/chat.js).
-        if (target.minerStub && relPath === target.minerStubBefore) {
-            chunks.push(banner(MINER_FILE, '(исключён из этой сборки, используется заглушка)'), MINER_STUB, '');
+        if (relPath === CHAT_MODULES[0]) {
+            chunks.push(banner('modules/miner.js', '(удалён в 11.6.4b: античит, используется заглушка)'), MINER_STUB, '');
         }
         chunks.push(banner(relPath), readSource(relPath), '');
     }
@@ -237,7 +235,7 @@ function usage() {
         '',
         '  node build.js --all         собрать обе версии (по умолчанию)',
         '  node build.js --ultimate    только LegionUltimate.user.js (публичная, без Майнера)',
-        '  node build.js --personal    только LegionPersonal.user.js (личная, с Майнером)',
+        '  node build.js --personal    только LegionPersonal.user.js (личная, без Майнера)',
         '  node build.js --help        эта справка'
     ].join('\n'));
 }

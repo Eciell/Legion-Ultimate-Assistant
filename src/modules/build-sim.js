@@ -10,6 +10,13 @@
         _autoLoadClass: null, // класс, чей билд пришёл ссылкой #build=… (вкладку открываем после создания табов)
         _tooltipTimer: null, // setTimeout hover-тултипа узла (500 мс, ТЗ 11.6.1e)
         _tooltipState: null, // { clsId, nodeId, mode: 'hover'|'click' } — что сейчас показано
+        // v11.6.3: режим навыков из hero.sk.md. 'shared' — один общий пул
+        // очков по уровню героя, вложить можно только в одно дерево.
+        // 'class' (и старый 'hero') — прежняя модель, лимит MAX_POINTS.
+        skillMode: 'class',
+        pointsLimit: MAX_POINTS,
+        ownerClass: '', // класс, в чьё дерево уже вложены общие очки (md === 'shared')
+        _nativeSkillsWarm: null, // промис прогрева ленивого LGSkills (не блокирует UI)
 
         statNames: { hp: 'Макс. HP', atk: 'Физ. урон', mag: 'Магия', def: 'Броня', crit: 'Крит %', critDmg: 'Сила крита', dodge: 'Уклонение', pierce: 'Пробивание', healPow: 'Сила лечения', luck: 'Удача', resist: 'Сопротивление' },
         fxNames: { melee: 'Физ. урон %', magic: 'Магия %', hp: 'Макс. HP %', def: 'Броня', healPow: 'Сила лечения %', healIn: 'Вх. лечение %', crit: 'Крит %', critDmg: 'Сила крита', skel: 'Урон скелетов %', skelT: 'Время скелетов', leech: 'Вампиризм %', block: 'Снижение урона %', dodge: 'Уклонение %', lead: 'Урон по боссам %', first: 'Урон 1-й ход %', dmg: 'Весь урон %', pierce: 'Пробивание %', resist: 'Сопротивление', healCrit: 'Крит лечения %', regen: 'Регенерация %', low: 'Урон при низком HP %', a_siyanie: 'Сияние +%', a_obereg: 'Оберег +%', a_dlan: 'Длань +%', a_aura: 'Аура +%', aura: 'Аура −урон %', a_svet: 'Свет +%', a_vspyshka: 'Вспышка +%', a_oznob: 'Озноб +%', a_pricel: 'Прицел +%', a_grad: 'Град +%', a_natisk: 'Натиск +%', a_stoyka: 'Стойка +%', a_vspinu: 'Вспину +%', a_yad: 'Яд +%', a_vytyanut: 'Вытянуть +%', a_podnyat: 'Поднять +%', poison: 'Отрава %', steal: 'Кража %', loot: 'Добыча %', skelN: 'Скелетов +', volley: 'Залп +%', shieldBlock: 'Щит блок %', trapDodge: 'Ловушки %', steady: 'Промах→удар %', cleave: 'Замах %', cleaveBoss: 'Замах по боссу %', penBoss: 'Бронебой по боссу %', drain: 'Вытягивание %', hex: 'Проклятие +%', holy: 'По нежити +%', poisonT: 'Время отравы' },
@@ -57,6 +64,17 @@
             sun: '<circle cx="12" cy="12" r="3.8"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>',
             drop: '<path d="M12 3.5s-6 6.6-6 10.6a6 6 0 0 0 12 0c0-4-6-10.6-6-10.6z"/>',
             coin: '<circle cx="12" cy="12" r="8"/><path d="M14.5 9.5c-.6-.9-1.5-1.3-2.5-1.3-1.5 0-2.5.8-2.5 1.9 0 2.7 5.2 1.3 5.2 4 0 1.1-1.1 1.9-2.7 1.9-1.1 0-2.1-.5-2.6-1.4M12 6.5v1.7M12 15.8v1.7"/>',
+            // v11.6.3: иконки из обновлённого skills.js (CHECK подтверждения,
+            // «часы» для cd_*, геометрические заглушки и точки/столбики).
+            check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+            clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2.5"/>',
+            leaf: '<path d="M5 19c0-8 5-13.5 14-14 .5 9-5 14-13 14z"/><path d="M5 19l8-8"/>',
+            ring: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2"/>',
+            hex: '<path d="M12 3l7.8 4.5v9L12 21l-7.8-4.5v-9z"/>',
+            tri: '<path d="M12 4l8.5 15h-17z"/>',
+            sq: '<rect x="5" y="5" width="14" height="14" rx="2.5"/>',
+            dots: '<circle cx="8" cy="8" r="2.6"/><circle cx="16" cy="8" r="2.6"/><circle cx="12" cy="16" r="2.6"/>',
+            bars: '<path d="M6 19V11M12 19V6M18 19v-5"/>',
             // --- Иконки веток (BI): ключ = id ветки из /api/skills ---
             blade: '<path d="M19.5 4.5 20 4l-.5 4.5L9.5 18.5l-4-4zM7.5 16.5l-3 3M4 15l5 5"/>',
             veteran: '<path d="M8 3h8l-1.5 6h-5zM12 9v3"/><circle cx="12" cy="16.5" r="4.2"/><path d="M12 14.6l.7 1.4 1.5.2-1.1 1 .3 1.5-1.4-.7-1.4.7.3-1.5-1.1-1 1.5-.2z"/>',
@@ -80,7 +98,8 @@
             diam: '<path d="M12 3.5l8.5 8.5-8.5 8.5L3.5 12z"/>'
         },
         // Иконки, которые в игре заливаются полупрозрачно (нативный класс .so).
-        SOLID_ICONS: ['sword', 'shield', 'heart', 'cross', 'star', 'bolt', 'crown', 'fire', 'spark'],
+        // v11.6.3: список синхронизирован с SOLID из skills.js.
+        SOLID_ICONS: ['sword', 'shield', 'heart', 'cross', 'star', 'bolt', 'crown', 'fire', 'spark', 'leaf', 'hex', 'tri', 'diam', 'sq', 'drop'],
         // fx-ключ -> иконка; порядок важен: срабатывает первое совпадение (FXI из skills.js).
         FX_ICONS: [
             [/^(melee|dmg|cleave|first|a_natisk|cd_natisk)$/, 'sword'],
@@ -119,6 +138,9 @@
             if (node.kind === 'cap') return 'crown';
             if (node.kind === 'act') return 'bolt';
             if (node.kind === 'ctl') return 'star';
+            // v11.6.3: нативное правило iconOf — навык с кулдауном (cd_*)
+            // рисуется «часами», даже если у него есть другой fx-ключ.
+            if (Object.keys(node.fx || {}).some(k => /^cd_/.test(k))) return 'clock';
             for (const k of Object.keys(node.fx || {})) {
                 for (const [re, icon] of this.FX_ICONS) if (re.test(k)) return icon;
             }
@@ -179,6 +201,87 @@
             if (body) await this.mount(body);
         },
 
+        // ------------------------------------------------------------
+        // v11.6.3: ленивый LGSkills и режим общих очков (sk.md).
+        // ------------------------------------------------------------
+
+        /**
+         * Прогрев нативного дерева навыков.
+         *
+         * В новом клиенте skills.js грузится лениво (`lazy('skills')` из
+         * app.js) и до открытия вкладки «Навыки» window.LGSkills === undefined.
+         * Свой каталог мы всё равно берём из /api/skills, поэтому прогрев —
+         * необязательный фон: он нужен лишь затем, чтобы нативная вкладка
+         * героя не оставалась пустой после открытия аддона.
+         *
+         * ВАЖНО: lazy() в app.js — локальная функция IIFE и наружу не
+         * экспортируется. Сначала проверяем G.lazy (на случай, если клиент
+         * её всё-таки отдаст), а при отсутствии молчим: данные уже пришли
+         * через Utils.fetchApi('/api/skills').
+         */
+        warmNativeSkills() {
+            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
+            try {
+                if (pageWin.LGSkills) return Promise.resolve(true);
+                if (this._nativeSkillsWarm) return this._nativeSkillsWarm;
+                if (typeof pageWin.lazy === 'function') {
+                    this._nativeSkillsWarm = Promise.resolve(pageWin.lazy('skills'))
+                        .catch(() => false)
+                        .finally(() => { this._nativeSkillsWarm = null; });
+                    return this._nativeSkillsWarm;
+                }
+            } catch (e) {
+                dbg('[BUILD SIM] прогрев LGSkills не удался:', e);
+            }
+            return Promise.resolve(false);
+        },
+
+        /**
+         * Режим очков навыков из /api/me -> hero.sk.
+         *
+         * md === 'shared' (новое): очки общие по уровню героя, лимит =
+         * max(1, sk.lv || hero.level). Вложить их можно только в одно
+         * дерево — класс-владелец определяется по ненулевым рангам sk.t.
+         * Иначе — прежняя модель с MAX_POINTS.
+         */
+        readSkillMode(hero) {
+            const sk = (hero && hero.sk) || {};
+            this.skillMode = sk.md || 'class';
+            this.ownerClass = '';
+            if (this.skillMode === 'shared') {
+                this.pointsLimit = Math.max(1, +sk.lv || +hero.level || 1);
+                this.ownerClass = this.ownerOf(sk);
+            } else {
+                this.pointsLimit = MAX_POINTS;
+            }
+            return { mode: this.skillMode, limit: this.pointsLimit, owner: this.ownerClass };
+        },
+
+        // Класс, в чьё дерево уже вложены общие очки (ownerOf из skills.js):
+        // первый класс sk.t, у которого есть ранг > 0.
+        ownerOf(sk) {
+            if (!sk || sk.md !== 'shared' || !sk.t) return '';
+            for (const [cls, ranks] of Object.entries(sk.t)) {
+                if (ranks && Object.values(ranks).some(r => +r > 0)) return cls;
+            }
+            return '';
+        },
+
+        // Заблокирован ли класс для вложения при shared-режиме.
+        isClassLocked(clsId) {
+            return this.skillMode === 'shared' && !!this.ownerClass && this.ownerClass !== clsId;
+        },
+
+        // Плашка-предупреждение над деревом класса (аналог sharedNote из skills.js).
+        sharedNoticeHtml(clsId) {
+            if (this.skillMode !== 'shared' || !this.ownerClass) return '';
+            const owner = this.classNames[this.ownerClass] || this.ownerClass;
+            if (this.ownerClass !== clsId) {
+                return `<p class="sim-shared-note" role="status">Очки уже в дереве «${Utils.escapeHtml(owner)}» — сбрось очки навыков, чтобы вложить в этот класс</p>`;
+            }
+            return `<p class="sim-shared-note own" role="status">Общие очки вложены сюда · лимит ${this.pointsLimit} по уровню героя</p>`;
+        },
+
         async mount(container) {
             if (!container) return;
             // Ссылка вида …#build=<код> — обмен билдами без сервера. Код читаем
@@ -191,6 +294,9 @@
             // Сохранённые билды поднимаем до парсинга /api/me и /api/skills,
             // чтобы UI успел отрисовать список «Мои билды» при первом renderTree.
             this.loadSavedBuilds();
+            // v11.6.3: нативное дерево грузится лениво. Прогрев — фоном,
+            // результат не ждём: каталог навыков берём из /api/skills.
+            this.warmNativeSkills();
             // Тултип узла от прошлой сессии не должен «воскресать» при повторном
             // открытии модалки (state хранится на объекте BuildSim).
             this.hideTooltip();
@@ -203,6 +309,9 @@
             try {
                 const me = await Utils.fetchApi('/api/me');
                 if (!me || !me.ok || !me.hero) throw new Error('Нет героя');
+                // v11.6.3: режим очков читаем ДО decodeBuild — импорт из
+                // ссылки ограничен тем же лимитом, что и ручное вложение.
+                this.readSkillMode(me.hero);
                 if (!this.skillsCache) this.skillsCache = await Utils.fetchApi('/api/skills');
                 if (!this.skillsCache || !this.skillsCache.classes) throw new Error('Нет данных о навыках');
 
@@ -234,7 +343,15 @@
                     // --ct: цвет текста на заливке (classTextColors, ТЗ 11.6.1e).
                     const color = this.classColors[c.id] || '#caa55c';
                     const textColor = this.classTextColors[c.id] || '#12100e';
-                    tabsHtml += `<button class="modal-tab sim-tab" data-tab="${c.id}" style="--c:${color};--ct:${textColor}">${this.getClassSvg(c.id)}${this.classNames[c.id] || c.name || c.id}</button>`;
+                    // v11.6.3: в shared-режиме помечаем дерево, в которое уже
+                    // вложены общие очки (аналог .skc-ow из нативных навыков),
+                    // и замком — все остальные классы (.skc-p.oth).
+                    const owned = this.skillMode === 'shared' && this.ownerClass === c.id;
+                    const lockedTab = this.skillMode === 'shared' && !!this.ownerClass && this.ownerClass !== c.id;
+                    const tabBadge = owned
+                        ? '<span class="sim-tab-own" title="Очки навыков вложены в этот класс">✓</span>'
+                        : (lockedTab ? '<span class="sim-tab-lock" title="Очки навыков уже вложены в другой класс">🔒</span>' : '');
+                    tabsHtml += `<button class="modal-tab sim-tab" data-tab="${c.id}" style="--c:${color};--ct:${textColor}">${this.getClassSvg(c.id)}${this.classNames[c.id] || c.name || c.id}${tabBadge}</button>`;
                 });
 
                 let contentHtml = `
@@ -272,7 +389,7 @@
                                 <div class="sim-tree-inner">
                                     <!-- Верхняя панель: одна строка 38px (очки / билды / обмен). -->
                                     <div class="sim-top-bar">
-                                        <div class="sim-free-pts">Свободно: <b id="free-${c.id}">0</b> / ${MAX_POINTS}</div>
+                                        <div class="sim-free-pts">Свободно: <b id="free-${c.id}">0</b> / ${this.pointsLimit}</div>
                                         <div class="sim-bar-sep"></div>
                                         <button class="sim-save-btn" data-save="${c.id}" title="Сохранить билд">Сохранить</button>
                                         <button class="sim-share-btn" data-share="${c.id}" title="Поделиться билдом">Поделиться</button>
@@ -284,6 +401,7 @@
                                         <button class="sim-del-btn" data-del="${c.id}" title="Удалить выбранный билд">🗑️</button>
                                         <button class="sim-reset-btn" data-reset="${c.id}" title="Сбросить все навыки">Сбросить всё</button>
                                     </div>
+                                    <div class="sim-shared-host" id="shared-${c.id}">${this.sharedNoticeHtml(c.id)}</div>
                                     <div class="sim-branches" id="tree-${c.id}"></div>
                                 </div>
                             </div>
@@ -533,7 +651,7 @@
 
         // Код приходит извне (ссылка от другого игрока), поэтому декодируем
         // с проверками: известный класс, целые ранги в пределах node.max,
-        // сумма очков не больше MAX_POINTS.
+        // сумма очков не больше pointsLimit (MAX_POINTS в обычном режиме).
         // Возвращает id класса, к которому относится билд, либо null.
         decodeBuild(code) {
             if (!code || typeof code !== 'string') return null;
@@ -571,7 +689,8 @@
                 });
 
                 // «Перекачанный» билд (больше очков, чем даёт игра) не принимаем.
-                if (total > MAX_POINTS) return null;
+                // v11.6.3: лимит зависит от режима (shared -> уровень героя).
+                if (total > this.pointsLimit) return null;
 
                 this.simulatedSkills[cls] = clean;
                 // Импорт — не сохранённый билд: «🗑️» не должен целиться
@@ -667,6 +786,13 @@
             const simTree = this.simulatedSkills[clsId];
             const current = simTree[nodeId] || 0;
             if (delta > 0) {
+                // v11.6.3: в shared-режиме очки уже лежат в другом дереве —
+                // игра не даст вложить их сюда, пока навыки не сброшены.
+                if (this.isClassLocked(clsId)) {
+                    const owner = this.classNames[this.ownerClass] || this.ownerClass;
+                    UI.showToast(`Очки уже в дереве «${owner}» — сбрось очки навыков, чтобы вложить в этот класс`, true);
+                    return;
+                }
                 if (current >= maxRank) return;
                 if (preNode && !(simTree[preNode] > 0)) return;
                 if (branchIds && branchReq > 0) {
@@ -677,7 +803,7 @@
                     if (branchPts < branchReq) return;
                 }
                 let spent = 0; Object.values(simTree).forEach(v => spent += v);
-                if (spent >= MAX_POINTS) return;
+                if (spent >= this.pointsLimit) return;
             }
             if (delta < 0) {
                 // Полная симуляция снятия: строим дерево «как будто очко уже снято»
@@ -748,6 +874,10 @@
         renderTree(clsId) {
             const clsData = this.skillsCache.classes.find(c => c.id === clsId);
             if (!clsData) return;
+            // v11.6.3: перед рендером дерева убеждаемся, что нативный LGSkills
+            // не остался в ленивом состоянии. Прогрев идемпотентен и нашу
+            // отрисовку не блокирует (данные уже есть из /api/skills).
+            this.warmNativeSkills();
             const container = document.getElementById(`tree-${clsId}`);
             if (!container) return;
             // Число колонок-веток как в нативном дереве (--nb), обычно 3.
@@ -755,10 +885,16 @@
 
             if (!this.simulatedSkills[clsId]) this.simulatedSkills[clsId] = {};
             const simTree = this.simulatedSkills[clsId];
+            // v11.6.3: в shared-режиме чужое дерево целиком заблокировано,
+            // а плашка над ним объясняет причину (может появиться позже).
+            const clsLocked = this.isClassLocked(clsId);
+            const sharedHost = document.getElementById(`shared-${clsId}`);
+            if (sharedHost) sharedHost.innerHTML = this.sharedNoticeHtml(clsId);
 
             let spent = 0; Object.values(simTree).forEach(v => spent += v);
             const freeEl = document.getElementById(`free-${clsId}`);
-            if (freeEl) freeEl.textContent = MAX_POINTS - spent;
+            // Нативно при shared + чужом дереве свободных очков ровно 0.
+            if (freeEl) freeEl.textContent = clsLocked ? 0 : this.pointsLimit - spent;
 
             let html = '';
             const simStats = {};
@@ -848,10 +984,11 @@
                     for (let i = 0; i < node.max; i++) ranksHtml += `<i class="${i < rank ? 'filled' : ''}"></i>`;
 
                     // Состояния как в нативном дереве: lock / has / max / can (available).
-                    const state = (locked ? ' locked' : '')
+                    // v11.6.3: чужое дерево в shared-режиме — как заблокированное.
+                    const state = ((locked || clsLocked) ? ' locked' : '')
                         + (rank > 0 ? ' has' : '')
                         + (maxed ? ' maxed' : '')
-                        + (!locked && !maxed ? ' available' : '');
+                        + (!locked && !clsLocked && !maxed ? ' available' : '');
                     const x = xMap.get(node.id);
                     const y = this.yFor(node.req);
 
@@ -1078,10 +1215,15 @@
             branch.nodes.forEach(n => branchPoints += (simTree[n.id] || 0));
             const locked = branchPoints < node.req || (node.pre && !(simTree[node.pre] > 0));
             const maxed = rank >= node.max;
+            // v11.6.3: в shared-режиме чужое дерево нельзя качать вообще.
+            const clsLocked = this.isClassLocked(clsId);
 
             let reqText = '';
-            if (branchPoints < node.req) reqText = `Требуется очков в ветке: ${node.req}`;
-            if (node.pre && !(simTree[node.pre] > 0)) reqText = `Сначала изучите предыдущий навык.`;
+            if (clsLocked) {
+                const owner = this.classNames[this.ownerClass] || this.ownerClass;
+                reqText = `Очки уже в дереве «${owner}» — сбрось очки навыков, чтобы вложить в этот класс`;
+            } else if (branchPoints < node.req) reqText = `Требуется очков в ветке: ${node.req}`;
+            if (!clsLocked && node.pre && !(simTree[node.pre] > 0)) reqText = `Сначала изучите предыдущий навык.`;
 
             const tip = this._getTooltip();
             tip.dataset.cls = clsId;
@@ -1094,7 +1236,7 @@
                 ${reqText ? `<div class="req">${reqText}</div>` : ''}
                 ${withControls ? `<div class="controls">
                     <button type="button" data-action="minus" ${rank === 0 ? 'disabled' : ''}>− Убрать</button>
-                    <button type="button" data-action="plus" ${maxed || locked ? 'disabled' : ''}>+ Вложить</button>
+                    <button type="button" data-action="plus" ${maxed || locked || clsLocked ? 'disabled' : ''}>+ Вложить</button>
                 </div>` : ''}`;
 
             // Позиция — после вставки контента: нужны реальные offsetWidth/Height.
