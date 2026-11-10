@@ -45,7 +45,7 @@ const Players = {
             // Перерисовываем вкладку «✉️ ЛС», если она активна.
             // (Список «Друзья» удалён в 11.5.4: в игре появились нативные друзья.)
             try {
-                if (typeof Chat !== 'undefined' && Chat.activeMainTab === 'dm' && typeof Chat.renderMessages === 'function') {
+                if (typeof Chat !== 'undefined' && Chat.activeTab === 'dm' && typeof Chat.renderMessages === 'function') {
                     Chat.renderMessages();
                 }
             } catch (e) {}
@@ -346,7 +346,9 @@ const Players = {
                 // ВАЖНО: чистый fetch, а не Utils.fetchApi: тот может уйти через
                 // нативный контекст игры (G.__lgAucContext / G.X) мимо сессии
                 // города, прогрев тогда не сработает и отправка даст 409.
-                const warmRes = await fetch('/api/city/enter', {
+                // ПАТЧ 11.6.4h: сам адрес обязательно через Utils.apiPath —
+                // иначе запрос уходит в корень домена мимо /c/<channel>/ (404).
+                const warmRes = await fetch(Utils.apiPath('/api/city/enter'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'same-origin',
@@ -380,8 +382,9 @@ const Players = {
                 }
 
                 // 2. Фолбэк: обычный fetch (как в прошлой версии)
+                // ПАТЧ 11.6.4h: адрес через Utils.apiPath, иначе улетал в корень.
                 if (!data) {
-                    const res = await fetch('/api/city/say', {
+                    const res = await fetch(Utils.apiPath('/api/city/say'), {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         credentials: 'same-origin',
@@ -490,47 +493,35 @@ const Players = {
             historyBox.scrollTop = historyBox.scrollHeight;
         },
 
+        /**
+         * Открыть ЛС с игроком (ПАТЧ 11.6.4f).
+         *
+         * Раньше здесь кликали по нативным узлам .cy-chat (data-dm + вкладка
+         * «Личные»), но нативный чат теперь скрыт CSS-ом и живёт в DOM только
+         * ради LGChatOne.place()/dock(). Идём через собственный Chat.openDM():
+         * он открывает PiP и переключает вкладку «✉️ ЛС».
+         *
+         * text — необязательный черновик. openDM() асинхронный (может создать
+         * PiP-окно), поэтому поле ввода ищем после его завершения.
+         */
         async openWhisperWith(nick, text = '') {
             if (!nick) return;
+            if (typeof Chat === 'undefined' || typeof Chat.openDM !== 'function') return;
 
-            // Ищем чат, который НЕ находится внутри контейнера шахты (.mn)
-            let chatBox = null;
-            const allChats = document.querySelectorAll('.cy-chat');
-            for (const box of allChats) {
-                if (!box.closest('.mn')) { // Если это не чат шахты
-                    chatBox = box;
-                    break;
-                }
-            }
-            if (!chatBox) return; // Если городского чата нет на странице, ничего не делаем
-
-            // Нативный триггер игры: .cy-chat → временный [data-dm] → вкладка ЛС
             try {
-                const toggleBtn = chatBox.querySelector('.cy-chat-t');
-                if (toggleBtn && (toggleBtn.getAttribute('aria-expanded') === 'false' || chatBox.querySelector('.cy-chat-b')?.hidden)) {
-                    toggleBtn.click();
-                }
+                await Chat.openDM(nick);
 
-                const list = chatBox.querySelector('.cy-chat-l');
-                if (list) {
-                    const dummy = document.createElement('span');
-                    dummy.setAttribute('data-dm', nick);
-                    list.appendChild(dummy);
-                    dummy.click();
-                    dummy.remove();
-                }
-
-                const dmTab = chatBox.querySelector('[data-tab="dm"]');
-                if (dmTab) dmTab.click();
-
-                // Текст вставляем только в инпут найденного (городского) чата
-                const inp = chatBox.querySelector('.cy-chat input') || chatBox.querySelector('input');
+                if (!text) return;
+                const pipDoc = Chat._pipDoc;
+                const inp = pipDoc && typeof pipDoc.getElementById === 'function'
+                    ? pipDoc.getElementById('chat-input')
+                    : null;
                 if (inp) {
-                    if (text) inp.value = text;
+                    inp.value = text;
                     inp.focus();
                 }
             } catch (e) {
-                dbg('openWhisperWith native trigger failed:', e);
+                dbg('openWhisperWith failed:', e);
             }
         },
 

@@ -24,9 +24,18 @@
 
         addonHighlight: localStorage.getItem('LEGION_ADDON_HIGHLIGHT') !== 'false',
         _inited: false,
+        // ПАТЧ 11.6.4f: состояние хука нативной ленты LGChatOne и Keep-Alive.
+        // _nativeChatOrig — оригинальные onFeed/enterFeed, чтобы снять хук при
+        // выключении перехвата/перезапуске; _nativeWatchTimer — интервал watch.
+        _nativeWatchTimer: null,
+        _nativeChatOrig: null,
         messages: [], // Массив всех сообщений
-        activeMainTab: 'city',
-        activeSubTab: 'general',
+        // ПАТЧ 11.6.4g: одна активная вкладка в терминах нативного чата игры
+        // (reference/LegionFrontSRC/lib/site-chat.js: TABS = g/tr/mn/gl/dm).
+        // Раньше было две оси — activeMainTab (city/mine/dm) и activeSubTab
+        // (general/trade/ach): «Шахта» и «Торговля» жили в разных полях, и
+        // подсветка вкладок рассинхронивалась.
+        activeTab: 'g',
         // v11.6.0g-5: ник — это ME.user (page-context), а не LG_CH: в LG_CH
         // лежит логин Twitch-канала, из-за него в чат/HUD попадал чужой ник.
         // Если ME ещё пуст — ник придёт асинхронно из syncMe().
@@ -55,19 +64,6 @@
             if (this.addonHighlight === false) return false;
             if (!nick || this.addonUsers.size === 0) return false;
             return this.addonUsers.has(String(nick).trim().toLowerCase());
-        },
-
-        get activeTab() {
-            if (this.activeMainTab === 'mine' || this.activeMainTab === 'dm') return this.activeMainTab;
-            return this.activeSubTab;
-        },
-        set activeTab(val) {
-            if (val === 'mine' || val === 'dm') {
-                this.activeMainTab = val;
-            } else {
-                this.activeMainTab = 'city';
-                this.activeSubTab = val;
-            }
         },
 
         isOpen() {
@@ -117,20 +113,136 @@
             }
         },
 
+        /* ---------------------------------------------------------- */
+        /* ПАТЧ 11.6.4f: хук нативной ленты LGChatOne                  */
+        /* ---------------------------------------------------------- */
+
+        /**
+         * Перехват ленты нативного чата игры.
+         *
+         * Свой EventSource('/api/live') удалён: клиент Legion сам стримит чат и
+         * отдаёт его разобранным в LGChatOne.onFeed(room, data) — новые сообщения
+         * комнаты (city/mine) — и LGChatOne.enterFeed(room, r) — история при входе
+         * в город/шахту. Формат пакета тот же, что приходил из SSE:
+         * { chat: [...], chatDel: [...], chatMe, c }.
+         *
+         * Хук ставится ПОВЕРХ игры: сначала наш разбор, затем оригинал — поэтому
+         * нативный чат продолжает работать как обычно (11.6.4g: он снова виден
+         * на экране, мы его больше не скрываем и не подменяем).
+         *
+         * Модуль site-chatone.js грузится лениво (oneLoad() в reference/.../app.js),
+         * поэтому метод идемпотентен и вызывается повторно из
+         * ChatNet._onGameChatTraffic(), пока LGChatOne не появится.
+         *
+         * @returns {boolean} true, если хуки стоят на объекте игры
+         */
+        hookNativeChat() {
+            const one = (typeof G !== 'undefined' && G) ? G.LGChatOne : null;
+            if (!one || typeof one.onFeed !== 'function' || typeof one.enterFeed !== 'function') return false;
+            // Уже обёрнут (этим или прежним инстансом, пока хуки не сняты).
+            if (one.__lgChatHooked) return true;
+
+            const self = this;
+            // Сохраняем оригиналы: по ним же снимаем хук в unhookNativeChat().
+            this._nativeChatOrig = { onFeed: one.onFeed, enterFeed: one.enterFeed };
+
+            one.onFeed = function (room, data) {
+                try { self.ingestGameFeed(room, data, false); } catch (e) {}
+                return self._nativeChatOrig.onFeed.apply(this, arguments);
+            };
+
+            one.enterFeed = function (room, history) {
+                try { self.ingestGameFeed(room, history, true); } catch (e) {}
+                return self._nativeChatOrig.enterFeed.apply(this, arguments);
+            };
+
+            try { one.__lgChatHooked = true; } catch (e) {}
+            dbg('[CHAT] Хук нативной ленты LGChatOne установлен');
+            return true;
+        },
+
+        /**
+         * Снять хуки с нативной ленты (выключение перехвата, restart скрипта).
+         *
+         * Возвращаем ровно те функции, что были до нас: иначе после перезапуска
+         * аддона игра продолжала бы звать колбэк в мёртвый инстанс Chat.
+         */
+        unhookNativeChat() {
+            const one = (typeof G !== 'undefined' && G) ? G.LGChatOne : null;
+            const orig = this._nativeChatOrig;
+            if (!one || !orig || !one.__lgChatHooked) return false;
+            try {
+                one.onFeed = orig.onFeed;
+                one.enterFeed = orig.enterFeed;
+                try { delete one.__lgChatHooked; } catch (e) { one.__lgChatHooked = false; }
+            } catch (e) {
+                return false;
+            }
+            this._nativeChatOrig = null;
+            return true;
+        },
+
+        /**
+         * Keep-Alive нативного чата (ТЗ 11.6.4f, раз в 30 с).
+         *
+         * LGChatOne.sync() отправляет POST /api/chat/watch {on:true} только когда
+         * state().open === true, а сервер стримит сообщения в SSE лишь по watch.
+         * Своей ленты у нас нет — сообщения приходят из хука onFeed, поэтому
+         * watch нужно поддерживать живым.
+         *
+         * ПАТЧ 11.6.4g: нативный чат больше не скрыт CSS-ом, поэтому флаг open
+         * навязываем ТОЛЬКО пока открыт наш вынесенный чат (Chat.isOpen()).
+         * Если наш чат закрыт — нативные флаги не трогаем: игрок сам решает,
+         * свернуть ему нативную ленту или оставить.
+         */
+        startNativeChatWatch() {
+            if (this._nativeWatchTimer) return;
+            const tick = () => {
+                try {
+                    const one = (typeof G !== 'undefined' && G) ? G.LGChatOne : null;
+                    if (!one || typeof one.state !== 'function') {
+                        // Модуль игры ещё не подгрузился — доберём хуки на следующем тике.
+                        this.hookNativeChat();
+                        return;
+                    }
+                    // Наш чат закрыт — не перебиваем выбор игрока по нативной ленте.
+                    if (!this.isOpen()) return;
+                    const st = one.state();
+                    if (!st) return;
+                    st.open = true;
+                    if (typeof one.sync === 'function') one.sync();
+                } catch (e) {}
+            };
+            tick();
+            this._nativeWatchTimer = setInterval(tick, NATIVE_CHAT_KEEPALIVE_MS);
+        },
+
+        /** Остановка Keep-Alive и снятие хуков (Chat.destroy, выключение чата). */
+        stopNativeChatWatch() {
+            if (this._nativeWatchTimer) {
+                clearInterval(this._nativeWatchTimer);
+                this._nativeWatchTimer = null;
+            }
+            this.unhookNativeChat();
+        },
+
         setDisabled(val) {
             this.disabled = !!val;
             try {
                 localStorage.setItem('LEGION_CHAT_DISABLED', String(this.disabled));
             } catch (e) {}
             if (this.disabled) {
-                this.stopBackgroundLiveListener();
+                // ПАТЧ 11.6.4f: своего потока /api/live нет — гасим Keep-Alive
+                // и снимаем хуки с нативной ленты LGChatOne.
+                this.stopNativeChatWatch();
                 if (this.isOpen()) {
                     this.close();
                 }
                 UI.showToast('🚫 Перехват чата отключен');
             } else {
                 UI.showToast('💬 Перехват чата включен');
-                this.startBackgroundLiveListener();
+                this.hookNativeChat();
+                this.startNativeChatWatch();
             }
         },
 
@@ -244,6 +356,15 @@
             // классами в DOM. Браузер применит их к уже отрисованной ленте в
             // первом же кадре — ни флэша, ни ожидания ответа /users.
             if (typeof this._applyAddonStyles === 'function') this._applyAddonStyles();
+
+            // ПАТЧ 11.6.4f: фундамент нового чата. Нативный LGChatOne остаётся
+            // в DOM (его place()/dock() перевешивают блок между городом и
+            // шахтой — узел удалять нельзя). С 11.6.4g он снова виден на экране:
+            // CSS-скрытие .cy-chat из styles.js удалено.
+            // Ленту берём из его колбэков onFeed/enterFeed, а Keep-Alive держит
+            // watch {on:true} включённым, иначе сервер не стримит сообщения.
+            this.hookNativeChat();
+            this.startNativeChatWatch();
         },
 
         // Детектор стороннего чата (Legion7TV, плагин ProCto_Fliy).
@@ -313,9 +434,9 @@
                     }
                 }
 
-                // Если этот диалог сейчас открыт во вкладке «✉️ ЛС» — считаем прочитанным.
+                // Если этот диалог сейчас открыт во вкладке «✉️ Личные» — считаем прочитанным.
                 // Перерисовку выполняет Players.refreshUnreadDMViews() -> Chat.renderMessages().
-                if (typeof Players !== 'undefined' && this.activeMainTab === 'dm' && this.dmTarget) {
+                if (typeof Players !== 'undefined' && this.activeTab === 'dm' && this.dmTarget) {
                     const myNick = (this.myNick || '').toLowerCase();
                     const isSelf = (author === 'Я') || (!!myNick && String(author || '').toLowerCase() === myNick);
                     const peer = isSelf ? (to || '') : (author || '');
@@ -426,12 +547,17 @@
          * Остановка фоновых задач чата (ТЗ 11.6.0g-3).
          *
          * Вызывается из legionApi.shutdown() в main.js при перезапуске скрипта.
-         * Живой поток /api/live гасит сам shutdown (stopBackgroundLiveListener);
-         * здесь — только таймер поллинга /heartbeat + /users. DOM-наблюдатель
-         * нативной ленты удалён в 11.6.0h.2 (подсветку рисует CSS).
+         * Своего потока /api/live больше нет (ПАТЧ 11.6.4f): Keep-Alive и хуки
+         * нативной ленты снимает stopNativeChatWatch(); здесь — таймер поллинга
+         * /heartbeat + /users и PerformanceObserver. DOM-наблюдатель нативной
+         * ленты удалён в 11.6.0h.2 (подсветку рисует CSS).
          */
         destroy() {
             this.stopAddonUsersPolling();
+            // ПАТЧ 11.6.4f: снимаем Keep-Alive и хуки с нативной ленты — иначе
+            // после перезапуска скрипта на G.LGChatOne остался бы колбэк в
+            // мёртвый инстанс Chat (и лишний интервал каждые 30 с).
+            this.stopNativeChatWatch();
             // 11.6.4b: гасим PerformanceObserver, иначе старый инстанс продолжал
             // бы слушать запросы игры (/api/me, /api/city, /api/mine) после
             // перезапуска скрипта.

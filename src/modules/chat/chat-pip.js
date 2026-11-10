@@ -6,6 +6,21 @@
     // documentPictureInPicture). Рендер ленты и отправка сообщений.
     // this внутри методов — это Chat (Object.assign в chat/chat.js).
 
+    // ПАТЧ 11.6.4g: вкладки вынесенного чата. Набор и порядок повторяют
+    // нативный чат игры (reference/LegionFrontSRC/lib/site-chat.js: TABS):
+    // g — общий город, tr — торговля, mn — ремёсла/шахта, gl — гильдия,
+    // dm — личные сообщения. Одна ось на всё состояние (Chat.activeTab).
+    const CHAT_TABS = ['g', 'tr', 'mn', 'gl', 'dm'];
+
+    // Подсказки в поле ввода под активную вкладку.
+    const CHAT_TAB_PH = {
+        g: 'Написать в чат города...',
+        tr: 'Куплю / продам / меняю...',
+        mn: 'Написать в чат шахты...',
+        gl: 'Написать гильдии...',
+        dm: 'Лично...'
+    };
+
     const ChatPip = {
         widget: null,
         _popoutWin: null,
@@ -37,7 +52,7 @@
             return root ? root.querySelector(selector) : null;
         },
 
-        // Синхронизация подсветки вкладок с this.activeMainTab / this.activeSubTab.
+        // Синхронизация подсветки вкладок с this.activeTab.
         // Ищем по всему документу PiP-окна, а не только внутри this.widget: если
         // ссылка на виджет устарела (окно пересоздано), поиск по документу всё равно
         // найдёт реальные вкладки и снимет лишние active.
@@ -45,23 +60,13 @@
             const d = doc || this._pipDoc || (this.widget && this.widget.ownerDocument) || null;
             if (!d || typeof d.querySelectorAll !== 'function') return;
 
-            const mainKey = (t) => t.getAttribute('data-main-tab')
-                || (t.dataset && t.dataset.tab) || 'city';
-            const subKey = (t) => t.getAttribute('data-sub-tab')
-                || (t.dataset && t.dataset.tab) || 'general';
-
+            // ПАТЧ 11.6.4g: одна ось вкладок. Ключ лежит в data-tab кнопки
+            // (g/tr/mn/gl/dm), а не в двух атрибутах main/sub, как раньше.
             d.querySelectorAll('.chat-main-tab').forEach(t => {
-                t.classList.toggle('active', mainKey(t) === this.activeMainTab);
+                const key = t.getAttribute('data-tab')
+                    || (t.dataset && t.dataset.tab) || 'g';
+                t.classList.toggle('active', key === this.activeTab);
             });
-            d.querySelectorAll('.chat-sub-tab').forEach(t => {
-                t.classList.toggle('active', subKey(t) === this.activeSubTab);
-            });
-
-            // Суб-вкладки (Общий/Торговля/Достижения) относятся только к городу.
-            const subTabsRow = typeof d.getElementById === 'function'
-                ? d.getElementById('chat-sub-tabs')
-                : d.querySelector('#chat-sub-tabs');
-            if (subTabsRow) subTabsRow.style.display = this.activeMainTab === 'city' ? 'flex' : 'none';
         },
 
         showError(msg) {
@@ -95,19 +100,10 @@
         updateInputState() {
             const inp = this._pipEl('#chat-input');
             const sendBtn = this._pipEl('#chat-send');
+            const tab = this.activeTab;
 
-            // Чат живёт только в PiP-окне, поэтому состояние ввода считаем
-            // по активной вкладке (город / торговля / шахта / ЛС).
-            const inMine = this.isInMine();
-
-            if (this.activeMainTab === 'mine' && !inMine) {
-                if (inp) {
-                    inp.disabled = true;
-                    inp.placeholder = 'Доступно только в шахте';
-                    inp.value = '';
-                }
-                if (sendBtn) sendBtn.disabled = true;
-            } else if (this.activeMainTab === 'dm') {
+            // Вкладка «Личные»: писать можно только внутри открытого диалога.
+            if (tab === 'dm') {
                 if (this.dmTarget) {
                     if (inp) {
                         inp.disabled = false;
@@ -117,30 +113,31 @@
                 } else {
                     if (inp) {
                         inp.disabled = true;
-                        inp.placeholder = 'Выберите диалог в списке «✉️ ЛС»';
+                        inp.placeholder = 'Выберите диалог в списке «Личные»';
                         inp.value = '';
                     }
                     if (sendBtn) sendBtn.disabled = true;
                 }
-            } else if (this.activeMainTab === 'city' && this.activeSubTab === 'ach') {
+                return;
+            }
+
+            // Ремёсла/шахта: сервер принимает сообщения только из шахты.
+            if (tab === 'mn' && !this.isInMine()) {
                 if (inp) {
                     inp.disabled = true;
-                    inp.placeholder = 'Чат достижений (только чтение)';
+                    inp.placeholder = 'Доступно только в шахте';
                     inp.value = '';
                 }
                 if (sendBtn) sendBtn.disabled = true;
-            } else {
-                if (inp) {
-                    inp.disabled = false;
-                    const phMap = {
-                        general: 'Написать в чат города...',
-                        trade: 'Написать в торговлю...',
-                        mine: 'Написать в чат шахты...'
-                    };
-                    inp.placeholder = phMap[this.activeTab] || 'Написать сообщение...';
-                }
-                if (sendBtn) sendBtn.disabled = false;
+                return;
             }
+
+            // g / tr / gl — обычный ввод с подсказкой под вкладку.
+            if (inp) {
+                inp.disabled = false;
+                inp.placeholder = CHAT_TAB_PH[tab] || 'Написать сообщение...';
+            }
+            if (sendBtn) sendBtn.disabled = false;
         },
 
         // DOM чата собирается только внутри документа PiP-окна.
@@ -155,17 +152,14 @@
             widget.style.cssText = 'position:relative; display:flex; flex-direction:column; width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; background:#1d1620; color:#f7eadf;';
             widget.innerHTML = `
                 <div class="chat-top-bar" id="chat-drag-handle">
-                    <div class="chat-main-tabs">
-                        <button class="chat-main-tab active" data-main-tab="city" type="button">🏙️ Город</button>
-                        <button class="chat-main-tab" data-main-tab="mine" type="button">⛏️ Шахта</button>
-                        <button class="chat-main-tab" data-main-tab="dm" type="button">✉️ ЛС</button>
+                    <div class="chat-main-tabs" role="tablist">
+                        <button class="chat-main-tab active" data-tab="g" type="button">Общий</button>
+                        <button class="chat-main-tab" data-tab="tr" type="button">Торговля</button>
+                        <button class="chat-main-tab" data-tab="mn" type="button">Ремёсла</button>
+                        <button class="chat-main-tab" data-tab="gl" type="button">Гильдия</button>
+                        <button class="chat-main-tab" data-tab="dm" type="button">Личные</button>
                     </div>
                     <span class="chat-close" id="chat-close-btn" title="Закрыть">✖</span>
-                </div>
-                <div class="chat-sub-tabs" id="chat-sub-tabs">
-                    <button class="chat-sub-tab active" data-sub-tab="general" type="button">Общий</button>
-                    <button class="chat-sub-tab" data-sub-tab="trade" type="button">Торговля</button>
-                    <button class="chat-sub-tab" data-sub-tab="ach" type="button">Достижения</button>
                 </div>
                 <div class="chat-messages" id="chat-messages"></div>
                 <div class="chat-input-area">
@@ -197,28 +191,14 @@
                     // Ищем вкладки в документе PiP-окна, а не в this.widget:
                     // после пересоздания окна ссылка на виджет может быть устаревшей.
                     const tabDoc = this._pipDoc || (this.widget && this.widget.ownerDocument) || mainTab.ownerDocument;
-                    this.activeMainTab = mainTab.getAttribute('data-main-tab')
-                        || (mainTab.dataset && mainTab.dataset.tab) || 'city';
+                    const nextTab = mainTab.getAttribute('data-tab')
+                        || (mainTab.dataset && mainTab.dataset.tab) || 'g';
+                    // Неизвестный ключ не должен «терять» ленту — падаем на общий чат.
+                    this.activeTab = CHAT_TABS.indexOf(nextTab) !== -1 ? nextTab : 'g';
                     if (tabDoc) {
                         tabDoc.querySelectorAll('.chat-main-tab').forEach(t => t.classList.remove('active'));
                     }
                     mainTab.classList.add('active');
-                    this._syncTabs(tabDoc);
-                    this.updateInputState();
-                    this.renderMessages();
-                    return;
-                }
-
-                const subTab = target.closest('.chat-sub-tab');
-                if (subTab) {
-                    e.preventDefault();
-                    const tabDoc = this._pipDoc || (this.widget && this.widget.ownerDocument) || subTab.ownerDocument;
-                    this.activeSubTab = subTab.getAttribute('data-sub-tab')
-                        || (subTab.dataset && subTab.dataset.tab) || 'general';
-                    if (tabDoc) {
-                        tabDoc.querySelectorAll('.chat-sub-tab').forEach(t => t.classList.remove('active'));
-                    }
-                    subTab.classList.add('active');
                     this._syncTabs(tabDoc);
                     this.updateInputState();
                     this.renderMessages();
@@ -238,8 +218,8 @@
                 });
             }
 
-            // Восстанавливаем активные вкладки: DOM пересоздаётся при каждом открытии PiP,
-            // а состояние (город/шахта/ЛС, общий/торговля/достижения) хранится в полях.
+            // Восстанавливаем активную вкладку: DOM пересоздаётся при каждом открытии PiP,
+            // а состояние (g/tr/mn/gl/dm) хранится в Chat.activeTab.
             // Передаём сам виджет: он ещё не вставлен в документ, и querySelectorAll
             // по документу его вкладок не найдёт (по элементу — найдёт).
             this._syncTabs(widget);
@@ -390,8 +370,8 @@
 
             this.dmTarget = nick;
 
-            // Переключаем главную вкладку на ЛС
-            this.activeMainTab = 'dm';
+            // Переключаем вкладку на личные сообщения
+            this.activeTab = 'dm';
 
             // Виджет живёт только в PiP-окне: если оно закрыто — открываем.
             if (!this._pipRoot()) await this.popoutChat();
@@ -710,7 +690,7 @@
             const box = (this._pipDoc && this._pipDoc.querySelector('#chat-messages')) || this._pipEl('#chat-messages');
             if (!box) return;
 
-            // Подсветка вкладок всегда соответствует activeMainTab/activeSubTab:
+            // Подсветка вкладок всегда соответствует Chat.activeTab:
             // раньше active-класс мог накапливаться сразу на нескольких вкладках.
             this._syncTabs();
 
@@ -732,8 +712,8 @@
 
             box.innerHTML = '';
 
-            // Вкладка «✉️ ЛС»: либо открытый диалог, либо список всех диалогов
-            if (this.activeMainTab === 'dm') {
+            // Вкладка «Личные»: либо открытый диалог, либо список всех диалогов
+            if (this.activeTab === 'dm') {
                 if (this.dmTarget) {
                     const ownerDoc = box.ownerDocument || document;
 
@@ -782,7 +762,7 @@
             }
 
             // Заглушка, если игрок находится в городе (§ Задача 2 & 4)
-            if (this.activeMainTab === 'mine' && !this.isInMine()) {
+            if (this.activeTab === 'mn' && !this.isInMine()) {
                 box.innerHTML = `
                     <div style="color:#aaa; text-align:center; padding:35px 15px; font-style:italic; line-height:1.6;">
                         <span style="font-size:32px; display:block; margin-bottom:8px;">⛏️</span>
@@ -792,32 +772,33 @@
                 return;
             }
 
+            // ПАТЧ 11.6.4g: классификация сообщений по вкладкам — копия нативной
+            // логики (reference/LegionFrontSRC/lib/site-chat.js: tabOf):
+            //   • tb — готовый ярлык вкладки от сервера: 'gl' у гильдейских
+            //     сообщений, 'ev' у системных событий (заточки/достижения);
+            //   • rm/channel === 'mine' — сообщения шахты (в нативе тег rm: 'mine');
+            //   • k: 'tr' — торговля, k: 'dm' — личные;
+            //   • всё остальное — общий чат города.
+            const tabOf = (m) => m.tb || ((m.rm === 'mine' || m.channel === 'mine')
+                ? 'mn'
+                : m.k === 'tr' ? 'tr'
+                : m.k === 'dm' ? 'dm'
+                : 'g');
+
+            const tab = this.activeTab;
             const filtered = this.messages.filter(m => {
-                // ЛС отображаются отдельно — во вкладке «✉️ ЛС»
-                if (m.k === 'dm') return false;
-
-                const isMineMsg = m.channel === 'mine' || m.room === 'mine' || m.ch === 'mine';
-
-                // Вкладка «Шахта»
-                if (this.activeMainTab === 'mine') {
-                    return !m.isSystem && isMineMsg;
+                const t = tabOf(m);
+                if (tab === 'g') {
+                    // Общий: живые сообщения города без торговли и событий.
+                    return t === 'g' && !m.isSystem && !m.ev;
                 }
-
-                // Вкладки города (Общий / Торговля / Достижения)
-                if (isMineMsg) return false; // в городе сообщения шахты не показываем
-
-                if (this.activeSubTab === 'general') {
-                    // Общий: всё, что не торговля и не система
-                    return !m.isSystem && m.k !== 'tr';
-                }
-                if (this.activeSubTab === 'trade') {
-                    // Торговля: СТРОГО только серверный/локальный флаг 'tr'
-                    return !m.isSystem && m.k === 'tr';
-                }
-                if (this.activeSubTab === 'ach') {
-                    return m.isSystem;
-                }
-                return true;
+                // Торговля/Ремёсла: только живые сообщения этой вкладки.
+                if (tab === 'tr') return t === 'tr' && !m.isSystem;
+                if (tab === 'mn') return t === 'mn' && !m.isSystem;
+                // Гильдия: tb === 'gl' (системных сообщений в гильдии не бывает).
+                if (tab === 'gl') return t === 'gl';
+                // 'dm' отрисован отдельной ветвью выше и сюда не доходит.
+                return false;
             });
 
             const ownerDoc = box.ownerDocument || document;
@@ -938,8 +919,8 @@
             const rawText = input.value.trim();
             if (!rawText) return;
 
-            // Открыт диалог во вкладке «✉️ ЛС» — отправляем ЛС прямо из виджета
-            if (this.activeMainTab === 'dm' && this.dmTarget) {
+            // Открыт диалог во вкладке «Личные» — отправляем ЛС прямо из виджета
+            if (this.activeTab === 'dm' && this.dmTarget) {
                 // Сначала проверяем, не команда ли это /w: иначе в текст сообщения
                 // уйдёт «/w Ник привет» целиком, и собеседник получит команду как текст.
                 const dmCmd = rawText.match(/^\/(?:w|dm|whisper)\s+(?:"([^"]+)"|'([^']+)'|(\S+))(?:\s+(.*))?$/i);
@@ -962,12 +943,8 @@
                 return; // Выходим, чтобы не отправлять в общий чат
             }
 
-            if (this.activeTab === 'ach') {
-                this.showError('Вкладка достижений только для чтения');
-                return;
-            }
-            if (this.activeMainTab === 'dm') {
-                this.showError('Выберите диалог в списке «✉️ ЛС»');
+            if (this.activeTab === 'dm') {
+                this.showError('Выберите диалог в списке «Личные»');
                 return;
             }
             if (this.cooldownUntil && Date.now() < this.cooldownUntil) {
@@ -991,7 +968,7 @@
                     this.showError('Формат: /w Ник сообщение');
                     return;
                 }
-            } else if (this.activeMainTab === 'mine') {
+            } else if (this.activeTab === 'mn') {
                 if (!this.isInMine()) {
                     this.showError('Чат шахты доступен только в шахте');
                     return;
@@ -1007,7 +984,7 @@
                 author: this.myNick, 
                 text: dmMatch ? cleanText : rawText, 
                 to: toUser,
-                k: dmMatch ? 'dm' : (!isMine && this.activeSubTab === 'trade' ? 'tr' : undefined),
+                k: dmMatch ? 'dm' : (!isMine && this.activeTab === 'tr' ? 'tr' : undefined),
                 role: this.myRole, 
                 isSystem: false, 
                 id: null, 
@@ -1022,9 +999,11 @@
             // 3. ПРОГРЕВ СЕССИИ: если отправляем в город (или ЛС), находясь в шахте
             if (!isMine && this.isInMine()) {
                 try {
-                    // ВАЖНО: используем чистый fetch, так как Utils.fetchApi возьмет контекст ШАХТЫ,
-                    // и прогрев улетит не туда, дав 409 при отправке в город.
-                    await fetch('/api/city/enter', {
+                    // ВАЖНО: чистый fetch, а не Utils.fetchApi — тот возьмёт контекст
+                    // ШАХТЫ, и прогрев улетит не туда, дав 409 при отправке в город.
+                    // ПАТЧ 11.6.4h: адрес собираем через Utils.apiPath, иначе запрос
+                    // уходил в корень домена мимо /c/<channel>/ и получал 404.
+                    await fetch(Utils.apiPath('/api/city/enter'), {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         credentials: 'same-origin',
@@ -1038,73 +1017,93 @@
             try {
                 let res;
                 let data = null;
-                let nativeOk = null;
-                let lastError = null;
+
+                // ПАТЧ 11.6.4h: адрес всегда собираем через Utils.apiPath — он
+                // добавляет префикс /c/<channel>/. Голый fetch('/api/...') уходил
+                // в корень домена (play.multidonate.ru/api/...) и получал 404:
+                // переписывание путей делает window.fetch самой страницы, а из
+                // песочницы Tampermonkey запрос идёт мимо него.
+                let endpoint = '/api/chat/say';
+                let payload = {};
                 if (dmMatch) {
-                    const payload = { text: cleanText, to: toUser, k: 'dm' }; // k: 'dm' обязателен!
-
-                    // 1. Пытаемся использовать нативный контекст города (как в прошлой версии).
-                    // Контекст — объект страницы, в песочнице доступен только через G.
-                    const nativeCtx = G.__lgCityContext || G.LGCity;
-                    if (nativeCtx && typeof nativeCtx.api === 'function') {
-                        try {
-                            const nativeData = await nativeCtx.api('/api/city/say', payload);
-                            if (nativeData && typeof nativeData === 'object') {
-                                data = nativeData;
-                                nativeOk = nativeData.ok !== false;
-                            }
-                        } catch (err) {
-                            dbg('Native DM send failed, fallback to fetch:', err);
-                        }
-                    }
-
-                    // 2. Фолбэк: обычный fetch (как в прошлой версии)
-                    if (!data) {
-                        res = await fetch('/api/city/say', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            credentials: 'same-origin',
-                            body: JSON.stringify(payload)
-                        });
-                        data = await res.json().catch(() => null);
-                        if (!res.ok) {
-                            nativeOk = false;
-                        }
-                    }
-                } else if (isMine) {
-                    // Чат шахты — только c=, без apiPath / location.origin / credentials / cache
-                    res = await fetch(`/api/mine/chat/say?c=${encodeURIComponent(mineId)}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text: rawText })
-                    });
-                } else if (this.activeSubTab === 'trade') {
-                    // Торговля
-                    res = await fetch('/api/city/say', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text: rawText, k: 'tr' })
-                    });
+                    // ЛС — отдельный эндпоинт, тело { to, text }.
+                    endpoint = '/api/dm/say';
+                    payload = { to: toUser, text: cleanText };
+                } else if (this.activeTab === 'gl') {
+                    // Гильдия: ВАЖНО — поле 't', а не 'text'.
+                    endpoint = '/api/guilds/say';
+                    payload = { t: rawText };
+                } else if (this.activeTab === 'mn') {
+                    // Ремёсла/шахта: комнату сервер определяет по текущей сессии,
+                    // поэтому c= в теле и в URL не нужен.
+                    endpoint = '/api/chat/say';
+                    payload = { room: 'mine', text: rawText };
+                } else if (this.activeTab === 'tr') {
+                    // Торговля — общая комната города с флагом k: 'tr'.
+                    endpoint = '/api/chat/say';
+                    payload = { room: 'city', k: 'tr', text: rawText };
                 } else {
-                    // Общий чат
-                    res = await fetch('/api/city/say', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text: rawText })
-                    });
+                    // Общий чат города.
+                    endpoint = '/api/chat/say';
+                    payload = { room: 'city', text: rawText };
                 }
 
-                if (!data) {
+                res = await fetch(Utils.apiPath(endpoint), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(payload)
+                });
+                data = await res.json().catch(() => null);
+
+                // ПАТЧ 11.6.4h: фолбэк на старые адреса — если сервер не знает
+                // новый эндпоинт. Все адреса строго через Utils.apiPath, иначе они
+                // тоже улетали бы в корень домена. На rate_limited не ретраим,
+                // чтобы не получить двойной запрос.
+                const unknownEndpoint = !!res && (
+                    res.status === 404
+                    || (data && (data.error === 'not_found' || data.error === 'method_not_allowed'))
+                );
+                if (unknownEndpoint && dmMatch) {
+                    // Старый путь ЛС: комната города с флагом k: 'dm'.
+                    res = await fetch(Utils.apiPath('/api/city/say'), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ text: cleanText, to: toUser, k: 'dm' })
+                    });
+                    data = await res.json().catch(() => null);
+                } else if (unknownEndpoint && this.activeTab === 'gl') {
+                    // Для гильдии фолбэка нет: /api/guilds/say — единственный путь.
+                } else if (unknownEndpoint && isMine) {
+                    // Старый путь шахты: обязательный параметр c=.
+                    res = await fetch(Utils.apiPath(`/api/mine/chat/say?c=${encodeURIComponent(mineId)}`), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ text: rawText })
+                    });
+                    data = await res.json().catch(() => null);
+                } else if (unknownEndpoint) {
+                    // Старый путь города: общий чат либо торговля (k: 'tr').
+                    res = await fetch(Utils.apiPath('/api/city/say'), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify(this.activeTab === 'tr'
+                            ? { text: rawText, k: 'tr' }
+                            : { text: rawText })
+                    });
                     data = await res.json().catch(() => null);
                 }
 
-                const httpOk = nativeOk !== null ? nativeOk : !!(res && res.ok);
+                const httpOk = !!(res && res.ok);
                 if (!httpOk || (data && data.ok === false)) {
                     // откат
                     this.messages = this.messages.filter(m => m !== local);
                     input.value = rawText;
                     this.renderMessages();
-                    const errMsg = (data && (data.error || data.err)) || lastError || (res ? `HTTP ${res.status}` : 'Ошибка сети');
+                    const errMsg = (data && (data.error || data.err)) || (res ? `HTTP ${res.status}` : 'Ошибка сети');
                     this.showError(errMsg);
                     if ((res && res.status === 429) || /не так быстро/i.test(errMsg)) {
                         this.cooldownUntil = Date.now() + 5000;

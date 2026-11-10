@@ -2,7 +2,8 @@
     // 7.3 МОДУЛЬ: ЧАТ — сеть: перехватчики и живой поток
     // ============================================================
     // Вынесено из modules/chat.js (v11.6.0, этап 2 декомпозиции).
-    // Слой-миксин: перехват EventSource / WebSocket, живой поток /api/live,
+    // Слой-миксин: перехват EventSource / WebSocket, хуки нативной ленты
+    // LGChatOne (ПАТЧ 11.6.4f: свой поток /api/live больше не открываем),
     // наблюдение за сетевой активностью игры (PerformanceObserver) и разбор
     // входящих в общий Chat.handleIncoming().
     // 11.6.4b: перехват window.fetch удалён — античит шахты палит подмену
@@ -13,6 +14,13 @@
     // v11.6.0g-3: период поллинга «кто играет с аддоном» (ТЗ — раз в 30 с).
     // Один тик = POST /heartbeat + GET /users, окно онлайна на сервере 15 мин.
     const ADDON_USERS_POLL_MS = 30000;
+
+    // ПАТЧ 11.6.4f: период Keep-Alive нативного чата. LGChatOne.sync() отправляет
+    // POST /api/chat/watch {on:true} только при H.chat.open === true, а сервер
+    // стримит сообщения в SSE лишь по watch. Свой поток мы больше не держим,
+    // поэтому раз в 30 с возвращаем флаг открытия (Chat.startNativeChatWatch) —
+    // но только пока открыт наш вынесенный чат (ПАТЧ 11.6.4g).
+    const NATIVE_CHAT_KEEPALIVE_MS = 30000;
 
     // v11.6.1c: как часто спрашивать GET /latest-version (раз в час). Троттлинг
     // хранится в localStorage 'lgUpdateCheck', чтобы проверка не зависела от
@@ -30,25 +38,10 @@
     const ADDON_API_KEY = 'LGU-default-secret-key-change-me';
 
     const ChatNet = {
-        // id текущей шахты (обновляется из /api/mine/* и /api/live).
+        // id текущей шахты (обновляется из ленты LGChatOne и /api/mine/*).
+        // ПАТЧ 11.6.4f: своего потока /api/live больше нет — состояние поллинга
+        // и таймеры EventSource удалены вместе с startBackgroundLiveListener.
         currentMineId: 'home',
-        // Состояние живого потока /api/live.
-        _liveES: null,
-        _livePollTimer: null,
-        _liveRunning: false,
-        _liveConnecting: false,
-        _livePollDelay: 2500,
-        // TODO: REMOVE — пауза скрытой вкладки больше не используется:
-        // поллинг полностью останавливается и поднимается по visibilitychange.
-        _liveHiddenDelay: 5000,
-        // Обработчик visibilitychange, который перезапускает поллинг после
-        // возврата на вкладку. Ставится один раз в startBackgroundLiveListener().
-        _visibilityHandler: null,
-
-        _isLiveTabHidden() {
-            // Стелс-режим удалён: просто читаем нативный document.hidden.
-            return !!document.hidden;
-        },
 
         getChannelLogin() {
             try {
@@ -115,208 +108,71 @@
             return this.isInMine() ? 'mine' : 'city';
         },
 
-        async startBackgroundLiveListener() {
-            if (this.disabled || this._liveConnecting) return;
-
-            // Возврат на вкладку: поллинг останавливается при document.hidden
-            // (см. poll ниже), поэтому поток поднимаем заново по visibilitychange.
-            if (!this._visibilityHandler) {
-                this._visibilityHandler = () => {
-                    if (!document.hidden && !this._liveRunning) {
-                        this._livePollDelay = 2500;
-                        this.startBackgroundLiveListener();
-                    }
-                };
-                document.addEventListener('visibilitychange', this._visibilityHandler);
-            }
-
-            // Защита от дублирования: живой поток уже открыт или подключается.
-            if (this._liveES && (this._liveES.readyState === 0 || this._liveES.readyState === 1)) return;
-            // Уже идёт fetch-поллинг — второй цикл не запускаем.
-            if (this._liveRunning && !this._liveES && this._livePollTimer) return;
-
-            // Старое закрытое соединение закрываем перед созданием нового.
-            if (this._liveES) {
-                try { this._liveES.close(); } catch (e) {}
-                this._liveES = null;
-            }
-            this._liveRunning = true;
-            this._liveConnecting = true;
-
-            const sid = new URL(location.href).searchParams.get('sid');
-            const livePath = '/api/live' + (sid ? `?sid=${encodeURIComponent(sid)}` : '');
-            // EventSource должен подключаться к /api/live без префикса канала:
-            // Utils.apiPath() добавляет /c/<канал>/ и ломает поток.
-            const url = livePath;
-
-            const startPollingFallback = () => {
-                if (!this._liveRunning || this._livePollTimer) return;
-                this._liveConnecting = false; // EventSource не создаётся — уходим в поллинг
-                dbg('Starting live fetch polling fallback...');
-                const poll = async () => {
-                    if (!this._liveRunning) return;
-                    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-                    const timeoutId = controller ? setTimeout(() => controller.abort(), 3000) : null;
-                    let hasPayload = false;
-                    try {
-                        const curSid = new URL(location.href).searchParams.get('sid');
-                        // Поллинг идёт на тот же чистый /api/live, что и EventSource (без /c/<канал>/)
-                        const pollUrl = '/api/live' + (curSid ? `?sid=${encodeURIComponent(curSid)}` : '');
-                        const res = await fetch(pollUrl, {
-                            signal: controller ? controller.signal : undefined,
-                            credentials: 'same-origin',
-                            cache: 'no-store'
-                        });
-                        const text = await res.text();
-                        let data = null;
-                        try { data = JSON.parse(text); } catch (e) {}
-
-                        // Если пришел поток SSE строками "data: {...}"
-                        if (!data && text && text.includes('data:')) {
-                            hasPayload = true;
-                            const lines = text.split('\n');
-                            for (const line of lines) {
-                                if (line.startsWith('data:')) {
-                                    try {
-                                        const lineData = JSON.parse(line.slice(5).trim());
-                                        const lineLoc = this.resolveLiveChannel(lineData);
-                                        Utils.updateOnlinePlayers(lineData, lineLoc);
-                                        Utils.processIncomingDMs(lineData);
-                                        const chats = Utils.extractChatDeep(lineData);
-                                        chats.forEach(m => {
-                                            const parsed = Utils.extractChatFields(m);
-                                            if (parsed.text) {
-                                                this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, lineLoc, parsed.k, parsed.to, parsed.rank);
-                                            }
-                                        });
-                                    } catch (err) {}
-                                }
-                            }
-                        } else if (data) {
-                            hasPayload = true;
-                            const pollLoc = this.resolveLiveChannel(data);
-                            Utils.updateOnlinePlayers(data, pollLoc);
-                            Utils.processIncomingDMs(data);
-                            if (data.c) this.currentMineId = data.c;
-                            const chats = Utils.extractChatDeep(data);
-                            if (chats.length > 0) {
-                                chats.forEach(m => {
-                                    const parsed = Utils.extractChatFields(m);
-                                    if (parsed.text) {
-                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, pollLoc, parsed.k, parsed.to, parsed.rank);
-                                    }
-                                });
-                            }
-                        }
-                    } catch (e) {
-                        dbg('Live poll error / abort:', e);
-                    } finally {
-                        // Бэкофф: пустые ответы не должны долбить /api/live каждые 2.5 с.
-                        this._livePollDelay = hasPayload
-                            ? 2500
-                            : Math.min(30000, Math.max(2500, (this._livePollDelay || 2500) * 2));
-                        if (timeoutId) clearTimeout(timeoutId);
-                    }
-                    if (!this._liveRunning) return;
-                    // Не поллим, если вкладка скрыта и PiP не открыт.
-                    const pipOpen = !!(this._popoutWin && !this._popoutWin.closed);
-                    if (this._isLiveTabHidden() && !pipOpen) {
-                        // Ждём разворота вкладки. Слушатель visibilitychange перезапустит poll,
-                        // но только если _liveRunning снят — иначе startBackgroundLiveListener()
-                        // посчитает поток уже запущенным и выйдет по гарду.
-                        this._liveRunning = false;
-                        this._livePollTimer = null;
-                        return;
-                    }
-                    this._livePollTimer = setTimeout(poll, this._livePollDelay);
-                };
-                poll();
-            };
-
+        /**
+         * ПАТЧ 11.6.4f: приём ленты нативного чата игры.
+         *
+         * Свой EventSource('/api/live') больше НЕ открываем: клиент Legion сам
+         * стримит чат, а LGChatOne.onFeed(room, data) / enterFeed(room, r)
+         * получают уже разобранные пакеты комнаты (см. reference/.../site-chatone.js).
+         * Хуки на эти колбэки ставит Chat.hookNativeChat(), а сюда приходит тот же
+         * формат, что раньше разбирался из SSE: { chat, chatDel, chatMe, c }.
+         *
+         * @param {string}  room      'city' | 'mine'
+         * @param {object}  data      пакет ленты (onFeed) или истории (enterFeed)
+         * @param {boolean} isHistory true для enterFeed — историю не считаем непрочитанной
+         */
+        ingestGameFeed(room, data, isHistory = false) {
+            if (!data) return;
+            const loc = room === 'mine' ? 'mine' : 'city';
             try {
-                if (typeof EventSource !== 'undefined') {
-                    const es = new EventSource(url, { withCredentials: true, _customLive: true });
-                    this._liveES = es;
-                    this._liveConnecting = false;
+                if (data.c != null) this.currentMineId = data.c;
 
-                    es.onopen = () => console.log('Live Connected!');
+                // Игроков и входящие ЛС разбираем всегда — на них держатся
+                // «Друзья» и тосты ЛС, даже при выключенном перехвате чата.
+                Utils.updateOnlinePlayers(data, loc);
+                Utils.processIncomingDMs(data);
 
-                    const handleData = (raw) => {
-                        try {
-                            let data = raw;
-                            if (typeof data === 'string') {
-                                try { data = JSON.parse(data); } catch(e) {}
-                            }
-                            const esLoc = this.resolveLiveChannel(data);
-                            Utils.updateOnlinePlayers(data, esLoc);
-                            Utils.processIncomingDMs(data);
-                            if (data && data.c) this.currentMineId = data.c;
-                            const chats = Utils.extractChatDeep(data);
-                            if (chats.length > 0) {
-                                chats.forEach(m => {
-                                    const parsed = Utils.extractChatFields(m);
-                                    if (parsed.text) {
-                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, esLoc, parsed.k, parsed.to, parsed.rank);
-                                    }
-                                });
-                            }
-                        } catch (err) {
-                            dbg('Live ES data error:', err);
-                        }
-                    };
+                if (this.disabled) return;
 
-                    es.onmessage = (e) => handleData(e.data);
-                    // 'message' обрабатывается onmessage выше — второй раз не вешаем
-                    ['chat', 'mine', 'live', 'event', 'update'].forEach(ev => {
-                        try { es.addEventListener(ev, (e) => handleData(e.data)); } catch(e) {}
-                    });
-
-                    es.onerror = (e) => {
-                        dbg('Live EventSource error, switching to fetch polling:', e);
-                        try { es.close(); } catch(err) {}
-                        this._liveES = null;
-
-                        // Сбрасываем TTL для всех sse-записей (делаем их «протухшими»)
-                        if (window.__lgOnlinePlayers) {
-                            const now = Date.now();
-                            for (const [nick, info] of window.__lgOnlinePlayers.entries()) {
-                                if (info && info.src === 'sse') {
-                                    // Сдвигаем timestamp в прошлое — они больше не считаются свежими
-                                    info.ts = now - 200000; // больше TTL_CITY (180000)
-                                }
-                            }
-                        }
-
-                        startPollingFallback();
-                    };
-                } else {
-                    startPollingFallback();
-                }
-            } catch (e) {
-                dbg('Live EventSource init failed:', e);
-                this._liveConnecting = false;
-                startPollingFallback();
+                // data.chat — массив сообщений комнаты: в шахте игра помечает их
+                // rm: 'mine' и префиксом id 'm:', остальные поля те же, что
+                // понимает Utils.extractChatFields() (l/n — автор, t — текст, c — класс).
+                const list = Array.isArray(data.chat) ? data.chat : [];
+                list.forEach((m) => {
+                    const parsed = Utils.extractChatFields(m);
+                    if (!parsed.text) return;
+                    const ch = parsed.channel || loc;
+                    this.handleIncoming(
+                        parsed.author || 'Игрок', parsed.text, !!isHistory,
+                        parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw,
+                        ch, parsed.k, parsed.to, parsed.rank
+                    );
+                });
+            } catch (err) {
+                dbg('[CHAT] ingestGameFeed error:', err);
             }
         },
 
+        /**
+         * @deprecated ПАТЧ 11.6.4f: свой EventSource и поллинг /api/live удалены.
+         *
+         * Имя сохранено как точка совместимости для main.js, chat-pip.js и
+         * Chat.setDisabled(): раньше метод поднимал фоновый поток, теперь он
+         * идемпотентно вешает хуки на нативную ленту и включает Keep-Alive.
+         */
+        startBackgroundLiveListener() {
+            if (this.disabled) return;
+            this.hookNativeChat();
+            this.startNativeChatWatch();
+        },
+
+        /**
+         * @deprecated ПАТЧ 11.6.4f: полная остановка перехвата (выключение чата в
+         * настройках, restart скрипта). Снимает Keep-Alive и хуки, чтобы после
+         * перезапуска на G.LGChatOne не остался колбэк в мёртвый инстанс Chat.
+         */
         stopBackgroundLiveListener() {
-            this._liveRunning = false;
-            this._liveConnecting = false;
-            this._livePollDelay = 2500;
-            // Снимаем слушатель разворота вкладки: при повторном старте он
-            // будет поставлен заново (startBackgroundLiveListener).
-            if (this._visibilityHandler) {
-                document.removeEventListener('visibilitychange', this._visibilityHandler);
-                this._visibilityHandler = null;
-            }
-            if (this._liveES) {
-                try { this._liveES.close(); } catch(e) {}
-                this._liveES = null;
-            }
-            if (this._livePollTimer) {
-                clearTimeout(this._livePollTimer);
-                this._livePollTimer = null;
-            }
+            this.stopNativeChatWatch();
         },
 
         interceptEventSource() {
@@ -486,19 +342,20 @@
          *
          * Что даёт без fetch-хука:
          *   • игра сходила в /api/me         -> наш syncMe() (ник и класс);
-         *   • игра общается с городом/шахтой -> живой поток обязан быть поднят
-         *     (если свой EventSource отвалился и поллинг не крутится — поднимаем).
+         *   • игра общается с городом/шахтой -> добираем хуки на LGChatOne
+         *     (модуль site-chatone.js грузится лениво, на init() его могло не быть).
          *
          * Тела чужих ответов прочитать нельзя (PerformanceObserver отдаёт только
-         * метаданные). Данные чата приходят своим EventSource на /api/live,
-         * история города — POST /api/city/enter в loadHistory(), топ шахты и
-         * «сколько народу в шахте» — SSE-событием mine через
-         * Utils.updateOnlinePlayers(). Отдельный перехват ответов не нужен.
+         * метаданные). Данные чата берём из колбэков нативного LGChatOne
+         * (Chat.hookNativeChat -> ChatNet.ingestGameFeed), история города —
+         * POST /api/city/enter в loadHistory(), топ шахты и «сколько народу в
+         * шахте» — SSE-событием mine через Utils.updateOnlinePlayers().
+         * Отдельный перехват ответов не нужен.
          */
         startNetworkObserver() {
             if (this._perfObserver) return;
             if (typeof PerformanceObserver !== 'function') {
-                // Старые браузеры: чат живёт на своём EventSource, деградация мягкая.
+                // Старые браузеры: остаёмся на хуках LGChatOne, деградация мягкая.
                 dbg('[CHAT] PerformanceObserver не поддерживается — работаем без наблюдателя');
                 return;
             }
@@ -550,14 +407,16 @@
         },
 
         /**
-         * Игра общается с городом/шахтой — игрок активен, живой поток ему нужен.
-         * Если свой EventSource отвалился и поллинг не крутится,
-         * startBackgroundLiveListener() поднимет поток заново (внутри гарды).
+         * Игра общается с городом/шахтой — значит, LGChatOne уже жив: модуль
+         * site-chatone.js подгружается лениво (oneLoad() в app.js), поэтому на
+         * момент Chat.init() его могло ещё не быть.
+         *
+         * ПАТЧ 11.6.4f: своего EventSource больше нет, так что здесь только
+         * добираем хуки на нативную ленту (метод идемпотентен).
          */
         _onGameChatTraffic() {
             if (this.disabled) return;
-            if (this._liveES || this._liveRunning) return;
-            this.startBackgroundLiveListener();
+            this.hookNativeChat();
         },
 
         /* ---------------------------------------------------------- */

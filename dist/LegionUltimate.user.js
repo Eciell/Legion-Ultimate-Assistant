@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Legion: Ultimate Assistant (Chat, Auction, Pocket City)
 // @namespace    http://tampermonkey.net/
-// @version      11.6.3
+// @version      11.6.4
 // @description  QoL-аддон для Легиона: Умный чат, Сканер аукциона, Разведка, Планировщик, Карманный город. Без авто-копания.
 // @connect      7tv.io
 // @connect      cdn.7tv.app
@@ -1501,8 +1501,12 @@
         .${DOM_IDS.chatWidget}, .chat-widget { position: fixed; bottom: 80px; right: 20px; width: 320px; height: 400px; min-width: 320px; min-height: 400px; max-width: 95vw; max-height: 95vh; resize: both; background: #1d1620; border: 2px solid #caa55c; border-radius: 12px; display: flex; flex-direction: column; z-index: 10000; box-shadow: 0 10px 30px rgba(0,0,0,0.8); overflow: hidden; transition: transform 0.2s, opacity 0.2s; transform: translateY(20px); opacity: 0; pointer-events: none; }
         .${DOM_IDS.chatWidget}.open, .chat-widget.open { transform: translateY(0); opacity: 1; pointer-events: auto; }
         .chat-top-bar, .chat-header { background: #2a2030; padding: 10px 12px; font-weight: bold; color: #ffcf6a; display: flex; justify-content: space-between; align-items: center; gap: 8px; overflow: hidden; border-bottom: 1px solid #444; cursor: move; user-select: none; touch-action: none; box-sizing: border-box; flex-shrink: 0; }
-        .chat-main-tabs, .chat-tabs { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
-        .chat-main-tab, .chat-tab { background: #1d1620; border: 1px solid #444; color: #aaa; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 11px; white-space: nowrap; font-weight: bold; user-select: none; pointer-events: auto; }
+        /* ПАТЧ 11.6.4g: вкладок стало пять (Общий/Торговля/Ремёсла/Гильдия/
+           Личные), а ширина PiP-окна всего 350px. Поэтому горизонтальный
+           padding урезан до 6px, шрифт — 11px, а ряд вкладок переносится
+           (flex-wrap), если не влезает в одну строку рядом с кнопкой «✖». */
+        .chat-main-tabs, .chat-tabs { display: flex; flex-wrap: wrap; gap: 3px; flex: 1; min-width: 0; }
+        .chat-main-tab, .chat-tab { background: #1d1620; border: 1px solid #444; color: #aaa; padding: 3px 6px; border-radius: 6px; cursor: pointer; font-size: 11px; white-space: nowrap; font-weight: bold; user-select: none; pointer-events: auto; }
         .chat-main-tab.active, .chat-tab.active { background: #caa55c; color: #1d1620; border-color: #caa55c; font-weight: bold; }
         .chat-sub-tabs { display: flex; gap: 6px; padding: 6px 12px; background: #231929; border-bottom: 1px solid #3a2b42; flex-shrink: 0; }
         .chat-sub-tab { background: #1d1620; border: 1px solid #444; color: #bbb; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; white-space: nowrap; user-select: none; pointer-events: auto; }
@@ -7133,7 +7137,7 @@ const Players = {
             // Перерисовываем вкладку «✉️ ЛС», если она активна.
             // (Список «Друзья» удалён в 11.5.4: в игре появились нативные друзья.)
             try {
-                if (typeof Chat !== 'undefined' && Chat.activeMainTab === 'dm' && typeof Chat.renderMessages === 'function') {
+                if (typeof Chat !== 'undefined' && Chat.activeTab === 'dm' && typeof Chat.renderMessages === 'function') {
                     Chat.renderMessages();
                 }
             } catch (e) {}
@@ -7434,7 +7438,9 @@ const Players = {
                 // ВАЖНО: чистый fetch, а не Utils.fetchApi: тот может уйти через
                 // нативный контекст игры (G.__lgAucContext / G.X) мимо сессии
                 // города, прогрев тогда не сработает и отправка даст 409.
-                const warmRes = await fetch('/api/city/enter', {
+                // ПАТЧ 11.6.4h: сам адрес обязательно через Utils.apiPath —
+                // иначе запрос уходит в корень домена мимо /c/<channel>/ (404).
+                const warmRes = await fetch(Utils.apiPath('/api/city/enter'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'same-origin',
@@ -7468,8 +7474,9 @@ const Players = {
                 }
 
                 // 2. Фолбэк: обычный fetch (как в прошлой версии)
+                // ПАТЧ 11.6.4h: адрес через Utils.apiPath, иначе улетал в корень.
                 if (!data) {
-                    const res = await fetch('/api/city/say', {
+                    const res = await fetch(Utils.apiPath('/api/city/say'), {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         credentials: 'same-origin',
@@ -7578,47 +7585,35 @@ const Players = {
             historyBox.scrollTop = historyBox.scrollHeight;
         },
 
+        /**
+         * Открыть ЛС с игроком (ПАТЧ 11.6.4f).
+         *
+         * Раньше здесь кликали по нативным узлам .cy-chat (data-dm + вкладка
+         * «Личные»), но нативный чат теперь скрыт CSS-ом и живёт в DOM только
+         * ради LGChatOne.place()/dock(). Идём через собственный Chat.openDM():
+         * он открывает PiP и переключает вкладку «✉️ ЛС».
+         *
+         * text — необязательный черновик. openDM() асинхронный (может создать
+         * PiP-окно), поэтому поле ввода ищем после его завершения.
+         */
         async openWhisperWith(nick, text = '') {
             if (!nick) return;
+            if (typeof Chat === 'undefined' || typeof Chat.openDM !== 'function') return;
 
-            // Ищем чат, который НЕ находится внутри контейнера шахты (.mn)
-            let chatBox = null;
-            const allChats = document.querySelectorAll('.cy-chat');
-            for (const box of allChats) {
-                if (!box.closest('.mn')) { // Если это не чат шахты
-                    chatBox = box;
-                    break;
-                }
-            }
-            if (!chatBox) return; // Если городского чата нет на странице, ничего не делаем
-
-            // Нативный триггер игры: .cy-chat → временный [data-dm] → вкладка ЛС
             try {
-                const toggleBtn = chatBox.querySelector('.cy-chat-t');
-                if (toggleBtn && (toggleBtn.getAttribute('aria-expanded') === 'false' || chatBox.querySelector('.cy-chat-b')?.hidden)) {
-                    toggleBtn.click();
-                }
+                await Chat.openDM(nick);
 
-                const list = chatBox.querySelector('.cy-chat-l');
-                if (list) {
-                    const dummy = document.createElement('span');
-                    dummy.setAttribute('data-dm', nick);
-                    list.appendChild(dummy);
-                    dummy.click();
-                    dummy.remove();
-                }
-
-                const dmTab = chatBox.querySelector('[data-tab="dm"]');
-                if (dmTab) dmTab.click();
-
-                // Текст вставляем только в инпут найденного (городского) чата
-                const inp = chatBox.querySelector('.cy-chat input') || chatBox.querySelector('input');
+                if (!text) return;
+                const pipDoc = Chat._pipDoc;
+                const inp = pipDoc && typeof pipDoc.getElementById === 'function'
+                    ? pipDoc.getElementById('chat-input')
+                    : null;
                 if (inp) {
-                    if (text) inp.value = text;
+                    inp.value = text;
                     inp.focus();
                 }
             } catch (e) {
-                dbg('openWhisperWith native trigger failed:', e);
+                dbg('openWhisperWith failed:', e);
             }
         },
 
@@ -10734,7 +10729,8 @@ const Players = {
     // 7.3 МОДУЛЬ: ЧАТ — сеть: перехватчики и живой поток
     // ============================================================
     // Вынесено из modules/chat.js (v11.6.0, этап 2 декомпозиции).
-    // Слой-миксин: перехват EventSource / WebSocket, живой поток /api/live,
+    // Слой-миксин: перехват EventSource / WebSocket, хуки нативной ленты
+    // LGChatOne (ПАТЧ 11.6.4f: свой поток /api/live больше не открываем),
     // наблюдение за сетевой активностью игры (PerformanceObserver) и разбор
     // входящих в общий Chat.handleIncoming().
     // 11.6.4b: перехват window.fetch удалён — античит шахты палит подмену
@@ -10745,6 +10741,13 @@ const Players = {
     // v11.6.0g-3: период поллинга «кто играет с аддоном» (ТЗ — раз в 30 с).
     // Один тик = POST /heartbeat + GET /users, окно онлайна на сервере 15 мин.
     const ADDON_USERS_POLL_MS = 30000;
+
+    // ПАТЧ 11.6.4f: период Keep-Alive нативного чата. LGChatOne.sync() отправляет
+    // POST /api/chat/watch {on:true} только при H.chat.open === true, а сервер
+    // стримит сообщения в SSE лишь по watch. Свой поток мы больше не держим,
+    // поэтому раз в 30 с возвращаем флаг открытия (Chat.startNativeChatWatch) —
+    // но только пока открыт наш вынесенный чат (ПАТЧ 11.6.4g).
+    const NATIVE_CHAT_KEEPALIVE_MS = 30000;
 
     // v11.6.1c: как часто спрашивать GET /latest-version (раз в час). Троттлинг
     // хранится в localStorage 'lgUpdateCheck', чтобы проверка не зависела от
@@ -10762,25 +10765,10 @@ const Players = {
     const ADDON_API_KEY = 'LGU-default-secret-key-change-me';
 
     const ChatNet = {
-        // id текущей шахты (обновляется из /api/mine/* и /api/live).
+        // id текущей шахты (обновляется из ленты LGChatOne и /api/mine/*).
+        // ПАТЧ 11.6.4f: своего потока /api/live больше нет — состояние поллинга
+        // и таймеры EventSource удалены вместе с startBackgroundLiveListener.
         currentMineId: 'home',
-        // Состояние живого потока /api/live.
-        _liveES: null,
-        _livePollTimer: null,
-        _liveRunning: false,
-        _liveConnecting: false,
-        _livePollDelay: 2500,
-        // TODO: REMOVE — пауза скрытой вкладки больше не используется:
-        // поллинг полностью останавливается и поднимается по visibilitychange.
-        _liveHiddenDelay: 5000,
-        // Обработчик visibilitychange, который перезапускает поллинг после
-        // возврата на вкладку. Ставится один раз в startBackgroundLiveListener().
-        _visibilityHandler: null,
-
-        _isLiveTabHidden() {
-            // Стелс-режим удалён: просто читаем нативный document.hidden.
-            return !!document.hidden;
-        },
 
         getChannelLogin() {
             try {
@@ -10847,208 +10835,71 @@ const Players = {
             return this.isInMine() ? 'mine' : 'city';
         },
 
-        async startBackgroundLiveListener() {
-            if (this.disabled || this._liveConnecting) return;
-
-            // Возврат на вкладку: поллинг останавливается при document.hidden
-            // (см. poll ниже), поэтому поток поднимаем заново по visibilitychange.
-            if (!this._visibilityHandler) {
-                this._visibilityHandler = () => {
-                    if (!document.hidden && !this._liveRunning) {
-                        this._livePollDelay = 2500;
-                        this.startBackgroundLiveListener();
-                    }
-                };
-                document.addEventListener('visibilitychange', this._visibilityHandler);
-            }
-
-            // Защита от дублирования: живой поток уже открыт или подключается.
-            if (this._liveES && (this._liveES.readyState === 0 || this._liveES.readyState === 1)) return;
-            // Уже идёт fetch-поллинг — второй цикл не запускаем.
-            if (this._liveRunning && !this._liveES && this._livePollTimer) return;
-
-            // Старое закрытое соединение закрываем перед созданием нового.
-            if (this._liveES) {
-                try { this._liveES.close(); } catch (e) {}
-                this._liveES = null;
-            }
-            this._liveRunning = true;
-            this._liveConnecting = true;
-
-            const sid = new URL(location.href).searchParams.get('sid');
-            const livePath = '/api/live' + (sid ? `?sid=${encodeURIComponent(sid)}` : '');
-            // EventSource должен подключаться к /api/live без префикса канала:
-            // Utils.apiPath() добавляет /c/<канал>/ и ломает поток.
-            const url = livePath;
-
-            const startPollingFallback = () => {
-                if (!this._liveRunning || this._livePollTimer) return;
-                this._liveConnecting = false; // EventSource не создаётся — уходим в поллинг
-                dbg('Starting live fetch polling fallback...');
-                const poll = async () => {
-                    if (!this._liveRunning) return;
-                    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-                    const timeoutId = controller ? setTimeout(() => controller.abort(), 3000) : null;
-                    let hasPayload = false;
-                    try {
-                        const curSid = new URL(location.href).searchParams.get('sid');
-                        // Поллинг идёт на тот же чистый /api/live, что и EventSource (без /c/<канал>/)
-                        const pollUrl = '/api/live' + (curSid ? `?sid=${encodeURIComponent(curSid)}` : '');
-                        const res = await fetch(pollUrl, {
-                            signal: controller ? controller.signal : undefined,
-                            credentials: 'same-origin',
-                            cache: 'no-store'
-                        });
-                        const text = await res.text();
-                        let data = null;
-                        try { data = JSON.parse(text); } catch (e) {}
-
-                        // Если пришел поток SSE строками "data: {...}"
-                        if (!data && text && text.includes('data:')) {
-                            hasPayload = true;
-                            const lines = text.split('\n');
-                            for (const line of lines) {
-                                if (line.startsWith('data:')) {
-                                    try {
-                                        const lineData = JSON.parse(line.slice(5).trim());
-                                        const lineLoc = this.resolveLiveChannel(lineData);
-                                        Utils.updateOnlinePlayers(lineData, lineLoc);
-                                        Utils.processIncomingDMs(lineData);
-                                        const chats = Utils.extractChatDeep(lineData);
-                                        chats.forEach(m => {
-                                            const parsed = Utils.extractChatFields(m);
-                                            if (parsed.text) {
-                                                this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, lineLoc, parsed.k, parsed.to, parsed.rank);
-                                            }
-                                        });
-                                    } catch (err) {}
-                                }
-                            }
-                        } else if (data) {
-                            hasPayload = true;
-                            const pollLoc = this.resolveLiveChannel(data);
-                            Utils.updateOnlinePlayers(data, pollLoc);
-                            Utils.processIncomingDMs(data);
-                            if (data.c) this.currentMineId = data.c;
-                            const chats = Utils.extractChatDeep(data);
-                            if (chats.length > 0) {
-                                chats.forEach(m => {
-                                    const parsed = Utils.extractChatFields(m);
-                                    if (parsed.text) {
-                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, pollLoc, parsed.k, parsed.to, parsed.rank);
-                                    }
-                                });
-                            }
-                        }
-                    } catch (e) {
-                        dbg('Live poll error / abort:', e);
-                    } finally {
-                        // Бэкофф: пустые ответы не должны долбить /api/live каждые 2.5 с.
-                        this._livePollDelay = hasPayload
-                            ? 2500
-                            : Math.min(30000, Math.max(2500, (this._livePollDelay || 2500) * 2));
-                        if (timeoutId) clearTimeout(timeoutId);
-                    }
-                    if (!this._liveRunning) return;
-                    // Не поллим, если вкладка скрыта и PiP не открыт.
-                    const pipOpen = !!(this._popoutWin && !this._popoutWin.closed);
-                    if (this._isLiveTabHidden() && !pipOpen) {
-                        // Ждём разворота вкладки. Слушатель visibilitychange перезапустит poll,
-                        // но только если _liveRunning снят — иначе startBackgroundLiveListener()
-                        // посчитает поток уже запущенным и выйдет по гарду.
-                        this._liveRunning = false;
-                        this._livePollTimer = null;
-                        return;
-                    }
-                    this._livePollTimer = setTimeout(poll, this._livePollDelay);
-                };
-                poll();
-            };
-
+        /**
+         * ПАТЧ 11.6.4f: приём ленты нативного чата игры.
+         *
+         * Свой EventSource('/api/live') больше НЕ открываем: клиент Legion сам
+         * стримит чат, а LGChatOne.onFeed(room, data) / enterFeed(room, r)
+         * получают уже разобранные пакеты комнаты (см. reference/.../site-chatone.js).
+         * Хуки на эти колбэки ставит Chat.hookNativeChat(), а сюда приходит тот же
+         * формат, что раньше разбирался из SSE: { chat, chatDel, chatMe, c }.
+         *
+         * @param {string}  room      'city' | 'mine'
+         * @param {object}  data      пакет ленты (onFeed) или истории (enterFeed)
+         * @param {boolean} isHistory true для enterFeed — историю не считаем непрочитанной
+         */
+        ingestGameFeed(room, data, isHistory = false) {
+            if (!data) return;
+            const loc = room === 'mine' ? 'mine' : 'city';
             try {
-                if (typeof EventSource !== 'undefined') {
-                    const es = new EventSource(url, { withCredentials: true, _customLive: true });
-                    this._liveES = es;
-                    this._liveConnecting = false;
+                if (data.c != null) this.currentMineId = data.c;
 
-                    es.onopen = () => console.log('Live Connected!');
+                // Игроков и входящие ЛС разбираем всегда — на них держатся
+                // «Друзья» и тосты ЛС, даже при выключенном перехвате чата.
+                Utils.updateOnlinePlayers(data, loc);
+                Utils.processIncomingDMs(data);
 
-                    const handleData = (raw) => {
-                        try {
-                            let data = raw;
-                            if (typeof data === 'string') {
-                                try { data = JSON.parse(data); } catch(e) {}
-                            }
-                            const esLoc = this.resolveLiveChannel(data);
-                            Utils.updateOnlinePlayers(data, esLoc);
-                            Utils.processIncomingDMs(data);
-                            if (data && data.c) this.currentMineId = data.c;
-                            const chats = Utils.extractChatDeep(data);
-                            if (chats.length > 0) {
-                                chats.forEach(m => {
-                                    const parsed = Utils.extractChatFields(m);
-                                    if (parsed.text) {
-                                        this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, esLoc, parsed.k, parsed.to, parsed.rank);
-                                    }
-                                });
-                            }
-                        } catch (err) {
-                            dbg('Live ES data error:', err);
-                        }
-                    };
+                if (this.disabled) return;
 
-                    es.onmessage = (e) => handleData(e.data);
-                    // 'message' обрабатывается onmessage выше — второй раз не вешаем
-                    ['chat', 'mine', 'live', 'event', 'update'].forEach(ev => {
-                        try { es.addEventListener(ev, (e) => handleData(e.data)); } catch(e) {}
-                    });
-
-                    es.onerror = (e) => {
-                        dbg('Live EventSource error, switching to fetch polling:', e);
-                        try { es.close(); } catch(err) {}
-                        this._liveES = null;
-
-                        // Сбрасываем TTL для всех sse-записей (делаем их «протухшими»)
-                        if (window.__lgOnlinePlayers) {
-                            const now = Date.now();
-                            for (const [nick, info] of window.__lgOnlinePlayers.entries()) {
-                                if (info && info.src === 'sse') {
-                                    // Сдвигаем timestamp в прошлое — они больше не считаются свежими
-                                    info.ts = now - 200000; // больше TTL_CITY (180000)
-                                }
-                            }
-                        }
-
-                        startPollingFallback();
-                    };
-                } else {
-                    startPollingFallback();
-                }
-            } catch (e) {
-                dbg('Live EventSource init failed:', e);
-                this._liveConnecting = false;
-                startPollingFallback();
+                // data.chat — массив сообщений комнаты: в шахте игра помечает их
+                // rm: 'mine' и префиксом id 'm:', остальные поля те же, что
+                // понимает Utils.extractChatFields() (l/n — автор, t — текст, c — класс).
+                const list = Array.isArray(data.chat) ? data.chat : [];
+                list.forEach((m) => {
+                    const parsed = Utils.extractChatFields(m);
+                    if (!parsed.text) return;
+                    const ch = parsed.channel || loc;
+                    this.handleIncoming(
+                        parsed.author || 'Игрок', parsed.text, !!isHistory,
+                        parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw,
+                        ch, parsed.k, parsed.to, parsed.rank
+                    );
+                });
+            } catch (err) {
+                dbg('[CHAT] ingestGameFeed error:', err);
             }
         },
 
+        /**
+         * @deprecated ПАТЧ 11.6.4f: свой EventSource и поллинг /api/live удалены.
+         *
+         * Имя сохранено как точка совместимости для main.js, chat-pip.js и
+         * Chat.setDisabled(): раньше метод поднимал фоновый поток, теперь он
+         * идемпотентно вешает хуки на нативную ленту и включает Keep-Alive.
+         */
+        startBackgroundLiveListener() {
+            if (this.disabled) return;
+            this.hookNativeChat();
+            this.startNativeChatWatch();
+        },
+
+        /**
+         * @deprecated ПАТЧ 11.6.4f: полная остановка перехвата (выключение чата в
+         * настройках, restart скрипта). Снимает Keep-Alive и хуки, чтобы после
+         * перезапуска на G.LGChatOne не остался колбэк в мёртвый инстанс Chat.
+         */
         stopBackgroundLiveListener() {
-            this._liveRunning = false;
-            this._liveConnecting = false;
-            this._livePollDelay = 2500;
-            // Снимаем слушатель разворота вкладки: при повторном старте он
-            // будет поставлен заново (startBackgroundLiveListener).
-            if (this._visibilityHandler) {
-                document.removeEventListener('visibilitychange', this._visibilityHandler);
-                this._visibilityHandler = null;
-            }
-            if (this._liveES) {
-                try { this._liveES.close(); } catch(e) {}
-                this._liveES = null;
-            }
-            if (this._livePollTimer) {
-                clearTimeout(this._livePollTimer);
-                this._livePollTimer = null;
-            }
+            this.stopNativeChatWatch();
         },
 
         interceptEventSource() {
@@ -11218,19 +11069,20 @@ const Players = {
          *
          * Что даёт без fetch-хука:
          *   • игра сходила в /api/me         -> наш syncMe() (ник и класс);
-         *   • игра общается с городом/шахтой -> живой поток обязан быть поднят
-         *     (если свой EventSource отвалился и поллинг не крутится — поднимаем).
+         *   • игра общается с городом/шахтой -> добираем хуки на LGChatOne
+         *     (модуль site-chatone.js грузится лениво, на init() его могло не быть).
          *
          * Тела чужих ответов прочитать нельзя (PerformanceObserver отдаёт только
-         * метаданные). Данные чата приходят своим EventSource на /api/live,
-         * история города — POST /api/city/enter в loadHistory(), топ шахты и
-         * «сколько народу в шахте» — SSE-событием mine через
-         * Utils.updateOnlinePlayers(). Отдельный перехват ответов не нужен.
+         * метаданные). Данные чата берём из колбэков нативного LGChatOne
+         * (Chat.hookNativeChat -> ChatNet.ingestGameFeed), история города —
+         * POST /api/city/enter в loadHistory(), топ шахты и «сколько народу в
+         * шахте» — SSE-событием mine через Utils.updateOnlinePlayers().
+         * Отдельный перехват ответов не нужен.
          */
         startNetworkObserver() {
             if (this._perfObserver) return;
             if (typeof PerformanceObserver !== 'function') {
-                // Старые браузеры: чат живёт на своём EventSource, деградация мягкая.
+                // Старые браузеры: остаёмся на хуках LGChatOne, деградация мягкая.
                 dbg('[CHAT] PerformanceObserver не поддерживается — работаем без наблюдателя');
                 return;
             }
@@ -11282,14 +11134,16 @@ const Players = {
         },
 
         /**
-         * Игра общается с городом/шахтой — игрок активен, живой поток ему нужен.
-         * Если свой EventSource отвалился и поллинг не крутится,
-         * startBackgroundLiveListener() поднимет поток заново (внутри гарды).
+         * Игра общается с городом/шахтой — значит, LGChatOne уже жив: модуль
+         * site-chatone.js подгружается лениво (oneLoad() в app.js), поэтому на
+         * момент Chat.init() его могло ещё не быть.
+         *
+         * ПАТЧ 11.6.4f: своего EventSource больше нет, так что здесь только
+         * добираем хуки на нативную ленту (метод идемпотентен).
          */
         _onGameChatTraffic() {
             if (this.disabled) return;
-            if (this._liveES || this._liveRunning) return;
-            this.startBackgroundLiveListener();
+            this.hookNativeChat();
         },
 
         /* ---------------------------------------------------------- */
@@ -11674,6 +11528,21 @@ const Players = {
     // documentPictureInPicture). Рендер ленты и отправка сообщений.
     // this внутри методов — это Chat (Object.assign в chat/chat.js).
 
+    // ПАТЧ 11.6.4g: вкладки вынесенного чата. Набор и порядок повторяют
+    // нативный чат игры (reference/LegionFrontSRC/lib/site-chat.js: TABS):
+    // g — общий город, tr — торговля, mn — ремёсла/шахта, gl — гильдия,
+    // dm — личные сообщения. Одна ось на всё состояние (Chat.activeTab).
+    const CHAT_TABS = ['g', 'tr', 'mn', 'gl', 'dm'];
+
+    // Подсказки в поле ввода под активную вкладку.
+    const CHAT_TAB_PH = {
+        g: 'Написать в чат города...',
+        tr: 'Куплю / продам / меняю...',
+        mn: 'Написать в чат шахты...',
+        gl: 'Написать гильдии...',
+        dm: 'Лично...'
+    };
+
     const ChatPip = {
         widget: null,
         _popoutWin: null,
@@ -11705,7 +11574,7 @@ const Players = {
             return root ? root.querySelector(selector) : null;
         },
 
-        // Синхронизация подсветки вкладок с this.activeMainTab / this.activeSubTab.
+        // Синхронизация подсветки вкладок с this.activeTab.
         // Ищем по всему документу PiP-окна, а не только внутри this.widget: если
         // ссылка на виджет устарела (окно пересоздано), поиск по документу всё равно
         // найдёт реальные вкладки и снимет лишние active.
@@ -11713,23 +11582,13 @@ const Players = {
             const d = doc || this._pipDoc || (this.widget && this.widget.ownerDocument) || null;
             if (!d || typeof d.querySelectorAll !== 'function') return;
 
-            const mainKey = (t) => t.getAttribute('data-main-tab')
-                || (t.dataset && t.dataset.tab) || 'city';
-            const subKey = (t) => t.getAttribute('data-sub-tab')
-                || (t.dataset && t.dataset.tab) || 'general';
-
+            // ПАТЧ 11.6.4g: одна ось вкладок. Ключ лежит в data-tab кнопки
+            // (g/tr/mn/gl/dm), а не в двух атрибутах main/sub, как раньше.
             d.querySelectorAll('.chat-main-tab').forEach(t => {
-                t.classList.toggle('active', mainKey(t) === this.activeMainTab);
+                const key = t.getAttribute('data-tab')
+                    || (t.dataset && t.dataset.tab) || 'g';
+                t.classList.toggle('active', key === this.activeTab);
             });
-            d.querySelectorAll('.chat-sub-tab').forEach(t => {
-                t.classList.toggle('active', subKey(t) === this.activeSubTab);
-            });
-
-            // Суб-вкладки (Общий/Торговля/Достижения) относятся только к городу.
-            const subTabsRow = typeof d.getElementById === 'function'
-                ? d.getElementById('chat-sub-tabs')
-                : d.querySelector('#chat-sub-tabs');
-            if (subTabsRow) subTabsRow.style.display = this.activeMainTab === 'city' ? 'flex' : 'none';
         },
 
         showError(msg) {
@@ -11763,19 +11622,10 @@ const Players = {
         updateInputState() {
             const inp = this._pipEl('#chat-input');
             const sendBtn = this._pipEl('#chat-send');
+            const tab = this.activeTab;
 
-            // Чат живёт только в PiP-окне, поэтому состояние ввода считаем
-            // по активной вкладке (город / торговля / шахта / ЛС).
-            const inMine = this.isInMine();
-
-            if (this.activeMainTab === 'mine' && !inMine) {
-                if (inp) {
-                    inp.disabled = true;
-                    inp.placeholder = 'Доступно только в шахте';
-                    inp.value = '';
-                }
-                if (sendBtn) sendBtn.disabled = true;
-            } else if (this.activeMainTab === 'dm') {
+            // Вкладка «Личные»: писать можно только внутри открытого диалога.
+            if (tab === 'dm') {
                 if (this.dmTarget) {
                     if (inp) {
                         inp.disabled = false;
@@ -11785,30 +11635,31 @@ const Players = {
                 } else {
                     if (inp) {
                         inp.disabled = true;
-                        inp.placeholder = 'Выберите диалог в списке «✉️ ЛС»';
+                        inp.placeholder = 'Выберите диалог в списке «Личные»';
                         inp.value = '';
                     }
                     if (sendBtn) sendBtn.disabled = true;
                 }
-            } else if (this.activeMainTab === 'city' && this.activeSubTab === 'ach') {
+                return;
+            }
+
+            // Ремёсла/шахта: сервер принимает сообщения только из шахты.
+            if (tab === 'mn' && !this.isInMine()) {
                 if (inp) {
                     inp.disabled = true;
-                    inp.placeholder = 'Чат достижений (только чтение)';
+                    inp.placeholder = 'Доступно только в шахте';
                     inp.value = '';
                 }
                 if (sendBtn) sendBtn.disabled = true;
-            } else {
-                if (inp) {
-                    inp.disabled = false;
-                    const phMap = {
-                        general: 'Написать в чат города...',
-                        trade: 'Написать в торговлю...',
-                        mine: 'Написать в чат шахты...'
-                    };
-                    inp.placeholder = phMap[this.activeTab] || 'Написать сообщение...';
-                }
-                if (sendBtn) sendBtn.disabled = false;
+                return;
             }
+
+            // g / tr / gl — обычный ввод с подсказкой под вкладку.
+            if (inp) {
+                inp.disabled = false;
+                inp.placeholder = CHAT_TAB_PH[tab] || 'Написать сообщение...';
+            }
+            if (sendBtn) sendBtn.disabled = false;
         },
 
         // DOM чата собирается только внутри документа PiP-окна.
@@ -11823,17 +11674,14 @@ const Players = {
             widget.style.cssText = 'position:relative; display:flex; flex-direction:column; width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; background:#1d1620; color:#f7eadf;';
             widget.innerHTML = `
                 <div class="chat-top-bar" id="chat-drag-handle">
-                    <div class="chat-main-tabs">
-                        <button class="chat-main-tab active" data-main-tab="city" type="button">🏙️ Город</button>
-                        <button class="chat-main-tab" data-main-tab="mine" type="button">⛏️ Шахта</button>
-                        <button class="chat-main-tab" data-main-tab="dm" type="button">✉️ ЛС</button>
+                    <div class="chat-main-tabs" role="tablist">
+                        <button class="chat-main-tab active" data-tab="g" type="button">Общий</button>
+                        <button class="chat-main-tab" data-tab="tr" type="button">Торговля</button>
+                        <button class="chat-main-tab" data-tab="mn" type="button">Ремёсла</button>
+                        <button class="chat-main-tab" data-tab="gl" type="button">Гильдия</button>
+                        <button class="chat-main-tab" data-tab="dm" type="button">Личные</button>
                     </div>
                     <span class="chat-close" id="chat-close-btn" title="Закрыть">✖</span>
-                </div>
-                <div class="chat-sub-tabs" id="chat-sub-tabs">
-                    <button class="chat-sub-tab active" data-sub-tab="general" type="button">Общий</button>
-                    <button class="chat-sub-tab" data-sub-tab="trade" type="button">Торговля</button>
-                    <button class="chat-sub-tab" data-sub-tab="ach" type="button">Достижения</button>
                 </div>
                 <div class="chat-messages" id="chat-messages"></div>
                 <div class="chat-input-area">
@@ -11865,28 +11713,14 @@ const Players = {
                     // Ищем вкладки в документе PiP-окна, а не в this.widget:
                     // после пересоздания окна ссылка на виджет может быть устаревшей.
                     const tabDoc = this._pipDoc || (this.widget && this.widget.ownerDocument) || mainTab.ownerDocument;
-                    this.activeMainTab = mainTab.getAttribute('data-main-tab')
-                        || (mainTab.dataset && mainTab.dataset.tab) || 'city';
+                    const nextTab = mainTab.getAttribute('data-tab')
+                        || (mainTab.dataset && mainTab.dataset.tab) || 'g';
+                    // Неизвестный ключ не должен «терять» ленту — падаем на общий чат.
+                    this.activeTab = CHAT_TABS.indexOf(nextTab) !== -1 ? nextTab : 'g';
                     if (tabDoc) {
                         tabDoc.querySelectorAll('.chat-main-tab').forEach(t => t.classList.remove('active'));
                     }
                     mainTab.classList.add('active');
-                    this._syncTabs(tabDoc);
-                    this.updateInputState();
-                    this.renderMessages();
-                    return;
-                }
-
-                const subTab = target.closest('.chat-sub-tab');
-                if (subTab) {
-                    e.preventDefault();
-                    const tabDoc = this._pipDoc || (this.widget && this.widget.ownerDocument) || subTab.ownerDocument;
-                    this.activeSubTab = subTab.getAttribute('data-sub-tab')
-                        || (subTab.dataset && subTab.dataset.tab) || 'general';
-                    if (tabDoc) {
-                        tabDoc.querySelectorAll('.chat-sub-tab').forEach(t => t.classList.remove('active'));
-                    }
-                    subTab.classList.add('active');
                     this._syncTabs(tabDoc);
                     this.updateInputState();
                     this.renderMessages();
@@ -11906,8 +11740,8 @@ const Players = {
                 });
             }
 
-            // Восстанавливаем активные вкладки: DOM пересоздаётся при каждом открытии PiP,
-            // а состояние (город/шахта/ЛС, общий/торговля/достижения) хранится в полях.
+            // Восстанавливаем активную вкладку: DOM пересоздаётся при каждом открытии PiP,
+            // а состояние (g/tr/mn/gl/dm) хранится в Chat.activeTab.
             // Передаём сам виджет: он ещё не вставлен в документ, и querySelectorAll
             // по документу его вкладок не найдёт (по элементу — найдёт).
             this._syncTabs(widget);
@@ -12058,8 +11892,8 @@ const Players = {
 
             this.dmTarget = nick;
 
-            // Переключаем главную вкладку на ЛС
-            this.activeMainTab = 'dm';
+            // Переключаем вкладку на личные сообщения
+            this.activeTab = 'dm';
 
             // Виджет живёт только в PiP-окне: если оно закрыто — открываем.
             if (!this._pipRoot()) await this.popoutChat();
@@ -12378,7 +12212,7 @@ const Players = {
             const box = (this._pipDoc && this._pipDoc.querySelector('#chat-messages')) || this._pipEl('#chat-messages');
             if (!box) return;
 
-            // Подсветка вкладок всегда соответствует activeMainTab/activeSubTab:
+            // Подсветка вкладок всегда соответствует Chat.activeTab:
             // раньше active-класс мог накапливаться сразу на нескольких вкладках.
             this._syncTabs();
 
@@ -12400,8 +12234,8 @@ const Players = {
 
             box.innerHTML = '';
 
-            // Вкладка «✉️ ЛС»: либо открытый диалог, либо список всех диалогов
-            if (this.activeMainTab === 'dm') {
+            // Вкладка «Личные»: либо открытый диалог, либо список всех диалогов
+            if (this.activeTab === 'dm') {
                 if (this.dmTarget) {
                     const ownerDoc = box.ownerDocument || document;
 
@@ -12450,7 +12284,7 @@ const Players = {
             }
 
             // Заглушка, если игрок находится в городе (§ Задача 2 & 4)
-            if (this.activeMainTab === 'mine' && !this.isInMine()) {
+            if (this.activeTab === 'mn' && !this.isInMine()) {
                 box.innerHTML = `
                     <div style="color:#aaa; text-align:center; padding:35px 15px; font-style:italic; line-height:1.6;">
                         <span style="font-size:32px; display:block; margin-bottom:8px;">⛏️</span>
@@ -12460,32 +12294,33 @@ const Players = {
                 return;
             }
 
+            // ПАТЧ 11.6.4g: классификация сообщений по вкладкам — копия нативной
+            // логики (reference/LegionFrontSRC/lib/site-chat.js: tabOf):
+            //   • tb — готовый ярлык вкладки от сервера: 'gl' у гильдейских
+            //     сообщений, 'ev' у системных событий (заточки/достижения);
+            //   • rm/channel === 'mine' — сообщения шахты (в нативе тег rm: 'mine');
+            //   • k: 'tr' — торговля, k: 'dm' — личные;
+            //   • всё остальное — общий чат города.
+            const tabOf = (m) => m.tb || ((m.rm === 'mine' || m.channel === 'mine')
+                ? 'mn'
+                : m.k === 'tr' ? 'tr'
+                : m.k === 'dm' ? 'dm'
+                : 'g');
+
+            const tab = this.activeTab;
             const filtered = this.messages.filter(m => {
-                // ЛС отображаются отдельно — во вкладке «✉️ ЛС»
-                if (m.k === 'dm') return false;
-
-                const isMineMsg = m.channel === 'mine' || m.room === 'mine' || m.ch === 'mine';
-
-                // Вкладка «Шахта»
-                if (this.activeMainTab === 'mine') {
-                    return !m.isSystem && isMineMsg;
+                const t = tabOf(m);
+                if (tab === 'g') {
+                    // Общий: живые сообщения города без торговли и событий.
+                    return t === 'g' && !m.isSystem && !m.ev;
                 }
-
-                // Вкладки города (Общий / Торговля / Достижения)
-                if (isMineMsg) return false; // в городе сообщения шахты не показываем
-
-                if (this.activeSubTab === 'general') {
-                    // Общий: всё, что не торговля и не система
-                    return !m.isSystem && m.k !== 'tr';
-                }
-                if (this.activeSubTab === 'trade') {
-                    // Торговля: СТРОГО только серверный/локальный флаг 'tr'
-                    return !m.isSystem && m.k === 'tr';
-                }
-                if (this.activeSubTab === 'ach') {
-                    return m.isSystem;
-                }
-                return true;
+                // Торговля/Ремёсла: только живые сообщения этой вкладки.
+                if (tab === 'tr') return t === 'tr' && !m.isSystem;
+                if (tab === 'mn') return t === 'mn' && !m.isSystem;
+                // Гильдия: tb === 'gl' (системных сообщений в гильдии не бывает).
+                if (tab === 'gl') return t === 'gl';
+                // 'dm' отрисован отдельной ветвью выше и сюда не доходит.
+                return false;
             });
 
             const ownerDoc = box.ownerDocument || document;
@@ -12606,8 +12441,8 @@ const Players = {
             const rawText = input.value.trim();
             if (!rawText) return;
 
-            // Открыт диалог во вкладке «✉️ ЛС» — отправляем ЛС прямо из виджета
-            if (this.activeMainTab === 'dm' && this.dmTarget) {
+            // Открыт диалог во вкладке «Личные» — отправляем ЛС прямо из виджета
+            if (this.activeTab === 'dm' && this.dmTarget) {
                 // Сначала проверяем, не команда ли это /w: иначе в текст сообщения
                 // уйдёт «/w Ник привет» целиком, и собеседник получит команду как текст.
                 const dmCmd = rawText.match(/^\/(?:w|dm|whisper)\s+(?:"([^"]+)"|'([^']+)'|(\S+))(?:\s+(.*))?$/i);
@@ -12630,12 +12465,8 @@ const Players = {
                 return; // Выходим, чтобы не отправлять в общий чат
             }
 
-            if (this.activeTab === 'ach') {
-                this.showError('Вкладка достижений только для чтения');
-                return;
-            }
-            if (this.activeMainTab === 'dm') {
-                this.showError('Выберите диалог в списке «✉️ ЛС»');
+            if (this.activeTab === 'dm') {
+                this.showError('Выберите диалог в списке «Личные»');
                 return;
             }
             if (this.cooldownUntil && Date.now() < this.cooldownUntil) {
@@ -12659,7 +12490,7 @@ const Players = {
                     this.showError('Формат: /w Ник сообщение');
                     return;
                 }
-            } else if (this.activeMainTab === 'mine') {
+            } else if (this.activeTab === 'mn') {
                 if (!this.isInMine()) {
                     this.showError('Чат шахты доступен только в шахте');
                     return;
@@ -12675,7 +12506,7 @@ const Players = {
                 author: this.myNick, 
                 text: dmMatch ? cleanText : rawText, 
                 to: toUser,
-                k: dmMatch ? 'dm' : (!isMine && this.activeSubTab === 'trade' ? 'tr' : undefined),
+                k: dmMatch ? 'dm' : (!isMine && this.activeTab === 'tr' ? 'tr' : undefined),
                 role: this.myRole, 
                 isSystem: false, 
                 id: null, 
@@ -12690,9 +12521,11 @@ const Players = {
             // 3. ПРОГРЕВ СЕССИИ: если отправляем в город (или ЛС), находясь в шахте
             if (!isMine && this.isInMine()) {
                 try {
-                    // ВАЖНО: используем чистый fetch, так как Utils.fetchApi возьмет контекст ШАХТЫ,
-                    // и прогрев улетит не туда, дав 409 при отправке в город.
-                    await fetch('/api/city/enter', {
+                    // ВАЖНО: чистый fetch, а не Utils.fetchApi — тот возьмёт контекст
+                    // ШАХТЫ, и прогрев улетит не туда, дав 409 при отправке в город.
+                    // ПАТЧ 11.6.4h: адрес собираем через Utils.apiPath, иначе запрос
+                    // уходил в корень домена мимо /c/<channel>/ и получал 404.
+                    await fetch(Utils.apiPath('/api/city/enter'), {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         credentials: 'same-origin',
@@ -12706,73 +12539,93 @@ const Players = {
             try {
                 let res;
                 let data = null;
-                let nativeOk = null;
-                let lastError = null;
+
+                // ПАТЧ 11.6.4h: адрес всегда собираем через Utils.apiPath — он
+                // добавляет префикс /c/<channel>/. Голый fetch('/api/...') уходил
+                // в корень домена (play.multidonate.ru/api/...) и получал 404:
+                // переписывание путей делает window.fetch самой страницы, а из
+                // песочницы Tampermonkey запрос идёт мимо него.
+                let endpoint = '/api/chat/say';
+                let payload = {};
                 if (dmMatch) {
-                    const payload = { text: cleanText, to: toUser, k: 'dm' }; // k: 'dm' обязателен!
-
-                    // 1. Пытаемся использовать нативный контекст города (как в прошлой версии).
-                    // Контекст — объект страницы, в песочнице доступен только через G.
-                    const nativeCtx = G.__lgCityContext || G.LGCity;
-                    if (nativeCtx && typeof nativeCtx.api === 'function') {
-                        try {
-                            const nativeData = await nativeCtx.api('/api/city/say', payload);
-                            if (nativeData && typeof nativeData === 'object') {
-                                data = nativeData;
-                                nativeOk = nativeData.ok !== false;
-                            }
-                        } catch (err) {
-                            dbg('Native DM send failed, fallback to fetch:', err);
-                        }
-                    }
-
-                    // 2. Фолбэк: обычный fetch (как в прошлой версии)
-                    if (!data) {
-                        res = await fetch('/api/city/say', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            credentials: 'same-origin',
-                            body: JSON.stringify(payload)
-                        });
-                        data = await res.json().catch(() => null);
-                        if (!res.ok) {
-                            nativeOk = false;
-                        }
-                    }
-                } else if (isMine) {
-                    // Чат шахты — только c=, без apiPath / location.origin / credentials / cache
-                    res = await fetch(`/api/mine/chat/say?c=${encodeURIComponent(mineId)}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text: rawText })
-                    });
-                } else if (this.activeSubTab === 'trade') {
-                    // Торговля
-                    res = await fetch('/api/city/say', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text: rawText, k: 'tr' })
-                    });
+                    // ЛС — отдельный эндпоинт, тело { to, text }.
+                    endpoint = '/api/dm/say';
+                    payload = { to: toUser, text: cleanText };
+                } else if (this.activeTab === 'gl') {
+                    // Гильдия: ВАЖНО — поле 't', а не 'text'.
+                    endpoint = '/api/guilds/say';
+                    payload = { t: rawText };
+                } else if (this.activeTab === 'mn') {
+                    // Ремёсла/шахта: комнату сервер определяет по текущей сессии,
+                    // поэтому c= в теле и в URL не нужен.
+                    endpoint = '/api/chat/say';
+                    payload = { room: 'mine', text: rawText };
+                } else if (this.activeTab === 'tr') {
+                    // Торговля — общая комната города с флагом k: 'tr'.
+                    endpoint = '/api/chat/say';
+                    payload = { room: 'city', k: 'tr', text: rawText };
                 } else {
-                    // Общий чат
-                    res = await fetch('/api/city/say', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text: rawText })
-                    });
+                    // Общий чат города.
+                    endpoint = '/api/chat/say';
+                    payload = { room: 'city', text: rawText };
                 }
 
-                if (!data) {
+                res = await fetch(Utils.apiPath(endpoint), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(payload)
+                });
+                data = await res.json().catch(() => null);
+
+                // ПАТЧ 11.6.4h: фолбэк на старые адреса — если сервер не знает
+                // новый эндпоинт. Все адреса строго через Utils.apiPath, иначе они
+                // тоже улетали бы в корень домена. На rate_limited не ретраим,
+                // чтобы не получить двойной запрос.
+                const unknownEndpoint = !!res && (
+                    res.status === 404
+                    || (data && (data.error === 'not_found' || data.error === 'method_not_allowed'))
+                );
+                if (unknownEndpoint && dmMatch) {
+                    // Старый путь ЛС: комната города с флагом k: 'dm'.
+                    res = await fetch(Utils.apiPath('/api/city/say'), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ text: cleanText, to: toUser, k: 'dm' })
+                    });
+                    data = await res.json().catch(() => null);
+                } else if (unknownEndpoint && this.activeTab === 'gl') {
+                    // Для гильдии фолбэка нет: /api/guilds/say — единственный путь.
+                } else if (unknownEndpoint && isMine) {
+                    // Старый путь шахты: обязательный параметр c=.
+                    res = await fetch(Utils.apiPath(`/api/mine/chat/say?c=${encodeURIComponent(mineId)}`), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ text: rawText })
+                    });
+                    data = await res.json().catch(() => null);
+                } else if (unknownEndpoint) {
+                    // Старый путь города: общий чат либо торговля (k: 'tr').
+                    res = await fetch(Utils.apiPath('/api/city/say'), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify(this.activeTab === 'tr'
+                            ? { text: rawText, k: 'tr' }
+                            : { text: rawText })
+                    });
                     data = await res.json().catch(() => null);
                 }
 
-                const httpOk = nativeOk !== null ? nativeOk : !!(res && res.ok);
+                const httpOk = !!(res && res.ok);
                 if (!httpOk || (data && data.ok === false)) {
                     // откат
                     this.messages = this.messages.filter(m => m !== local);
                     input.value = rawText;
                     this.renderMessages();
-                    const errMsg = (data && (data.error || data.err)) || lastError || (res ? `HTTP ${res.status}` : 'Ошибка сети');
+                    const errMsg = (data && (data.error || data.err)) || (res ? `HTTP ${res.status}` : 'Ошибка сети');
                     this.showError(errMsg);
                     if ((res && res.status === 429) || /не так быстро/i.test(errMsg)) {
                         this.cooldownUntil = Date.now() + 5000;
@@ -12855,9 +12708,18 @@ const Players = {
 
         addonHighlight: localStorage.getItem('LEGION_ADDON_HIGHLIGHT') !== 'false',
         _inited: false,
+        // ПАТЧ 11.6.4f: состояние хука нативной ленты LGChatOne и Keep-Alive.
+        // _nativeChatOrig — оригинальные onFeed/enterFeed, чтобы снять хук при
+        // выключении перехвата/перезапуске; _nativeWatchTimer — интервал watch.
+        _nativeWatchTimer: null,
+        _nativeChatOrig: null,
         messages: [], // Массив всех сообщений
-        activeMainTab: 'city',
-        activeSubTab: 'general',
+        // ПАТЧ 11.6.4g: одна активная вкладка в терминах нативного чата игры
+        // (reference/LegionFrontSRC/lib/site-chat.js: TABS = g/tr/mn/gl/dm).
+        // Раньше было две оси — activeMainTab (city/mine/dm) и activeSubTab
+        // (general/trade/ach): «Шахта» и «Торговля» жили в разных полях, и
+        // подсветка вкладок рассинхронивалась.
+        activeTab: 'g',
         // v11.6.0g-5: ник — это ME.user (page-context), а не LG_CH: в LG_CH
         // лежит логин Twitch-канала, из-за него в чат/HUD попадал чужой ник.
         // Если ME ещё пуст — ник придёт асинхронно из syncMe().
@@ -12886,19 +12748,6 @@ const Players = {
             if (this.addonHighlight === false) return false;
             if (!nick || this.addonUsers.size === 0) return false;
             return this.addonUsers.has(String(nick).trim().toLowerCase());
-        },
-
-        get activeTab() {
-            if (this.activeMainTab === 'mine' || this.activeMainTab === 'dm') return this.activeMainTab;
-            return this.activeSubTab;
-        },
-        set activeTab(val) {
-            if (val === 'mine' || val === 'dm') {
-                this.activeMainTab = val;
-            } else {
-                this.activeMainTab = 'city';
-                this.activeSubTab = val;
-            }
         },
 
         isOpen() {
@@ -12948,20 +12797,136 @@ const Players = {
             }
         },
 
+        /* ---------------------------------------------------------- */
+        /* ПАТЧ 11.6.4f: хук нативной ленты LGChatOne                  */
+        /* ---------------------------------------------------------- */
+
+        /**
+         * Перехват ленты нативного чата игры.
+         *
+         * Свой EventSource('/api/live') удалён: клиент Legion сам стримит чат и
+         * отдаёт его разобранным в LGChatOne.onFeed(room, data) — новые сообщения
+         * комнаты (city/mine) — и LGChatOne.enterFeed(room, r) — история при входе
+         * в город/шахту. Формат пакета тот же, что приходил из SSE:
+         * { chat: [...], chatDel: [...], chatMe, c }.
+         *
+         * Хук ставится ПОВЕРХ игры: сначала наш разбор, затем оригинал — поэтому
+         * нативный чат продолжает работать как обычно (11.6.4g: он снова виден
+         * на экране, мы его больше не скрываем и не подменяем).
+         *
+         * Модуль site-chatone.js грузится лениво (oneLoad() в reference/.../app.js),
+         * поэтому метод идемпотентен и вызывается повторно из
+         * ChatNet._onGameChatTraffic(), пока LGChatOne не появится.
+         *
+         * @returns {boolean} true, если хуки стоят на объекте игры
+         */
+        hookNativeChat() {
+            const one = (typeof G !== 'undefined' && G) ? G.LGChatOne : null;
+            if (!one || typeof one.onFeed !== 'function' || typeof one.enterFeed !== 'function') return false;
+            // Уже обёрнут (этим или прежним инстансом, пока хуки не сняты).
+            if (one.__lgChatHooked) return true;
+
+            const self = this;
+            // Сохраняем оригиналы: по ним же снимаем хук в unhookNativeChat().
+            this._nativeChatOrig = { onFeed: one.onFeed, enterFeed: one.enterFeed };
+
+            one.onFeed = function (room, data) {
+                try { self.ingestGameFeed(room, data, false); } catch (e) {}
+                return self._nativeChatOrig.onFeed.apply(this, arguments);
+            };
+
+            one.enterFeed = function (room, history) {
+                try { self.ingestGameFeed(room, history, true); } catch (e) {}
+                return self._nativeChatOrig.enterFeed.apply(this, arguments);
+            };
+
+            try { one.__lgChatHooked = true; } catch (e) {}
+            dbg('[CHAT] Хук нативной ленты LGChatOne установлен');
+            return true;
+        },
+
+        /**
+         * Снять хуки с нативной ленты (выключение перехвата, restart скрипта).
+         *
+         * Возвращаем ровно те функции, что были до нас: иначе после перезапуска
+         * аддона игра продолжала бы звать колбэк в мёртвый инстанс Chat.
+         */
+        unhookNativeChat() {
+            const one = (typeof G !== 'undefined' && G) ? G.LGChatOne : null;
+            const orig = this._nativeChatOrig;
+            if (!one || !orig || !one.__lgChatHooked) return false;
+            try {
+                one.onFeed = orig.onFeed;
+                one.enterFeed = orig.enterFeed;
+                try { delete one.__lgChatHooked; } catch (e) { one.__lgChatHooked = false; }
+            } catch (e) {
+                return false;
+            }
+            this._nativeChatOrig = null;
+            return true;
+        },
+
+        /**
+         * Keep-Alive нативного чата (ТЗ 11.6.4f, раз в 30 с).
+         *
+         * LGChatOne.sync() отправляет POST /api/chat/watch {on:true} только когда
+         * state().open === true, а сервер стримит сообщения в SSE лишь по watch.
+         * Своей ленты у нас нет — сообщения приходят из хука onFeed, поэтому
+         * watch нужно поддерживать живым.
+         *
+         * ПАТЧ 11.6.4g: нативный чат больше не скрыт CSS-ом, поэтому флаг open
+         * навязываем ТОЛЬКО пока открыт наш вынесенный чат (Chat.isOpen()).
+         * Если наш чат закрыт — нативные флаги не трогаем: игрок сам решает,
+         * свернуть ему нативную ленту или оставить.
+         */
+        startNativeChatWatch() {
+            if (this._nativeWatchTimer) return;
+            const tick = () => {
+                try {
+                    const one = (typeof G !== 'undefined' && G) ? G.LGChatOne : null;
+                    if (!one || typeof one.state !== 'function') {
+                        // Модуль игры ещё не подгрузился — доберём хуки на следующем тике.
+                        this.hookNativeChat();
+                        return;
+                    }
+                    // Наш чат закрыт — не перебиваем выбор игрока по нативной ленте.
+                    if (!this.isOpen()) return;
+                    const st = one.state();
+                    if (!st) return;
+                    st.open = true;
+                    if (typeof one.sync === 'function') one.sync();
+                } catch (e) {}
+            };
+            tick();
+            this._nativeWatchTimer = setInterval(tick, NATIVE_CHAT_KEEPALIVE_MS);
+        },
+
+        /** Остановка Keep-Alive и снятие хуков (Chat.destroy, выключение чата). */
+        stopNativeChatWatch() {
+            if (this._nativeWatchTimer) {
+                clearInterval(this._nativeWatchTimer);
+                this._nativeWatchTimer = null;
+            }
+            this.unhookNativeChat();
+        },
+
         setDisabled(val) {
             this.disabled = !!val;
             try {
                 localStorage.setItem('LEGION_CHAT_DISABLED', String(this.disabled));
             } catch (e) {}
             if (this.disabled) {
-                this.stopBackgroundLiveListener();
+                // ПАТЧ 11.6.4f: своего потока /api/live нет — гасим Keep-Alive
+                // и снимаем хуки с нативной ленты LGChatOne.
+                this.stopNativeChatWatch();
                 if (this.isOpen()) {
                     this.close();
                 }
                 UI.showToast('🚫 Перехват чата отключен');
             } else {
                 UI.showToast('💬 Перехват чата включен');
-                this.startBackgroundLiveListener();
+                this.hookNativeChat();
+                this.startNativeChatWatch();
             }
         },
 
@@ -13075,6 +13040,15 @@ const Players = {
             // классами в DOM. Браузер применит их к уже отрисованной ленте в
             // первом же кадре — ни флэша, ни ожидания ответа /users.
             if (typeof this._applyAddonStyles === 'function') this._applyAddonStyles();
+
+            // ПАТЧ 11.6.4f: фундамент нового чата. Нативный LGChatOne остаётся
+            // в DOM (его place()/dock() перевешивают блок между городом и
+            // шахтой — узел удалять нельзя). С 11.6.4g он снова виден на экране:
+            // CSS-скрытие .cy-chat из styles.js удалено.
+            // Ленту берём из его колбэков onFeed/enterFeed, а Keep-Alive держит
+            // watch {on:true} включённым, иначе сервер не стримит сообщения.
+            this.hookNativeChat();
+            this.startNativeChatWatch();
         },
 
         // Детектор стороннего чата (Legion7TV, плагин ProCto_Fliy).
@@ -13144,9 +13118,9 @@ const Players = {
                     }
                 }
 
-                // Если этот диалог сейчас открыт во вкладке «✉️ ЛС» — считаем прочитанным.
+                // Если этот диалог сейчас открыт во вкладке «✉️ Личные» — считаем прочитанным.
                 // Перерисовку выполняет Players.refreshUnreadDMViews() -> Chat.renderMessages().
-                if (typeof Players !== 'undefined' && this.activeMainTab === 'dm' && this.dmTarget) {
+                if (typeof Players !== 'undefined' && this.activeTab === 'dm' && this.dmTarget) {
                     const myNick = (this.myNick || '').toLowerCase();
                     const isSelf = (author === 'Я') || (!!myNick && String(author || '').toLowerCase() === myNick);
                     const peer = isSelf ? (to || '') : (author || '');
@@ -13257,12 +13231,17 @@ const Players = {
          * Остановка фоновых задач чата (ТЗ 11.6.0g-3).
          *
          * Вызывается из legionApi.shutdown() в main.js при перезапуске скрипта.
-         * Живой поток /api/live гасит сам shutdown (stopBackgroundLiveListener);
-         * здесь — только таймер поллинга /heartbeat + /users. DOM-наблюдатель
-         * нативной ленты удалён в 11.6.0h.2 (подсветку рисует CSS).
+         * Своего потока /api/live больше нет (ПАТЧ 11.6.4f): Keep-Alive и хуки
+         * нативной ленты снимает stopNativeChatWatch(); здесь — таймер поллинга
+         * /heartbeat + /users и PerformanceObserver. DOM-наблюдатель нативной
+         * ленты удалён в 11.6.0h.2 (подсветку рисует CSS).
          */
         destroy() {
             this.stopAddonUsersPolling();
+            // ПАТЧ 11.6.4f: снимаем Keep-Alive и хуки с нативной ленты — иначе
+            // после перезапуска скрипта на G.LGChatOne остался бы колбэк в
+            // мёртвый инстанс Chat (и лишний интервал каждые 30 с).
+            this.stopNativeChatWatch();
             // 11.6.4b: гасим PerformanceObserver, иначе старый инстанс продолжал
             // бы слушать запросы игры (/api/me, /api/city, /api/mine) после
             // перезапуска скрипта.
@@ -13406,7 +13385,8 @@ const Players = {
         // ловит запросы игры к /api/me и к городу/шахте и обновляет данные
         // своими запросами, ничего не перезаписывая.
         Chat.startNetworkObserver();
-        // Слушаем живой поток всегда (нужно для непрочитанных при закрытом виджете)
+        // Фоновые задачи чата: хуки нативной ленты + Keep-Alive watch (ПАТЧ 11.6.4f).
+        // Идемпотентно; своего EventSource на /api/live больше нет.
         if (!Chat.disabled) {
             Chat.startBackgroundLiveListener();
         }
