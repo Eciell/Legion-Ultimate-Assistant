@@ -19,6 +19,9 @@
         CHANNEL_API_URL: 'https://7tv.io/v3/users/twitch/',
         DEFAULT_CHANNEL: 'zakvielchannel',
         CHANNEL_KEY: 'LEGION_7TV_CHANNEL',
+        // 11.6.4e: 'true' — смайлы 7TV не отображаются и не загружаются
+        // (тумблер «🎭 Отображать смайлы 7TV» в UI.openSettings()).
+        DISABLE_KEY: 'LEGION_7TV_DISABLED',
         channel: 'zakvielchannel',   // текущий канал (переопределяется из localStorage)
         _reloadQueued: false,
         _cacheEpoch: 0,
@@ -57,6 +60,21 @@
                 if (saved && this.SIZES[saved]) this.size = saved;
             } catch (e) {}
             this.applySize();
+        },
+
+        /**
+         * 11.6.4e: выключен ли рендер 7TV-смайлов.
+         *
+         * Ключ читается на каждом рендере/загрузке, а не кэшируется в поле:
+         * тумблер должен действовать сразу, без перезагрузки страницы.
+         */
+        isDisabled() {
+            try {
+                return localStorage.getItem(this.DISABLE_KEY) === 'true';
+            } catch (e) {
+                // localStorage недоступен (приватный режим) — считаем, что включено.
+                return false;
+            }
         },
         // 1×1 прозрачный GIF: заглушка до подгрузки блоба (data: разрешён CSP).
         PLACEHOLDER: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
@@ -109,6 +127,11 @@
         },
 
         async load(force = false) {
+            // 11.6.4e: тумблер выключен — наборы 7TV не запрашиваем вовсе
+            // (экономия трафика). Chat.setSevenTVEnabled() догрузит набор,
+            // когда тумблер включат обратно.
+            if (this.isDisabled()) return;
+
             if (this.loading) {
                 // Перезагрузка во время текущей загрузки — выполним после неё.
                 if (force) this._reloadQueued = true;
@@ -192,6 +215,9 @@
             if (!rawText) return '';
             // replaceEmotes — единственная точка экранирования текста сообщения.
             const text = String(rawText);
+            // 11.6.4e: тумблер «🎭 Отображать смайлы 7TV» выключен — отдаём
+            // обычный текст (экранированный, иначе получим XSS через innerHTML).
+            if (this.isDisabled()) return Utils.escapeHtml(text);
             if (!this.emotes.size) return Utils.escapeHtml(text);
 
             return text.split(/([^\p{L}\p{N}_]+)/u).map(part => {
@@ -206,6 +232,9 @@
 
         // После вставки HTML: меняем заглушки на blob:-URL смайликов.
         decorate(root) {
+            // 11.6.4e: тумблер выключен — img.t7-emote в разметке не появляются,
+            // но на всякий случай не тянем блобы смайлов.
+            if (this.isDisabled()) return;
             if (!root || typeof root.querySelectorAll !== 'function' || !this.emotes.size) return;
             root.querySelectorAll('img.t7-emote[data-t7]').forEach(img => {
                 const name = img.getAttribute('data-t7');

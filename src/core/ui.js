@@ -223,6 +223,25 @@
                 }
             });
 
+            // 11.6.4e: тумблер «🎭 Отображать смайлы 7TV». Дефолт — включено
+            // (ключа в localStorage ещё нет). Флаг читают
+            // SevenTV.replaceEmotes / decorate / load() в
+            // modules/chat/chat-emotes.js, поэтому и замена смайлов, и запросы
+            // к 7TV прекращаются сразу, без перезагрузки страницы.
+            const tvChk = modal.querySelector('#modal-chk-7tv');
+            if (tvChk) {
+                tvChk.checked = localStorage.getItem('LEGION_7TV_DISABLED') !== 'true';
+                tvChk.addEventListener('change', (e) => {
+                    localStorage.setItem('LEGION_7TV_DISABLED', String(!e.target.checked));
+                    // Chat.setSevenTVEnabled() догрузит набор (если аддон
+                    // стартовал с выключенным тумблером) и перерисует
+                    // открытый чат.
+                    if (typeof Chat !== 'undefined' && typeof Chat.setSevenTVEnabled === 'function') {
+                        Chat.setSevenTVEnabled(e.target.checked);
+                    }
+                });
+            }
+
             // 11.6.0g-4: подсветка ников Legion — сохраняем и перерисовываем чат.
             modal.querySelector('#modal-chk-addon-hl')?.addEventListener('change', (e) => {
                 if (typeof Chat !== 'undefined' && typeof Chat.setAddonHighlight === 'function') {

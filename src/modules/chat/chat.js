@@ -92,6 +92,31 @@
                    (location.pathname.includes('/mine') && location.search.includes('sid='));
         },
 
+        /**
+         * Вернуть нативный чат игры в шахту (v11.6.4d).
+         *
+         * LGChatOne — общий чат города/шахты: dock(k, root) регистрирует сцену,
+         * а place() переносит блок в последнюю видимую. LGCity.open() заново
+         * докает город, поэтому после «Карманного города» чат оставался в root
+         * города под оверлеем `.mn` и в шахте не появлялся. Повторный
+         * dock('mine') делает шахту последней и возвращает блок на место.
+         *
+         * Возвращает false, если шахта закрыта или LGChatOne недоступен —
+         * это не ошибка (чат мог быть отключён настройками игры).
+         */
+        showForMine() {
+            const mineRoot = document.querySelector('.mn');
+            if (!mineRoot || !document.body.classList.contains('mn-on')) return false;
+            const one = (typeof G !== 'undefined' && G) ? G.LGChatOne : null;
+            if (!one || typeof one.dock !== 'function') return false;
+            try {
+                one.dock('mine', mineRoot); // dock() сам вызывает place()
+                return true;
+            } catch (e) {
+                return false;
+            }
+        },
+
         setDisabled(val) {
             this.disabled = !!val;
             try {
@@ -135,6 +160,32 @@
             this._applyAddonStyles();
             if (this._pipDoc) this._applyAddonStylesToPip(this._pipDoc);
             if (this.isOpen && this.isOpen()) this.renderMessages();
+        },
+
+        /**
+         * Тумблер «🎭 Отображать смайлы 7TV» (ТЗ 11.6.4e).
+         *
+         * Сам флаг живёт в localStorage (LEGION_7TV_DISABLED) и читается в точке
+         * рендера — SevenTV.replaceEmotes()/decorate() — а также в SevenTV.load(),
+         * поэтому выключение действует сразу и не требует перезагрузки страницы.
+         * Здесь: сохраняем выбор, догружаем набор, если аддон стартовал с
+         * выключенным тумблером, и перерисовываем открытый PiP-чат.
+         */
+        setSevenTVEnabled(val) {
+            const enabled = !!val;
+            try {
+                localStorage.setItem(SevenTV.DISABLE_KEY, String(!enabled));
+            } catch (e) {}
+
+            // Набор не грузился, пока тумблер был выключен: load() сам вызовет
+            // renderMessages() после успешной загрузки.
+            if (enabled && !SevenTV.loaded) {
+                SevenTV.load();
+            }
+
+            if (typeof this.isOpen === 'function' && this.isOpen() && typeof this.renderMessages === 'function') {
+                this.renderMessages();
+            }
         },
 
         // v11.5.3: встроенный виджет чата удалён — его заменил сторонний плагин

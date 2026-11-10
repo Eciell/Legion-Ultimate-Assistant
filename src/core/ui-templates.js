@@ -94,6 +94,14 @@
                         <span>🚫 Отключить перехват чата</span>
                         <input type="checkbox" class="lg-toggle" id="modal-chk-chat" ${chatDisabled ? 'checked' : ''}>
                     </label>
+                    <!-- 11.6.4e: тумблер отображения 7TV-смайлов. Состояние ставит
+                         и сохраняет UI.openSettings() (localStorage
+                         'LEGION_7TV_DISABLED'), читают рендер сообщений и загрузчик
+                         набора (modules/chat/chat-emotes.js). -->
+                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
+                        <span>🎭 Отображать смайлы 7TV</span>
+                        <input type="checkbox" class="lg-toggle" id="modal-chk-7tv">
+                    </label>
                     <!-- v11.6.0g-4: подсветка ников пользователей аддона в чате -->
                     <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
                         <span>⚡ Подсветка ников Legion</span>
