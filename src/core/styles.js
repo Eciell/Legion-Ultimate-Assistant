@@ -70,6 +70,11 @@
         .sim-save-btn { background: #caa55c; color: #1d1620; border: 1px solid #caa55c; }
         .sim-del-btn { background: transparent; color: #ff5a7a; border: 1px solid #ff5a7a; padding: 0 8px; }
         .sim-share-btn, .sim-import-btn { background: transparent; color: #caa55c; border: 1px solid #caa55c; }
+        /* v11.6.5b.1: «⟲ От вложенного» — старт плана от текущих очков героя.
+           Цвет нейтральный (не конфликтует с золотом «Поделиться» и красным
+           «Сбросить всё»), чтобы в панели 38px кнопки различались. */
+        .sim-keep-btn { background: transparent; color: #9fd0ff; border: 1px solid #9fd0ff; }
+        .sim-keep-btn:hover { background: rgba(159, 208, 255, 0.14); }
         /* Инлайн-имя билда (патч 11.6.2a): поле и OK встают на место кнопки
            «Сохранить» внутри панели 38px. Селекторы с .sim-top-bar нужны,
            чтобы перебить общие правила панели (height: 26px, width: 120px). */
@@ -257,6 +262,19 @@
             border-color: rgba(120, 220, 140, 0.45);
             background: rgba(30, 90, 40, 0.3);
             color: #b9f0c0;
+        }
+        /* v11.6.5b.1: плашка доступного пула очков («Доступно сейчас: N»).
+           Голубая, чтобы не путалась с оранжевым предупреждением о чужом
+           дереве и зелёной плашкой «очки вложены сюда». */
+        .sim-avail-note {
+            margin: 0 0 8px;
+            padding: 7px 10px;
+            border: 1px solid rgba(120, 180, 255, 0.45);
+            border-radius: 6px;
+            background: rgba(30, 60, 120, 0.3);
+            color: #bcd8ff;
+            font-size: 12px;
+            line-height: 1.35;
         }
         /* Кнопка класса в сайдбаре: вертикальный список, цветная полоска слева.
            Цвет класса в --c (инлайн-стиль таба из BuildSim.classColors),

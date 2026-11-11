@@ -118,7 +118,15 @@
         CLASS_SHIELD: { legionary: true, paladin: true },
         GEAR_PEN: { armor: 25, helmet: 10, shield: 15 },
         GEAR_PEN_CAP: 50,
-        GEAR_NAMES: { heavy: 'тяжёлое', light: 'лёгкое', cloth: 'ткань', any: 'для всех' }
+        GEAR_NAMES: { heavy: 'тяжёлое', light: 'лёгкое', cloth: 'ткань', any: 'для всех' },
+
+        /*
+         * v11.6.5b: максимальная цена лота на аукционе, медь.
+         * Игра присылает тот же лимит в cfg.maxPrice из /api/auction —
+         * конфиг канала имеет приоритет (см. Auction.maxLotPrice()), а это
+         * значение нужно как фолбэк и для проверки цены до открытия витрины.
+         */
+        AUCTION_MAX_PRICE: 99990000
     };
 
     /*

@@ -147,7 +147,15 @@
         CLASS_SHIELD: { legionary: true, paladin: true },
         GEAR_PEN: { armor: 25, helmet: 10, shield: 15 },
         GEAR_PEN_CAP: 50,
-        GEAR_NAMES: { heavy: 'тяжёлое', light: 'лёгкое', cloth: 'ткань', any: 'для всех' }
+        GEAR_NAMES: { heavy: 'тяжёлое', light: 'лёгкое', cloth: 'ткань', any: 'для всех' },
+
+        /*
+         * v11.6.5b: максимальная цена лота на аукционе, медь.
+         * Игра присылает тот же лимит в cfg.maxPrice из /api/auction —
+         * конфиг канала имеет приоритет (см. Auction.maxLotPrice()), а это
+         * значение нужно как фолбэк и для проверки цены до открытия витрины.
+         */
+        AUCTION_MAX_PRICE: 99990000
     };
 
     /*
@@ -1172,6 +1180,11 @@
         .sim-save-btn { background: #caa55c; color: #1d1620; border: 1px solid #caa55c; }
         .sim-del-btn { background: transparent; color: #ff5a7a; border: 1px solid #ff5a7a; padding: 0 8px; }
         .sim-share-btn, .sim-import-btn { background: transparent; color: #caa55c; border: 1px solid #caa55c; }
+        /* v11.6.5b.1: «⟲ От вложенного» — старт плана от текущих очков героя.
+           Цвет нейтральный (не конфликтует с золотом «Поделиться» и красным
+           «Сбросить всё»), чтобы в панели 38px кнопки различались. */
+        .sim-keep-btn { background: transparent; color: #9fd0ff; border: 1px solid #9fd0ff; }
+        .sim-keep-btn:hover { background: rgba(159, 208, 255, 0.14); }
         /* Инлайн-имя билда (патч 11.6.2a): поле и OK встают на место кнопки
            «Сохранить» внутри панели 38px. Селекторы с .sim-top-bar нужны,
            чтобы перебить общие правила панели (height: 26px, width: 120px). */
@@ -1359,6 +1372,19 @@
             border-color: rgba(120, 220, 140, 0.45);
             background: rgba(30, 90, 40, 0.3);
             color: #b9f0c0;
+        }
+        /* v11.6.5b.1: плашка доступного пула очков («Доступно сейчас: N»).
+           Голубая, чтобы не путалась с оранжевым предупреждением о чужом
+           дереве и зелёной плашкой «очки вложены сюда». */
+        .sim-avail-note {
+            margin: 0 0 8px;
+            padding: 7px 10px;
+            border: 1px solid rgba(120, 180, 255, 0.45);
+            border-radius: 6px;
+            background: rgba(30, 60, 120, 0.3);
+            color: #bcd8ff;
+            font-size: 12px;
+            line-height: 1.35;
         }
         /* Кнопка класса в сайдбаре: вертикальный список, цветная полоска слева.
            Цвет класса в --c (инлайн-стиль таба из BuildSim.classColors),
@@ -3233,15 +3259,35 @@
         _tooltipTimer: null, // setTimeout hover-тултипа узла (500 мс, ТЗ 11.6.1e)
         _tooltipState: null, // { clsId, nodeId, mode: 'hover'|'click' } — что сейчас показано
         // v11.6.3: режим навыков из hero.sk.md. 'shared' — один общий пул
-        // очков по уровню героя, вложить можно только в одно дерево.
-        // 'class' (и старый 'hero') — прежняя модель, лимит MAX_POINTS.
+        // очков по уровню героя в игре, но планировщик его игнорирует.
+        // v11.6.5b.3: лимита по пулу героя больше нет вообще — полей
+        // availablePoints / pointsLimit / heroLevel в объекте не осталось,
+        // чтобы ограничение нельзя было случайно вернуть. maxPts() === 50.
+        // 'class' (и старый 'hero') — прежняя модель, тот же лимит.
         skillMode: 'class',
-        pointsLimit: MAX_POINTS,
-        ownerClass: '', // класс, в чьё дерево уже вложены общие очки (md === 'shared')
+        // v11.6.5b.1: вложенные ранги героя из hero.sk.t ({ [clsId]: { [nodeId]: rank } }).
+        // Нужны кнопке «От вложенного» (режим keep).
+        nativeSkills: {},
+        ownerClass: '', // класс, в чьё дерево уже вложены общие очки (только зелёная метка ✓)
         _nativeSkillsWarm: null, // промис прогрева ленивого LGSkills (не блокирует UI)
 
         statNames: { hp: 'Макс. HP', atk: 'Физ. урон', mag: 'Магия', def: 'Броня', crit: 'Крит %', critDmg: 'Сила крита', dodge: 'Уклонение', pierce: 'Пробивание', healPow: 'Сила лечения', luck: 'Удача', resist: 'Сопротивление' },
-        fxNames: { melee: 'Физ. урон %', magic: 'Магия %', hp: 'Макс. HP %', def: 'Броня', healPow: 'Сила лечения %', healIn: 'Вх. лечение %', crit: 'Крит %', critDmg: 'Сила крита', skel: 'Урон скелетов %', skelT: 'Время скелетов', leech: 'Вампиризм %', block: 'Снижение урона %', dodge: 'Уклонение %', lead: 'Урон по боссам %', first: 'Урон 1-й ход %', dmg: 'Весь урон %', pierce: 'Пробивание %', resist: 'Сопротивление', healCrit: 'Крит лечения %', regen: 'Регенерация %', low: 'Урон при низком HP %', a_siyanie: 'Сияние +%', a_obereg: 'Оберег +%', a_dlan: 'Длань +%', a_aura: 'Аура +%', aura: 'Аура −урон %', a_svet: 'Свет +%', a_vspyshka: 'Вспышка +%', a_oznob: 'Озноб +%', a_pricel: 'Прицел +%', a_grad: 'Град +%', a_natisk: 'Натиск +%', a_stoyka: 'Стойка +%', a_vspinu: 'Вспину +%', a_yad: 'Яд +%', a_vytyanut: 'Вытянуть +%', a_podnyat: 'Поднять +%', poison: 'Отрава %', steal: 'Кража %', loot: 'Добыча %', skelN: 'Скелетов +', volley: 'Залп +%', shieldBlock: 'Щит блок %', trapDodge: 'Ловушки %', steady: 'Промах→удар %', cleave: 'Замах %', cleaveBoss: 'Замах по боссу %', penBoss: 'Бронебой по боссу %', drain: 'Вытягивание %', hex: 'Проклятие +%', holy: 'По нежити +%', poisonT: 'Время отравы' },
+        fxNames: { melee: 'Физ. урон %', magic: 'Магия %', hp: 'Макс. HP %', def: 'Броня', healPow: 'Сила лечения %', healIn: 'Вх. лечение %', crit: 'Крит %', critDmg: 'Сила крита', skel: 'Урон скелетов %', skelT: 'Время скелетов', leech: 'Вампиризм %', block: 'Снижение урона %', dodge: 'Уклонение %', lead: 'Урон по боссам %', first: 'Урон 1-й ход %', dmg: 'Весь урон %', pierce: 'Пробивание %', resist: 'Сопротивление', healCrit: 'Крит лечения %', regen: 'Регенерация %', low: 'Урон при низком HP %', a_siyanie: 'Сияние +%', a_obereg: 'Оберег +%', a_dlan: 'Длань +%', a_aura: 'Аура +%', aura: 'Аура −урон %', a_svet: 'Свет +%', a_vspyshka: 'Вспышка +%', a_oznob: 'Озноб +%', a_pricel: 'Прицел +%', a_grad: 'Град +%', a_natisk: 'Натиск +%', a_stoyka: 'Стойка +%', a_vspinu: 'Вспину +%', a_yad: 'Яд +%', a_vytyanut: 'Вытянуть +%', a_podnyat: 'Поднять +%', poison: 'Отрава %', steal: 'Кража %', loot: 'Добыча %', skelN: 'Скелетов +', volley: 'Залп +%', shieldBlock: 'Щит блок %', trapDodge: 'Ловушки %', steady: 'Промах→удар %', cleave: 'Замах %', cleaveBoss: 'Замах по боссу %', penBoss: 'Бронебой по боссу %', drain: 'Вытягивание %', hex: 'Проклятие +%', holy: 'По нежити +%', poisonT: 'Время отравы',
+            // v11.6.5b: новые ключи ребаланса — проклятие и кулдауны действий.
+            a_proklyat: 'Проклятие +%',
+            cd_proklyat: 'КД Проклятия',
+            cd_natisk: 'КД Натиска',
+            cd_grad: 'КД Града',
+            cd_vspyshka: 'КД Вспышки',
+            cd_obereg: 'КД Оберега',
+            cd_siyanie: 'КД Сияния',
+            cd_oznob: 'КД Озноба',
+            cd_yad: 'КД Яда',
+            cd_vspinu: 'КД Вспину',
+            cd_podnyat: 'КД Поднять',
+            cd_vytyanut: 'КД Вытянуть',
+            cd_dlan: 'КД Длани',
+            cd_aura: 'КД Ауры' },
         classNames: { recruit: 'Новобранец', legionary: 'Легионер', archer: 'Лучник', mage: 'Маг', priest: 'Жрец', rogue: 'Разбойник', necromancer: 'Некромант', paladin: 'Паладин' },
         /*
          * Цвета кнопок классов — из нативного экрана игры (ТЗ 11.6.1d, скрин 4).
@@ -3357,12 +3403,14 @@
         // Ключ иконки навыка: kind -> первый fx -> иконка ветки (iconOf из skills.js).
         iconKeyOf(node, branch) {
             if (!node) return 'diam';
+            // v11.6.5b: нативное правило iconOf — навык с кулдауном (cd_*)
+            // рисуется «часами» раньше любых проверок kind, даже если у него
+            // есть другой fx-ключ или он является капом ветки.
+            const hasCd = Object.keys(node.fx || {}).some(k => k.startsWith('cd_'));
+            if (hasCd) return 'clock';
             if (node.kind === 'cap') return 'crown';
             if (node.kind === 'act') return 'bolt';
             if (node.kind === 'ctl') return 'star';
-            // v11.6.3: нативное правило iconOf — навык с кулдауном (cd_*)
-            // рисуется «часами», даже если у него есть другой fx-ключ.
-            if (Object.keys(node.fx || {}).some(k => /^cd_/.test(k))) return 'clock';
             for (const k of Object.keys(node.fx || {})) {
                 for (const [re, icon] of this.FX_ICONS) if (re.test(k)) return icon;
             }
@@ -3387,14 +3435,29 @@
 
         // Текст навыка с подстановкой значений из node.fx (там прибавка за 1 ранг).
         // Для неизученного навыка (rank 0) показываем значения 1-го ранга.
+        //
+        // v11.6.5b: игра ввела макросы ребаланса {cleaveBoss}, {penBoss}, {critX},
+        // которых нет в node.fx — сервер их не присылает, значения считаются на
+        // лету при отрисовке текста (см. kv() в reference/LegionFrontSRC/site/skills.js).
         formatNodeText(node, rank) {
             if (!node.text) return '';
             const r = Math.max(1, rank); // Если ранг 0, показываем значение для 1-го ранга
+            const fx = node.fx || {};
+            // Красивое форматирование: 1.2 -> "1.2", 3.0 -> "3"
+            const fmt = (val) => Number.isInteger(val) ? val.toString() : val.toFixed(1).replace('.0', '');
             return node.text.replace(/\{(\w+)\}/g, (match, key) => {
-                if (node.fx && node.fx[key] !== undefined) {
-                    const val = node.fx[key] * r;
-                    // Красивое форматирование: 1.2 -> "1.2", 3.0 -> "3"
-                    return Number.isInteger(val) ? val.toString() : val.toFixed(1).replace('.0', '');
+                /*
+                 * Вычисляемые макросы ребаланса (в fx их нет, поэтому проверяются
+                 * ДО стандартной подстановки fx[key] * r):
+                 *   cleaveBoss — 40% от «Замаха» за ранг: урон по боссу;
+                 *   penBoss    — «Пробивание» / 20 за ранг: бронебой по боссу;
+                 *   critX      — множитель крита: база ×2 + Сила крита / 100 за ранг.
+                 */
+                if (key === 'cleaveBoss') return fmt((fx.cleave || 0) * r * 0.4);
+                if (key === 'penBoss') return fmt((fx.pierce || 0) * r / 20);
+                if (key === 'critX') return fmt(2 + (fx.critDmg || 0) * r / 100);
+                if (fx[key] !== undefined) {
+                    return fmt(fx[key] * r);
                 }
                 return match; // Если ключа нет в fx, оставляем как есть (или можно '?')
             });
@@ -3461,22 +3524,32 @@
         /**
          * Режим очков навыков из /api/me -> hero.sk.
          *
-         * md === 'shared' (новое): очки общие по уровню героя, лимит =
-         * max(1, sk.lv || hero.level). Вложить их можно только в одно
-         * дерево — класс-владелец определяется по ненулевым рангам sk.t.
-         * Иначе — прежняя модель с MAX_POINTS.
+         * Игра в shared-режиме разрешает вложение только в одно дерево, но
+         * ПЛАНИРОВЩИК — песочница: он не зависит от текущих вложений игры.
+         * v11.6.5b.3: из метода убраны пул очков героя (availablePoints) и
+         * лимит (pointsLimit) — планирование всегда до maxPts() === 50,
+         * в том числе для класса-владельца (ownerClass).
+         * ownerClass остаётся только ради зелёной метки ✓ в сайдбаре.
          */
         readSkillMode(hero) {
             const sk = (hero && hero.sk) || {};
             this.skillMode = sk.md || 'class';
             this.ownerClass = '';
-            if (this.skillMode === 'shared') {
-                this.pointsLimit = Math.max(1, +sk.lv || +hero.level || 1);
-                this.ownerClass = this.ownerOf(sk);
-            } else {
-                this.pointsLimit = MAX_POINTS;
-            }
-            return { mode: this.skillMode, limit: this.pointsLimit, owner: this.ownerClass };
+            this.nativeSkills = (sk.t && typeof sk.t === 'object' && !Array.isArray(sk.t)) ? sk.t : {};
+            if (this.skillMode === 'shared') this.ownerClass = this.ownerOf(sk);
+            return { mode: this.skillMode, limit: this.maxPts(), owner: this.ownerClass };
+        },
+
+        /**
+         * v11.6.5b.3: лимит очков плана (maxPts из ТЗ).
+         *
+         * Всегда MAX_POINTS (50) — в любом режиме и для любого класса,
+         * включая класс-владельца общих очков (ownerClass). Симулятор не
+         * зависит от того, сколько очков уже вложено в игре. Ползунка в UI
+         * нет: очки вкладываются только кнопками «+» / «−».
+         */
+        maxPts() {
+            return MAX_POINTS;
         },
 
         // Класс, в чьё дерево уже вложены общие очки (ownerOf из skills.js):
@@ -3487,21 +3560,6 @@
                 if (ranks && Object.values(ranks).some(r => +r > 0)) return cls;
             }
             return '';
-        },
-
-        // Заблокирован ли класс для вложения при shared-режиме.
-        isClassLocked(clsId) {
-            return this.skillMode === 'shared' && !!this.ownerClass && this.ownerClass !== clsId;
-        },
-
-        // Плашка-предупреждение над деревом класса (аналог sharedNote из skills.js).
-        sharedNoticeHtml(clsId) {
-            if (this.skillMode !== 'shared' || !this.ownerClass) return '';
-            const owner = this.classNames[this.ownerClass] || this.ownerClass;
-            if (this.ownerClass !== clsId) {
-                return `<p class="sim-shared-note" role="status">Очки уже в дереве «${Utils.escapeHtml(owner)}» — сбрось очки навыков, чтобы вложить в этот класс</p>`;
-            }
-            return `<p class="sim-shared-note own" role="status">Общие очки вложены сюда · лимит ${this.pointsLimit} по уровню героя</p>`;
         },
 
         async mount(container) {
@@ -3565,14 +3623,13 @@
                     // --ct: цвет текста на заливке (classTextColors, ТЗ 11.6.1e).
                     const color = this.classColors[c.id] || '#caa55c';
                     const textColor = this.classTextColors[c.id] || '#12100e';
-                    // v11.6.3: в shared-режиме помечаем дерево, в которое уже
-                    // вложены общие очки (аналог .skc-ow из нативных навыков),
-                    // и замком — все остальные классы (.skc-p.oth).
+                    // v11.6.5b.2: замки с классов сняты — все деревья
+                    // кликабельны всегда. Осталась только метка ✓ у класса,
+                    // в который уже вложены общие очки (аналог .skc-ow).
                     const owned = this.skillMode === 'shared' && this.ownerClass === c.id;
-                    const lockedTab = this.skillMode === 'shared' && !!this.ownerClass && this.ownerClass !== c.id;
                     const tabBadge = owned
                         ? '<span class="sim-tab-own" title="Очки навыков вложены в этот класс">✓</span>'
-                        : (lockedTab ? '<span class="sim-tab-lock" title="Очки навыков уже вложены в другой класс">🔒</span>' : '');
+                        : '';
                     tabsHtml += `<button class="modal-tab sim-tab" data-tab="${c.id}" style="--c:${color};--ct:${textColor}">${this.getClassSvg(c.id)}${this.classNames[c.id] || c.name || c.id}${tabBadge}</button>`;
                 });
 
@@ -3611,11 +3668,12 @@
                                 <div class="sim-tree-inner">
                                     <!-- Верхняя панель: одна строка 38px (очки / билды / обмен). -->
                                     <div class="sim-top-bar">
-                                        <div class="sim-free-pts">Свободно: <b id="free-${c.id}">0</b> / ${this.pointsLimit}</div>
+                                        <div class="sim-free-pts">Свободно: <b id="free-${c.id}">0</b> / ${this.maxPts()}</div>
                                         <div class="sim-bar-sep"></div>
                                         <button class="sim-save-btn" data-save="${c.id}" title="Сохранить билд">Сохранить</button>
                                         <button class="sim-share-btn" data-share="${c.id}" title="Поделиться билдом">Поделиться</button>
                                         <button class="sim-import-btn" data-import="${c.id}" title="Импортировать билд">Импорт</button>
+                                        <button class="sim-keep-btn" data-keep="${c.id}" title="От того, что уже вложено: взять очки, вложенные в игре, и планировать остальные до ${this.maxPts()}">⟲ Вложено</button>
                                         <div class="sim-bar-sep"></div>
                                         <select id="load-select-${c.id}" class="sim-load-select" title="Мои билды">
                                             <option value="">— Мои билды —</option>
@@ -3623,7 +3681,6 @@
                                         <button class="sim-del-btn" data-del="${c.id}" title="Удалить выбранный билд">🗑️</button>
                                         <button class="sim-reset-btn" data-reset="${c.id}" title="Сбросить все навыки">Сбросить всё</button>
                                     </div>
-                                    <div class="sim-shared-host" id="shared-${c.id}">${this.sharedNoticeHtml(c.id)}</div>
                                     <div class="sim-branches" id="tree-${c.id}"></div>
                                 </div>
                             </div>
@@ -3689,6 +3746,37 @@
             this.hideTooltip();
             this.renderTree(clsId);
             document.querySelectorAll('.sim-card').forEach(c => c.remove());
+        },
+
+        /**
+         * v11.6.5b.1: кнопка «⟲ Вложено» (режим keep, «от того, что уже вложено»).
+         *
+         * Берёт ранги, которые УЖЕ вложены в игре (hero.sk.t[clsId]), кладёт
+         * их в симуляцию и оставляет свободными остальные очки до целевого
+         * лимита плана (maxPts, до 50) — их план и добирает кнопками +.
+         * Правила зависимостей/тиров проверять не нужно: ранги пришли из
+         * валидного состояния игры.
+         */
+        keepNativeBuild(clsId) {
+            const ranks = (this.nativeSkills && this.nativeSkills[clsId]) || {};
+            const clean = {};
+            let total = 0;
+            Object.entries(ranks).forEach(([nodeId, rank]) => {
+                const r = Math.floor(Number(rank));
+                if (!Number.isFinite(r) || r <= 0) return;
+                clean[nodeId] = r;
+                total += r;
+            });
+            if (!total) {
+                UI.showToast('В этом дереве нет вложенных очков — начинаем с чистого плана', true);
+                return;
+            }
+            this.simulatedSkills[clsId] = clean;
+            // Это не сохранённый билд: «🗑️» не должен целиться в localStorage.
+            this._setCurrentBuild(clsId, '');
+            this.hideTooltip();
+            this.renderTree(clsId);
+            UI.showToast(`⟲ Взято из игры: ${total} ${this._pointsWord(total)} · свободно до ${this.maxPts()}`);
         },
 
         // ------------------------------------------------------------
@@ -3873,7 +3961,7 @@
 
         // Код приходит извне (ссылка от другого игрока), поэтому декодируем
         // с проверками: известный класс, целые ранги в пределах node.max,
-        // сумма очков не больше pointsLimit (MAX_POINTS в обычном режиме).
+        // сумма очков не больше целевого лимита плана (maxPts, до 50).
         // Возвращает id класса, к которому относится билд, либо null.
         decodeBuild(code) {
             if (!code || typeof code !== 'string') return null;
@@ -3911,8 +3999,10 @@
                 });
 
                 // «Перекачанный» билд (больше очков, чем даёт игра) не принимаем.
-                // v11.6.3: лимит зависит от режима (shared -> уровень героя).
-                if (total > this.pointsLimit) return null;
+                // v11.6.3: лимит зависит от режима.
+                // v11.6.5b.1: в shared план считается до MAX_POINTS (maxPts),
+                // а не до уровня героя — иначе импорт плана на 50 не проходил.
+                if (total > this.maxPts()) return null;
 
                 this.simulatedSkills[cls] = clean;
                 // Импорт — не сохранённый билд: «🗑️» не должен целиться
@@ -4008,13 +4098,10 @@
             const simTree = this.simulatedSkills[clsId];
             const current = simTree[nodeId] || 0;
             if (delta > 0) {
-                // v11.6.3: в shared-режиме очки уже лежат в другом дереве —
-                // игра не даст вложить их сюда, пока навыки не сброшены.
-                if (this.isClassLocked(clsId)) {
-                    const owner = this.classNames[this.ownerClass] || this.ownerClass;
-                    UI.showToast(`Очки уже в дереве «${owner}» — сбрось очки навыков, чтобы вложить в этот класс`, true);
-                    return;
-                }
+                // v11.6.5b.2: блокировка чужих деревьев в shared снята —
+                // планировщик симулирует план на любой класс.
+                // v11.6.5b.3: ни availablePoints, ни ownerClass здесь не
+                // участвуют — лимит строго maxPts() (50) для любого класса.
                 if (current >= maxRank) return;
                 if (preNode && !(simTree[preNode] > 0)) return;
                 if (branchIds && branchReq > 0) {
@@ -4025,7 +4112,8 @@
                     if (branchPts < branchReq) return;
                 }
                 let spent = 0; Object.values(simTree).forEach(v => spent += v);
-                if (spent >= this.pointsLimit) return;
+                // Считаем только очки ТЕКУЩЕГО ПЛАНА (simTree), а не вложения игры.
+                if (spent >= this.maxPts()) return;
             }
             if (delta < 0) {
                 // Полная симуляция снятия: строим дерево «как будто очко уже снято»
@@ -4107,16 +4195,12 @@
 
             if (!this.simulatedSkills[clsId]) this.simulatedSkills[clsId] = {};
             const simTree = this.simulatedSkills[clsId];
-            // v11.6.3: в shared-режиме чужое дерево целиком заблокировано,
-            // а плашка над ним объясняет причину (может появиться позже).
-            const clsLocked = this.isClassLocked(clsId);
-            const sharedHost = document.getElementById(`shared-${clsId}`);
-            if (sharedHost) sharedHost.innerHTML = this.sharedNoticeHtml(clsId);
-
             let spent = 0; Object.values(simTree).forEach(v => spent += v);
             const freeEl = document.getElementById(`free-${clsId}`);
-            // Нативно при shared + чужом дереве свободных очков ровно 0.
-            if (freeEl) freeEl.textContent = clsLocked ? 0 : this.pointsLimit - spent;
+            // v11.6.5b.3: «Свободно: X / 50» = 50 минус сумма ВСЕХ очков
+            // текущего плана. Вложения игры (hero.sk.t) и ownerClass в расчёт
+            // не входят — полоска одинаково считается для любого класса.
+            if (freeEl) freeEl.textContent = this.maxPts() - spent;
 
             let html = '';
             const simStats = {};
@@ -4206,11 +4290,10 @@
                     for (let i = 0; i < node.max; i++) ranksHtml += `<i class="${i < rank ? 'filled' : ''}"></i>`;
 
                     // Состояния как в нативном дереве: lock / has / max / can (available).
-                    // v11.6.3: чужое дерево в shared-режиме — как заблокированное.
-                    const state = ((locked || clsLocked) ? ' locked' : '')
+                    const state = (locked ? ' locked' : '')
                         + (rank > 0 ? ' has' : '')
                         + (maxed ? ' maxed' : '')
-                        + (!locked && !clsLocked && !maxed ? ' available' : '');
+                        + (!locked && !maxed ? ' available' : '');
                     const x = xMap.get(node.id);
                     const y = this.yFor(node.req);
 
@@ -4332,6 +4415,10 @@
             const importBtn = document.querySelector(`.sim-import-btn[data-import="${clsId}"]`);
             if (importBtn) importBtn.onclick = () => this.importBuild(clsId);
 
+            // v11.6.5b.1: «⟲ От вложенного» — план от текущих очков героя.
+            const keepBtn = document.querySelector(`.sim-keep-btn[data-keep="${clsId}"]`);
+            if (keepBtn) keepBtn.onclick = () => this.keepNativeBuild(clsId);
+
             // Перерисовка пересоздала узлы — старый тултип невалиден (позиция
             // устарела). changeSkill() при необходимости покажет его заново.
             this.hideTooltip();
@@ -4437,15 +4524,10 @@
             branch.nodes.forEach(n => branchPoints += (simTree[n.id] || 0));
             const locked = branchPoints < node.req || (node.pre && !(simTree[node.pre] > 0));
             const maxed = rank >= node.max;
-            // v11.6.3: в shared-режиме чужое дерево нельзя качать вообще.
-            const clsLocked = this.isClassLocked(clsId);
 
             let reqText = '';
-            if (clsLocked) {
-                const owner = this.classNames[this.ownerClass] || this.ownerClass;
-                reqText = `Очки уже в дереве «${owner}» — сбрось очки навыков, чтобы вложить в этот класс`;
-            } else if (branchPoints < node.req) reqText = `Требуется очков в ветке: ${node.req}`;
-            if (!clsLocked && node.pre && !(simTree[node.pre] > 0)) reqText = `Сначала изучите предыдущий навык.`;
+            if (branchPoints < node.req) reqText = `Требуется очков в ветке: ${node.req}`;
+            if (node.pre && !(simTree[node.pre] > 0)) reqText = `Сначала изучите предыдущий навык.`;
 
             const tip = this._getTooltip();
             tip.dataset.cls = clsId;
@@ -4458,7 +4540,7 @@
                 ${reqText ? `<div class="req">${reqText}</div>` : ''}
                 ${withControls ? `<div class="controls">
                     <button type="button" data-action="minus" ${rank === 0 ? 'disabled' : ''}>− Убрать</button>
-                    <button type="button" data-action="plus" ${maxed || locked || clsLocked ? 'disabled' : ''}>+ Вложить</button>
+                    <button type="button" data-action="plus" ${maxed || locked ? 'disabled' : ''}>+ Вложить</button>
                 </div>` : ''}`;
 
             // Позиция — после вставки контента: нужны реальные offsetWidth/Height.
@@ -6749,6 +6831,7 @@
         // умолчанию (reference: game-data.js → auction): сбор 1% (мин. 10 меди),
         // комиссия 5%, лимит 10 лотов, сроки 24/48/72 ч. Стоимость заточки — из
         // GAME_DATA.ENCHANT_PRICES (идеальная, без учёта шансов).
+        // v11.6.5b: лимит цены лота — cfg.maxPrice, иначе GAME_DATA.AUCTION_MAX_PRICE.
         showInfo() {
             const c = this.cfg || {};
             const feePct = c.feePct != null ? c.feePct : 1;
@@ -6756,6 +6839,8 @@
             const comPct = c.com != null ? c.com : 5;
             const maxLots = c.maxLots != null ? c.maxLots : 10;
             const hours = Array.isArray(c.hours) && c.hours.length ? c.hours : [24, 48, 72];
+            // v11.6.5b: лимит цены лота — из cfg канала, иначе игровое значение.
+            const maxPrice = this.maxLotPrice();
             const tmlNote = this.tradeMinLevel > 1
                 ? `сейчас у тебя порог ${this.tradeMinLevel}-го уровня`
                 : 'в этом канале ограничения нет';
@@ -6800,6 +6885,7 @@
                         <li><b>Сроки:</b> ${hours.join(' / ')} ч — по истечении лот снимается с витрины.</li>
                         <li><b>Максимум лотов:</b> ${maxLots} одновременно.</li>
                         <li><b>Минимальный уровень торговли:</b> поле <code>hero.tml</code> — ${tmlNote}.</li>
+                        <li><b>Максимальная цена лота:</b> ${maxPrice} меди (${Utils.formatMoney(maxPrice)}). Лот дороже лимита выставить нельзя.</li>
                     </ul>
 
                     <h3 style="color:#ffcf6a; font-size:14px; margin-top:15px;">📊 Что показывают колонки</h3>
@@ -6863,6 +6949,54 @@
          */
         sellBlockedReason(item) {
             return isBoundItem(item) ? BOUND_LINE : '';
+        },
+
+        /**
+         * v11.6.5b: максимальная цена лота в меди.
+         *
+         * Игра отдаёт лимит в cfg.maxPrice из /api/auction. Конфиг канала
+         * важнее игрового значения по умолчанию (на тестовых каналах лимит
+         * может быть ниже), а GAME_DATA.AUCTION_MAX_PRICE нужен как фолбэк,
+         * пока витрина не открыта и cfg ещё не получен.
+         *
+         * @returns {number} лимит цены лота, меди.
+         */
+        maxLotPrice() {
+            const cfgMax = Math.trunc(Number(this.cfg && this.cfg.maxPrice));
+            return Number.isFinite(cfgMax) && cfgMax > 0 ? cfgMax : GAME_DATA.AUCTION_MAX_PRICE;
+        },
+
+        /**
+         * v11.6.5b: валидация цены лота перед отправкой в /api/aucSell.
+         *
+         * Цена — целое число меди в диапазоне 1..maxLotPrice(). Сервер в
+         * такой запрос всё равно отвечает отказом, поэтому блокируем раньше,
+         * чтобы пользователь не терял сбор за выставление.
+         *
+         * @param {number} price цена лота, меди.
+         * @returns {string} '' — цена допустима, иначе текст для тултипа/алерта.
+         */
+        priceBlockedReason(price) {
+            const p = Number(price);
+            if (!Number.isFinite(p) || p <= 0) return 'Цена лота должна быть больше нуля';
+            if (Math.trunc(p) !== p) return 'Цена лота указывается целым числом меди';
+            const max = this.maxLotPrice();
+            if (p > max) return `Максимальная цена лота: ${max}`;
+            return '';
+        },
+
+        /**
+         * v11.6.5b: ограничение ввода пользователя — цена обрезается до
+         * лимита канала и приводится к целым меди (для поля ввода лота).
+         * 0 означает «цена не задана» и вызывающий код должен это отсечь.
+         *
+         * @param {number} price введённая цена, меди.
+         * @returns {number} цена в диапазоне 0..maxLotPrice().
+         */
+        clampLotPrice(price) {
+            const p = Math.trunc(Number(price));
+            if (!Number.isFinite(p) || p <= 0) return 0;
+            return Math.min(p, this.maxLotPrice());
         },
 
         async open() {
@@ -7332,6 +7466,14 @@
                         // после отрисовки таблицы — проверяем ещё раз перед запросом.
                         if (!Number.isFinite(price) || price <= 0) {
                             alert('Некорректная цена лота — обновите список');
+                            return;
+                        }
+                        // 11.6.5b: цена лота выше лимита (GAME_DATA.AUCTION_MAX_PRICE
+                        // или cfg.maxPrice канала) — такой лот сервер принимать не
+                        // должен, значит данные устарели или подменены: блокируем.
+                        const priceBlock = this.priceBlockedReason(price);
+                        if (priceBlock) {
+                            alert(priceBlock);
                             return;
                         }
                         if (this.myLevel < this.tradeMinLevel) {

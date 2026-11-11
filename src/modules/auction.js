@@ -1528,6 +1528,7 @@
         // умолчанию (reference: game-data.js → auction): сбор 1% (мин. 10 меди),
         // комиссия 5%, лимит 10 лотов, сроки 24/48/72 ч. Стоимость заточки — из
         // GAME_DATA.ENCHANT_PRICES (идеальная, без учёта шансов).
+        // v11.6.5b: лимит цены лота — cfg.maxPrice, иначе GAME_DATA.AUCTION_MAX_PRICE.
         showInfo() {
             const c = this.cfg || {};
             const feePct = c.feePct != null ? c.feePct : 1;
@@ -1535,6 +1536,8 @@
             const comPct = c.com != null ? c.com : 5;
             const maxLots = c.maxLots != null ? c.maxLots : 10;
             const hours = Array.isArray(c.hours) && c.hours.length ? c.hours : [24, 48, 72];
+            // v11.6.5b: лимит цены лота — из cfg канала, иначе игровое значение.
+            const maxPrice = this.maxLotPrice();
             const tmlNote = this.tradeMinLevel > 1
                 ? `сейчас у тебя порог ${this.tradeMinLevel}-го уровня`
                 : 'в этом канале ограничения нет';
@@ -1579,6 +1582,7 @@
                         <li><b>Сроки:</b> ${hours.join(' / ')} ч — по истечении лот снимается с витрины.</li>
                         <li><b>Максимум лотов:</b> ${maxLots} одновременно.</li>
                         <li><b>Минимальный уровень торговли:</b> поле <code>hero.tml</code> — ${tmlNote}.</li>
+                        <li><b>Максимальная цена лота:</b> ${maxPrice} меди (${Utils.formatMoney(maxPrice)}). Лот дороже лимита выставить нельзя.</li>
                     </ul>
 
                     <h3 style="color:#ffcf6a; font-size:14px; margin-top:15px;">📊 Что показывают колонки</h3>
@@ -1642,6 +1646,54 @@
          */
         sellBlockedReason(item) {
             return isBoundItem(item) ? BOUND_LINE : '';
+        },
+
+        /**
+         * v11.6.5b: максимальная цена лота в меди.
+         *
+         * Игра отдаёт лимит в cfg.maxPrice из /api/auction. Конфиг канала
+         * важнее игрового значения по умолчанию (на тестовых каналах лимит
+         * может быть ниже), а GAME_DATA.AUCTION_MAX_PRICE нужен как фолбэк,
+         * пока витрина не открыта и cfg ещё не получен.
+         *
+         * @returns {number} лимит цены лота, меди.
+         */
+        maxLotPrice() {
+            const cfgMax = Math.trunc(Number(this.cfg && this.cfg.maxPrice));
+            return Number.isFinite(cfgMax) && cfgMax > 0 ? cfgMax : GAME_DATA.AUCTION_MAX_PRICE;
+        },
+
+        /**
+         * v11.6.5b: валидация цены лота перед отправкой в /api/aucSell.
+         *
+         * Цена — целое число меди в диапазоне 1..maxLotPrice(). Сервер в
+         * такой запрос всё равно отвечает отказом, поэтому блокируем раньше,
+         * чтобы пользователь не терял сбор за выставление.
+         *
+         * @param {number} price цена лота, меди.
+         * @returns {string} '' — цена допустима, иначе текст для тултипа/алерта.
+         */
+        priceBlockedReason(price) {
+            const p = Number(price);
+            if (!Number.isFinite(p) || p <= 0) return 'Цена лота должна быть больше нуля';
+            if (Math.trunc(p) !== p) return 'Цена лота указывается целым числом меди';
+            const max = this.maxLotPrice();
+            if (p > max) return `Максимальная цена лота: ${max}`;
+            return '';
+        },
+
+        /**
+         * v11.6.5b: ограничение ввода пользователя — цена обрезается до
+         * лимита канала и приводится к целым меди (для поля ввода лота).
+         * 0 означает «цена не задана» и вызывающий код должен это отсечь.
+         *
+         * @param {number} price введённая цена, меди.
+         * @returns {number} цена в диапазоне 0..maxLotPrice().
+         */
+        clampLotPrice(price) {
+            const p = Math.trunc(Number(price));
+            if (!Number.isFinite(p) || p <= 0) return 0;
+            return Math.min(p, this.maxLotPrice());
         },
 
         async open() {
@@ -2111,6 +2163,14 @@
                         // после отрисовки таблицы — проверяем ещё раз перед запросом.
                         if (!Number.isFinite(price) || price <= 0) {
                             alert('Некорректная цена лота — обновите список');
+                            return;
+                        }
+                        // 11.6.5b: цена лота выше лимита (GAME_DATA.AUCTION_MAX_PRICE
+                        // или cfg.maxPrice канала) — такой лот сервер принимать не
+                        // должен, значит данные устарели или подменены: блокируем.
+                        const priceBlock = this.priceBlockedReason(price);
+                        if (priceBlock) {
+                            alert(priceBlock);
                             return;
                         }
                         if (this.myLevel < this.tradeMinLevel) {
