@@ -82,6 +82,15 @@
         MARKET_MAX_IDS: 200,
         MARKET_TIMEOUT: 12000,
         MARKET_WAIT_MS: 1200,
+        // 11.6.5a: как часто можно перезапрашивать медиану для одного
+        // предмета из подсказки. Тултип проверяется на каждую мутацию DOM,
+        // поэтому без троттлинга один и тот же id уходил бы в /market/medians
+        // по нескольку раз в секунду.
+        TIP_MEDIAN_RETRY_MS: 2 * 60 * 1000,
+        // 11.6.5a.2: инлайн-стиль строки медианы для HTML-хука. Инлайн, а не
+        // класс из styles.js, потому что строка рождается внутри строки
+        // разметки игры и должна переживать её перерисовки без наших правок.
+        TIP_MEDIAN_LINE_STYLE: 'margin-top:6px;padding-top:4px;border-top:1px dashed rgba(255,255,255,0.2);font-size:12px;color:#ffd700;font-weight:600;display:flex;align-items:center;gap:4px;',
 
         // 11.6.2c.4: полное сканирование витрины (кнопка «📡 Сканировать весь
         // аукцион»). Отметка о последнем скане живёт в localStorage, чтобы
@@ -708,34 +717,59 @@
             return ` title="Медиана сети (7 дней): ${Utils.formatMoney(net)}"`;
         },
 
-        // 11.6.2c.2: строка «Медиана рынка» в НАТИВНЫХ тултипах предметов.
+        // 11.6.2c.2: строка «Медиана рынка» в НАТИВНЫХ подсказках предметов.
         //
-        // Игра рисует подсказки сама: #lg-tip (site/app.js — экипировка и
-        // сумка героя) и #lgi-tip (lib/inventory.js — окно инвентаря).
-        // Оба наполняются через innerHTML, поэтому единственная точка
-        // перехвата — MutationObserver на document.body: как только игра
-        // переписала содержимое подсказки, мы дописываем в её конец строку.
+        // 11.6.5a.2: основной путь — хук генератора HTML карточки предмета
+        // (window.LGInventory.cardHtml, lib/inventory.js): строка вшивается в
+        // готовую разметку ЕЩЁ ДО вставки в DOM. Раньше подсказку дописывал
+        // MutationObserver, но игра перерисовывает её на pointermove, и каждый
+        // такой проход добавлял узел заново — отсюда мерцание.
         //
-        // id предмета в разметке подсказки нет, поэтому:
+        // 11.6.5a.3: второй хук — генератор карточки старого тултипа
+        // (G.itemBody / G.cardTip, site/app.js). В текущем клиенте эти функции
+        // локальны для модуля, поэтому хук ставится «если есть», а страховкой
+        // остаётся обход #lg-tip / .tip.card из MutationObserver — строго при
+        // отсутствии строки в подсказке.
+        //
+        // MutationObserver, кроме того, обслуживает плашку лавки города
+        // (.cy-icard.on): её HTML генерирует site/cityshop.js, который мы не
+        // перехватываем, а перерисовывается она редко (по клику/наведению).
+        //
+        // id предмета в разметке подсказки нет, поэтому (resolveTipItemId):
         //   1) игра помечает наведённый элемент aria-describedby="<id
-        //      подсказки>" (tipPlace в app.js) -> читаем data-sel (это uid
-        //      экземпляра) и ищем предмет в инвентаре героя (G.ME.hero.items);
+        //      подсказки>" (tipPlace в app.js, tipShow в inventory.js) -> читаем
+        //      11.6.5a: data-ig (uid в новом инвентаре), data-sel (uid в
+        //      сумке), data-item/data-good/data-lot-id (прямой id) и ищем
+        //      экземпляр в сумке, на складе (sg.store) и на складе аукциона (ar);
+        //      11.6.5a.1: data-k="<uid>|<itemId>|…" у надетых вещей и
+        //      data-lore="<itemId>" (.lg-lorebox) внутри самой подсказки;
         //   2) если якорь не помог — сравниваем заголовок подсказки с
-        //      названиями предметов, по которым есть медиана (tipNameIndex).
+        //      названиями из справочника предметов (tipNameIndex).
         // ------------------------------------------------------------
         initItemTips() {
-            // Повторный boot() не должен плодить наблюдателей.
+            // Повторный boot() не должен плодить ни хуков, ни наблюдателей.
+            this.hookInventoryCardHtml();
+            // 11.6.5a.3: генератор карточки старого тултипа (site/app.js).
+            this.hookItemBody();
             if (this._tipObserver || typeof MutationObserver === 'undefined') return;
 
             const check = () => {
                 try {
+                    // 11.6.5a.3 (п.4): резервный путь для старого тултипа
+                    // #lg-tip / .tip.card. Строку добавляем ТОЛЬКО если её нет —
+                    // повторной вставки на каждую мутацию не происходит,
+                    // поэтому подсказка не мерцает.
                     const lgTip = document.getElementById('lg-tip');
-                    if (lgTip) this.attachMarketMedian(lgTip);
-                    const lgiTip = document.getElementById('lgi-tip');
-                    if (lgiTip) this.attachMarketMedian(lgiTip);
-                    // Карточка предмета в нативной подсказке (.tip.card) —
-                    // отдельный режим #lg-tip, проверяем и по селектору.
-                    document.querySelectorAll('.tip.card').forEach(el => this.attachMarketMedian(el));
+                    if (lgTip && !lgTip.hidden && !lgTip.querySelector('.lg-market-median')) {
+                        this.attachMarketMedian(lgTip);
+                    }
+                    document.querySelectorAll('.tip.card').forEach(el => {
+                        if (!el.querySelector('.lg-market-median')) this.attachMarketMedian(el);
+                    });
+                    // 11.6.5a: плашка товара в лавках города (.cy-icard.on):
+                    // она не #lg-tip и не .tip.card, поэтому раньше медиана в
+                    // магазинах не появлялась вовсе.
+                    document.querySelectorAll('.cy-icard.on').forEach(el => this.attachMarketMedian(el));
                 } catch (e) {
                     dbg('[AUCTION] строка медианы в тултипе:', e);
                 }
@@ -764,11 +798,205 @@
         },
 
         /**
-         * Дописать строку «📈 Медиана рынка: …» в подсказку, если для её
-         * предмета есть медиана сети. Повторный вызов безопасен: маркер
-         * .lg-market-median не даёт вставить строку дважды.
+         * 11.6.5a.2: перехват генератора HTML карточки предмета нового
+         * инвентаря — `window.LGInventory.cardHtml(it, list, opts)`
+         * (lib/inventory.js: api.cardHtml). Хук возвращает ту же разметку, но
+         * со строкой «📈 Медиана рынка», поэтому дописывать DOM после
+         * отрисовки не нужно и подсказка не мерцает.
          *
-         * @param {Element} tipEl #lg-tip / #lgi-tip / .tip.card
+         * lib/inventory.js подключается отдельным файлом и может быть готов
+         * позже нашего init(), поэтому первые 60 секунд ждём появления
+         * объекта (интервал 500 мс) и хукаем ровно один раз.
+         *
+         * @returns {boolean} хук установлен
+         */
+        hookInventoryCardHtml() {
+            if (this._cardHtmlHooked) return true;
+            const inv = G.LGInventory;
+            if (!inv || typeof inv.cardHtml !== 'function') {
+                if (!this._cardHtmlTimer && typeof setInterval === 'function') {
+                    let tries = 0;
+                    this._cardHtmlTimer = setInterval(() => {
+                        tries += 1;
+                        if (this.hookInventoryCardHtml() || tries >= 120) {
+                            clearInterval(this._cardHtmlTimer);
+                            this._cardHtmlTimer = null;
+                        }
+                    }, 500);
+                }
+                return false;
+            }
+
+            this._cardHtmlHooked = true;
+            this._origCardHtml = inv.cardHtml;
+            const self = this;
+            // arguments пробрасываем как есть: в клиенте сигнатура
+            // cardHtml(it, list, opts), но нам нужен только it.
+            inv.cardHtml = function () {
+                const html = self._origCardHtml.apply(inv, arguments);
+                try {
+                    return self.injectTipMedian(html, arguments[0]);
+                } catch (e) {
+                    // Игра не должна страдать из-за нашей строки: отдаём
+                    // оригинальную разметку.
+                    dbg('[AUCTION] хук cardHtml:', e);
+                    return html;
+                }
+            };
+            return true;
+        },
+
+        /**
+         * 11.6.5a.3: перехват генератора HTML карточки предмета из site/app.js.
+         *
+         * В референс-сборке `itemBody(it, h, o)` и `cardTip(el, it, h, o)`
+         * объявлены ВНУТРИ модуля (function itemBody / function cardTip) и
+         * наружу не выложены: window.itemBody и window.cardTip === undefined,
+         * наружу идёт только фасад CX, который получает window.LGCity.open —
+         * поэтому хук ставим «если есть»: как только клиент выложит генератор
+         * в глобальную область, строка начнёт вшиваться в HTML до отрисовки.
+         *
+         * Пока их нет, работает резервный обход #lg-tip / .tip.card в
+         * MutationObserver (только при отсутствии строки, см. initItemTips).
+         *
+         * @returns {boolean} хук установлен
+         */
+        hookItemBody() {
+            if (this._itemBodyHooked) return true;
+            const self = this;
+
+            // Чистая функция, возвращающая HTML строкой — лучший вариант.
+            const body = G.itemBody;
+            if (typeof body === 'function') {
+                this._origItemBody = body;
+                this._itemBodyHooked = true;
+                G.itemBody = function () {
+                    const html = self._origItemBody.apply(G, arguments);
+                    try {
+                        return self.injectTipMedian(html, arguments[0]);
+                    } catch (e) {
+                        dbg('[AUCTION] хук itemBody:', e);
+                        return html;
+                    }
+                };
+                return true;
+            }
+
+            // cardTip: может вернуть строку, а может писать в #lg-tip сам.
+            const tip = G.cardTip;
+            if (typeof tip === 'function') {
+                this._origCardTip = tip;
+                this._itemBodyHooked = true;
+                G.cardTip = function () {
+                    const out = self._origCardTip.apply(G, arguments);
+                    if (typeof out === 'string') {
+                        try {
+                            return self.injectTipMedian(out, arguments[1]);
+                        } catch (e) {
+                            dbg('[AUCTION] хук cardTip:', e);
+                            return out;
+                        }
+                    }
+                    // void: разметка уже улетела в #lg-tip — дописываем строку
+                    // один раз (маркер не даст вставить её повторно).
+                    try {
+                        const openTip = document.getElementById('lg-tip');
+                        if (openTip && !openTip.hidden && !openTip.querySelector('.lg-market-median')) {
+                            self.attachMarketMedian(openTip);
+                        }
+                    } catch (e) {
+                        dbg('[AUCTION] хук cardTip (dom):', e);
+                    }
+                    return out;
+                };
+                return true;
+            }
+
+            // Генераторов пока нет — ждём, как и хук LGInventory.cardHtml.
+            if (!this._itemBodyTimer && typeof setInterval === 'function') {
+                let tries = 0;
+                this._itemBodyTimer = setInterval(() => {
+                    tries += 1;
+                    if (this.hookItemBody() || tries >= 120) {
+                        clearInterval(this._itemBodyTimer);
+                        this._itemBodyTimer = null;
+                    }
+                }, 500);
+            }
+            return false;
+        },
+
+        /**
+         * Дописать строку медианы в готовый HTML карточки предмета.
+         *
+         * Вставка идёт через временный контейнер (innerHTML), а не правкой
+         * живого DOM: так строка попадает в блок .d-q перед .d-dur и не
+         * ломает разметку игры.
+         *
+         * @param {string} html результат LGInventory.cardHtml
+         * @param {object} it предмет ({ id, … })
+         * @returns {string} html со строкой .lg-market-median
+         */
+        injectTipMedian(html, it) {
+            if (!html || typeof html !== 'string') return html;
+            // Маркер-предохранитель: повторный проход (или чужая строка)
+            // второй раз ничего не добавит.
+            if (html.indexOf('lg-market-median') !== -1) return html;
+            const itemId = it && it.id != null ? String(it.id) : '';
+            if (!itemId) return html;
+
+            const price = this.getMarketMedian(itemId);
+            if (price <= 0) this.requestTipMedian(itemId, null);
+            const text = price > 0 ? Utils.formatMoney(price) : 'загрузка...';
+            const line = `<div class="lg-market-median" data-median-id="${Utils.escapeHtml(itemId)}" style="${this.TIP_MEDIAN_LINE_STYLE}">📈 Медиана рынка: ${text}</div>`;
+
+            const temp = document.createElement('div');
+            temp.innerHTML = html;
+            const qBox = temp.querySelector('.d-q');
+            if (qBox) {
+                const durEl = qBox.querySelector('.d-dur');
+                if (durEl) durEl.insertAdjacentHTML('beforebegin', line);
+                else qBox.insertAdjacentHTML('beforeend', line);
+            } else {
+                temp.insertAdjacentHTML('beforeend', line);
+            }
+            return temp.innerHTML;
+        },
+
+        /**
+         * Подставить актуальные цены в уже отрисованные строки «загрузка...».
+         *
+         * Меняем только текст узла (он помечен data-median-id), поэтому
+         * подсказка обновляется на месте: без перерисовки и мерцания.
+         */
+        refreshOpenTipMedians() {
+            let nodes = [];
+            try {
+                nodes = [...document.querySelectorAll('.lg-market-median[data-median-id]')];
+            } catch (e) {
+                return;
+            }
+            for (const node of nodes) {
+                const id = node.getAttribute('data-median-id');
+                const price = this.getMarketMedian(id);
+                if (price > 0) node.textContent = `📈 Медиана рынка: ${Utils.formatMoney(price)}`;
+            }
+        },
+
+        /**
+         * Дописать строку «📈 Медиана рынка: …» в подсказку.
+         *
+         * 11.6.5a: место вставки зависит от разметки игры:
+         *   #lg-tip   (.tip.card) — блок .d-q перед строкой прочности (.d-dur);
+         *   .cy-icard (лавка)     — перед кнопкой «Купить…» (.cy-icbuy);
+         *   #lgi-tip и прочее     — в конец подсказки.
+         *
+         * Если медианы в памяти ещё нет, цену дозапрашиваем у сервера и
+         * возвращаемся сюда же, когда ответ придёт (requestTipMedian).
+         * Повторный вызов безопасен: маркер .lg-market-median не даёт
+         * вставить строку дважды.
+         *
+         * @param {Element} tipEl #lg-tip / #lgi-tip / .tip.card / .cy-icard
          */
         attachMarketMedian(tipEl) {
             if (!tipEl || tipEl.hidden) return;
@@ -777,18 +1005,101 @@
 
             const itemId = this.resolveTipItemId(tipEl);
             if (!itemId) return;
+
             const price = this.getMarketMedian(itemId);
-            if (price <= 0) return;
+            if (price <= 0) {
+                // 11.6.5a: раньше здесь был голый return, и строка не
+                // появлялась до тех пор, пока медиану не подтянет витрина.
+                this.requestTipMedian(itemId, tipEl);
+                return;
+            }
 
             const line = document.createElement('div');
             line.className = 'lg-market-median';
+            // 11.6.5a.3: помечаем строку id предмета, чтобы
+            // refreshOpenTipMedians могла обновить цену на месте (без
+            // пересоздания узла) — как у строки из HTML-хука.
+            line.setAttribute('data-median-id', itemId);
             line.textContent = `📈 Медиана рынка: ${Utils.formatMoney(price)}`;
+            this.insertTipMedian(tipEl, line);
+        },
+
+        /**
+         * Куда вставить строку медианы.
+         *
+         * Подсказки игры устроены по-разному: карточка предмета держит
+         * описание в блоке .d-q вместе со строкой прочности (.d-dur), а
+         * плашка лавки заканчивается кнопкой «Купить…» (.cy-icbuy). «В конец»
+         * годится только для окна инвентаря #lgi-tip — там плоский список.
+         *
+         * @param {Element} tipEl
+         * @param {Element} line готовая строка .lg-market-median
+         */
+        insertTipMedian(tipEl, line) {
+            // Карточка предмета (site/app.js: itemBody -> .d-q c .d-dur).
+            const desc = tipEl.id === 'lg-tip' ? tipEl.querySelector('.d-q') : null;
+            if (desc) {
+                const dur = desc.querySelector('.d-dur');
+                // insertBefore(el, null) === appendChild — когда прочности нет
+                // (зелья, материалы) строка встаёт в конец блока.
+                desc.insertBefore(line, dur && dur.parentElement === desc ? dur : null);
+                return;
+            }
+            // Плашка лавки города (site/cityshop.js: кнопка .cy-icbuy в конце).
+            const buy = tipEl.classList && tipEl.classList.contains('cy-icard')
+                ? tipEl.querySelector('.cy-icbuy')
+                : null;
+            if (buy && buy.parentElement) {
+                buy.parentElement.insertBefore(line, buy);
+                return;
+            }
             tipEl.appendChild(line);
+        },
+
+        /**
+         * Запросить медиану по предмету, для которого её ещё нет в памяти.
+         *
+         * Троттлинг по id (TIP_MEDIAN_RETRY_MS): проверка подсказок идёт на
+         * каждую мутацию DOM, поэтому без отметки один и тот же id уходил бы
+         * в GET /market/medians постоянно.
+         *
+         * @param {string} itemId
+         * @param {Element|null} tipEl подсказка для обновления; null — цену
+         *   подставит refreshOpenTipMedians в уже отрисованные строки
+         */
+        requestTipMedian(itemId, tipEl) {
+            if (!itemId || typeof this.fetchMarketMedians !== 'function') return;
+            const now = Date.now();
+            if (!this._tipMedianAsked) this._tipMedianAsked = new Map();
+            const asked = this._tipMedianAsked;
+            // Карта растёт на каждый просмотренный предмет — чистим, чтобы не
+            // копить записи за долгую сессию.
+            if (asked.size > 500) asked.clear();
+            if (now - (asked.get(itemId) || 0) < this.TIP_MEDIAN_RETRY_MS) return;
+            asked.set(itemId, now);
+
+            Promise.resolve(this.fetchMarketMedians([itemId]))
+                .then(() => {
+                    // 11.6.5a.2: сначала подставляем цену в уже отрисованные
+                    // строки «загрузка...» (их ставит хук cardHtml) — правится
+                    // только текст, без перерисовки подсказки.
+                    this.refreshOpenTipMedians();
+                    // Медиана могла прийти — дописываем строку в ту же
+                    // подсказку, если она ещё на экране. Повторного запроса не
+                    // будет: отметка в _tipMedianAsked свежая.
+                    if (tipEl && tipEl.isConnected && !tipEl.hidden) this.attachMarketMedian(tipEl);
+                })
+                .catch((e) => dbg('[AUCTION] Медиана для тултипа недоступна:', e));
         },
 
         /**
          * id предмета по подсказке: сначала якорь (aria-describedby), затем
          * совпадение заголовка с известным названием.
+         *
+         * 11.6.5a: id возвращается ДАЖЕ без медианы — прежняя проверка
+         * getMarketMedian(direct) > 0 отсекала предметы, цены по которым ещё
+         * нет, и строка не появлялась никогда (медиану теперь дозапрашивает
+         * attachMarketMedian).
          *
          * @param {Element} tipEl
          * @returns {string} '' — предмет не опознан
@@ -796,35 +1107,48 @@
         resolveTipItemId(tipEl) {
             // 1. Якорь подсказки: игра ставит aria-describedby="lg-tip" на
             //    наведённую ячейку, инвентарь — aria-describedby="lgi-tip".
-            const tipId = tipEl.id;
-            if (tipId) {
-                let anchor = null;
-                try {
-                    anchor = document.querySelector(`[aria-describedby="${tipId}"]`);
-                } catch (e) {
-                    anchor = null;
-                }
-                if (anchor) {
-                    // Прямые data-атрибуты предмета (наши строки и сторонние аддоны).
-                    const direct = anchor.getAttribute('data-item-id')
-                        || anchor.getAttribute('data-lg-item')
-                        || anchor.getAttribute('data-item')
-                        || '';
-                    if (direct && this.getMarketMedian(direct) > 0) return direct;
+            const anchor = this.tipAnchor(tipEl);
 
-                    // Строка нашей витрины аукциона: id предмета в data-lot-id.
-                    const lotRow = anchor.closest('[data-lot-id]');
-                    const lotId = lotRow && lotRow.getAttribute('data-lot-id');
-                    if (lotId && this.getMarketMedian(lotId) > 0) return lotId;
-
-                    // data-sel — uid экземпляра предмета (app.js: data-sel="${it.uid}").
-                    const uid = anchor.getAttribute('data-sel');
-                    const items = G.ME?.hero?.items;
-                    if (uid && Array.isArray(items)) {
-                        const found = items.find(it => it && it.uid === uid);
-                        if (found && found.id && this.getMarketMedian(found.id) > 0) return found.id;
-                    }
+            // 1.1 11.6.5a.1: data-k="<uid>|<itemId>|<rarity>|…" — так игра
+            //     размечает надетые вещи. UID надетого экземпляра в
+            //     G.ME.hero.items не лежит (он в слоте экипировки), поэтому
+            //     id берём прямо из второго поля. Атрибут с одним полем
+            //     (например data-k="atk" у ячейки статов) игнорируем.
+            if (anchor) {
+                const dataK = anchor.getAttribute('data-k');
+                if (dataK) {
+                    const parts = String(dataK).split('|');
+                    if (parts.length > 1 && parts[1]) return parts[1].trim();
                 }
+            }
+
+            // 1.2 11.6.5a.1: <div class="lg-lorebox" data-lore="<itemId>"> —
+            //     id предмета внутри самой подсказки (LG_LORE.html). Самый
+            //     надёжный фолбэк, когда якорь не опознан.
+            const loreEl = tipEl.querySelector('[data-lore]');
+            if (loreEl) {
+                const loreId = (loreEl.getAttribute('data-lore') || '').trim();
+                if (loreId) return loreId;
+            }
+
+            if (anchor) {
+                // Прямые data-атрибуты предмета: наши строки витрины,
+                // лавка города (data-good), сторонние аддоны.
+                const direct = anchor.getAttribute('data-item-id')
+                    || anchor.getAttribute('data-item')
+                    || anchor.getAttribute('data-good')
+                    || anchor.getAttribute('data-lot-id')
+                    || anchor.closest('[data-lot-id]')?.getAttribute('data-lot-id')
+                    || '';
+                // 11.6.5a: id отдаём даже без медианы — иначе строка не
+                // появится никогда (цену дозапрашивает attachMarketMedian).
+                if (direct) return direct;
+
+                // data-ig — UID экземпляра в новом инвентаре (lib/inventory.js),
+                // data-sel — UID в сумке и надетом (site/app.js).
+                const uid = anchor.getAttribute('data-ig') || anchor.getAttribute('data-sel') || '';
+                const uidItemId = this.findHeroItemIdByUid(uid);
+                if (uidItemId) return uidItemId;
             }
 
             // 2. По названию из заголовка подсказки.
@@ -834,30 +1158,136 @@
         },
 
         /**
+         * Элемент, на который наведён курсор (якорь подсказки).
+         *
+         * 11.6.5a: aria-describedby может содержать несколько id («lg-tip …»),
+         * а на странице одновременно живут якоря скрытых панелей — берём
+         * видимый. Плашка лавки (.cy-icard) в закреплённом режиме
+         * aria-describedby не получает: её подсказка привязана к выбранному
+         * товару (класс .on + data-good).
+         *
+         * @param {Element} tipEl
+         * @returns {Element|null}
+         */
+        tipAnchor(tipEl) {
+            const tipId = tipEl && tipEl.id ? String(tipEl.id) : '';
+            const found = [];
+            if (tipId) {
+                let nodes = [];
+                try {
+                    nodes = [...document.querySelectorAll('[aria-describedby]')];
+                } catch (e) {
+                    nodes = [];
+                }
+                for (const el of nodes) {
+                    const value = el.getAttribute('aria-describedby') || '';
+                    if (!value) continue;
+                    if (value === tipId || value.split(/\s+/).includes(tipId)) found.push(el);
+                }
+            }
+            const isCard = !!(tipEl && tipEl.classList && tipEl.classList.contains('cy-icard'));
+            if (!found.length && isCard) {
+                try {
+                    found.push(...document.querySelectorAll(
+                        '.cy-hot.on[data-good], .cy-good.on[data-good], .cy-good[aria-pressed="true"]'
+                    ));
+                } catch (e) { /* селектор не разобрался — опознаем по названию */ }
+            }
+            if (!found.length) return null;
+            // Скрытые панели тоже держат атрибут — предпочитаем видимый якорь.
+            return found.find((el) => el.getClientRects().length > 0) || found[0];
+        },
+
+        /**
+         * Списки экземпляров героя, у которых есть uid: сумка (items),
+         * склад (sg.store) и склад аукциона (ar).
+         *
+         * @returns {Array<Array<object>>}
+         */
+        heroItemLists() {
+            const hero = G.ME && G.ME.hero ? G.ME.hero : null;
+            if (!hero) return [];
+            const lists = [];
+            if (Array.isArray(hero.items)) lists.push(hero.items);
+            if (hero.sg && Array.isArray(hero.sg.store)) lists.push(hero.sg.store);
+            if (Array.isArray(hero.ar)) lists.push(hero.ar);
+            return lists;
+        },
+
+        /**
+         * id предмета по uid экземпляра. 11.6.5a: ищем не только в сумке, но и
+         * на складе (sg.store) и на складе аукциона (ar) — иначе медиана не
+         * появлялась для вещей, которые лежат не в сумке.
+         *
+         * @param {string} uid
+         * @returns {string} '' — экземпляр не найден
+         */
+        findHeroItemIdByUid(uid) {
+            if (!uid) return '';
+            const target = String(uid);
+            for (const list of this.heroItemLists()) {
+                const found = list.find(it => it && it.id != null && String(it.uid) === target);
+                if (found) return String(found.id);
+            }
+            return '';
+        },
+
+        /**
          * Текст заголовка подсказки в нормализованном виде:
          *   .t-n      — имя предмета в тултипе игры (site/app.js),
-         *   .lgi-th b — имя в тултипе инвентаря (lib/inventory.js).
+         *   .lgi-th b — имя в тултипе инвентаря (lib/inventory.js),
+         *   .cy-ich b — имя в плашке лавки города (site/cityshop.js),
+         *   .au-cn    — название в карточке лота (site/auction.js).
          */
         tipTitleText(tipEl) {
-            const node = tipEl.querySelector('.t-n, .lgi-th b, h4, b');
+            const node = tipEl.querySelector('.t-n, .lgi-th b, .cy-ich b, .au-cn, h2.d-n, h3, h4, b');
             if (!node) return '';
             return this.normalizeItemName(node.textContent || '');
         },
 
         /**
-         * Индекс «нормализованное название -> id предмета» по всем id, для
-         * которых есть медиана. Строится лениво и пересобирается, когда
-         * меняется набор id (новый скан витрины) или справочник предметов.
+         * Индекс «нормализованное название -> id предмета».
+         *
+         * 11.6.5a: раньше индексировались только id, по которым уже есть
+         * медиана, поэтому название из подсказки не находилось до загрузки
+         * цен (а в лавке без открытого аукциона — никогда). Источники:
+         *   1) весь справочник предметов аукциона this.lastItemsMap;
+         *   2) id медиан и товаров лавок NPC (могут отсутствовать в справочнике);
+         *   3) предметы героя — у них есть готовое name/baseName из /api/me.
+         * Пересобирается, когда меняется размер любого из источников.
          */
         tipNameIndex() {
             const itemsKey = this.lastItemsMap ? Object.keys(this.lastItemsMap).length : 0;
-            const key = Object.keys(this.marketMedians).sort().join(',') + '|' + itemsKey;
+            const stockKey = this.cityStockMap ? this.cityStockMap.size : 0;
+            const heroLists = this.heroItemLists();
+            const heroKey = heroLists.reduce((sum, list) => sum + list.length, 0);
+            const key = Object.keys(this.marketMedians).sort().join(',')
+                + '|' + itemsKey + '|' + stockKey + '|' + heroKey;
             if (this._tipNameIndex && this._tipNameIndexKey === key) return this._tipNameIndex;
 
             const map = {};
-            for (const id of Object.keys(this.marketMedians)) {
-                const name = this.normalizeItemName(Utils.getItemName(id, this.lastItemsMap));
-                if (name && !map[name]) map[name] = id;
+            const add = (id, name) => {
+                const norm = this.normalizeItemName(name);
+                if (norm && id && !map[norm]) map[norm] = String(id);
+            };
+
+            // 1. Справочник предметов витрины (приходит с GET /api/auction).
+            const dict = this.lastItemsMap || {};
+            for (const id of Object.keys(dict)) {
+                const def = dict[id];
+                add(id, (def && def.name) || Utils.getItemName(id, dict));
+            }
+            // 2. Медианы и ассортимент лавок NPC.
+            for (const id of Object.keys(this.marketMedians)) add(id, Utils.getItemName(id, dict));
+            if (this.cityStockMap) {
+                for (const id of this.cityStockMap.keys()) add(id, Utils.getItemName(id, dict));
+            }
+            // 3. Предметы героя: имя уже пришло с /api/me.
+            for (const list of heroLists) {
+                for (const it of list) {
+                    if (!it || it.id == null) continue;
+                    add(it.id, it.name || it.baseName || Utils.getItemName(it.id, dict));
+                }
             }
             this._tipNameIndex = map;
             this._tipNameIndexKey = key;
