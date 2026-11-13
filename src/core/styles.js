@@ -1023,4 +1023,162 @@
         .hp-card-foot { font-size: 11px; color: #8b7f96; line-height: 1.5; }
         .hp-card-foot b { color: #ffcf6a; font-variant-numeric: tabular-nums; }
 
+        /* Редизайн заточки: Split-view (11.6.5f).
+           Слева — таблица уровней, справа — карточка выбранной цели (+N).
+           minmax(0, 1fr) у первой колонки обязателен: иначе таблица
+           распирает грид-колонку по min-content и правая карточка уезжает
+           за край модалки. */
+        /* 11.6.5f.1: слева карточка цели (40%), справа таблица уровней (60%).
+           flex-basis в сумме даёт >100% из-за gap 12px, поэтому колонки чуть
+           поджимаются flex-shrink — пропорция 40:60 сохраняется, а вторая
+           колонка не переносится на новую строку. */
+        .hp-ench-split {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            min-height: 0;
+        }
+        .hp-ench-left {
+            flex: 1 1 40%; min-width: 280px;
+            display: flex; flex-direction: column; gap: 10px;
+            background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px;
+            padding: 10px 12px;
+        }
+        /* Таблица уровней: свой скролл, чтобы 15 строк не растягивали модалку.
+           Отступ 350px — это h2, табы, две компактные строки верха
+           (topbar + суббар), баннер предмета и сноска под сплитом. */
+        .hp-ench-right {
+            flex: 1 1 60%; min-width: 0;
+            max-height: calc(100vh - 350px);
+            overflow-y: auto;
+        }
+        /* Узкая модалка/маленькое окно — таблица уезжает под карточку цели. */
+        @media (max-width: 980px) {
+            .hp-ench-split { flex-direction: column; }
+            .hp-ench-left, .hp-ench-right { flex: 1 1 auto; width: 100%; min-width: 0; }
+        }
+        /* Таблица уровней: компактнее общих правил .custom-modal th/td и без
+           псевдоэлемента сортировки «↕» (здесь сортировки нет). */
+        .custom-modal .hp-ench-table th,
+        .custom-modal .hp-ench-table td { padding: 5px 8px; font-size: 13px; }
+        .custom-modal .hp-ench-table th { cursor: default; white-space: nowrap; }
+        .custom-modal .hp-ench-table th::after { content: ''; }
+        /* Строка уровня — кликабельная цель. Пройденные шаги приглушены. */
+        .hp-ench-table .hp-ench-row { cursor: pointer; transition: background 0.12s; }
+        .hp-ench-table .hp-ench-row:hover { background: rgba(202, 165, 92, 0.08); }
+        .hp-ench-table .hp-ench-row.passed { cursor: default; opacity: 0.45; }
+        .hp-ench-table .hp-ench-row.passed:hover { background: transparent; }
+        .hp-ench-table .hp-ench-row.cur { opacity: 1; background: rgba(202, 165, 92, 0.12); }
+        .hp-ench-table .hp-ench-row.target { background: rgba(122, 209, 255, 0.12); }
+        .hp-ench-table .hp-ench-row.target td:first-child { box-shadow: inset 2px 0 0 #7ad1ff; }
+        /* Чипы усилителей (⭐ звезда / 🌐 сфера) в колонке «Усилители». */
+        .hp-mats-cell { white-space: nowrap; }
+        .hp-mat-chip {
+            display: inline-flex; align-items: center; gap: 3px;
+            font-size: 12px; line-height: 1; padding: 3px 6px; margin: 0 2px;
+            border-radius: 6px; border: 1px solid #4a3b55; background: #241c2b;
+            cursor: pointer; user-select: none;
+        }
+        .hp-mat-chip input { margin: 0; cursor: pointer; accent-color: #caa55c; }
+        .hp-mat-chip.star { border-color: rgba(202, 165, 92, 0.5); }
+        .hp-mat-chip.sphere { border-color: rgba(122, 209, 255, 0.45); }
+        /* В режиме «Идеально» усилители не участвуют в расчёте — чипы-подсказки. */
+        .hp-mat-chip.muted { cursor: default; opacity: 0.35; }
+        /* ── Шапка карточки цели: «Цель: +N» + пресеты ── */
+        .hp-target-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .hp-target-title { font-size: 13px; color: #d8c9a8; }
+        .hp-target-title b { color: #ffcf6a; font-size: 19px; font-variant-numeric: tabular-nums; }
+        .hp-target-presets { display: flex; gap: 4px; margin-left: auto; }
+        .hp-target-preset {
+            background: #2a2030; border: 1px solid #44374a; color: #d8c9a8;
+            padding: 3px 9px; border-radius: 999px; font: inherit; font-size: 12px;
+            font-weight: bold; cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
+        }
+        .hp-target-preset:hover:not(:disabled) { background: #352941; border-color: #caa55c; }
+        .hp-target-preset.active { background: #caa55c; border-color: #caa55c; color: #1d1620; }
+        .hp-target-preset:disabled { opacity: 0.35; cursor: not-allowed; }
+        /* ── Секции карточки: статы и стоимость ── */
+        .hp-target-section {
+            display: flex; flex-direction: column; gap: 6px;
+            border-top: 1px solid #33283d; padding-top: 8px;
+        }
+        .hp-target-sub {
+            font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #9c8fa8;
+        }
+        .hp-stat-grid { display: flex; flex-direction: column; gap: 4px; }
+        .hp-stat-row { display: flex; align-items: baseline; gap: 8px; font-size: 12px; color: #d8c9a8; }
+        .hp-stat-name {
+            flex: 1; min-width: 0; color: #9c8fa8;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .hp-stat-val { white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .hp-stat-val b { color: #ffcf6a; }
+        .hp-stat-gain { color: #8ff2a0; font-size: 11px; }
+        .hp-cost-total { font-size: 20px; font-weight: bold; color: #ffcf6a; font-variant-numeric: tabular-nums; }
+        .hp-cost-sub { font-size: 11px; color: #9c8fa8; line-height: 1.45; }
+        .hp-cost-row { font-size: 12px; color: #d8c9a8; font-variant-numeric: tabular-nums; }
+        .hp-cost-note { font-size: 11px; color: #888; line-height: 1.5; margin-top: 10px; }
+
+        /* ── Компактный верх вкладки «Заточка» (11.6.5f.1) ──
+           Было 5 полос подряд (режимы, инпуты ресурсов, цены, штраф
+           экипировки, локации) — стало 2:
+             1) topbar: режимы | инпуты | цены;
+             2) суббар: локации + плитка предметов в один ряд.
+           Статус экипировки ушёл в иконку рядом с названием предмета. */
+        .hp-ench-topbar {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 8px 16px; flex-wrap: wrap;
+            background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px;
+            padding: 5px 10px;
+        }
+        .hp-mode-switch {
+            display: flex; gap: 3px; flex: none;
+            background: #241c2b; border: 1px solid #3d2f44; border-radius: 6px; padding: 3px;
+        }
+        .hp-ench-topbar .hp-mode-btn { padding: 5px 12px; font-size: 12px; line-height: 1.2; }
+        .hp-mat-inputs { display: flex; align-items: center; gap: 12px; flex: 1 1 auto; }
+        .hp-mat-inputs label {
+            display: flex; align-items: center; gap: 6px;
+            color: #ffcf6a; font-weight: bold; font-size: 12px; white-space: nowrap;
+        }
+        .hp-mat-inputs input {
+            width: 44px; background: #111; border: 1px solid #555; color: #fff;
+            padding: 2px 4px; border-radius: 4px; text-align: center;
+            font-weight: bold; font-size: 12px;
+        }
+        .hp-mat-prices {
+            display: flex; align-items: center; gap: 16px; margin-left: auto;
+            font-size: 12px; color: #ccc; flex-wrap: wrap;
+        }
+        /* Вторая строка: локации слева, плитка предметов справа (скролл по X). */
+        .hp-ench-subbar {
+            display: flex; align-items: center; gap: 10px;
+            border-bottom: 1px solid #44374a; padding-bottom: 6px; min-height: 0;
+        }
+        .hp-loc-tabs { display: flex; gap: 6px; flex: none; }
+        .hp-loc-tabs .hp-loc-btn { padding: 4px 9px; font-size: 12px; line-height: 1.2; border-radius: 4px; }
+        /* Плитка предметов: компактные иконки (было min-height:120px на контейнере
+           и 32px арт с паддингом 8px — теперь ~44px по высоте). */
+        .hp-item-grid {
+            display: flex; align-items: center; gap: 6px;
+            flex: 1 1 auto; min-width: 0; overflow-x: auto; padding: 2px 0;
+        }
+        .hp-item-grid .hp-item-card { min-width: 52px; padding: 4px 3px; }
+        .hp-item-grid .hp-item-art {
+            width: 24px; height: 24px; margin-bottom: 2px;
+            display: flex; align-items: center; justify-content: center; overflow: hidden;
+        }
+        /* SVG-арт игры не имеет собственных размеров — растягиваем по контейнеру,
+           как это делает <img> из getItemArtHtml (max-width/max-height:100%). */
+        .hp-item-grid .hp-item-art > svg { width: 100%; height: 100%; display: block; }
+        /* 11.6.5f.1: статус экипировки — маленькая иконка у названия предмета. */
+        .hp-gear-pill {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 16px; height: 16px; margin-left: 4px; vertical-align: middle;
+            border-radius: 50%; font-size: 11px; line-height: 1; cursor: help;
+        }
+        .hp-gear-pill.ok { color: #1d1620; background: #8ff2a0; }
+        .hp-gear-pill.bad { color: #1d1620; background: #ffb3a0; }
+
     `;

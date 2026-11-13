@@ -95,8 +95,11 @@
         // Цена попытки заточки в % от стоимости предмета (из 05_Mechanics.md).
         // ВНИМАНИЕ: это идеальная (минимальная) стоимость без учёта шансов —
         // считается, что все попытки успешны с первой. Индекс = уровень.
-        ENCHANT_PRICES: [0, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5.5, 7.5, 10, 13, 17, 22, 28, 35],
-        ENCHANT_PRICE_MIN: 10,
+        // v11.6.5e: ребаланс — новая шкала цен и нулевой минимум. Живая
+        // таблица игры имеет приоритет: см. liveEnchantPricePct() /
+        // liveEnchantPriceMin() ниже, это фолбэк.
+        ENCHANT_PRICES: [0, 0.5, 0.5, 1, 1, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 10],
+        ENCHANT_PRICE_MIN: 0,
 
         // Расширенные характеристики (xstats) из game-data.js.
         // Заточка для них применяется с множителем enchK = 0.25 (÷4).
@@ -127,6 +130,58 @@
          * значение нужно как фолбэк и для проверки цены до открытия витрины.
          */
         AUCTION_MAX_PRICE: 99990000
+    };
+
+    /*
+     * ------------------------------------------------------------
+     * v11.6.5e: ЖИВАЯ ТАБЛИЦА ЗАТОЧКИ ИЗ ИГРЫ (защита от ребалансов).
+     *
+     * Игра публикует таблицу в window.LG_GAME_DATA.enchant
+     * (reference/LegionFrontSRC/lib/game-data.js):
+     *   chance[0..15]     — шанс успеха, %;
+     *   price[0..15]      — цена попытки, % от стоимости предмета;
+     *   priceMin          — минимум цены попытки, медь;
+     *   coins.star/sphere — цена ресурсов заточки у кузнеца, медь.
+     *
+     * Всё, что лежит в GAME_DATA выше (и HeroPlanner.ENCH.chance), — фолбэк:
+     * таблицы может ещё не быть (run-at document-start) или она сменит
+     * формат. Читаем строго через G (unsafeWindow): из песочницы
+     * Tampermonkey window.LG_GAME_DATA вернёт undefined.
+     * ------------------------------------------------------------
+     */
+    const liveEnchant = () => {
+        try {
+            const e = G.LG_GAME_DATA && G.LG_GAME_DATA.enchant;
+            return (e && typeof e === 'object') ? e : null;
+        } catch (err) {
+            return null;
+        }
+    };
+
+    // Шанс успеха, % (NaN — живой таблицы нет, вызывающий берёт свой фолбэк).
+    const liveEnchantChance = (level) => {
+        const live = liveEnchant();
+        if (!live || !Array.isArray(live.chance)) return NaN;
+        const v = +live.chance[Math.min(15, +level || 0)];
+        return Number.isFinite(v) ? v : NaN;
+    };
+
+    // Цена попытки, % от стоимости предмета (фолбэк — GAME_DATA.ENCHANT_PRICES).
+    const liveEnchantPricePct = (level) => {
+        const i = Math.min(15, +level || 0);
+        const live = liveEnchant();
+        if (live && Array.isArray(live.price)) {
+            const v = +live.price[i];
+            if (Number.isFinite(v)) return v;
+        }
+        return GAME_DATA.ENCHANT_PRICES[i] || 0;
+    };
+
+    // Минимальная цена попытки, медь (фолбэк — GAME_DATA.ENCHANT_PRICE_MIN).
+    const liveEnchantPriceMin = () => {
+        const live = liveEnchant();
+        const v = live ? +live.priceMin : NaN;
+        return Number.isFinite(v) ? v : GAME_DATA.ENCHANT_PRICE_MIN;
     };
 
     /*

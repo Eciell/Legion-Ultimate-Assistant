@@ -59,9 +59,10 @@ curl -s -X DELETE localhost:8787/party/<groupId>/leave -H 'Authorization: Bearer
 
 - `POST /market/scan` — тело `{lots:[{id:"wood_club", price:150}, …]}`,
   цена ЗА ШТУКУ (лот `p` / `n`). Пишет наблюдения в таблицу `market_prices`
-  и чистит там записи старше 7 дней. Ответ `{ok:true, count:N}`.
-- `GET /market/medians?ids=wood_club,iron_sword` — медианы по предметам за
-  7 дней, `null` = наблюдений нет: `{medians:{"wood_club":150,"iron_sword":null}}`.
+  и чистит там записи старше 72 часов. Ответ `{ok:true, count:N}`.
+- `GET /market/medians?ids=wood_club,iron_sword` — медианы по предметам
+  (последние ≤100 наблюдений за 72 часа), `null` = наблюдений нет:
+  `{medians:{"wood_club":150,"iron_sword":null}}`.
 
 Оба эндпоинта требуют заголовок `X-Legion-Key` (как остальные, кроме `GET /`
 и `GET /latest-version`), Bearer не нужен: статистика общая и ников не

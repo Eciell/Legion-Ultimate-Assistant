@@ -124,8 +124,11 @@
         // Цена попытки заточки в % от стоимости предмета (из 05_Mechanics.md).
         // ВНИМАНИЕ: это идеальная (минимальная) стоимость без учёта шансов —
         // считается, что все попытки успешны с первой. Индекс = уровень.
-        ENCHANT_PRICES: [0, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5.5, 7.5, 10, 13, 17, 22, 28, 35],
-        ENCHANT_PRICE_MIN: 10,
+        // v11.6.5e: ребаланс — новая шкала цен и нулевой минимум. Живая
+        // таблица игры имеет приоритет: см. liveEnchantPricePct() /
+        // liveEnchantPriceMin() ниже, это фолбэк.
+        ENCHANT_PRICES: [0, 0.5, 0.5, 1, 1, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 10],
+        ENCHANT_PRICE_MIN: 0,
 
         // Расширенные характеристики (xstats) из game-data.js.
         // Заточка для них применяется с множителем enchK = 0.25 (÷4).
@@ -156,6 +159,58 @@
          * значение нужно как фолбэк и для проверки цены до открытия витрины.
          */
         AUCTION_MAX_PRICE: 99990000
+    };
+
+    /*
+     * ------------------------------------------------------------
+     * v11.6.5e: ЖИВАЯ ТАБЛИЦА ЗАТОЧКИ ИЗ ИГРЫ (защита от ребалансов).
+     *
+     * Игра публикует таблицу в window.LG_GAME_DATA.enchant
+     * (reference/LegionFrontSRC/lib/game-data.js):
+     *   chance[0..15]     — шанс успеха, %;
+     *   price[0..15]      — цена попытки, % от стоимости предмета;
+     *   priceMin          — минимум цены попытки, медь;
+     *   coins.star/sphere — цена ресурсов заточки у кузнеца, медь.
+     *
+     * Всё, что лежит в GAME_DATA выше (и HeroPlanner.ENCH.chance), — фолбэк:
+     * таблицы может ещё не быть (run-at document-start) или она сменит
+     * формат. Читаем строго через G (unsafeWindow): из песочницы
+     * Tampermonkey window.LG_GAME_DATA вернёт undefined.
+     * ------------------------------------------------------------
+     */
+    const liveEnchant = () => {
+        try {
+            const e = G.LG_GAME_DATA && G.LG_GAME_DATA.enchant;
+            return (e && typeof e === 'object') ? e : null;
+        } catch (err) {
+            return null;
+        }
+    };
+
+    // Шанс успеха, % (NaN — живой таблицы нет, вызывающий берёт свой фолбэк).
+    const liveEnchantChance = (level) => {
+        const live = liveEnchant();
+        if (!live || !Array.isArray(live.chance)) return NaN;
+        const v = +live.chance[Math.min(15, +level || 0)];
+        return Number.isFinite(v) ? v : NaN;
+    };
+
+    // Цена попытки, % от стоимости предмета (фолбэк — GAME_DATA.ENCHANT_PRICES).
+    const liveEnchantPricePct = (level) => {
+        const i = Math.min(15, +level || 0);
+        const live = liveEnchant();
+        if (live && Array.isArray(live.price)) {
+            const v = +live.price[i];
+            if (Number.isFinite(v)) return v;
+        }
+        return GAME_DATA.ENCHANT_PRICES[i] || 0;
+    };
+
+    // Минимальная цена попытки, медь (фолбэк — GAME_DATA.ENCHANT_PRICE_MIN).
+    const liveEnchantPriceMin = () => {
+        const live = liveEnchant();
+        const v = live ? +live.priceMin : NaN;
+        return Number.isFinite(v) ? v : GAME_DATA.ENCHANT_PRICE_MIN;
     };
 
     /*
@@ -2132,6 +2187,164 @@
         /* ── Подвал карточки/вкладки ── */
         .hp-card-foot { font-size: 11px; color: #8b7f96; line-height: 1.5; }
         .hp-card-foot b { color: #ffcf6a; font-variant-numeric: tabular-nums; }
+
+        /* Редизайн заточки: Split-view (11.6.5f).
+           Слева — таблица уровней, справа — карточка выбранной цели (+N).
+           minmax(0, 1fr) у первой колонки обязателен: иначе таблица
+           распирает грид-колонку по min-content и правая карточка уезжает
+           за край модалки. */
+        /* 11.6.5f.1: слева карточка цели (40%), справа таблица уровней (60%).
+           flex-basis в сумме даёт >100% из-за gap 12px, поэтому колонки чуть
+           поджимаются flex-shrink — пропорция 40:60 сохраняется, а вторая
+           колонка не переносится на новую строку. */
+        .hp-ench-split {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            min-height: 0;
+        }
+        .hp-ench-left {
+            flex: 1 1 40%; min-width: 280px;
+            display: flex; flex-direction: column; gap: 10px;
+            background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px;
+            padding: 10px 12px;
+        }
+        /* Таблица уровней: свой скролл, чтобы 15 строк не растягивали модалку.
+           Отступ 350px — это h2, табы, две компактные строки верха
+           (topbar + суббар), баннер предмета и сноска под сплитом. */
+        .hp-ench-right {
+            flex: 1 1 60%; min-width: 0;
+            max-height: calc(100vh - 350px);
+            overflow-y: auto;
+        }
+        /* Узкая модалка/маленькое окно — таблица уезжает под карточку цели. */
+        @media (max-width: 980px) {
+            .hp-ench-split { flex-direction: column; }
+            .hp-ench-left, .hp-ench-right { flex: 1 1 auto; width: 100%; min-width: 0; }
+        }
+        /* Таблица уровней: компактнее общих правил .custom-modal th/td и без
+           псевдоэлемента сортировки «↕» (здесь сортировки нет). */
+        .custom-modal .hp-ench-table th,
+        .custom-modal .hp-ench-table td { padding: 5px 8px; font-size: 13px; }
+        .custom-modal .hp-ench-table th { cursor: default; white-space: nowrap; }
+        .custom-modal .hp-ench-table th::after { content: ''; }
+        /* Строка уровня — кликабельная цель. Пройденные шаги приглушены. */
+        .hp-ench-table .hp-ench-row { cursor: pointer; transition: background 0.12s; }
+        .hp-ench-table .hp-ench-row:hover { background: rgba(202, 165, 92, 0.08); }
+        .hp-ench-table .hp-ench-row.passed { cursor: default; opacity: 0.45; }
+        .hp-ench-table .hp-ench-row.passed:hover { background: transparent; }
+        .hp-ench-table .hp-ench-row.cur { opacity: 1; background: rgba(202, 165, 92, 0.12); }
+        .hp-ench-table .hp-ench-row.target { background: rgba(122, 209, 255, 0.12); }
+        .hp-ench-table .hp-ench-row.target td:first-child { box-shadow: inset 2px 0 0 #7ad1ff; }
+        /* Чипы усилителей (⭐ звезда / 🌐 сфера) в колонке «Усилители». */
+        .hp-mats-cell { white-space: nowrap; }
+        .hp-mat-chip {
+            display: inline-flex; align-items: center; gap: 3px;
+            font-size: 12px; line-height: 1; padding: 3px 6px; margin: 0 2px;
+            border-radius: 6px; border: 1px solid #4a3b55; background: #241c2b;
+            cursor: pointer; user-select: none;
+        }
+        .hp-mat-chip input { margin: 0; cursor: pointer; accent-color: #caa55c; }
+        .hp-mat-chip.star { border-color: rgba(202, 165, 92, 0.5); }
+        .hp-mat-chip.sphere { border-color: rgba(122, 209, 255, 0.45); }
+        /* В режиме «Идеально» усилители не участвуют в расчёте — чипы-подсказки. */
+        .hp-mat-chip.muted { cursor: default; opacity: 0.35; }
+        /* ── Шапка карточки цели: «Цель: +N» + пресеты ── */
+        .hp-target-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .hp-target-title { font-size: 13px; color: #d8c9a8; }
+        .hp-target-title b { color: #ffcf6a; font-size: 19px; font-variant-numeric: tabular-nums; }
+        .hp-target-presets { display: flex; gap: 4px; margin-left: auto; }
+        .hp-target-preset {
+            background: #2a2030; border: 1px solid #44374a; color: #d8c9a8;
+            padding: 3px 9px; border-radius: 999px; font: inherit; font-size: 12px;
+            font-weight: bold; cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
+        }
+        .hp-target-preset:hover:not(:disabled) { background: #352941; border-color: #caa55c; }
+        .hp-target-preset.active { background: #caa55c; border-color: #caa55c; color: #1d1620; }
+        .hp-target-preset:disabled { opacity: 0.35; cursor: not-allowed; }
+        /* ── Секции карточки: статы и стоимость ── */
+        .hp-target-section {
+            display: flex; flex-direction: column; gap: 6px;
+            border-top: 1px solid #33283d; padding-top: 8px;
+        }
+        .hp-target-sub {
+            font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: #9c8fa8;
+        }
+        .hp-stat-grid { display: flex; flex-direction: column; gap: 4px; }
+        .hp-stat-row { display: flex; align-items: baseline; gap: 8px; font-size: 12px; color: #d8c9a8; }
+        .hp-stat-name {
+            flex: 1; min-width: 0; color: #9c8fa8;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .hp-stat-val { white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .hp-stat-val b { color: #ffcf6a; }
+        .hp-stat-gain { color: #8ff2a0; font-size: 11px; }
+        .hp-cost-total { font-size: 20px; font-weight: bold; color: #ffcf6a; font-variant-numeric: tabular-nums; }
+        .hp-cost-sub { font-size: 11px; color: #9c8fa8; line-height: 1.45; }
+        .hp-cost-row { font-size: 12px; color: #d8c9a8; font-variant-numeric: tabular-nums; }
+        .hp-cost-note { font-size: 11px; color: #888; line-height: 1.5; margin-top: 10px; }
+
+        /* ── Компактный верх вкладки «Заточка» (11.6.5f.1) ──
+           Было 5 полос подряд (режимы, инпуты ресурсов, цены, штраф
+           экипировки, локации) — стало 2:
+             1) topbar: режимы | инпуты | цены;
+             2) суббар: локации + плитка предметов в один ряд.
+           Статус экипировки ушёл в иконку рядом с названием предмета. */
+        .hp-ench-topbar {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 8px 16px; flex-wrap: wrap;
+            background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px;
+            padding: 5px 10px;
+        }
+        .hp-mode-switch {
+            display: flex; gap: 3px; flex: none;
+            background: #241c2b; border: 1px solid #3d2f44; border-radius: 6px; padding: 3px;
+        }
+        .hp-ench-topbar .hp-mode-btn { padding: 5px 12px; font-size: 12px; line-height: 1.2; }
+        .hp-mat-inputs { display: flex; align-items: center; gap: 12px; flex: 1 1 auto; }
+        .hp-mat-inputs label {
+            display: flex; align-items: center; gap: 6px;
+            color: #ffcf6a; font-weight: bold; font-size: 12px; white-space: nowrap;
+        }
+        .hp-mat-inputs input {
+            width: 44px; background: #111; border: 1px solid #555; color: #fff;
+            padding: 2px 4px; border-radius: 4px; text-align: center;
+            font-weight: bold; font-size: 12px;
+        }
+        .hp-mat-prices {
+            display: flex; align-items: center; gap: 16px; margin-left: auto;
+            font-size: 12px; color: #ccc; flex-wrap: wrap;
+        }
+        /* Вторая строка: локации слева, плитка предметов справа (скролл по X). */
+        .hp-ench-subbar {
+            display: flex; align-items: center; gap: 10px;
+            border-bottom: 1px solid #44374a; padding-bottom: 6px; min-height: 0;
+        }
+        .hp-loc-tabs { display: flex; gap: 6px; flex: none; }
+        .hp-loc-tabs .hp-loc-btn { padding: 4px 9px; font-size: 12px; line-height: 1.2; border-radius: 4px; }
+        /* Плитка предметов: компактные иконки (было min-height:120px на контейнере
+           и 32px арт с паддингом 8px — теперь ~44px по высоте). */
+        .hp-item-grid {
+            display: flex; align-items: center; gap: 6px;
+            flex: 1 1 auto; min-width: 0; overflow-x: auto; padding: 2px 0;
+        }
+        .hp-item-grid .hp-item-card { min-width: 52px; padding: 4px 3px; }
+        .hp-item-grid .hp-item-art {
+            width: 24px; height: 24px; margin-bottom: 2px;
+            display: flex; align-items: center; justify-content: center; overflow: hidden;
+        }
+        /* SVG-арт игры не имеет собственных размеров — растягиваем по контейнеру,
+           как это делает <img> из getItemArtHtml (max-width/max-height:100%). */
+        .hp-item-grid .hp-item-art > svg { width: 100%; height: 100%; display: block; }
+        /* 11.6.5f.1: статус экипировки — маленькая иконка у названия предмета. */
+        .hp-gear-pill {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 16px; height: 16px; margin-left: 4px; vertical-align: middle;
+            border-radius: 50%; font-size: 11px; line-height: 1; cursor: help;
+        }
+        .hp-gear-pill.ok { color: #1d1620; background: #8ff2a0; }
+        .hp-gear-pill.bad { color: #1d1620; background: #ffb3a0; }
 
     `;
 
@@ -4768,27 +4981,37 @@
     // Вкладки: Билды (заглушка → BuildSim), Заточка (рабочий калькулятор).
     // ============================================================
     const HeroPlanner = {
-        // Таблица заточки (05_Mechanics.md). TODO: переключить источник на
-        // hero.crafts / API в v1.1, если игра начнёт отдавать таблицу.
+        // Таблица заточки (05_Mechanics.md). v11.6.5e: это ФОЛБЭК — если игра
+        // уже отдала LG_GAME_DATA.enchant, шансы и цены берутся оттуда
+        // (см. enchantChance / enchantPricePct / enchantPriceMin ниже).
         // Бонус заточки (ENCHANT_MULTIPLIERS) и цены попыток (ENCHANT_PRICES /
         // ENCHANT_PRICE_MIN) — общие: GAME_DATA в core/constants.js, чтобы не
         // дублировать их с auction.js.
         ENCH: {
             max: 15,
-            chance: [0, 95, 90, 80, 70, 55, 42, 30, 20, 12, 7, 4, 2, 1, 0.5, 0],
+            // v11.6.5e: шансы после ребаланса (было 95/90/80/70/55/42/30/20/12/7/4/2/1/0.5/0).
+            // Индекс = текущий уровень: chance[1] — шанс шага +1 -> +2.
+            chance: [0, 100, 95, 90, 80, 70, 60, 50, 40, 32, 25, 20, 16, 12, 9, 6],
             slots: ['weapon', 'shield', 'armor', 'helmet', 'trinket']
         },
 
         // ── Режим «С учётом шансов» (стратегии) ──────────────────
         strategyMode: 'ideal', // 'ideal' | 'expected'
+        // 11.6.5f: цель заточки (+N) для правой карточки Split-view.
+        // null — не выбрана: берём следующий уровень (enchantTargetLevel).
+        // Хранится в абсолютных уровнях (+1…+15); при смене предмета цель
+        // не сбрасывается — просто зажимается в допустимый диапазон.
+        targetLevel: null,
         userStars: 0,
         userSpheres: 0,
         allocatedStars: {},   // { lv: true }
         allocatedSpheres: {}, // { lv: true }
 
-        // Стоимость ресурсов (из 05_Mechanics.md)
-        COST_STAR: 300,
-        COST_SPHERE: 900,
+        // Стоимость ресурсов (из 05_Mechanics.md). v11.6.5e: ребаланс — 100/300.
+        // Это фолбэк: живая цена кузнеца читается из enchant.coins
+        // (см. baseResourcePrice), поэтому следующие ребалансы цен не ломают расчёт.
+        COST_STAR: 100,
+        COST_SPHERE: 300,
 
         // 11.6.2d: id ресурсов заточки в игре (рынок/аукцион, сумка).
         // Найдено в game-src: site/b-shop.js.txt (плитки материалов лавки) —
@@ -4822,14 +5045,62 @@
             return divisor > 0 ? Math.round(stat / divisor) : stat;
         },
 
-        enchantCost(itemV, level) {
-            const pct = GAME_DATA.ENCHANT_PRICES[Math.min(15, +level || 0)] || 0;
-            return Math.max(GAME_DATA.ENCHANT_PRICE_MIN, Math.round(itemV * pct / 100));
+        /**
+         * v11.6.5e: ШАНС УСПЕХА заточки, % (без способов, обычная заточка).
+         *
+         * Источник — живая таблица игры LG_GAME_DATA.enchant.chance, поэтому
+         * ребалансы шансов не требуют правок аддона. Если таблицы ещё нет
+         * (run-at document-start, урезанная сборка) — локальный фолбэк
+         * ENCH.chance из этого объекта.
+         *
+         * @param {number} level текущий уровень: chance[level] — шанс шага level -> level+1
+         * @returns {number} шанс в процентах
+         */
+        enchantChance(level) {
+            const i = Math.min(15, +level || 0);
+            const live = liveEnchantChance(i);
+            return Number.isFinite(live) ? live : (this.ENCH.chance[i] || 0);
         },
 
-        // Шанс успеха, % (без способов, обычная заточка)
-        enchantChance(level) {
-            return this.ENCH.chance[Math.min(15, +level || 0)] || 0;
+        // v11.6.5e: цена попытки в % от стоимости предмета — из живой таблицы
+        // игры (enchant.price), фолбэк — GAME_DATA.ENCHANT_PRICES.
+        enchantPricePct(level) {
+            return liveEnchantPricePct(level);
+        },
+
+        // v11.6.5e: минимум цены попытки, медь — из живой таблицы игры
+        // (enchant.priceMin), фолбэк — GAME_DATA.ENCHANT_PRICE_MIN.
+        enchantPriceMin() {
+            return liveEnchantPriceMin();
+        },
+
+        // Стоимость одной попытки заточки с уровня level, медь.
+        enchantCost(itemV, level) {
+            const pct = this.enchantPricePct(level);
+            return Math.max(this.enchantPriceMin(), Math.round(itemV * pct / 100));
+        },
+
+        /**
+         * 11.6.5f: цель заточки для правой карточки Split-view.
+         *
+         * Приоритет: выбранный пользователем targetLevel (клик по строке
+         * уровня или пресет +4/+7/+10/+15), иначе следующий уровень curEn + 1.
+         *
+         * Цель ВСЕГДА впереди текущего уровня и не выше ENCH.max: шаги
+         * +1…+curEn уже пройдены, и включать их в «Итоговую стоимость» нельзя.
+         * Поэтому targetLevel зажимается в [min(cur+1, max), max] — при
+         * curEn = 15 остаётся только 15 (стоимость нулевая).
+         *
+         * @param {number} curEn текущая заточка предмета
+         * @returns {number} целевой уровень (1…15)
+         */
+        enchantTargetLevel(curEn) {
+            const max = this.ENCH.max;
+            const cur = Math.min(max, Math.max(0, +curEn || 0));
+            const min = Math.min(max, cur + 1);
+            const t = +this.targetLevel;
+            if (!Number.isFinite(t) || t <= 0) return min;
+            return Math.min(max, Math.max(min, Math.round(t)));
         },
 
         /* ---------------------------------------------------------- */
@@ -4891,7 +5162,10 @@
             return { pct: Math.min(GAME_DATA.GEAR_PEN_CAP, pct), parts };
         },
 
-        // Короткая строка-резюме для панели «Заточка».
+        // Короткая строка-резюме по экипировке. 11.6.5f.1: вкладка «Заточка»
+        // больше не рисует отдельную полосу — статус показывается иконкой
+        // (gearSummaryIcon) рядом с названием предмета; метод оставлен как
+        // текстовый вариант для отладки/других вызовов.
         gearSummaryHtml(role, items) {
             const eff = this.gearPenaltyTotal(role, items);
             if (!eff.parts.length) {
@@ -4901,6 +5175,27 @@
                 .map(p => `${Utils.escapeHtml(p.item.name || p.item.slot)} −${p.pct}%`)
                 .join(', ');
             return `<span style="color:#ffb3a0;">⚠ Штраф к основному стату: −${eff.pct}%</span> <span style="color:#888;">(${list})</span>`;
+        },
+
+        /**
+         * 11.6.5f.1: компактный статус экипировки — одна иконка рядом с
+         * названием предмета вместо отдельной полосы над таблицей.
+         * Полный текст живёт в title (у штрафа — со списком предметов).
+         *
+         * @param {string} role класс героя
+         * @param {Array} items надетые предметы
+         * @returns {string} html
+         */
+        gearSummaryIcon(role, items) {
+            const eff = this.gearPenaltyTotal(role, items);
+            if (!eff.parts.length) {
+                return '<span class="hp-gear-pill ok" title="Экипировка подходит классу: штрафа нет">✓</span>';
+            }
+            const list = eff.parts
+                .map(p => `${p.item.name || p.item.slot} −${p.pct}%`)
+                .join(', ');
+            const tip = `Штраф к основному стату: −${eff.pct}% (${list})`;
+            return `<span class="hp-gear-pill bad" title="${Utils.escapeHtml(tip)}">⚠</span>`;
         },
 
         // Ожидаемое число попыток (при 0% — Infinity)
@@ -4915,8 +5210,8 @@
 
         /**
          * Медиана аукциона по ресурсу заточки: 'star' | 'sphere'.
-         * 0 — наблюдений за 7 дней нет, сервер не ответил или модуль Auction
-         * недоступен (урезанная сборка).
+         * 0 — наблюдений за 72 часа / последние 100 цен нет, сервер не ответил
+         * или модуль Auction недоступен (урезанная сборка).
          *
          * Auction объявлен в modules/auction.js, а тот в сборке идёт ПОСЛЕ
          * hero-planner.js: обращаемся к нему только из методов (на момент
@@ -4939,19 +5234,37 @@
         },
 
         /**
+         * v11.6.5e: базовая цена ресурса заточки у кузнеца, медь.
+         *
+         * Живой источник — LG_GAME_DATA.enchant.coins.star / .sphere: игра
+         * сама сообщает актуальные цены, поэтому ребаланс 100/300 (и любой
+         * следующий) подхватывается без правок аддона. Фолбэк — локальные
+         * COST_STAR / COST_SPHERE из этого объекта.
+         *
+         * @param {'star'|'sphere'} kind
+         * @returns {number}
+         */
+        baseResourcePrice(kind) {
+            const live = liveEnchant();
+            const v = live && live.coins ? +live.coins[kind] : NaN;
+            return (Number.isFinite(v) && v > 0)
+                ? v
+                : (kind === 'star' ? this.COST_STAR : this.COST_SPHERE);
+        },
+
+        /**
          * Цена ресурса заточки в меди.
          *
          * Фолбэк (11.6.2d): если медианы аука нет или она нулевая — берём
-         * базовую цену кузнеца (COST_STAR / COST_SPHERE, они же
-         * game-data.js → enchant.coins: 300 и 900). Ноль в стоимость попытки
-         * попасть не может, иначе «Суммарно» занижалось бы.
+         * базовую цену кузнеца (baseResourcePrice, живая таблица игры либо
+         * COST_STAR / COST_SPHERE). Ноль в стоимость попытки попасть не
+         * может, иначе «Суммарно» занижалось бы.
          *
          * @param {'star'|'sphere'} kind
          * @returns {number}
          */
         resourcePrice(kind) {
-            const base = kind === 'star' ? this.COST_STAR : this.COST_SPHERE;
-            return this.resourceMedian(kind) || base;
+            return this.resourceMedian(kind) || this.baseResourcePrice(kind);
         },
 
         /**
@@ -4996,7 +5309,7 @@
 
         /**
          * Бейдж источника цены ресурса для UI:
-         *   📈 — цена взята с аукциона (медиана сети за 7 дней);
+         *   📈 — цена взята с аукциона (медиана сети за 72 часа / последние 100 цен);
          *   🏪 — базовая цена кузнеца (аукцион не ответил / нет наблюдений).
          * В title — сумма и пояснение, поэтому бейдж работает как тултип.
          *
@@ -5006,10 +5319,10 @@
         priceBadge(kind) {
             const net = this.resourceMedian(kind);
             if (net > 0) {
-                return `<span title="Цена взята с аукциона (медиана сети за 7 дней): ${Utils.formatMoney(net)}" style="cursor:help;">`
+                return `<span title="Цена взята с аукциона (медиана сети за 72 часа / последние 100 цен): ${Utils.formatMoney(net)}" style="cursor:help;">`
                     + `📈 <b style="color:#7ad1ff;">${Utils.formatMoney(net)}</b></span>`;
             }
-            const base = kind === 'star' ? this.COST_STAR : this.COST_SPHERE;
+            const base = this.baseResourcePrice(kind);
             return `<span title="Базовые цены (аукцион не отвечает): цена кузнеца ${Utils.formatMoney(base)}" style="cursor:help; color:#999;">`
                 + `🏪 ${Utils.formatMoney(base)}</span>`;
         },
@@ -5667,6 +5980,10 @@
                 let currentLocKey = 'equipped';
                 let selectedItem = locations[currentLocKey].items[0] || null;
 
+                // 11.6.5f.1: статус экипировки — маленькая иконка в шапке
+                // выбранного предмета (раньше была отдельная полоса сверху).
+                const gearIconHtml = this.gearSummaryIcon(h.role, equipped);
+
                 const tabsHtml = `
                     <button class="modal-tab active" data-tab="hero-build">🛡️ Билды</button>
                     <button class="modal-tab" data-tab="hero-ench">⚒️ Заточка</button>
@@ -5679,46 +5996,36 @@
                     <div class="tab-content active" id="tab-hero-build" style="flex-direction:column; gap:0;">
                         <div id="hp-buildsim-container" style="display:flex; flex-direction:column; flex:1; min-height:0; overflow:auto; padding-bottom:20px;"></div>
                     </div>
-                    <div class="tab-content" id="tab-hero-ench" style="flex-direction:column; gap:10px;">
-                        <!-- Переключатель режимов (Стилизованный) -->
-                        <div style="display:flex; background:#1e1724; border:1px solid #3d2f44; border-radius:8px; padding:4px; margin-bottom:10px;">
-                            <button class="hp-mode-btn ${this.strategyMode === 'ideal' ? 'active' : ''}" data-mode="ideal" style="flex:1; padding:8px; border:none; border-radius:6px; font-weight:bold; cursor:pointer; transition:all 0.2s; background:${this.strategyMode === 'ideal' ? '#caa55c' : 'transparent'}; color:${this.strategyMode === 'ideal' ? '#1d1620' : '#aaa'};">📊 Идеально</button>
-                            <button class="hp-mode-btn ${this.strategyMode === 'expected' ? 'active' : ''}" data-mode="expected" style="flex:1; padding:8px; border:none; border-radius:6px; font-weight:bold; cursor:pointer; transition:all 0.2s; background:${this.strategyMode === 'expected' ? '#caa55c' : 'transparent'}; color:${this.strategyMode === 'expected' ? '#1d1620' : '#aaa'};">🧠 С учётом шансов</button>
+                    <div class="tab-content" id="tab-hero-ench" style="flex-direction:column; gap:8px;">
+                        <!-- 11.6.5f.1: строка 1 — режимы, инпуты ресурсов (только в
+                             режиме шансов) и цены ресурсов в одной полосе. -->
+                        <div class="hp-ench-topbar">
+                            <div class="hp-mode-switch">
+                                <button class="hp-mode-btn ${this.strategyMode === 'ideal' ? 'active' : ''}" data-mode="ideal" style="border:none; border-radius:5px; font-weight:bold; cursor:pointer; transition:all 0.2s; background:${this.strategyMode === 'ideal' ? '#caa55c' : 'transparent'}; color:${this.strategyMode === 'ideal' ? '#1d1620' : '#aaa'};">📊 Идеально</button>
+                                <button class="hp-mode-btn ${this.strategyMode === 'expected' ? 'active' : ''}" data-mode="expected" style="border:none; border-radius:5px; font-weight:bold; cursor:pointer; transition:all 0.2s; background:${this.strategyMode === 'expected' ? '#caa55c' : 'transparent'}; color:${this.strategyMode === 'expected' ? '#1d1620' : '#aaa'};">🧠 С учётом шансов</button>
+                            </div>
+                            <div id="hp-resources-panel" class="hp-mat-inputs" style="display:${this.strategyMode === 'expected' ? 'flex' : 'none'};">
+                                <label>⭐ Звёзды: <input type="number" id="hp-input-stars" min="0" max="15" value="${this.userStars}"></label>
+                                <label>🌐 Сферы: <input type="number" id="hp-input-spheres" min="0" max="15" value="${this.userSpheres}"></label>
+                            </div>
+                            <!-- 11.6.2d: цены ресурсов. 📈 — медиана аука (за 72 часа /
+                                 последние 100 цен), 🏪 — цена кузнеца (фолбэк).
+                                 Содержимое обновляет renderTable после ответа сервера. -->
+                            <div id="hp-mats-price" class="hp-mat-prices">${this.matsPriceHtml()}</div>
                         </div>
 
-                        <!-- Панель ресурсов (скрыта в режиме ideal) -->
-                        <div id="hp-resources-panel" style="display:${this.strategyMode === 'expected' ? 'flex' : 'none'}; gap:15px; align-items:center; justify-content:center; margin-bottom:10px; background:#1e1724; border:1px solid #3d2f44; border-radius:6px; padding:8px 12px;">
-                            <label style="display:flex; align-items:center; gap:8px; color:#ffcf6a; font-weight:bold; font-size:14px;">
-                                ⭐ Звёзды: <input type="number" id="hp-input-stars" min="0" max="15" value="${this.userStars}" style="width:45px; background:#111; border:1px solid #555; color:#fff; padding:4px; border-radius:4px; text-align:center; font-weight:bold;">
-                            </label>
-                            <label style="display:flex; align-items:center; gap:8px; color:#ffcf6a; font-weight:bold; font-size:14px;">
-                                🌐 Сферы: <input type="number" id="hp-input-spheres" min="0" max="15" value="${this.userSpheres}" style="width:45px; background:#111; border:1px solid #555; color:#fff; padding:4px; border-radius:4px; text-align:center; font-weight:bold;">
-                            </label>
-                        </div>
-
-                        <!-- 11.6.2d: цены ресурсов заточки. 📈 — медиана аука,
-                             🏪 — базовая цена кузнеца (фолбэк). Содержимое
-                             обновляет renderTable после ответа сервера. -->
-                        <div id="hp-mats-price" style="display:flex; gap:18px; align-items:center; font-size:12px; color:#ccc; background:#1e1724; border:1px solid #3d2f44; border-radius:6px; padding:6px 12px; margin-bottom:10px;">
-                            ${this.matsPriceHtml()}
-                        </div>
-
-                        <!-- v11.6.3: суммарный штраф надетой экипировки.
-                             Фокус (shield + cloth) для магов/жрецов штрафа не даёт. -->
-                        <div id="hp-gear-summary" style="font-size:12px; background:#1e1724; border:1px solid #3d2f44; border-radius:6px; padding:6px 12px; margin-bottom:10px;">
-                            ${this.gearSummaryHtml(h.role, equipped)}
-                        </div>
-
-                        <!-- Суб-табы локаций -->
-                        <div style="display:flex; gap:6px; border-bottom:1px solid #44374a; padding-bottom:8px;">
-                            <button class="hp-loc-btn active" data-loc="equipped" style="background:#caa55c; color:#1d1620; border:none; padding:6px 12px; border-radius:4px; font-weight:bold; cursor:pointer;">🛡️ Надето</button>
-                            <button class="hp-loc-btn" data-loc="bag" style="background:#2a2030; color:#aaa; border:1px solid #44374a; padding:6px 12px; border-radius:4px; font-weight:bold; cursor:pointer;">🎒 Сумка</button>
-                            <button class="hp-loc-btn" data-loc="storage" style="background:#2a2030; color:#aaa; border:1px solid #44374a; padding:6px 12px; border-radius:4px; font-weight:bold; cursor:pointer;">📦 Склад</button>
-                        </div>
-
-                        <!-- Плитка предметов -->
-                        <div id="hp-item-grid" style="display:flex; gap:10px; overflow-x:auto; padding:10px 0; min-height:120px; align-items:flex-start;">
-                            <!-- Сюда рендерятся карточки -->
+                        <!-- 11.6.5f.1: строка 2 — локации и плитка предметов рядом.
+                             Статус экипировки (бывшая полоса «✓ Снаряжение подходит»)
+                             теперь иконка рядом с названием предмета — см. renderTable. -->
+                        <div class="hp-ench-subbar">
+                            <div class="hp-loc-tabs">
+                                <button class="hp-loc-btn active" data-loc="equipped" style="background:#caa55c; color:#1d1620; border:none; font-weight:bold; cursor:pointer;">🛡️ Надето</button>
+                                <button class="hp-loc-btn" data-loc="bag" style="background:#2a2030; color:#aaa; border:1px solid #44374a; font-weight:bold; cursor:pointer;">🎒 Сумка</button>
+                                <button class="hp-loc-btn" data-loc="storage" style="background:#2a2030; color:#aaa; border:1px solid #44374a; font-weight:bold; cursor:pointer;">📦 Склад</button>
+                            </div>
+                            <div id="hp-item-grid" class="hp-item-grid">
+                                <!-- Сюда рендерятся карточки -->
+                            </div>
                         </div>
 
                         <!-- Таблица результатов -->
@@ -5805,79 +6112,127 @@
 
                     const isExpected = this.strategyMode === 'expected';
                     const isExpanded = this.ENCH.max;
+                    // 11.6.5f: цель правой карточки (null -> curEn + 1).
+                    const target = this.enchantTargetLevel(curEn);
 
-                    let starsUsed = 0, spheresUsed = 0;
-
+                    // ── Левая колонка: таблица уровней ──
+                    // Колонки «Суммарно» и «Статы после» переехали в карточку
+                    // цели: они описывают конкретную цель, а не каждый уровень.
                     let rows = '';
-                    let cumulativeIdeal = 0;
-                    let cumulativeStrat = 0;
                     for (let lv = 1; lv <= isExpanded; lv++) {
                         let chance = this.enchantChance(lv);
-                        let cost = this.enchantCost(item.v, lv);
+                        const cost = this.enchantCost(item.v, lv);
                         const isCur = lv === curEn;
+                        const passed = lv <= curEn;          // шаг уже пройден
+                        const isTarget = !passed && lv === target;
 
-                        // Сохраняем идеальную сумму (без ресурсов)
-                        cumulativeIdeal += cost;
+                        const useStar = isExpected && !!this.allocatedStars[lv];
+                        const useSphere = isExpected && !!this.allocatedSpheres[lv];
+                        // ⭐ даёт +25% к шансу — показываем шанс уже с надбавкой.
+                        if (useStar) chance += 25;
 
-                        const useStar = isExpected && this.allocatedStars[lv];
-                        const useSphere = isExpected && this.allocatedSpheres[lv];
-
-                        // 11.6.2d: цена ресурса — медиана аука, если по нему есть
-                        // наблюдения за 7 дней, иначе базовая цена кузнеца
-                        // (resourcePrice сам делает фолбэк).
+                        // Цена ресурса: медиана аука (за 72 часа / последние
+                        // 100 цен), иначе базовая цена кузнеца — фолбэк внутри
+                        // resourcePrice.
                         const starPrice = this.resourcePrice('star');
                         const spherePrice = this.resourcePrice('sphere');
 
-                        // Применяем ресурсы
-                        if (useStar) { chance += 25; cost += starPrice; starsUsed++; }
-                        if (useSphere) { cost += spherePrice; spheresUsed++; }
+                        // Отмеченный усилитель входит в стоимость попытки:
+                        // колонка «Попытка» показывает реальные траты шага.
+                        const attemptCost = cost
+                            + (useStar ? starPrice : 0)
+                            + (useSphere ? spherePrice : 0);
 
-                        // Сумма с учетом выбранных стратегий
-                        cumulativeStrat += cost;
-
-                        // Выбираем, какую сумму показывать
-                        const totalCostStr = isExpected
-                            ? Utils.formatMoney(cumulativeStrat)
-                            : Utils.formatMoney(cumulativeIdeal);
-
-                        // 📈 у цены — в этой строке стоимость включает ресурс,
-                        // взятый с аукциона (тултип объясняет источник).
+                        // 📈 — в стоимость вошёл ресурс, купленный на ауке
+                        // (медиана сети). Тултип объясняет источник цены.
                         const aucUsed = (useStar && this.resourceMedian('star') > 0)
                             || (useSphere && this.resourceMedian('sphere') > 0);
-                        const costCell = `${Utils.formatMoney(cost)}${aucUsed
-                            ? ' <span title="Цена взята с аукциона (медиана сети за 7 дней)" style="cursor:help; font-size:11px;">📈</span>'
+                        const costCell = `${Utils.formatMoney(attemptCost)}${aucUsed
+                            ? ' <span title="Цена включает ресурс с аукциона (медиана сети за 72 часа / последние 100 цен)" style="cursor:help; font-size:11px;">📈</span>'
                             : ''}`;
 
-                        const statsLine = Object.entries(baseStats).map(([k, base]) => {
-                            const final = this.enchantStat(base, lv, k);  // передаем ключ
-                            return `${BuildSim.statNames[k] || k}: ${final}`;
-                        }).join(' · ') || '—';
+                        // Усилители: в режиме шансов — чипы с чекбоксами, в
+                        // «Идеально» — приглушённые чипы-подсказки (там
+                        // усилители не участвуют в расчёте).
+                        const chipHint = passed
+                            ? 'Шаг уже пройден'
+                            : 'Усилители учитываются в режиме «С учётом шансов»';
+                        const chips = (isExpected && !passed)
+                            ? `<label class="hp-mat-chip star" title="Счастливая звезда: +25% к шансу, +${Utils.formatMoney(starPrice)} к цене">`
+                                + `<input type="checkbox" class="hp-alloc-star" data-lv="${lv}" ${this.allocatedStars[lv] ? 'checked' : ''}>⭐</label>`
+                                + `<label class="hp-mat-chip sphere" title="Сфера сохранения: защита от поломки, +${Utils.formatMoney(spherePrice)} к цене">`
+                                + `<input type="checkbox" class="hp-alloc-sphere" data-lv="${lv}" ${this.allocatedSpheres[lv] ? 'checked' : ''}>🌐</label>`
+                            : `<span class="hp-mat-chip muted" title="${chipHint}">⭐</span>`
+                                + `<span class="hp-mat-chip muted" title="${chipHint}">🌐</span>`;
 
-                        // Чекбоксы для стратегий
-                        let stratCells = '';
-                        if (isExpected) {
-                            const sChecked = this.allocatedStars[lv] ? 'checked' : '';
-                            const spChecked = this.allocatedSpheres[lv] ? 'checked' : '';
-                            stratCells = `
-                                <td style="text-align:center;"><input type="checkbox" class="hp-alloc-star" data-lv="${lv}" ${sChecked}></td>
-                                <td style="text-align:center;"><input type="checkbox" class="hp-alloc-sphere" data-lv="${lv}" ${spChecked}></td>
-                            `;
-                        }
-
-                        // Бонус заточки на этом уровне (GAME_DATA.ENCHANT_MULTIPLIERS, %), для новых уровней — 0
+                        // Бонус заточки на этом уровне (GAME_DATA.ENCHANT_MULTIPLIERS, %)
                         const bonusPct = GAME_DATA.ENCHANT_MULTIPLIERS[lv] || 0;
-                        rows += `<tr style="${isCur ? 'background:rgba(202,165,92,0.12);' : ''}">
-                            <td><b>+${lv}</b>${isCur ? ' <small style="color:#ffcf6a;">(текущая)</small>' : ''}</td>
+
+                        const rowCls = ['hp-ench-row'];
+                        if (passed) rowCls.push('passed');
+                        if (isCur) rowCls.push('cur');
+                        if (isTarget) rowCls.push('target');
+                        const rowTitle = passed ? '' : ` title="Сделать целью +${lv}"`;
+
+                        rows += `<tr class="${rowCls.join(' ')}" data-lv="${lv}"${rowTitle}>
+                            <td><b>+${lv}</b>${isCur ? ' <small style="color:#ffcf6a;">(тек.)</small>' : ''}</td>
                             <td>${Math.min(100, chance)}%</td>
                             <td style="color:#4cc95a; font-weight:bold;">+${bonusPct}%</td>
                             <td>${costCell}</td>
-                            ${stratCells}
-                            <td style="color:#ffcf6a; font-weight:bold;">${totalCostStr}</td>
-                            <td style="font-size:12px; color:#ccc;">${statsLine}</td>
+                            <td class="hp-mats-cell">${chips}</td>
                         </tr>`;
                     }
 
-                    const stratHeaders = isExpected ? `<th>⭐</th><th>🌐</th>` : '';
+                    // ── Правая колонка: карточка цели curEn -> target ──
+                    // Две суммы: «идеальная» (все попытки удачны с первой) и с
+                    // отмеченными усилителями. В режиме шансов показываем вторую.
+                    const starPrice = this.resourcePrice('star');
+                    const spherePrice = this.resourcePrice('sphere');
+                    let costIdeal = 0;
+                    let costStrat = 0;
+                    let starsUsed = 0, spheresUsed = 0;
+                    let attempts = 0;
+                    for (let lv = curEn + 1; lv <= target; lv++) {
+                        const step = this.enchantCost(item.v, lv);
+                        costIdeal += step;
+                        let stepCost = step;
+                        let chance = this.enchantChance(lv);
+                        if (isExpected && this.allocatedStars[lv]) { stepCost += starPrice; chance += 25; starsUsed++; }
+                        if (isExpected && this.allocatedSpheres[lv]) { stepCost += spherePrice; spheresUsed++; }
+                        costStrat += stepCost;
+                        // 100 / chance — ожидаемое число попыток на один шаг
+                        // (1/p). Сумма по пути даёт матожидание попыток на всю
+                        // цель; при 0% шаг бесконечен, поэтому Infinity.
+                        attempts += chance > 0 ? 100 / chance : Infinity;
+                    }
+                    const costTotal = isExpected ? costStrat : costIdeal;
+                    const costExtra = Math.max(0, costStrat - costIdeal);
+                    const attemptsStr = Number.isFinite(attempts) ? Math.ceil(attempts) : '∞';
+                    const rangeText = target > curEn
+                        ? `шагов +${curEn + 1}…+${target}`
+                        : 'шагов нет (уровень максимальный)';
+
+                    // Статы предмета на целевой заточке: база -> итог, прибавка
+                    // отдельным зелёным числом.
+                    const statHtml = Object.entries(baseStats).map(([k, base]) => {
+                        const b = +base || 0;
+                        const fin = this.enchantStat(b, target, k);
+                        const gain = fin - b;
+                        const name = (typeof BuildSim !== 'undefined' && BuildSim.statNames && BuildSim.statNames[k]) || k;
+                        const safeName = Utils.escapeHtml(name);
+                        return `<div class="hp-stat-row">
+                            <span class="hp-stat-name" title="${safeName}">${safeName}</span>
+                            <span class="hp-stat-val">${b} → <b>${fin}</b>${gain > 0 ? ` <span class="hp-stat-gain">+${gain}</span>` : ''}</span>
+                        </div>`;
+                    }).join('') || '<div class="hp-cost-sub">У предмета нет характеристик.</div>';
+
+                    // Пресеты цели: уже пройденные уровни недоступны.
+                    const presets = [4, 7, 10, 15].map(t => {
+                        const done = t <= curEn;
+                        const active = t === target;
+                        return `<button type="button" class="hp-target-preset${active ? ' active' : ''}"`
+                            + ` data-target="${t}"${done ? ' disabled title="Уже пройдено"' : ` title="Цель +${t}"`}>+${t}</button>`;
+                    }).join('');
 
                     // v11.6.3: штраф/фокус и привязка выбранного предмета.
                     // Фокус (shield + cloth) для магов/жрецов считается по
@@ -5894,45 +6249,81 @@
                         ? `<div style="font-size:11px; color:#ffb3a0; margin-top:2px;">🔒 ${BOUND_LINE}</div>`
                         : '';
 
+                    // Клик по строке/пресету перерисовывает колонки целиком —
+                    // сохраняем прокрутку списка уровней, иначе таблица прыгает
+                    // наверх при каждом выборе цели. 11.6.5f.1: таблица теперь
+                    // скроллится внутри .hp-ench-right, поэтому помним и его.
+                    const keepScroll = outEl.scrollTop;
+                    const keepTableScroll = outEl.querySelector('.hp-ench-right')?.scrollTop || 0;
                     outEl.innerHTML = `
                         <div style="background:#26202e; border:1px solid #44374a; border-radius:6px; padding:8px 12px; margin-bottom:10px; font-size:12px; display:flex; justify-content:space-between;">
-                            <div><b style="color:#ffcf6a;">${Utils.escapeHtml(item.name)}</b> (v: ${item.v}, тек: +${curEn})${gearNote}${boundNote}</div>
-                            ${isExpected ? `<div>Использовано: ⭐ ${starsUsed}/${this.userStars} | 🌐 ${spheresUsed}/${this.userSpheres}</div>` : ''}
+                            <div><b style="color:#ffcf6a;">${Utils.escapeHtml(item.name)}</b>${gearIconHtml} (v: ${item.v}, тек: +${curEn})${gearNote}${boundNote}</div>
                         </div>
-                        <table>
-                            <thead><tr>
-                                <th>Уровень</th>
-                                <th>Шанс</th>
-                                <th>Бонус</th>
-                                <th>Стоимость</th>
-                                ${stratHeaders}
-                                <th>${isExpected ? 'Суммарно (с ресурсами)' : 'Суммарно до +N'}</th>
-                                <th>Статы после</th>
-                            </tr></thead>
-                            <tbody>${rows}</tbody>
-                        </table>
-                        ${isExpected
-                            ? `<div style="margin-top:10px; font-size:11px; color:#888; line-height:1.5;">
-                            ⭐ Звезда: +25% к шансу, +${Utils.formatMoney(this.resourcePrice('star'))} к цене. 🌐 Сфера: защита от поломки, +${Utils.formatMoney(this.resourcePrice('sphere'))} к цене.<br>
-                            Цены ресурсов: 📈 — медиана аукциона (наблюдения за 7 дней), 🏪 — базовая цена кузнеца (аукцион не отвечает).<br>
-                            «Суммарно» = стоимость всех попыток с +1 до +N с учетом выбранных вами ресурсов.<br>
-                            Расширенные статы (крит, уклонение, пробивание и пр.) получают ¼ бонуса заточки (enchK = 0.25).
-                        </div>`
-                            : `<div style="margin-top:10px; font-size:11px; color:#888; line-height:1.5;">
-                            Стоимость = <code>max(10, round(v × price% / 100))</code>. Округление статов — <code>Math.round</code> (подтверждено игрой).<br>
-                            <b>«Суммарно до +N»</b> = сумма всех базовых стоимостей с +1 до +N (без учета шансов и поломок, «идеальная» стоимость).<br>
-                            Звёзды и сферы учитываются в режиме «🧠 С учётом шансов»: 📈 — медиана аукциона, 🏪 — базовая цена кузнеца.<br>
-                            Расширенные статы (крит, уклонение, пробивание и пр.) получают ¼ бонуса заточки (enchK = 0.25).
-                        </div>`}
+                        <div class="hp-ench-split">
+                            <!-- 11.6.5f.1: карточка цели — СЛЕВА (класс .hp-ench-left,
+                                 flex 1 1 40%), таблица уровней — СПРАВА (.hp-ench-right). -->
+                            <div class="hp-ench-left">
+                                <div class="hp-target-head">
+                                    <div class="hp-target-title">Цель: <b>+${target}</b></div>
+                                    <div class="hp-target-presets">${presets}</div>
+                                </div>
+                                <div class="hp-target-section">
+                                    <div class="hp-target-sub">Характеристики на +${target}</div>
+                                    <div class="hp-stat-grid">${statHtml}</div>
+                                </div>
+                                <div class="hp-target-section">
+                                    <div class="hp-target-sub">Итоговая стоимость</div>
+                                    <div class="hp-cost-total">${Utils.formatMoney(costTotal)}</div>
+                                    <div class="hp-cost-sub">${rangeText} · попыток: ${attemptsStr}${isExpected
+                                        ? `<br>В том числе ресурсы: ${Utils.formatMoney(costExtra)}`
+                                        : ''}</div>
+                                    ${isExpected ? `<div class="hp-cost-row">Использовано: ⭐ ${starsUsed}/${this.userStars}, 🌐 ${spheresUsed}/${this.userSpheres}</div>` : ''}
+                                </div>
+                            </div>
+                            <div class="hp-ench-right">
+                                <table class="hp-ench-table">
+                                    <thead><tr>
+                                        <th>Уровень</th>
+                                        <th>Шанс</th>
+                                        <th>Бонус</th>
+                                        <th>Попытка</th>
+                                        <th>Усилители</th>
+                                    </tr></thead>
+                                    <tbody>${rows}</tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="hp-cost-note">
+                            ${isExpected
+                                ? `⭐ Звезда: +25% к шансу, +${Utils.formatMoney(starPrice)} к цене. 🌐 Сфера: защита от поломки, +${Utils.formatMoney(spherePrice)} к цене.<br>
+                            Цены ресурсов: 📈 — медиана аукциона (за 72 часа / последние 100 цен), 🏪 — базовая цена кузнеца (аукцион не отвечает).<br>
+                            <b>«Итоговая стоимость»</b> = стоимость ${rangeText} с выбранными усилителями; «попыток» — матожидание с учётом шансов.<br>
+                            Расширенные статы (крит, уклонение, пробивание и пр.) получают ¼ бонуса заточки (enchK = 0.25).`
+                                : `Стоимость попытки = <code>max(priceMin, round(v × price% / 100))</code> из живой таблицы игры <code>LG_GAME_DATA.enchant</code>. Округление статов — <code>Math.round</code> (подтверждено игрой).<br>
+                            <b>«Итоговая стоимость»</b> = сумма базовых стоимостей ${rangeText} (без шансов и поломок — «идеальная» стоимость).<br>
+                            Звёзды и сферы учитываются в режиме «🧠 С учётом шансов»: 📈 — медиана аукциона (за 72 часа / последние 100 цен), 🏪 — цена кузнеца.<br>
+                            Расширенные статы (крит, уклонение, пробивание и пр.) получают ¼ бонуса заточки (enchK = 0.25).`}
+                        </div>
                     `;
+                    outEl.scrollTop = keepScroll;
+                    const tableWrap = outEl.querySelector('.hp-ench-right');
+                    if (tableWrap) tableWrap.scrollTop = keepTableScroll;
 
                     // Обработчики чекбоксов
+                    // Лимит ресурсов считаем по ВСЕМ отмеченным уровням, а не
+                    // только по пути до цели (starsUsed/spheresUsed — счётчики
+                    // карточки, они ограничены диапазоном curEn → target).
+                    const countAllocated = (map) => Object.keys(map).filter(k => map[k]).length;
                     if (isExpected) {
                         outEl.querySelectorAll('.hp-alloc-star').forEach(cb => {
                             cb.addEventListener('change', (e) => {
                                 const lv = +e.target.dataset.lv;
                                 if (e.target.checked) {
-                                    if (starsUsed >= this.userStars) { e.target.checked = false; UI.showToast('Звёзды закончились', true); return; }
+                                    if (countAllocated(this.allocatedStars) >= this.userStars) {
+                                        e.target.checked = false;
+                                        UI.showToast('Звёзды закончились', true);
+                                        return;
+                                    }
                                     this.allocatedStars[lv] = true;
                                 } else {
                                     delete this.allocatedStars[lv];
@@ -5944,7 +6335,11 @@
                             cb.addEventListener('change', (e) => {
                                 const lv = +e.target.dataset.lv;
                                 if (e.target.checked) {
-                                    if (spheresUsed >= this.userSpheres) { e.target.checked = false; UI.showToast('Сферы закончились', true); return; }
+                                    if (countAllocated(this.allocatedSpheres) >= this.userSpheres) {
+                                        e.target.checked = false;
+                                        UI.showToast('Сферы закончились', true);
+                                        return;
+                                    }
                                     this.allocatedSpheres[lv] = true;
                                 } else {
                                     delete this.allocatedSpheres[lv];
@@ -5953,6 +6348,29 @@
                             });
                         });
                     }
+
+                    // 11.6.5f: клик по строке уровня делает его целью правой
+                    // карточки. Пройденные шаги целью быть не могут, а клик по
+                    // чипу усилителя целью не считается.
+                    outEl.querySelectorAll('.hp-ench-row').forEach(tr => {
+                        tr.addEventListener('click', (e) => {
+                            if (e.target.closest('input, label')) return;
+                            const lv = +tr.dataset.lv;
+                            if (!Number.isFinite(lv) || lv <= curEn) return;
+                            this.targetLevel = lv;
+                            renderTable();
+                        });
+                    });
+
+                    // Кнопки-пресеты цели (+4/+7/+10/+15).
+                    outEl.querySelectorAll('.hp-target-preset').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            const lv = +btn.dataset.target;
+                            if (!Number.isFinite(lv) || lv <= curEn) return;
+                            this.targetLevel = lv;
+                            renderTable();
+                        });
+                    });
                 };
 
                 // 11.6.2d: при входе на вкладку «Заточка» тянем цены звёзды и
@@ -5999,9 +6417,12 @@
                             + (focus ? `<span title="Магический фокус" style="position:absolute; top:2px; left:2px; font-size:10px;">✦</span>` : '');
                         const tip = `${it.name}${bound ? ' · ' + BOUND_LINE : ''}${focus ? ' · магический фокус' : ''}`;
 
-                        return `<div class="hp-item-card" data-uid="${Utils.escapeHtml(it.uid)}" title="${Utils.escapeHtml(tip)}" style="position:relative; cursor:pointer; min-width:70px; display:flex; flex-direction:column; align-items:center; padding:8px 4px; background:${bg}; border:${border}; border-radius:6px; transition:all 0.15s;">
+                        // 11.6.5f.1: габариты плитки (min-width/padding, 24px арт)
+                        // заданы в CSS — .hp-item-grid .hp-item-card/.hp-item-art.
+                        // Инлайн оставлен только для цветов выбранного предмета.
+                        return `<div class="hp-item-card" data-uid="${Utils.escapeHtml(it.uid)}" title="${Utils.escapeHtml(tip)}" style="position:relative; cursor:pointer; display:flex; flex-direction:column; align-items:center; background:${bg}; border:${border}; border-radius:6px; transition:all 0.15s;">
                             ${badges}
-                            <div style="width:32px; height:32px; display:flex; align-items:center; justify-content:center; margin-bottom:6px; overflow:hidden;">
+                            <div class="hp-item-art">
                                 ${art || '📦'}
                             </div>
                             <div style="font-size:10px; color:#ccc; text-align:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; width:100%;">+${+(it.en || it.e || 0)}</div>
@@ -6458,14 +6879,14 @@
          * GET /market/medians?ids=… — медианы по всем игрокам с аддоном.
          *
          * Результат МЕРДЖИМ в this.marketMedians ({ id: цена }). null от сервера
-         * («наблюдений за 7 дней нет») в объект не попадает: отсутствие ключа
+         * («наблюдений за 72 часа / последние 100 цен нет») в объект не попадает: отсутствие ключа
          * и означает «данных нет», тултип в этом случае не рисуется.
          *
          * 11.6.2d: раньше объект ЗАМЕНЯЛСЯ ответом на один запрос. Планировщик
          * героя запрашивает всего два id (звезда/сфера), и такая замена стёрла
          * бы медианы всех лотов витрины — тултипы «Медиана рынка» пропали бы до
          * следующего открытия аукциона. Мердж безопасен и для витрины: цены
-         * живут 7 дней на сервере, поэтому старый ключ не «протухает» мгновенно.
+         * живут 72 часа на сервере, поэтому старый ключ не «протухает» мгновенно.
          *
          * @param {string[]} ids
          */
@@ -6782,7 +7203,7 @@
 
         /**
          * 11.6.2c.2: медиана сети по предмету из marketMedians.
-         * 0 — наблюдений за 7 дней нет (колонка показывает «—»).
+         * 0 — наблюдений за 72 часа / последние 100 цен нет (колонка показывает «—»).
          *
          * @param {string} itemId
          * @returns {number}
@@ -6797,7 +7218,7 @@
          * 11.6.2d: публичный доступ к медиане для других модулей.
          *
          * Планировщик героя (вкладка «Заточка») берёт отсюда цены звёзд и сфер.
-         * 0 означает «наблюдений за 7 дней нет» — вызывающий обязан подставить
+         * 0 означает «наблюдений за 72 часа / последние 100 цен нет» — вызывающий обязан подставить
          * свою базовую цену (фолбэк), иначе стоимость попытки обнулится.
          *
          * @param {string} itemId
@@ -6819,7 +7240,7 @@
         marketMedianTitle(itemId) {
             const net = this.getMarketMedian(itemId);
             if (net <= 0) return '';
-            return ` title="Медиана сети (7 дней): ${Utils.formatMoney(net)}"`;
+            return ` title="Медиана сети (72 часа / последние 100 цен): ${Utils.formatMoney(net)}"`;
         },
 
         // 11.6.2c.2: строка «Медиана рынка» в НАТИВНЫХ подсказках предметов.
@@ -7475,9 +7896,12 @@
                 }
 
                 if (itemV > 0) {
+                    // 11.6.5e: цены попыток и минимум берутся из живой таблицы
+                    // игры (LG_GAME_DATA.enchant.price / priceMin), фолбэк —
+                    // GAME_DATA.ENCHANT_PRICES / ENCHANT_PRICE_MIN.
+                    const priceMin = liveEnchantPriceMin();
                     for (let lv = 1; lv <= en; lv++) {
-                        const pct = GAME_DATA.ENCHANT_PRICES[lv] || 0;
-                        invested += Math.max(GAME_DATA.ENCHANT_PRICE_MIN, Math.round(itemV * pct / 100));
+                        invested += Math.max(priceMin, Math.round(itemV * liveEnchantPricePct(lv) / 100));
                     }
                 }
             }
@@ -7529,7 +7953,7 @@
          *
          * Приоритет ориентира (сверху вниз):
          *   1. медиана сети (marketMedians[id]) — общая статистика игроков с
-         *      аддоном за 7 дней (GET /market/medians). Именно её показывает
+         *      аддоном за 72 часа / последние 100 цен (GET /market/medians). Именно её показывает
          *      колонка «Медиана», поэтому «Выгода» обязана считаться от неё:
          *      иначе строки расходятся (баг «Стеклянного шарика» — 39с 64
          *      против медианы 44с 8 показывалось минусом, хотя лот дешевле
@@ -7632,7 +8056,8 @@
         // (/api/auction), а если сервер их не прислал — из игровых значений по
         // умолчанию (reference: game-data.js → auction): сбор 1% (мин. 10 меди),
         // комиссия 5%, лимит 10 лотов, сроки 24/48/72 ч. Стоимость заточки — из
-        // GAME_DATA.ENCHANT_PRICES (идеальная, без учёта шансов).
+        // живой таблицы игры LG_GAME_DATA.enchant.price (идеальная, без учёта
+        // шансов), фолбэк — GAME_DATA.ENCHANT_PRICES.
         // v11.6.5b: лимит цены лота — cfg.maxPrice, иначе GAME_DATA.AUCTION_MAX_PRICE.
         showInfo() {
             const c = this.cfg || {};
@@ -7654,10 +8079,10 @@
                 ['Кол-во', 'Сколько штук в лоте (если стак)'],
                 ['Цена (общая)', 'Стоимость всего лота'],
                 ['Цена за 1 шт', 'Цена одной штуки (для стаков)'],
-                ['Медиана', 'Медиана сети по наблюдениям за 7 дней (наш сервер). Если наблюдений нет — приглушённая локальная медиана активных лотов, иначе «—». Цена лота за штуку ниже медианы на 15% и больше — зелёная, выше на 15% и больше — красная'],
+                ['Медиана', 'Медиана сети по наблюдениям за 72 часа / последние 100 цен (наш сервер). Если наблюдений нет — приглушённая локальная медиана активных лотов, иначе «—». Цена лота за штуку ниже медианы на 15% и больше — зелёная, выше на 15% и больше — красная'],
                 ['Магазин', 'Цена NPC в официальной лавке (голубая). Строки дешевле магазина подсвечены зелёным'],
                 ['Вложено', 'Идеальная (минимальная) стоимость заточки до текущего +N: сумма цен уровней без учёта шансов'],
-                ['Выгода', 'На сколько % цена лота за штуку ниже ориентира: сначала медиана сети (7 дней), затем лавка NPC/справочная ценность/медиана активных лотов. Зелёный от 10%, красный — дороже ориентира'],
+                ['Выгода', 'На сколько % цена лота за штуку ниже ориентира: сначала медиана сети (72 часа / последние 100 цен), затем лавка NPC/справочная ценность/медиана активных лотов. Зелёный от 10%, красный — дороже ориентира'],
                 ['Осталось', 'До конца лота. Если идёт розыгрыш — бейдж 🎲 Розыгрыш'],
                 ['Продавец', 'Ник игрока, выставившего лот'],
                 ['Действие', 'Купить / 🎲 Хочу (заявка) / Ваш лот / Ур. < N (низкий уровень торговли)']
@@ -7707,7 +8132,7 @@
                     </ul>
 
                     <h3 style="color:#ffcf6a; font-size:14px; margin-top:15px;">⚔️ Заточка и цена</h3>
-                    <p>Заточка (поле <code>en</code>) БОЛЬШЕ не увеличивает «справедливую цену»: выгода считается от базовой цены NPC/рынка. Вместо этого в колонке <b>«Вложено»</b> показана идеальная (минимальная) стоимость заточки до +N — сумма цен уровней из <code>GAME_DATA.ENCHANT_PRICES</code> (с минимумом ${GAME_DATA.ENCHANT_PRICE_MIN} меди за попытку, без учёта шансов).</p>
+                    <p>Заточка (поле <code>en</code>) БОЛЬШЕ не увеличивает «справедливую цену»: выгода считается от базовой цены NPC/рынка. Вместо этого в колонке <b>«Вложено»</b> показана идеальная (минимальная) стоимость заточки до +N — сумма цен уровней из живой таблицы игры <code>LG_GAME_DATA.enchant.price</code> с учётом <code>priceMin</code> (если игра ещё не загрузилась — фолбэк на <code>GAME_DATA.ENCHANT_PRICES</code> / <code>ENCHANT_PRICE_MIN</code>), без учёта шансов.</p>
                 </div>
             `, { compact: true });
 
@@ -8027,7 +8452,7 @@
                             <thead><tr>
                                 <th data-sort="name">Предмет</th>
                                 <th data-sort="totalPrice">Цена</th>
-                                <th data-sort="median" title="Медиана сети по наблюдениям за 7 дней (legion.ctrlfree.host). Без наблюдений — локальная медиана активных лотов">Медиана</th>
+                                <th data-sort="median" title="Медиана сети по наблюдениям за 72 часа / последние 100 цен (legion.ctrlfree.host). Без наблюдений — локальная медиана активных лотов">Медиана</th>
                                 <th data-sort="discount">Выгода</th>
                                 <th data-sort="u">Осталось</th>
                                 <th class="auc-col-action">Действие</th>
@@ -8137,8 +8562,8 @@
                                 : '<span style="color:#555;">—</span>');
                         const medianTitle = this.marketMedianTitle(l.id)
                             || (l.median > 0
-                                ? ' title="Медиана сети (7 дней): нет данных — показана локальная медиана активных лотов"'
-                                : ' title="Медиана сети (7 дней): нет данных"');
+                                ? ' title="Медиана сети (72 часа / последние 100 цен): нет данных — показана локальная медиана активных лотов"'
+                                : ' title="Медиана сети (72 часа / последние 100 цен): нет данных"');
 
                         // 11.5.5: «Вложено» — идеальная (минимальная) стоимость
                         // заточки до +N (см. getLotEvaluation). 11.6.2c.5: отдельной

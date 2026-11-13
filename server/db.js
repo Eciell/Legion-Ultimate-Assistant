@@ -133,12 +133,21 @@ CREATE INDEX IF NOT EXISTS idx_stats_seen ON users_stats(last_seen);
  * Строка = одно наблюдение «предмет стоил N меди в момент created_at».
  * Медиана считается по этим наблюдениям (см. getMedians), поэтому храним
  * сырые цены, а не готовую статистику: так можно менять окно/алгоритм, не
- * теряя данные. Ретеншн — 7 дней (MARKET_LIMITS.retentionMs), старые строки
+ * теряя данные. Ретеншн — 72 часа (MARKET_LIMITS.retentionMs), старые строки
  * удаляются прямо в addMarketPrices(): отдельный таймер не нужен, сканер и
  * так пишет каждые несколько минут.
  *
- * id — произвольная строка (id предмета игры, например wood_club), индекс
- * idx_market_item обязателен: медиана идёт по WHERE item_id IN (...).
+ * id — произвольная строка (id предмета игры, например wood_club).
+ *
+ * Индексы (v11.6.5d). Оба «горячих» запроса идут по
+ * WHERE item_id IN (...) AND created_at > ?, поэтому вместо старого
+ * idx_market_item(item_id) держим два:
+ *   • idx_market_created — для DELETE ... WHERE created_at <= ? (ретеншн);
+ *   • idx_market_item_created_price — покрывает выборку медианы целиком:
+ *     равенство по item_id, диапазон по created_at и price прямо из индекса
+ *     (в таблицу за ценами можно не ходить).
+ * Старый индекс удаляем явно: CREATE INDEX IF NOT EXISTS на уже развёрнутой
+ * базе его бы не тронул, и он остался бы мёртвым грузом на каждой записи.
  */
 db.exec(`
 CREATE TABLE IF NOT EXISTS market_prices (
@@ -147,7 +156,9 @@ CREATE TABLE IF NOT EXISTS market_prices (
   price INTEGER NOT NULL,
   created_at INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_market_item ON market_prices(item_id);
+DROP INDEX IF EXISTS idx_market_item;
+CREATE INDEX IF NOT EXISTS idx_market_created ON market_prices(created_at);
+CREATE INDEX IF NOT EXISTS idx_market_item_created_price ON market_prices(item_id, created_at DESC, price);
 `);
 
 // Окно «онлайн»: heartbeat реже (30 с), так что 15 минут прощает до 30
@@ -778,8 +789,9 @@ export const MARKET_LIMITS = {
     maxIdLength: 64,
     // Верхняя граница цены: защита от мусора и переполнения INTEGER в SQLite.
     maxPrice: 1_000_000_000,
-    // Окно статистики: наблюдения старше 7 дней удаляются (ТЗ 11.6.2c.1).
-    retentionMs: 7 * 24 * 60 * 60 * 1000
+    // Окно статистики: наблюдения старше 72 часов удаляются (v11.6.5d:
+    // было 7 дней — столько истории медиане не нужно, а таблица росла).
+    retentionMs: 72 * 60 * 60 * 1000
 };
 
 const deleteStaleMarketPricesStmt = db.query(
@@ -790,25 +802,43 @@ const insertMarketPriceStmt = db.query(
 );
 
 /*
- * Медиана считается в SQL (ТЗ 11.6.2c.1): нумеруем цены внутри предмета по
- * возрастанию и берём центральные строки.
- *   • нечётное количество — одна строка: (cnt+1)/2 == (cnt+2)/2;
- *   • чётное — две: (cnt+1)/2 и (cnt+2)/2, их среднее и даёт AVG.
+ * Медиана считается в SQL (v11.6.2c.1, переписана на CTE в v11.6.5d).
+ *
+ * Два уровня, чтобы запрос не зависел от объёма истории:
+ *   1) recent — по каждому предмету нумеруем наблюдения от свежих к старым
+ *      (ROW_NUMBER по created_at DESC) и берём только первые 100: старая
+ *      цена не должна тянуть медиану, даже если формально она ещё в окне
+ *      ретеншна. Параметр created_at > ? отсекает то, что addMarketPrices
+ *      ещё не успел удалить.
+ *   2) ranked — уже из этих ≤100 строк нумеруем цены по возрастанию и берём
+ *      центральные: нечётное количество — одна строка ((cnt+1)/2 ==
+ *      (cnt+2)/2), чётное — две, их среднее и даёт AVG.
+ *
  * Деление целочисленное (SQLite: INTEGER / INTEGER -> INTEGER), поэтому
- * дробных номеров строк не бывает. rn/cnt — оконные функции; Bun 1.4 несёт
- * SQLite 3.4x, где они есть с версии 3.25.
+ * дробных номеров строк не бывает. Порядок параметров: сначала id списка
+ * IN (?, ?, …), затем порог времени. Оконные функции есть в SQLite с 3.25,
+ * Bun 1.4 несёт 3.4x.
  */
 const buildMedianSql = (count) => `
-    SELECT item_id AS item_id,
+    WITH recent AS (
+        SELECT item_id,
+               price,
+               ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY created_at DESC) AS recency_rn
+          FROM market_prices
+         WHERE item_id IN (${new Array(count).fill('?').join(', ')})
+           AND created_at > ?
+    ),
+    ranked AS (
+        SELECT item_id,
+               price,
+               ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY price) AS rn,
+               COUNT(*)     OVER (PARTITION BY item_id)                AS cnt
+          FROM recent
+         WHERE recency_rn <= 100
+    )
+    SELECT item_id,
            CAST(ROUND(AVG(price)) AS INTEGER) AS median
-      FROM (
-            SELECT item_id,
-                   price,
-                   ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY price) AS rn,
-                   COUNT(*)     OVER (PARTITION BY item_id)                AS cnt
-              FROM market_prices
-             WHERE item_id IN (${new Array(count).fill('?').join(', ')})
-           )
+      FROM ranked
      WHERE rn IN ((cnt + 1) / 2, (cnt + 2) / 2)
      GROUP BY item_id
 `;
@@ -837,7 +867,7 @@ const insertMarketBatchTx = db.transaction((rows, threshold) => {
 
 /**
  * Массовая запись цен аукциона: одна транзакция + очистка записей старше
- * 7 дней.
+ * 72 часов (MARKET_LIMITS.retentionMs, v11.6.5d).
  *
  * Мусор внутри пачки пропускаем молча: один битый лот не должен ронять
  * отправку всей пачки (клиент присылает снимок витрины целиком). Цена —
@@ -867,7 +897,7 @@ export function addMarketPrices(items) {
 }
 
 /**
- * Медианы по предметам за окно ретеншна.
+ * Медианы по предметам: последние ≤100 наблюдений в окне ретеншна (72 ч).
  *
  * Возвращает объект ровно по запрошенным id: null означает «наблюдений нет»
  * (клиент по null просто не показывает тултип). Пустой список -> {}.
@@ -889,7 +919,11 @@ export function getMedians(itemIds) {
     for (const id of ids) out[id] = null;
     if (!ids.length) return out;
 
-    const rows = getMedianStmt(ids.length).all(...ids);
+    // Порог времени передаём в SQL, а не полагаемся на фоновую чистку:
+    // строки старше retentionMs могли ещё не удалиться (DELETE идёт только
+    // при следующем /market/scan), а в медиану попадать не должны.
+    const threshold = Date.now() - MARKET_LIMITS.retentionMs;
+    const rows = getMedianStmt(ids.length).all(...ids, threshold);
     for (const row of rows) {
         const price = Number(row.median);
         out[row.item_id] = Number.isFinite(price) && price > 0 ? price : null;
