@@ -68,7 +68,6 @@
         btnParty: `${RAND_ID}-btn-party`,
         btnProfile: `${RAND_ID}-btn-profile`,
         chkChatDisable: `${RAND_ID}-chk-chat-disable`,
-        externalChatStatus: `${RAND_ID}-external-chat-status`,
         chatBadge: `${RAND_ID}-chat-badge`,
         fabChatBadge: `${RAND_ID}-fab-chat-badge`,
         chatWidget: `${RAND_ID}-chat-widget`,
@@ -1574,6 +1573,12 @@
         .fab-section-title:hover .fab-arrow { color: #ffcf6a !important; }
         .fab-section.collapsed .fab-arrow { transform: rotate(-90deg); }
         .${DOM_IDS.fabMenu}.open-down, .legion-fab-menu.open-down { top: 100%; bottom: auto; margin-top: 10px; margin-bottom: 0; }
+        /* ПАТЧ 11.6.5g: кнопка «Аддон» в нативном баре города (#gu-hud .gu-main).
+           Разметка использует родные классы игры (.gu-b/.gu-bi/.gu-bl), поэтому
+           размеры кружка, шрифт и подсветку берём у неё. Здесь только страховка:
+           emoji не должен раздувать круг и ломать сетку бара. */
+        .lgu-nav-btn { flex-shrink: 0; }
+        .lgu-nav-btn .gu-bi > span { display: block; font-size: 26px; line-height: 1; }
         @keyframes fabFadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .fab-menu-item { position: relative; flex-shrink: 0; background: #2a2030; color: #ffcf6a; border: 1px solid #555; border-radius: 6px; padding: 10px 14px; font-weight: bold; cursor: pointer; font-size: 13px; text-align: left; transition: all 0.2s; display: flex; justify-content: space-between; align-items: center; }
         .fab-menu-item:hover { background: #caa55c; color: #1d1620; border-color: #caa55c; }
@@ -2598,7 +2603,6 @@
                 </div>
 
                 <!-- ФУТЕР -->
-                <div id="${d.externalChatStatus}" style="font-size:11px; text-align:center; padding:5px; color:#888; margin-top:4px;">Проверка внешнего чата...</div>
                 <div style="text-align:center; font-size:10px; color:#888; margin-top:8px; padding-top:8px; border-top:1px solid #333; user-select:none;">
                     Version: ${v}
                 </div>
@@ -2655,6 +2659,15 @@
                         <span>⚔️ Боевой ассистент в походах</span>
                         <input type="checkbox" class="lg-toggle" id="modal-chk-combat-assist">
                     </label>
+                    <!-- ПАТЧ 11.6.5h: куда девать вход в меню — в нативный бар
+                         города или оставить плавающую FAB. Состояние ставит
+                         и сохраняет UI.openSettings() (localStorage
+                         'LEGION_NATIVE_FAB'), читает UI.syncNavButton(). -->
+                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
+                        <span>📌 Кнопка аддона в нижнем меню игры</span>
+                        <input type="checkbox" id="modal-chk-native-fab" class="lg-toggle">
+                    </label>
+                    <div style="font-size:10px; color:#888; line-height:1.3; margin:-2px 2px 0;">Если выключено, кнопка аддона останется плавающей в правом нижнем углу.</div>
                 </div>
             `;
         },
@@ -2902,6 +2915,20 @@
         _hudTimer: null,
         _toastTimer: null,
         _toastClickHandler: null,
+        // ПАТЧ 11.6.5g: узлы меню аддона + режим входа в него.
+        //   _navMode: 'fab' — плавающая кнопка (шахта/поход),
+        //             'native' — кнопка в баре игры (город).
+        _fabWrap: null,
+        _fabBtn: null,
+        _fabMenu: null,
+        _navMode: '',
+        _navObserver: null,
+        _navRetryTimer: null,
+        _navRetries: 0,
+        // ПАТЧ 11.6.5h.1: дубль состояния тумблера «Кнопка аддона в нижнем
+        // меню игры». Нужен, если localStorage недоступен/заблокирован —
+        // тогда выбор живёт в памяти до перезагрузки страницы.
+        _nativeFabDisabled: false,
         showToast(msg, isError = false, onClick = null) {
             let toast = document.getElementById('lg-global-toast');
             if (!toast) {
@@ -3165,11 +3192,201 @@
                     localStorage.setItem('LEGION_COMBAT_ASSIST', String(e.target.checked));
                 });
             }
+
+            // ПАТЧ 11.6.5h / h.1: тумблер «📌 Кнопка аддона в нижнем меню игры».
+            // Порядок операций важен: сначала применяем выключение к DOM, потом
+            // пишем в хранилище, и только затем пересчитываем режим. Так выбор
+            // сработает, даже если localStorage недоступен (setItem бросит
+            // исключение) или syncNavButton() упадёт на полпути.
+            const nativeChk = modal.querySelector('#modal-chk-native-fab');
+            if (nativeChk) {
+                nativeChk.checked = UI._nativeFabEnabled();
+                nativeChk.addEventListener('change', (e) => {
+                    const isEnabled = e.target.checked;
+
+                    // 1. Принудительно применяем выключение к DOM — сразу, не
+                    //    дожидаясь syncNavButton().
+                    UI._nativeFabDisabled = !isEnabled;
+                    if (!isEnabled) {
+                        document.querySelectorAll('.lgu-nav-btn').forEach(el => el.remove());
+                        if (UI._fabBtn) UI._fabBtn.style.display = 'flex';
+                        UI._navMode = 'fab';
+                    }
+
+                    // 2. Сохраняем выбор (страховка на случай закрытого
+                    //    хранилища: дубль остаётся в UI._nativeFabDisabled).
+                    try {
+                        localStorage.setItem('LEGION_NATIVE_FAB', String(isEnabled));
+                    } catch (err) {
+                        dbg('[UI] LEGION_NATIVE_FAB: не удалось записать в localStorage', err);
+                    }
+
+                    // 3. Пересчитываем режим: при включении сюда же приходит
+                    //    возврат кнопки в бар игры.
+                    UI.syncNavButton();
+                });
+            }
         },
         // 🏰 Карманный город вынесен в modules/pocket-city.js (v11.6.0, этап 3):
         //    UI.openPocketCity()     -> PocketCity.open()
         //    UI.openNativeBuilding() -> PocketCity.openNativeBuilding()
+        // ------------------------------------------------------------
+        // ПАТЧ 11.6.5g: единая точка входа в меню аддона.
+        //
+        // Меню открывают двое: круглая FAB (шахта/поход) и нативная
+        // кнопка «Аддон» в баре города (#gu-hud .gu-main). Логика «в какую
+        // сторону раскрывать» живёт здесь, чтобы оба входа вели себя одинаково.
+        // ------------------------------------------------------------
+        toggleFabMenu() {
+            const menu = this._fabMenu
+                || document.getElementById(DOM_IDS.fabMenu)
+                || document.getElementById('legion-fab-menu');
+            if (!menu) return false;
+
+            if (menu.classList.contains('open')) {
+                this.closeFabMenu();
+                return false;
+            }
+
+            const viewportH = window.innerHeight || 800;
+            // У скрытого (display:none) меню scrollHeight равен 0, поэтому
+            // «|| 400» и зажим по высоте окна — как в старом обработчике FAB.
+            const menuHeight = Math.min(menu.scrollHeight || 400, viewportH - 120);
+
+            // Якорь — сама FAB, а когда она скрыта (город) — её обёртка:
+            // wrap сохраняет позицию, выбранную перетаскиванием.
+            let anchorTop = null;
+            const btnRect = this._fabBtn ? this._fabBtn.getBoundingClientRect() : null;
+            if (btnRect && btnRect.height > 0) anchorTop = btnRect.top;
+            if (anchorTop === null && this._fabWrap) anchorTop = this._fabWrap.getBoundingClientRect().top;
+            if (anchorTop === null) anchorTop = viewportH;
+
+            menu.classList.toggle('open-down', anchorTop < menuHeight + 20);
+            menu.classList.add('open');
+            return true;
+        },
+
+        closeFabMenu() {
+            const menu = this._fabMenu
+                || document.getElementById(DOM_IDS.fabMenu)
+                || document.getElementById('legion-fab-menu');
+            if (!menu) return;
+            menu.classList.remove('open');
+            menu.classList.remove('open-down');
+        },
+
+        // Кнопка «Аддон» для нативного бара игры. Классы .gu-b/.gu-bi/.gu-bl
+        // родные (site/style.css игры), поэтому размер кружка, шрифт подписи
+        // и подсветку берём у нативного худа — свой CSS почти не нужен.
+        createNativeNavButton() {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'gu-b lgu-nav-btn';
+            btn.setAttribute('data-gu', 'lgu-menu');
+            btn.title = 'Меню аддона Legion';
+            btn.setAttribute('aria-label', 'Меню аддона Legion');
+            btn.innerHTML = `
+                <span class="gu-bi" style="box-shadow: 0 0 0 1.5px #caa55c;">
+                    <span style="font-size: 26px; line-height: 1;">🐱</span>
+                </span>
+                <span class="gu-bl" style="color: #ffcf6a;">Аддон</span>
+            `;
+            // pointerdown гасим: setupFab закрывает меню «кликом снаружи»
+            // именно на pointerdown, иначе повторный клик по кнопке закрывал
+            // бы меню и тут же открывал его снова.
+            btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.toggleFabMenu();
+            });
+            return btn;
+        },
+
+        // ПАТЧ 11.6.5h.1: включён ли вход в меню через нижний бар игры.
+        // Источник правды — localStorage, но его чтение может быть недоступно
+        // (приватный режим, ограничения песочницы), поэтому выбор дублируется
+        // в памяти (_nativeFabDisabled): тумблер работает до перезагрузки даже
+        // без хранилища, а «мусорное» значение в нём трактуется как «включено».
+        _nativeFabEnabled() {
+            try {
+                const raw = localStorage.getItem('LEGION_NATIVE_FAB');
+                if (raw === 'true') return true;
+                if (raw === 'false') return false;
+            } catch (e) {}
+            return this._nativeFabDisabled !== true;
+        },
+
+        // Умное переключение входа в меню:
+        //   Город       — есть нативный бар: наша кнопка встаёт первой, FAB прячем;
+        //   Шахта/Поход — бара нет: возвращаем плавающую FAB.
+        // #gu-hud игра создаёт один раз и после выхода из города оставляет в DOM
+        // (скрывая через html.gu-city), поэтому наличия бара ещё не достаточно.
+        syncNavButton() {
+            // ПАТЧ 11.6.5h: тумблер «📌 Кнопка аддона в нижнем меню игры».
+            // Выключен — нативную кнопку не создаём (и убираем уже созданную),
+            // а FAB остаётся плавающей в правом нижнем углу даже в городе.
+            // Состояние читает _nativeFabEnabled() (localStorage + дубль в
+            // памяти), см. ПАТЧ 11.6.5h.1.
+            if (!this._nativeFabEnabled()) {
+                // 1. Удаляем нативную кнопку из бара игры, если она есть.
+                document.querySelectorAll('.lgu-nav-btn').forEach(el => el.remove());
+                // 2. Возвращаем плавающую FAB (её мог спрятать нативный режим).
+                if (this._fabBtn) this._fabBtn.style.display = 'flex';
+                this._navMode = 'fab';
+                this._navRetries = 0;
+                return false;
+            }
+
+            const bar = document.querySelector('#gu-hud .gu-main');
+            const inCity = !!bar && document.documentElement.classList.contains('gu-city');
+
+            if (inCity) {
+                this._navRetries = 0;
+                if (!bar.querySelector('.lgu-nav-btn')) {
+                    bar.prepend(this.createNativeNavButton());
+                }
+                if (this._navMode !== 'native') {
+                    this._navMode = 'native';
+                    // Меню, открытое в шахте, не должно висеть в городе без FAB.
+                    this.closeFabMenu();
+                }
+                // Бар бывает скрыт (открыто окно героя, чат на мобиле) —
+                // тогда FAB оставляем, иначе в меню аддона было бы не попасть.
+                const barVisible = bar.getClientRects().length > 0;
+                if (this._fabBtn) this._fabBtn.style.display = barVisible ? 'none' : 'flex';
+                return true;
+            }
+
+            this._navMode = 'fab';
+            if (this._fabBtn) this._fabBtn.style.display = 'flex';
+
+            // HUD игра создаёт лениво (guRender -> guHud, до ~2 с после входа
+            // в город). Пока бара нет, но город уже включён — добиваем парой
+            // отложенных проверок, чтобы FAB не висела поверх нативного бара.
+            if (!bar && document.documentElement.classList.contains('gu-city')) {
+                this._scheduleNavRetry();
+            }
+            return false;
+        },
+
+        // До шести повторов по 400 мс: ждём появления #gu-hud после входа
+        // в город (см. syncNavButton).
+        _scheduleNavRetry() {
+            if (this._navRetryTimer || this._navRetries >= 6) return;
+            this._navRetries += 1;
+            this._navRetryTimer = setTimeout(() => {
+                this._navRetryTimer = null;
+                this.syncNavButton();
+            }, 400);
+        },
+
         setupFab(wrap, btn, menu) {
+            // ПАТЧ 11.6.5g: ссылки нужны toggleFabMenu()/syncNavButton() —
+            // меню одно, а входов в него два (FAB и кнопка в баре города).
+            this._fabWrap = wrap;
+            this._fabBtn = btn;
+            this._fabMenu = menu;
             let dragging = false, startX = 0, startY = 0, offX = 0, offY = 0, hasMoved = false;
 
             btn.addEventListener('pointerdown', (e) => {
@@ -14828,7 +15045,6 @@ const Players = {
             SevenTV.load();
 
             this.syncMe();
-            this.detectExternalChat();
 
             // v11.6.0g-3: подсветка ников пользователей аддона. Поллинг сам
             // шлёт POST /heartbeat (мы тоже в списке) и раз в 30 с обновляет
@@ -14848,32 +15064,6 @@ const Players = {
             // watch {on:true} включённым, иначе сервер не стримит сообщения.
             this.hookNativeChat();
             this.startNativeChatWatch();
-        },
-
-        // Детектор стороннего чата (Legion7TV, плагин ProCto_Fliy).
-        // Статус рисуется строкой в FAB-меню; если плагина нет — даём ссылку.
-        detectExternalChat() {
-            setTimeout(() => {
-                const statusEl = document.getElementById(DOM_IDS.externalChatStatus)
-                    || document.getElementById('external-chat-status');
-                if (!statusEl) return;
-
-                // Проверяем, есть ли кнопка 7TV от плагина ProCto_Fliy
-                const has7TVBtn = !!document.querySelector('.t7-btn');
-                // Или проверяем флаг в unsafeWindow: после @grant объекты страницы
-                // живут только там, обычный window их не видит.
-                let has7TVWindow = false;
-                try {
-                    const pageWin = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
-                    has7TVWindow = !!(pageWin && pageWin.LGChat && pageWin.LGChat.__t7);
-                } catch (e) {}
-
-                if (has7TVBtn || has7TVWindow) {
-                    statusEl.innerHTML = `<span style="color:#4cc95a;">✅ Чат Legion7TV активен</span>`;
-                } else {
-                    statusEl.innerHTML = `<a href="https://github.com/mykhailkot-pixel/Legion7TV/raw/refs/heads/main/7tv-multidonate.user.js" target="_blank" style="color:#caa55c; text-decoration:underline;">Установить Legion7TV (чат)</a>`;
-                }
-            }, 2000);
         },
 
         getRoleMeta(role, isSystem) {
@@ -15152,6 +15342,39 @@ const Players = {
         const fabMenu = document.getElementById(DOM_IDS.fabMenu) || document.getElementById('legion-fab-menu');
         UI.setupFab(fabWrap, fabBtn, fabMenu);
 
+        // ============================================================
+        // ПАТЧ 11.6.5g: умный вход в меню аддона.
+        //
+        // В городе правый нижний угол уже занят нативным баром игры
+        // (#gu-hud .gu-main): вставляем туда свою кнопку «Аддон», а
+        // плавающую FAB прячем, чтобы не было двух входов подряд.
+        // В шахте и походе бара нет — FAB возвращается на экран.
+        // ============================================================
+        UI.syncNavButton();
+
+        if (typeof MutationObserver !== 'undefined') {
+            // HUD игра строит лениво (guRender -> guHud) и после выхода из
+            // города оставляет узел в DOM, переключая только html.gu-city.
+            // Слушаем две дешёвые цели (появление #gu-hud в body и смену
+            // классов на <html>), а не subtree всего документа: в городе
+            // мутаций слишком много. Повторные вызовы склеиваем в один кадр.
+            // Тумблер «📌 Кнопка аддона в нижнем меню игры» проверяется внутри
+            // UI.syncNavButton(): при выключенном тумблере метод снимает нативную
+            // кнопку и сразу выходит, поэтому наблюдатель её обратно не вернёт.
+            let navSyncScheduled = false;
+            const scheduleNavSync = () => {
+                if (navSyncScheduled) return;
+                navSyncScheduled = true;
+                const run = () => { navSyncScheduled = false; UI.syncNavButton(); };
+                if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+                else setTimeout(run, 150);
+            };
+            const navObserver = new MutationObserver(scheduleNavSync);
+            navObserver.observe(document.body, { childList: true });
+            navObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+            UI._navObserver = navObserver;
+        }
+
         // 🏰 Карманный город — модуль (modules/pocket-city.js), не UI.
         (document.getElementById(DOM_IDS.btnPocketCity) || document.getElementById('btn-pocket-city'))?.addEventListener('click', () => PocketCity.open());
         (document.getElementById(DOM_IDS.btnProfile) || document.getElementById('btn-profile'))?.addEventListener('click', () => UI.togglePlayerHud());
@@ -15219,6 +15442,21 @@ const Players = {
                     clearInterval(UI._hudTimer);
                     UI._hudTimer = null;
                 }
+                // ПАТЧ 11.6.5g: снимаем наблюдатель за нативным HUD, отложенный
+                // повтор и ссылки на узлы меню, а из бара игры убираем свою кнопку
+                // (fabWrap удаляется ниже вместе с остальной разметкой).
+                if (UI._navObserver) {
+                    try { UI._navObserver.disconnect(); } catch (e) {}
+                    UI._navObserver = null;
+                }
+                if (UI._navRetryTimer) {
+                    clearTimeout(UI._navRetryTimer);
+                    UI._navRetryTimer = null;
+                }
+                UI._fabWrap = UI._fabBtn = UI._fabMenu = null;
+                UI._navMode = '';
+                UI._navRetries = 0;
+                document.querySelectorAll('.lgu-nav-btn').forEach(el => el.remove());
                 if (Chat._popoutWin) {
                     try { Chat._popoutWin.close(); } catch(e) {}
                     Chat._popoutWin = null;

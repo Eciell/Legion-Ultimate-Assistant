@@ -66,7 +66,6 @@
                 </div>
 
                 <!-- ФУТЕР -->
-                <div id="${d.externalChatStatus}" style="font-size:11px; text-align:center; padding:5px; color:#888; margin-top:4px;">Проверка внешнего чата...</div>
                 <div style="text-align:center; font-size:10px; color:#888; margin-top:8px; padding-top:8px; border-top:1px solid #333; user-select:none;">
                     Version: ${v}
                 </div>
@@ -123,6 +122,15 @@
                         <span>⚔️ Боевой ассистент в походах</span>
                         <input type="checkbox" class="lg-toggle" id="modal-chk-combat-assist">
                     </label>
+                    <!-- ПАТЧ 11.6.5h: куда девать вход в меню — в нативный бар
+                         города или оставить плавающую FAB. Состояние ставит
+                         и сохраняет UI.openSettings() (localStorage
+                         'LEGION_NATIVE_FAB'), читает UI.syncNavButton(). -->
+                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
+                        <span>📌 Кнопка аддона в нижнем меню игры</span>
+                        <input type="checkbox" id="modal-chk-native-fab" class="lg-toggle">
+                    </label>
+                    <div style="font-size:10px; color:#888; line-height:1.3; margin:-2px 2px 0;">Если выключено, кнопка аддона останется плавающей в правом нижнем углу.</div>
                 </div>
             `;
         },

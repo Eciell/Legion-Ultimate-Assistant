@@ -345,7 +345,6 @@
             SevenTV.load();
 
             this.syncMe();
-            this.detectExternalChat();
 
             // v11.6.0g-3: подсветка ников пользователей аддона. Поллинг сам
             // шлёт POST /heartbeat (мы тоже в списке) и раз в 30 с обновляет
@@ -365,32 +364,6 @@
             // watch {on:true} включённым, иначе сервер не стримит сообщения.
             this.hookNativeChat();
             this.startNativeChatWatch();
-        },
-
-        // Детектор стороннего чата (Legion7TV, плагин ProCto_Fliy).
-        // Статус рисуется строкой в FAB-меню; если плагина нет — даём ссылку.
-        detectExternalChat() {
-            setTimeout(() => {
-                const statusEl = document.getElementById(DOM_IDS.externalChatStatus)
-                    || document.getElementById('external-chat-status');
-                if (!statusEl) return;
-
-                // Проверяем, есть ли кнопка 7TV от плагина ProCto_Fliy
-                const has7TVBtn = !!document.querySelector('.t7-btn');
-                // Или проверяем флаг в unsafeWindow: после @grant объекты страницы
-                // живут только там, обычный window их не видит.
-                let has7TVWindow = false;
-                try {
-                    const pageWin = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
-                    has7TVWindow = !!(pageWin && pageWin.LGChat && pageWin.LGChat.__t7);
-                } catch (e) {}
-
-                if (has7TVBtn || has7TVWindow) {
-                    statusEl.innerHTML = `<span style="color:#4cc95a;">✅ Чат Legion7TV активен</span>`;
-                } else {
-                    statusEl.innerHTML = `<a href="https://github.com/mykhailkot-pixel/Legion7TV/raw/refs/heads/main/7tv-multidonate.user.js" target="_blank" style="color:#caa55c; text-decoration:underline;">Установить Legion7TV (чат)</a>`;
-                }
-            }, 2000);
         },
 
         getRoleMeta(role, isSystem) {

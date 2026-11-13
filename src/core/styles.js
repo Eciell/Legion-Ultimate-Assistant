@@ -409,6 +409,12 @@
         .fab-section-title:hover .fab-arrow { color: #ffcf6a !important; }
         .fab-section.collapsed .fab-arrow { transform: rotate(-90deg); }
         .${DOM_IDS.fabMenu}.open-down, .legion-fab-menu.open-down { top: 100%; bottom: auto; margin-top: 10px; margin-bottom: 0; }
+        /* ПАТЧ 11.6.5g: кнопка «Аддон» в нативном баре города (#gu-hud .gu-main).
+           Разметка использует родные классы игры (.gu-b/.gu-bi/.gu-bl), поэтому
+           размеры кружка, шрифт и подсветку берём у неё. Здесь только страховка:
+           emoji не должен раздувать круг и ломать сетку бара. */
+        .lgu-nav-btn { flex-shrink: 0; }
+        .lgu-nav-btn .gu-bi > span { display: block; font-size: 26px; line-height: 1; }
         @keyframes fabFadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .fab-menu-item { position: relative; flex-shrink: 0; background: #2a2030; color: #ffcf6a; border: 1px solid #555; border-radius: 6px; padding: 10px 14px; font-weight: bold; cursor: pointer; font-size: 13px; text-align: left; transition: all 0.2s; display: flex; justify-content: space-between; align-items: center; }
         .fab-menu-item:hover { background: #caa55c; color: #1d1620; border-color: #caa55c; }

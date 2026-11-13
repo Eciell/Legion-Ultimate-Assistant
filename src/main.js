@@ -92,6 +92,39 @@
         const fabMenu = document.getElementById(DOM_IDS.fabMenu) || document.getElementById('legion-fab-menu');
         UI.setupFab(fabWrap, fabBtn, fabMenu);
 
+        // ============================================================
+        // ПАТЧ 11.6.5g: умный вход в меню аддона.
+        //
+        // В городе правый нижний угол уже занят нативным баром игры
+        // (#gu-hud .gu-main): вставляем туда свою кнопку «Аддон», а
+        // плавающую FAB прячем, чтобы не было двух входов подряд.
+        // В шахте и походе бара нет — FAB возвращается на экран.
+        // ============================================================
+        UI.syncNavButton();
+
+        if (typeof MutationObserver !== 'undefined') {
+            // HUD игра строит лениво (guRender -> guHud) и после выхода из
+            // города оставляет узел в DOM, переключая только html.gu-city.
+            // Слушаем две дешёвые цели (появление #gu-hud в body и смену
+            // классов на <html>), а не subtree всего документа: в городе
+            // мутаций слишком много. Повторные вызовы склеиваем в один кадр.
+            // Тумблер «📌 Кнопка аддона в нижнем меню игры» проверяется внутри
+            // UI.syncNavButton(): при выключенном тумблере метод снимает нативную
+            // кнопку и сразу выходит, поэтому наблюдатель её обратно не вернёт.
+            let navSyncScheduled = false;
+            const scheduleNavSync = () => {
+                if (navSyncScheduled) return;
+                navSyncScheduled = true;
+                const run = () => { navSyncScheduled = false; UI.syncNavButton(); };
+                if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+                else setTimeout(run, 150);
+            };
+            const navObserver = new MutationObserver(scheduleNavSync);
+            navObserver.observe(document.body, { childList: true });
+            navObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+            UI._navObserver = navObserver;
+        }
+
         // 🏰 Карманный город — модуль (modules/pocket-city.js), не UI.
         (document.getElementById(DOM_IDS.btnPocketCity) || document.getElementById('btn-pocket-city'))?.addEventListener('click', () => PocketCity.open());
         (document.getElementById(DOM_IDS.btnProfile) || document.getElementById('btn-profile'))?.addEventListener('click', () => UI.togglePlayerHud());
@@ -159,6 +192,21 @@
                     clearInterval(UI._hudTimer);
                     UI._hudTimer = null;
                 }
+                // ПАТЧ 11.6.5g: снимаем наблюдатель за нативным HUD, отложенный
+                // повтор и ссылки на узлы меню, а из бара игры убираем свою кнопку
+                // (fabWrap удаляется ниже вместе с остальной разметкой).
+                if (UI._navObserver) {
+                    try { UI._navObserver.disconnect(); } catch (e) {}
+                    UI._navObserver = null;
+                }
+                if (UI._navRetryTimer) {
+                    clearTimeout(UI._navRetryTimer);
+                    UI._navRetryTimer = null;
+                }
+                UI._fabWrap = UI._fabBtn = UI._fabMenu = null;
+                UI._navMode = '';
+                UI._navRetries = 0;
+                document.querySelectorAll('.lgu-nav-btn').forEach(el => el.remove());
                 if (Chat._popoutWin) {
                     try { Chat._popoutWin.close(); } catch(e) {}
                     Chat._popoutWin = null;
