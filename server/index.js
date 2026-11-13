@@ -87,7 +87,7 @@ const API_KEY = process.env.LGU_API_KEY || 'LGU-default-secret-key-change-me';
 // и раз в час показывает GM_notification, поэтому при релизе версию надо
 // поднимать и здесь, и в src/header-*.js — иначе уведомление будет приходить
 // даже тем, кто уже обновился (их GM_info всё ещё покажет старую версию).
-const LATEST_VERSION = '11.6.4';
+const LATEST_VERSION = '11.6.5';
 const UPDATE_URL = 'https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js';
 
 // Логин хранится и сравнивается ТОЛЬКО в нижнем регистре: игра отдаёт ник
