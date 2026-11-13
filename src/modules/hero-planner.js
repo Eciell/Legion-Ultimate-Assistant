@@ -287,12 +287,23 @@
             eff: [2, 5, 10],
             dur: [2, 5, 10]
         },
+        // 11.6.5c.7: все классы игры (id + русское имя из lib/game-data.js).
+        // id — те же, что hero.role и параметр ?cls= у /api/abtokens.
+        ARENA_CLASSES: [
+            ['legionary', 'Легионер'],
+            ['archer', 'Лучник'],
+            ['mage', 'Маг'],
+            ['priest', 'Жрец'],
+            ['rogue', 'Разбойник'],
+            ['necromancer', 'Некромант'],
+            ['paladin', 'Паладин']
+        ],
         // arenaData — последний ответ /api/abtokens (null = ещё не грузили).
         // arenaSim — ЛОКАЛЬНЫЙ план прокачки (11.6.5c.3): АБСОЛЮТНЫЕ уровни
         // каждой категории по слоту, 0 = «пусто», arenaMax(kind) = потолок.
         // В отличие от старой дельты план не зависит от купленного в игре:
-        // его можно поставить и ниже текущего состояния (разницу покажут
-        // синие пипсы «в игре»). Жетоны не тратятся — расходует только игра.
+        // его можно поставить и ниже текущего состояния (разницу показывает
+        // подпись «в игре: N»). Жетоны не тратятся — расходует только игра.
         arenaData: null,
         arenaSim: null,
         arenaCls: '',
@@ -303,6 +314,41 @@
         /** Пустой план: все абсолютные уровни = 0 (загрузка данных и кнопка «Очистить»). */
         emptyArenaSim() {
             return { ab: { lv: 0, pow: 0, eff: 0, dur: 0 }, ult: { lv: 0, pow: 0, eff: 0, dur: 0 } };
+        },
+
+        /**
+         * 11.6.5c.7: кнопки выбора класса для вкладки «Арена».
+         * Активный класс подсвечен (класс .active), класс героя помечен ★ —
+         * чтобы после экспериментов было видно, куда вернуться. Сами клики
+         * вешает bindArenaClassTabs().
+         */
+        arenaClassTabsHtml() {
+            const cur = this.arenaCls || '';
+            const own = (G.ME && G.ME.hero && (G.ME.hero.role || G.ME.hero.class)) || '';
+            const btns = this.ARENA_CLASSES.map(([id, name]) => {
+                const act = id === cur;
+                const mine = !!own && id === own;
+                return `<button type="button" class="arena-class-btn${act ? ' active' : ''}"`
+                    + ` data-cls="${Utils.escapeHtml(id)}"`
+                    + ` title="${mine ? 'Класс твоего героя' : 'Посмотреть способности класса'}"`
+                    + `${this.arenaLoading ? ' disabled' : ''}>`
+                    + `${Utils.escapeHtml(name)}${mine ? ' ★' : ''}</button>`;
+            }).join('');
+            return `<div class="arena-class-tabs">${btns}</div>`;
+        },
+
+        /**
+         * Клик по классу: грузим его дерево заново (GET /api/abtokens?cls=…).
+         * План сбрасывается внутри loadArenaData: у классов разные ветки/up.
+         */
+        bindArenaClassTabs(box) {
+            box.querySelectorAll('[data-cls]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const cls = btn.dataset.cls;
+                    if (!cls || cls === this.arenaCls || this.arenaLoading) return;
+                    this.loadArenaData(cls);
+                });
+            });
         },
 
         /**
@@ -394,7 +440,7 @@
         },
 
         /**
-         * «⟲ Взять из игры»: план = текущие уровни персонажа (s.up), то есть
+         * «Как у меня сейчас»: план = текущие уровни персонажа (s.up), то есть
          * «ничего не докупаем». Копируем в emptyArenaSim(), чтобы не потерять
          * ключи категорий, если сервер добавит новые.
          */
@@ -413,6 +459,8 @@
 
         /**
          * Загрузка дерева способностей арены для класса cls.
+         * cls приходит из селектора классов (11.6.5c.7) или из open();
+         * без аргумента берём текущий класс вкладки, затем класс героя.
          * Ответ кладём в this.arenaData, план обнуляем: у веток разные up/next,
          * поэтому старые абсолютные уровни к новой ветке не подходят.
          */
@@ -459,7 +507,7 @@
         /**
          * Полная перерисовка вкладки «Арена»: шапка, ветки, два слота,
          * панель плана и подвал. Вызывается после загрузки данных, кликов
-         * «+»/«−», кнопок «Взять из игры»/«Очистить», импорта и выбора ветки.
+         * «+»/«−», кнопок «Как у меня сейчас»/«Очистить», импорта и выбора ветки.
          */
         renderArenaTab() {
             const box = document.getElementById('tab-hero-arena');
@@ -467,11 +515,15 @@
 
             if (!this.arenaData) {
                 if (this.arenaError) {
-                    box.innerHTML = `<div class="hp-arena-empty">⚠ ${Utils.escapeHtml(this.arenaError)}`
+                    // Селектор классов оставляем и в ошибке: если один класс
+                    // не загрузился, можно сразу переключиться на другой.
+                    box.innerHTML = this.arenaClassTabsHtml()
+                        + `<div class="hp-arena-empty">⚠ ${Utils.escapeHtml(this.arenaError)}`
                         + '<button type="button" class="hp-arena-btn" data-arena="reload">↻ Повторить</button></div>';
                     box.querySelector('[data-arena="reload"]')?.addEventListener('click', () => {
                         this.loadArenaData(this.arenaCls);
                     });
+                    this.bindArenaClassTabs(box);
                 } else {
                     box.innerHTML = '<div class="hp-arena-loading">Загрузка…</div>';
                 }
@@ -523,40 +575,63 @@
                 const s = branch ? branch[slot] : null;
                 if (!s) return '';
                 const isUlt = slot === 'ult';
+                // 11.6.5c.4: бонусы способности — массив строк s.lines
+                // (напр. «Урон: 140%», «Кровотечение: 25%»), см. клиент игры
+                // site/skills.js: `S.lines.join(', ')`. Формул масштабирования
+                // API не отдаёт, поэтому показываем базовые цифры как есть.
+                const bonusLines = (Array.isArray(s.lines) ? s.lines : [])
+                    .map(x => String(x == null ? '' : x).trim())
+                    .filter(Boolean);
+                const bonusesHtml = bonusLines.length
+                    ? `<div class="hp-ab-bonuses">${bonusLines
+                        .map(x => `<span class="hp-ab-bonus">${Utils.escapeHtml(x)}</span>`)
+                        .join('')}</div>`
+                    : '';
                 const rowsHtml = this.ARENA_KINDS.map(([kind, label]) => {
-                    // base — что уже куплено в игре (s.up), cur — абсолютный
-                    // уровень плана (arenaSim), ограниченный потолком ступени.
+                    // plan — абсолютный уровень плана (arenaSim), base — куплено
+                    // в игре (s.up), cur — план с обрезкой по потолку ступени.
                     const base = this.arenaUp(slot, kind);
+                    const plan = (this.arenaSim?.[slot]?.[kind]) | 0;
                     const cur = this.arenaSimValue(slot, kind);
                     const capK = this.arenaMax(kind);
                     const nextPrice = s.next ? s.next[kind] : undefined;
                     // next[kind] === null — сервер сообщает, что ступень максимальная.
                     const topByServer = !!s.next && (kind in s.next) && nextPrice == null;
-                    // Песочница: единственное ограничение «+» — кап ступени.
+                    // Песочница (11.6.5c.6): единственное ограничение «+» — кап
+                    // ступени. Закрытую способность тоже можно планировать:
+                    // визуальной блокировки (класс shut и плашка «Откроется на
+                    // N уровне») больше нет, обе карточки выглядят одинаково.
                     // Кошелёк (arenaData.n) кнопку НЕ блокирует: дефицит жетонов
                     // показываем отдельной сводкой плана.
                     const full = capK > 0 ? cur >= capK : (topByServer && cur >= base);
-                    const locked = !s.open;
-                    const plusDisabled = this.arenaBusy || locked || full;
+                    const plusDisabled = this.arenaBusy || full;
                     // «−» уменьшает абсолютный уровень плана вплоть до нуля:
                     // план может быть и ниже текущего состояния персонажа.
-                    const minusDisabled = this.arenaBusy || locked || cur <= 0;
-                    // Пипсы (11.6.5c.3): золотые — уровни плана (arenaSim),
-                    // синие — куплено в игре, но в план не входит (видно разницу).
+                    const minusDisabled = this.arenaBusy || cur <= 0;
+                    // Пипсы (11.6.5c.8): золотые — уровни плана (arenaSim),
+                    // синие — то, что уже куплено в игре (s.up), остальные пустые.
                     const pips = capK > 0
                         ? `<span class="hp-ab-pips">${Array.from({ length: capK }, (_, i) => {
-                            const cls = i < cur ? 'on' : (i < base ? 'sim' : '');
+                            const cls = i < plan ? 'on' : (i < base ? 'sim' : '');
                             return `<i${cls ? ` class="${cls}"` : ''}></i>`;
                         }).join('')}</span>`
                         : '<span class="hp-ab-pips"></span>';
                     const hint = topByServer ? 'максимум'
                         : (nextPrice != null ? `след. уровень: ${nextPrice} 🎫` : '');
+                    // 11.6.5c.8: в блоке счёта показываем отличие плана от
+                    // текущего состояния. Никакого парсинга текста/процентов —
+                    // только цифры уровней из arenaSim и s.up.
+                    const delta = plan - base;
+                    const valNote = delta > 0
+                        ? ` <small>(в игре: ${base}, +${delta} в плане)</small>`
+                        : (delta < 0 ? ` <small>(в игре: ${base}, ${delta})</small>` : '');
+                    // Описание категории выводим как есть, без вычислений.
                     const desc = s.nodes?.[kind] || '';
                     return `
                         <div class="hp-ab-row">
                             <span class="hp-ab-name">${label}</span>
                             ${pips}
-                            <span class="hp-ab-val"><b>${cur}</b>${capK > 0 ? `/${capK}` : ''}</span>
+                            <span class="hp-ab-val"><b>${cur}</b>${capK > 0 ? `/${capK}` : ''}${valNote}</span>
                             <button type="button" class="hp-ab-btn minus" data-slot="${slot}" data-kind="${kind}" data-dir="minus"
                                 title="Убрать ступень из плана"${minusDisabled ? ' disabled' : ''}>−</button>
                             <button type="button" class="hp-ab-btn" data-slot="${slot}" data-kind="${kind}" data-dir="plus"
@@ -566,28 +641,24 @@
                         </div>`;
                 }).join('');
 
-                // Прогресс карточки: стоимость плана слота к полной стоимости
-                // s.total. Уже вложенное в игре показываем рядом, но в процент
-                // не плюсуем: план абсолютный и уже включает эти ступени.
-                const basePaid = +s.paid || 0;
+                // Подвал карточки: только стоимость плана этого слота.
+                // Проценты и знаменатель s.total убраны (11.6.5c.5): полная
+                // картина и так в нижней панели вкладки.
                 const slotCost = this.getPlanCost(slot);
-                const slotTotal = +s.total || 0;
-                const paidPct = slotTotal > 0 ? Math.min(100, Math.round(slotCost / slotTotal * 100)) : 0;
 
                 return `
-                    <div class="hp-arena-card${isUlt ? ' ult' : ''}${s.open ? '' : ' shut'}">
+                    <div class="hp-arena-card${isUlt ? ' ult' : ''}">
                         <div class="hp-arena-card-head">
                             <span class="hp-arena-card-ic">${Utils.escapeHtml(s.icon || (isUlt ? '★' : '◆'))}</span>
                             <span class="hp-arena-card-title">
                                 <b>${Utils.escapeHtml(s.name || '—')}</b>
                                 <small>${isUlt ? 'Ульта · каждый 5-й ход' : 'Способность · каждый 3-й ход'}</small>
                             </span>
-                            <span class="hp-slot-lv" title="Ступень способности">ст. ${+s.up?.lv || 0}</span>
                         </div>
                         <p class="hp-slot-text">${Utils.escapeHtml(s.text || '')}</p>
-                        ${s.open ? '' : `<p class="hp-slot-text">🔒 Откроется на ${isUlt ? (+d.ultLvl || 0) : (+d.abLvl || 0)} уровне героя (сейчас ${+d.lvl || 0}).</p>`}
+                        ${bonusesHtml}
                         <div class="hp-ab-rows">${rowsHtml}</div>
-                        <div class="hp-card-foot">План: <b>${slotCost}</b> / <b>${slotTotal}</b> жетонов (<b>${paidPct}</b>%) · в игре вложено <b>${basePaid}</b></div>
+                        <div class="hp-card-foot">В плане: <b>${slotCost}</b> жетонов</div>
                     </div>`;
             };
 
@@ -595,29 +666,29 @@
                 ? `<div class="hp-arena-slots">${slotHtml('ab')}${slotHtml('ult')}</div>`
                 : '<div class="hp-arena-empty">Ветки способностей недоступны.</div>';
 
-            // 11.6.5c.3: сводка плана в абсолютной модели.
-            //   planCost  — полная стоимость плана от нуля (getPlanCost),
-            //   paidTotal — уже вложено в игре (s.paid по ab + ult),
-            //   extra     — сколько жетонов ещё нужно добрать (X − Y),
-            //   deficit   — чего не хватает из текущего кошелька (extra − n).
+            // 11.6.5c.4: нижняя панель — ровно четыре цифры и дефицит.
+            //   planCost  — X, полная стоимость плана от нуля (getPlanCost),
+            //   paidTotal — Y, уже вложено в игре (s.paid по ab + ult),
+            //   need      — Z = max(0, X − Y), сколько жетонов ещё нужно,
+            //   missing   — Z − n, сколько не хватает из кошелька.
             // Дефицит НЕ блокирует кнопки (песочница): это подсказка «сколько фармить».
             const paidTotal = this.arenaPaidTotal();
-            const extra = Math.max(0, planCost - paidTotal);
-            const deficit = extra - n;
+            const need = Math.max(0, planCost - paidTotal);
+            const missing = need - n;
             const summaryHtml = `
                 <div class="arena-plan-summary">
                     <span>В наличии: <b>${n}</b> жетонов</span>
                     <span>В плане (всего): <b>${planCost}</b> жетонов</span>
                     <span>Уже вложено в игре: <b>${paidTotal}</b></span>
-                    <span>Доплатить: <b>${extra}</b></span>
-                    ${deficit > 0
-                        ? `<span class="arena-deficit">Не хватает <b>${deficit}</b> жетонов</span>`
+                    <span>Доплатить: <b>${need}</b></span>
+                    ${need > n
+                        ? `<span class="arena-deficit">Не хватает <b>${missing}</b> жетонов</span>`
                         : '<span class="arena-ready">Хватает жетонов!</span>'}
                 </div>`;
 
             const actionHtml = `
                 <div class="hp-arena-sim-bar">
-                    <button type="button" class="hp-arena-btn" data-arena="take"${this.arenaBusy ? ' disabled' : ''}>⟲ Взять из игры</button>
+                    <button type="button" class="hp-arena-btn" data-arena="take"${this.arenaBusy ? ' disabled' : ''}>Как у меня сейчас</button>
                     <button type="button" class="hp-arena-btn" data-arena="clear"${(simTotal > 0 && !this.arenaBusy) ? '' : ' disabled'}>✕ Очистить</button>
                     <button type="button" class="hp-arena-btn" data-arena="export"${this.arenaBusy ? ' disabled' : ''}>📤 Поделиться</button>
                     <button type="button" class="hp-arena-btn" data-arena="import"${this.arenaBusy ? ' disabled' : ''}>📥 Импорт</button>
@@ -638,11 +709,15 @@
             box.innerHTML = `
                 <div class="hp-arena-wrap">
                     ${headerHtml}
+                    ${this.arenaClassTabsHtml()}
                     <div class="hp-arena-branches">${branchesHtml}</div>
                     ${slotsHtml}
                     ${actionHtml}
                     ${footHtml}
                 </div>`;
+
+            // 11.6.5c.7: выбор класса — перезагрузка дерева через ?cls=.
+            this.bindArenaClassTabs(box);
 
             // Выбор ветки: чисто локальный переключатель (сеть не дёргаем).
             box.querySelectorAll('[data-branch]').forEach(btn => {
@@ -650,8 +725,8 @@
             });
 
             // «+» / «−» — локальная песочница с АБСОЛЮТНЫМИ уровнями плана:
-            // кошелёк кнопки не блокирует, «+» ограничен капом ступени и
-            // открытостью способности, «−» опускает план вплоть до нуля.
+            // кошелёк кнопки не блокирует, «+» ограничен только капом ступени,
+            // «−» опускает план вплоть до нуля.
             box.querySelectorAll('.hp-ab-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const slot = btn.dataset.slot;
@@ -670,7 +745,7 @@
                 });
             });
 
-            // «⟲ Взять из игры»: план = текущие уровни персонажа (s.up).
+            // «Как у меня сейчас»: план = текущие уровни персонажа (s.up).
             box.querySelector('[data-arena="take"]')?.addEventListener('click', () => {
                 this.takeArenaFromGame();
                 this.renderArenaTab();

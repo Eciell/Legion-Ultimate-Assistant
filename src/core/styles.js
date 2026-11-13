@@ -888,6 +888,20 @@
         }
         .hp-arena-spent { font-size: 12px; color: #9c8fa8; white-space: nowrap; }
         .hp-arena-spent b { color: #ffcf6a; }
+        /* 11.6.5c.7: селектор класса на вкладке «Арена». */
+        .arena-class-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+        .arena-class-btn {
+            background: #2a2030; border: 1px solid #44374a; color: #d8c9a8;
+            padding: 5px 12px; border-radius: 999px; font: inherit; font-size: 12px;
+            font-weight: bold; cursor: pointer; white-space: nowrap;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+        }
+        .arena-class-btn:hover:not(:disabled) { background: #352941; border-color: #caa55c; }
+        .arena-class-btn.active {
+            background: #caa55c; border-color: #caa55c; color: #1d1620;
+            box-shadow: 0 0 8px rgba(202, 165, 92, 0.35);
+        }
+        .arena-class-btn:disabled { opacity: 0.45; cursor: not-allowed; }
         /* ── Ветки класса ── */
         .hp-arena-branches { display: flex; gap: 10px; flex-wrap: wrap; }
         .hp-arena-branch-card {
@@ -927,17 +941,20 @@
             background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px; padding: 10px 12px;
         }
         .hp-arena-card.ult { border-color: rgba(176, 107, 255, 0.45); }
-        .hp-arena-card.shut { opacity: 0.62; }
         .hp-arena-card-head { display: flex; align-items: center; gap: 10px; }
         .hp-arena-card-ic { flex: none; font-size: 20px; line-height: 1; }
         .hp-arena-card-title { display: flex; flex-direction: column; flex: 1; min-width: 0; }
         .hp-arena-card-title b { color: #f7eadf; font-size: 14px; }
         .hp-arena-card-title small { color: #9c8fa8; font-size: 11px; }
-        .hp-slot-lv {
-            flex: none; font-size: 12px; font-weight: bold; color: #ffcf6a;
-            font-variant-numeric: tabular-nums;
-        }
         .hp-slot-text { margin: 0; font-size: 11px; color: #9c8fa8; line-height: 1.45; }
+        /* 11.6.5c.4: бонусы способности (s.lines из /api/abtokens) — чипы
+           под описанием: «Урон: 140%», «Кровотечение: 25%» и т.п. */
+        .hp-ab-bonuses { display: flex; flex-wrap: wrap; gap: 6px; }
+        .hp-ab-bonus {
+            font-size: 11px; line-height: 1.4; color: #9fdcff;
+            background: rgba(122, 209, 255, 0.10); border: 1px solid rgba(122, 209, 255, 0.35);
+            border-radius: 999px; padding: 1px 8px; font-variant-numeric: tabular-nums;
+        }
         .hp-ab-rows { display: flex; flex-direction: column; gap: 6px; flex: 1; }
         /* Строка категории: название · пипсы · значение · «+» · описание.
            Описание — во всю ширину второй строкой (grid-column: 1 / -1). */
@@ -952,8 +969,7 @@
             width: 9px; height: 9px; border-radius: 50%;
             background: #3a2f44; border: 1px solid #4a3b55;
         }
-        /* 11.6.5c.3: золотые пункты — уровни плана (arenaSim), синие — то,
-           что уже куплено в игре (s.up), но в план не входит. */
+        /* 11.6.5c.8: пипсы — золотые уровни плана, синие купленные в игре. */
         .hp-ab-pips i.on { background: #caa55c; border-color: #ffcf4a; box-shadow: 0 0 6px rgba(255, 207, 74, 0.55); }
         .hp-ab-pips i.sim { background: #4aa3ff; border-color: #7ad1ff; box-shadow: 0 0 6px rgba(74, 163, 255, 0.55); }
         .hp-ab-val { font-size: 11px; color: #9c8fa8; white-space: nowrap; font-variant-numeric: tabular-nums; }
