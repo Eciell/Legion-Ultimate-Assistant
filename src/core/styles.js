@@ -840,4 +840,171 @@
             max-width: min(560px, 90vw); text-align: center;
         }
 
+        /* ============================================================
+           11.6.5c: СПОСОБНОСТИ АРЕНЫ (modules/hero-planner.js)
+           Вкладка «⚔️ Арена»: шапка с жетонами навыков, ветки класса,
+           два слота (способность 3-го хода / ульта 5-го хода) и
+           локальная симуляция прокачки.
+           ============================================================ */
+        /* Вкладка арены скроллится сама: контента много (ветки + два слота).
+           display задаём только .active, иначе перебьём
+           .tab-content { display: none } и вкладка не будет скрываться. */
+        #tab-hero-arena.active {
+            display: flex !important;
+            flex-direction: column !important;
+            flex: 1 1 auto !important;
+            min-height: 0 !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+        }
+        .hp-arena-wrap { display: flex; flex-direction: column; gap: 12px; padding-bottom: 8px; }
+        .hp-arena-loading,
+        .hp-arena-empty {
+            display: flex; align-items: center; gap: 12px; justify-content: center;
+            padding: 18px; color: #9c8fa8; font-size: 13px;
+        }
+        .hp-arena-empty { color: #ffb3a0; }
+        /* ── Шапка: баланс жетонов + недельный прогресс ── */
+        .hp-arena-header {
+            display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+            background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px; padding: 10px 14px;
+        }
+        .hp-token-badge {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: rgba(202, 165, 92, 0.12); border: 1px solid rgba(202, 165, 92, 0.45);
+            border-radius: 999px; padding: 4px 14px; color: #d8c9a8; font-size: 12px; white-space: nowrap;
+        }
+        .hp-token-badge b { color: #ffcf6a; font-size: 18px; font-variant-numeric: tabular-nums; }
+        .hp-arena-week { display: flex; flex-direction: column; gap: 4px; flex: 1 1 180px; min-width: 160px; }
+        .hp-arena-week small { font-size: 11px; color: #9c8fa8; }
+        .hp-week-bar {
+            display: block; height: 8px; border-radius: 999px; overflow: hidden;
+            background: #2a2030; border: 1px solid #44374a;
+        }
+        .hp-week-bar > i {
+            display: block; height: 100%; border-radius: 999px;
+            background: linear-gradient(90deg, #caa55c, #ffcf4a);
+            box-shadow: 0 0 8px rgba(255, 207, 74, 0.45);
+        }
+        .hp-arena-spent { font-size: 12px; color: #9c8fa8; white-space: nowrap; }
+        .hp-arena-spent b { color: #ffcf6a; }
+        /* ── Ветки класса ── */
+        .hp-arena-branches { display: flex; gap: 10px; flex-wrap: wrap; }
+        .hp-arena-branch-card {
+            display: flex; align-items: center; gap: 10px; flex: 1 1 240px; min-width: 220px;
+            background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px; padding: 8px 12px;
+            color: #e8dfd0; font: inherit; text-align: left; cursor: pointer;
+            transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+        }
+        .hp-arena-branch-card:hover:not(:disabled) { border-color: #caa55c; background: #251d2d; }
+        .hp-arena-branch-card.active {
+            border-color: #caa55c; background: rgba(202, 165, 92, 0.12);
+            box-shadow: 0 0 10px rgba(202, 165, 92, 0.25);
+        }
+        .hp-arena-branch-card:disabled { opacity: 0.55; cursor: default; }
+        .hp-branch-ic { flex: none; font-size: 22px; line-height: 1; }
+        .hp-branch-lines { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+        .hp-branch-line {
+            display: flex; align-items: baseline; gap: 6px; font-size: 12px; color: #d8c9a8;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .hp-branch-line small {
+            flex: none; font-size: 10px; color: #7f7389; text-transform: uppercase; letter-spacing: 0.4px;
+        }
+        .hp-branch-line i { flex: none; font-style: normal; font-size: 11px; color: #8ff2a0; }
+        .hp-branch-active {
+            flex: none; font-style: normal; font-size: 10px; font-weight: bold;
+            color: #1d1620; background: #caa55c; border-radius: 999px; padding: 2px 8px;
+        }
+        /* ── Два слота: способность (ab) и ульта (ult) ── */
+        /* stretch + height:100% + flex:1 у строк выравнивают карточки по
+           высоте: подвал «Вложено X из Y» прижимается к низу обеих. */
+        .hp-arena-slots { display: flex; gap: 12px; flex-wrap: wrap; align-items: stretch; }
+        .hp-arena-card {
+            display: flex; flex-direction: column; gap: 8px;
+            flex: 1 1 340px; min-width: 300px;
+            height: 100%;
+            background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px; padding: 10px 12px;
+        }
+        .hp-arena-card.ult { border-color: rgba(176, 107, 255, 0.45); }
+        .hp-arena-card.shut { opacity: 0.62; }
+        .hp-arena-card-head { display: flex; align-items: center; gap: 10px; }
+        .hp-arena-card-ic { flex: none; font-size: 20px; line-height: 1; }
+        .hp-arena-card-title { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+        .hp-arena-card-title b { color: #f7eadf; font-size: 14px; }
+        .hp-arena-card-title small { color: #9c8fa8; font-size: 11px; }
+        .hp-slot-lv {
+            flex: none; font-size: 12px; font-weight: bold; color: #ffcf6a;
+            font-variant-numeric: tabular-nums;
+        }
+        .hp-slot-text { margin: 0; font-size: 11px; color: #9c8fa8; line-height: 1.45; }
+        .hp-ab-rows { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+        /* Строка категории: название · пипсы · значение · «+» · описание.
+           Описание — во всю ширину второй строкой (grid-column: 1 / -1). */
+        .hp-ab-row {
+            display: grid; grid-template-columns: 92px 1fr auto auto auto; align-items: center; gap: 6px 8px;
+            padding: 5px 8px; border-radius: 6px;
+            background: #241c2b; border: 1px solid #33283d;
+        }
+        .hp-ab-name { font-size: 12px; font-weight: bold; color: #e8dfd0; }
+        .hp-ab-pips { display: flex; gap: 3px; flex-wrap: wrap; }
+        .hp-ab-pips i {
+            width: 9px; height: 9px; border-radius: 50%;
+            background: #3a2f44; border: 1px solid #4a3b55;
+        }
+        /* 11.6.5c.3: золотые пункты — уровни плана (arenaSim), синие — то,
+           что уже куплено в игре (s.up), но в план не входит. */
+        .hp-ab-pips i.on { background: #caa55c; border-color: #ffcf4a; box-shadow: 0 0 6px rgba(255, 207, 74, 0.55); }
+        .hp-ab-pips i.sim { background: #4aa3ff; border-color: #7ad1ff; box-shadow: 0 0 6px rgba(74, 163, 255, 0.55); }
+        .hp-ab-val { font-size: 11px; color: #9c8fa8; white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .hp-ab-val b { color: #ffcf6a; font-size: 12px; }
+        .hp-ab-val .hp-ab-sim { font-style: normal; color: #7ad1ff; }
+        .hp-ab-btn {
+            width: 26px; height: 26px; padding: 0; line-height: 1;
+            border-radius: 6px; border: 1px solid #caa55c;
+            background: rgba(202, 165, 92, 0.16); color: #ffcf6a;
+            font-weight: bold; font-size: 15px; cursor: pointer;
+            transition: background 0.15s, transform 0.1s, opacity 0.15s;
+        }
+        .hp-ab-btn:hover:not(:disabled) { background: rgba(202, 165, 92, 0.34); }
+        .hp-ab-btn:active:not(:disabled) { transform: scale(0.94); }
+        .hp-ab-btn:disabled {
+            opacity: 0.35; cursor: not-allowed;
+            border-color: #4a3d55; color: #8b7f96; background: rgba(255, 255, 255, 0.04);
+        }
+        /* 11.6.5c.2: «−» — нейтральная кнопка отката шага плана. */
+        .hp-ab-btn.minus { border-color: #6b5570; background: rgba(255, 255, 255, 0.05); color: #d8c9a8; }
+        .hp-ab-btn.minus:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); }
+        .hp-ab-desc { grid-column: 1 / -1; font-size: 10px; color: #7f7389; line-height: 1.4; }
+        /* ── Плашка нехватки жетонов и панель действий ── */
+        .hp-arena-alert {
+            background: rgba(200, 30, 30, 0.18); border: 1px solid rgba(255, 90, 90, 0.55);
+            color: #ffb3a0; font-size: 12px; font-weight: bold;
+            border-radius: 6px; padding: 6px 10px;
+        }
+        .hp-arena-sim-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        /* 11.6.5c.2: сводка плана — кошелёк, стоимость плана, дефицит.
+           Дефицит ничего не блокирует: это подсказка «сколько фармить». */
+        .arena-plan-summary {
+            display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+            background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px;
+            padding: 8px 14px; font-size: 12px; color: #d8c9a8;
+        }
+        .arena-plan-summary b { color: #ffcf6a; font-variant-numeric: tabular-nums; }
+        .arena-deficit { color: #ffb3a0; font-weight: bold; }
+        .arena-deficit b { color: #ff8f7a; }
+        .arena-ready { color: #8ff2a0; font-weight: bold; }
+        .hp-arena-btn {
+            background: #2a2030; border: 1px solid #44374a; color: #d8c9a8;
+            padding: 7px 14px; border-radius: 6px; font-weight: bold; font-size: 13px; cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+        }
+        .hp-arena-btn:hover:not(:disabled) { background: #352941; border-color: #caa55c; }
+        .hp-arena-btn.primary { background: #caa55c; border-color: #caa55c; color: #1d1620; }
+        .hp-arena-btn.primary:hover:not(:disabled) { background: #ffcf4a; border-color: #ffcf4a; }
+        .hp-arena-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        /* ── Подвал карточки/вкладки ── */
+        .hp-card-foot { font-size: 11px; color: #8b7f96; line-height: 1.5; }
+        .hp-card-foot b { color: #ffcf6a; font-variant-numeric: tabular-nums; }
+
     `;
