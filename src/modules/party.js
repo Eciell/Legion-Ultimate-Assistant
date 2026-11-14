@@ -48,6 +48,13 @@
     // ответа игры, а не по таймеру. Интервал 3 с оставлен фолбэком и растянут
     // до 30 с (АФК, скрытая вкладка, игра перестала слать запросы). Серии
     // запросов при загрузке страницы гасит троттлинг 2 с в _hpTick().
+    // v11.6.6: штатный источник HP — событие `me` живого канала игры
+    // (LGLiveLink.open -> SSE/WS). Оно несёт полный стейт героя (hpNow,
+    // stats.hp), поэтому свой GET /api/me на каждое изменение больше не
+    // нужен: _onHeroUpdate() обновляет панель по кэшу и шлёт нашему серверу
+    // снимок. PerformanceObserver остаётся резервом: он не запускается, если
+    // канал подтверждён событием `me`, и работает, если LGLiveLink недоступен
+    // или хук не успел к уже открытому каналу.
     // ============================================================
     const Party = {
         BASE_URL_KEY: 'lgPartyBaseUrl',
@@ -100,6 +107,15 @@
         _hpBusy: false,      // тик уже в работе (медленная сеть)
         _lastHpTick: 0,      // Date.now() прошлого тика — троттлинг HP_TICK_MIN_MS
         _perfObserver: null, // PerformanceObserver: resource-записи /api/me, /api/qact
+        // v11.6.6: живой канал игры (LGLiveLink) — штатный источник HP.
+        _liveLinkHooked: false,  // обёртка LGLiveLink.open установлена
+        _liveLinkSeen: false,    // пришло хотя бы одно событие `me`
+        _liveLinkDead: false,    // инстанс выключен (destroy) — события игнорируем
+        _liveLinkOrigOpen: null, // оригинальный LGLiveLink.open (для снятия хука)
+        _liveLinkWrapper: null,  // наша обёртка (identity-проверка при unhook)
+        _liveLinkInstance: null, // последний открытый инстанс канала
+        _lastStates: null,       // последний GET /party/:id/state (кэш панели)
+        _lastSelfHp: null,       // {hp, maxHp} последней отрисовки — фильтр повторов
         _cachedLogin: '',    // последний ник из /api/me — для синхронного рендера
         // Промис фонового /api/me для .party-self-nick: повторные open() не
         // должны плодить одинаковые запросы, пока первый ещё в полёте.
@@ -805,9 +821,13 @@
          * v11.6.0d: у раненого союзника в строке есть кнопка «❤» (_healMember).
          * v11.6.0g-2: кнопка — только жрецу (this._prevMe.role === 'priest');
          * заголовок панели стал drag-handle для перетаскивания HUD.
+         * v11.6.6: opts.skipLog — не трогать журнал. Нужен _patchSelfHp():
+         * событие `me` приходит часто, а _syncLogPanel() каждый раз делает
+         * GET /party/:id/log. Журнал опрашивает тик синхронизации.
          * @param {Array<{login: string, hp: number, maxHp: number}>} states
+         * @param {{skipLog?: boolean}} [opts]
          */
-        _renderPanel(states) {
+        _renderPanel(states, opts = {}) {
             const el = this._ensurePanel();
             const list = Array.isArray(states) ? states : [];
 
@@ -877,8 +897,9 @@
             this._applyHudPosition();
 
             // Журнал — сосед по HUD-контейнеру; его видимость и догрузку
-            // синхронизируем на каждом тике.
-            this._syncLogPanel();
+            // синхронизируем на каждом тике (v11.6.6: кроме быстрых
+            // перерисовок из _patchSelfHp, иначе каждое `me` = GET журнала).
+            if (!opts.skipLog) this._syncLogPanel();
         },
 
         /* ---------------------------------------------------------- */
@@ -1092,6 +1113,8 @@
          *
          * v11.6.3c: тик запускается по событию (ответ игры на /api/me, /api/qact)
          * через PerformanceObserver; интервал HP_SYNC_MS (30 с) — только фолбэк.
+         * v11.6.6: основной триггер — событие `me` из LGLiveLink (см.
+         * _onHeroUpdate); observer поднимается только как резерв.
          * Повторный вызов безопасен: второй интервал и observer не создаются.
          * Вызывается из _writeState() (создали/вошли) и init() (перезагрузка).
          */
@@ -1101,6 +1124,12 @@
                 this.stopHpSync();
                 return;
             }
+
+            // v11.6.6: сначала вешаем хук на живой канал игры (он же снимает
+            // флаг «мёртв» после возможного destroy старого инстанса), и
+            // только потом решаем, нужен ли PerformanceObserver-фолбэк.
+            this._hookLiveLink();
+
             if (this._hpTimer) return;
 
             this._ensurePanel();
@@ -1124,6 +1153,12 @@
          */
         _startHpObserver() {
             if (this._perfObserver) return; // уже слушаем
+            // v11.6.6: канал игры подтверждён событием `me` — observer не нужен,
+            // HP приходит по живому потоку без наших запросов к /api/me.
+            if (this._liveLinkHooked && this._liveLinkSeen) {
+                dbg('[PARTY] HP: источник — LGLiveLink, PerformanceObserver не запускаем');
+                return;
+            }
             if (typeof PerformanceObserver !== 'function') {
                 console.warn('[LGU] PerformanceObserver не поддерживается — HP обновляется по таймеру');
                 return;
@@ -1153,6 +1188,190 @@
             }
         },
 
+        /* ---------------------------------------------------------- */
+        /* Живой канал игры (v11.6.6)                                  */
+        /* ---------------------------------------------------------- */
+
+        /**
+         * v11.6.6: подписка на событие `me` живого канала игры.
+         *
+         * Раньше HP-панель обновлялась по PerformanceObserver: мы замечали
+         * запрос игры к /api/me и делали СВОЙ /api/me, чтобы узнать hp.
+         * Теперь игра сама присылает полный стейт героя (hero.hpNow /
+         * hero.stats.hp) в SSE-событии `me` — второй запрос не нужен.
+         *
+         * LGLiveLink хранит свой инстанс в замыкании site-live.js, поэтому
+         * единственная точка доступа — обёртка его `open()`: при каждом
+         * (пере)открытии канала подписываемся на `me` у нового инстанса.
+         *
+         * Хук идемпотентен: повторные startHpSync()/init() второй обёртки
+         * не создают. Если LGLiveLink нет (старая версия сайта) — возвращаем
+         * false, и модуль остаётся на PerformanceObserver (см. _startHpObserver).
+         *
+         * @returns {boolean} хук стоит (или уже стоял) и события доступны
+         */
+        _hookLiveLink() {
+            const link = G.LGLiveLink;
+            if (!link || typeof link.open !== 'function') return false;
+            if (this._liveLinkWrapper && link.open === this._liveLinkWrapper) {
+                this._liveLinkHooked = true;
+                this._liveLinkDead = false;
+                return true;
+            }
+
+            const self = this;
+            const origOpen = link.open;
+
+            // Обёртка обязана быть обычной function: игру интересует только
+            // возвращённый инстанс, но apply(this) сохраняет поведение, если
+            // LGLiveLink позовут как метод.
+            const wrapper = function (opts) {
+                const instance = origOpen.apply(this, arguments);
+                try {
+                    if (instance && typeof instance.addEventListener === 'function') {
+                        self._liveLinkInstance = instance;
+                        instance.addEventListener('me', (e) => {
+                            try {
+                                const data = JSON.parse(e.data);
+                                if (data && data.hero) self._onHeroUpdate(data.hero);
+                            } catch (err) {
+                                // Битую строку канала игнорируем: игра делает то же.
+                            }
+                        });
+                    }
+                } catch (err) {
+                    console.warn('[PARTY] LGLiveLink: подписка на `me` не удалась:', err);
+                }
+                return instance;
+            };
+
+            this._liveLinkOrigOpen = origOpen;
+            this._liveLinkWrapper = wrapper;
+            this._liveLinkDead = false;
+            this._liveLinkHooked = true;
+            link.open = wrapper;
+            dbg('[PARTY] HP: подписались на LGLiveLink `me`');
+            return true;
+        },
+
+        /**
+         * v11.6.6: снять обёртку (destroy при перезапуске скрипта).
+         *
+         * Проверяем, что в link.open всё ещё наша обёртка: если поверх уже
+         * навернулся новый инстанс скрипта, чужой хук не трогаем — иначе
+         * сломали бы ему поток. Свой инстанс при этом помечен мёртвым и
+         * событий не обрабатывает.
+         */
+        _unhookLiveLink() {
+            const link = G.LGLiveLink;
+            if (link && this._liveLinkWrapper && link.open === this._liveLinkWrapper) {
+                link.open = this._liveLinkOrigOpen;
+            }
+            this._liveLinkWrapper = null;
+            this._liveLinkOrigOpen = null;
+            this._liveLinkInstance = null;
+            this._liveLinkHooked = false;
+        },
+
+        /**
+         * v11.6.6: новое состояние героя из события `me` LGLiveLink.
+         *
+         * data героя — полный объект (как в GET /api/me): hpNow, stats.hp,
+         * ghost, role. Состояния похода (ql) в `me` НЕТ — оно идёт отдельным
+         * событием `q`, поэтому quest берём из прошлого снимка: иначе каждый
+         * тик выглядел бы как «вышел из похода» (ложный quest_end).
+         *
+         * Снимок сразу становится _prevMe (до await'ов): параллельные
+         * события не должны дважды отправлять одно и то же событие журнала.
+         * @param {object} hero hero из JSON события `me`
+         */
+        async _onHeroUpdate(hero) {
+            if (this._liveLinkDead) return;
+            if (!hero || typeof hero !== 'object') return;
+            if (!this._readState()) return;
+
+            // Первое событие подтверждает, что канал живой: резервный
+            // PerformanceObserver (если он успел подняться) больше не нужен.
+            if (!this._liveLinkSeen) {
+                this._liveLinkSeen = Date.now();
+                this._stopHpObserver();
+            }
+
+            const prev = this._prevMe;
+            const hpRaw = Number(hero.hpNow);
+            // stats.hp — максимум (docs/API.md); hpMax — фолбэк для старых
+            // ответов, где максимум лежит в hero.hpMax.
+            const maxRaw = Number(hero.stats && hero.stats.hp !== undefined ? hero.stats.hp : hero.hpMax);
+            const hp = Number.isFinite(hpRaw) ? hpRaw : (prev ? prev.hp : null);
+            const maxHp = (Number.isFinite(maxRaw) && maxRaw > 0) ? maxRaw : (prev ? prev.maxHp ?? null : null);
+
+            const next = {
+                hp,
+                maxHp,
+                quest: prev ? prev.quest ?? null : null,
+                ghost: hero.ghost === true,
+                role: hero.role || (prev ? prev.role : 'unknown')
+            };
+
+            // Журнал боя: те же правила, что в _hpTick(). Снимок пришёл из
+            // живого канала, поэтому death/heal/damage по нему валидны.
+            const events = prev ? this._detectLogEvents(prev, next) : [];
+            this._prevMe = next; // до await: защита от двойной отправки
+
+            // 1. Панель — сразу, по кэшу состояний, без запросов.
+            this._patchSelfHp(next.hp, next.maxHp);
+            // 2. Стейт на наш сервер (POST + GET) — «как обычно», но с
+            //    готовым снимком: /api/me не запрашиваем. Внутри _hpTick()
+            //    живёт троттлинг HP_TICK_MIN_MS, поэтому серия `me`-событий
+            //    боя не превратится в серию запросов.
+            this._hpTick(next).catch((e) => {
+                console.warn('[PARTY] синхронизация HP (live):', e?.message || e);
+            });
+
+            // 3. События журнала — последовательно: id в БД должны идти по порядку.
+            for (const ev of events) {
+                if (this._liveLinkDead) return;
+                if (!(await this._postLogEvent(ev.type, ev.text))) break;
+                if (!this._readState()) return;
+            }
+        },
+
+        /**
+         * v11.6.6: мгновенная перерисовка своей строки по кэшу состояний.
+         *
+         * GET /party/:id/state не нужен: берём последний ответ сервера
+         * (_lastStates) и подменяем в нём свой hp/maxHp. Если кэша ещё нет
+         * (первый тик не ответил), рисуем одну свою строку — панель не
+         * должна пустовать до ответа нашего сервера.
+         *
+         * Одинаковые значения пропускаем: событие `me` приходит и на монеты
+         * или очередь действий, герой при этом не меняется.
+         * @param {number|null} hp
+         * @param {number|null} maxHp
+         */
+        _patchSelfHp(hp, maxHp) {
+            if (!Number.isFinite(hp) || !Number.isFinite(maxHp) || maxHp <= 0) return;
+            if (this._lastSelfHp && this._lastSelfHp.hp === hp && this._lastSelfHp.maxHp === maxHp) return;
+            this._lastSelfHp = { hp, maxHp };
+
+            const state = this._readState();
+            if (!state) return;
+            const selfLogin = String(state.login || this._cachedLogin || '').toLowerCase();
+            if (!selfLogin) return;
+
+            const list = Array.isArray(this._lastStates) ? this._lastStates.slice() : [];
+            const idx = list.findIndex((s) => String(s?.login || '').toLowerCase() === selfLogin);
+            if (idx >= 0) {
+                list[idx] = { ...list[idx], login: list[idx].login || selfLogin, hp, maxHp };
+            } else {
+                list.push({ login: selfLogin, hp, maxHp });
+            }
+            this._lastStates = list;
+            // skipLog: журнал опрашивает тик синхронизации; иначе каждое
+            // событие `me` (а их в бою много) давало бы GET /party/:id/log.
+            this._renderPanel(list, { skipLog: true });
+        },
+
         /** v11.6.3c: отключить observer (выход, 401, перезапуск скрипта). */
         _stopHpObserver() {
             if (this._perfObserver) {
@@ -1170,6 +1389,11 @@
                 this._hpTimer = null;
             }
             this._stopHpObserver();
+            // v11.6.6: кэш панели и признак живого канала сбрасываем — при
+            // следующем входе в пати observer снова подстрахует до первого `me`.
+            this._lastStates = null;
+            this._lastSelfHp = null;
+            this._liveLinkSeen = false;
             this._hidePanel();
             // leave/401: журнал прошлой пати очищается и прячется.
             this._hideLogPanel();
@@ -1184,11 +1408,15 @@
          * страховка на случай, если observer уже отключён.
          */
         destroy() {
+            // v11.6.6: старый инстанс не должен ни принимать `me` из
+            // LGLiveLink, ни слать state на наш сервер после перезапуска.
+            this._liveLinkDead = true;
             if (this._perfObserver) {
                 this._perfObserver.disconnect();
                 this._perfObserver = null;
             }
             this.stopHpSync();
+            this._unhookLiveLink();
         },
 
         /**
@@ -1267,15 +1495,21 @@
         /**
          * Один такт синхронизации: /api/me -> POST state -> GET state -> рендер.
          *
-         * Запускается событием PerformanceObserver (ответ игры на /api/me или
-         * /api/qact) и фолбэк-интервалом HP_SYNC_MS; не чаще HP_TICK_MIN_MS.
+         * Запускается событием `me` LGLiveLink (v11.6.6), событием
+         * PerformanceObserver (ответ игры на /api/me или /api/qact) и
+         * фолбэк-интервалом HP_SYNC_MS; не чаще HP_TICK_MIN_MS.
+         *
+         * v11.6.6: meOverride — готовый снимок героя из события `me`
+         * (см. _onHeroUpdate). С ним шаг 1 (/api/me) пропускается, а шаг 1a
+         * (детектор журнала) не нужен: снимок уже сравнён и записан в
+         * _prevMe вызывающей стороной.
          *
          * Ошибки сети и валидации намеренно «тихие» (console.warn): панель
          * обновляется часто, тосты на каждую ошибку были бы невыносимы.
          * Исключение — 401: он означает кик/удалённую пати, здесь нужен и
          * тост, и полный локальный сброс (его делает _request()).
          */
-        async _hpTick() {
+        async _hpTick(meOverride = null) {
             // v11.6.3c: троттлинг. Observer срабатывает на каждый /api/me, а
             // игра при загрузке страницы может отдать несколько подряд —
             // без ограничения это серия POST state + GET state на наш сервер.
@@ -1294,12 +1528,16 @@
             const path = `/party/${encodeURIComponent(party.groupId)}/state`;
             this._hpBusy = true;
             try {
-                // 1. Свой HP из игры. Если /api/me недоступен — просто не
-                //    отправляем стейт, панель строится по данным сервера.
-                const me = await this._fetchMe();
+                // 1. Свой HP из игры. v11.6.6: если снимок пришёл событием
+                //    `me` LGLiveLink (_onHeroUpdate), /api/me не запрашиваем.
+                //    Без снимка — обычный GET /api/me; если он недоступен,
+                //    стейт не отправляем, панель строится по данным сервера.
+                const me = meOverride || await this._fetchMe();
 
                 // 1a. Детектор журнала — только по «живому» снимку /api/me.
                 //     Фолбэк (live:false) не должен выглядеть как quest_end/death.
+                //     v11.6.6: у снимка из LGLiveLink флага live нет — события
+                //     уже разобраны в _onHeroUpdate, повторять их нельзя.
                 if (me.live) {
                     const events = this._detectLogEvents(this._prevMe, me);
                     for (const ev of events) {
@@ -1308,7 +1546,7 @@
                     }
                     // _prevMe обновляем даже при ошибке сети: иначе одно и то же
                     // событие отправлялось бы каждый тик.
-                    this._prevMe = { hp: me.hp, quest: me.quest, ghost: me.ghost, role: me.role };
+                    this._prevMe = { hp: me.hp, maxHp: me.maxHp, quest: me.quest, ghost: me.ghost, role: me.role };
                     // 401 внутри POST уже сбросил локальное состояние.
                     if (!this._readState()) return;
                 }
@@ -1331,6 +1569,9 @@
                 const res = await this._request('GET', path);
                 // Пока ждали ответ, могли выйти из пати — тогда рендер не нужен.
                 if (!this._readState()) return;
+                // v11.6.6: кэш состояний — по нему _patchSelfHp() мгновенно
+                // перерисовывает свою строку на событиях `me`.
+                this._lastStates = Array.isArray(res?.states) ? res.states : null;
                 this._renderPanel(res?.states);
             } catch (e) {
                 console.warn('[PARTY] синхронизация HP:', e?.message || e);
@@ -1396,6 +1637,12 @@
                     else prev.stopHpSync?.();
                 } catch (e) {}
             }
+
+            // v11.6.6: пытаемся навеситься на живой канал игры как можно
+            // раньше — до того, как LGLiveLink переоткроется (смена вкладки,
+            // реконнект). Если он откроется после нашего boot, событие `me`
+            // пойдёт уже в _onHeroUpdate без запросов к /api/me.
+            this._hookLiveLink();
 
             const btn = document.getElementById(DOM_IDS.btnParty) || document.getElementById('btn-party');
             btn?.addEventListener('click', () => this.open());
