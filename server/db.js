@@ -50,6 +50,12 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_party_login ON sessions(party_id, login);
 CREATE INDEX IF NOT EXISTS idx_party_sessions ON sessions(party_id);
+-- v11.6.5.1a: индекс под поиск пати по владельцу (getUserActiveParty ищет
+-- parties по owner_session, а не sessions по login).
+CREATE INDEX IF NOT EXISTS idx_party_owner ON parties(owner_session);
+-- v11.6.5.1: подзапрос поиска сессий логина идёт без party_id, поэтому
+-- составной idx_party_login здесь не помогает.
+CREATE INDEX IF NOT EXISTS idx_session_login ON sessions(login);
 `);
 
 /*
@@ -226,6 +232,30 @@ const insertSessionStmt = db.query(
 );
 const selectPartyStmt = db.query('SELECT * FROM parties WHERE id = $id');
 const selectPartyByInviteStmt = db.query('SELECT * FROM parties WHERE invite_token = $token');
+// v11.6.5.1a: активная пати логина — только та, где он ВЛАДЕЛЕЦ
+// (owner_session указывает на его сессию). Участие в чужой пати создавать
+// свою не мешает: клиент умеет держать только одну, но игрок может выйти из
+// чужой и собрать свою — сервер это больше не блокирует.
+// ORDER BY created_at DESC — на случай, если в базе остались дубли от
+// старых версий сервера. Подзапрос по sessions(login) закрыт индексом
+// idx_session_login, внешний — idx_party_owner.
+const selectActivePartyByLoginStmt = db.query(
+    `SELECT * FROM parties
+      WHERE owner_session IN (
+            SELECT session_id FROM sessions WHERE login = $login
+      )
+      ORDER BY created_at DESC
+      LIMIT 1`
+);
+// v11.6.5.1: пати-сироты для TTL-чистки: созданы больше 24 часов назад и
+// не имеют ни одного обновления party_states за последние 2 часа.
+const selectStalePartiesStmt = db.query(
+    `SELECT id FROM parties
+      WHERE created_at < $stale
+        AND id NOT IN (
+            SELECT DISTINCT party_id FROM party_states WHERE updated_at > $active
+        )`
+);
 const selectSessionStmt = db.query('SELECT * FROM sessions WHERE session_id = $session');
 const selectSessionByLoginStmt = db.query(
     'SELECT * FROM sessions WHERE party_id = $party AND login = $login'
@@ -468,6 +498,23 @@ export function getPartyByInvite(inviteToken) {
     return mapParty(selectPartyByInviteStmt.get({ $token: String(inviteToken) }));
 }
 
+/**
+ * Активная пати, которой логин ВЛАДЕЕТ (v11.6.5.1a).
+ *
+ * «Активная» = в parties осталась строка с owner_session, указывающим на
+ * сессию этого логина. Участие в чужой пати (строка в sessions без
+ * владения) здесь не учитывается: такой игрок может создать свою пати, а
+ * чужую покинет сам или его кикнут.
+ * Брошенные пати вычищает cleanupStaleParties() через 24 часа.
+ *
+ * @param {string} login нормализованный ник (trim + toLowerCase)
+ * @returns {{id: string, inviteToken: string, ownerSession: string, createdAt: number, logVersion: number}|null}
+ */
+export function getUserActiveParty(login) {
+    if (!login) return null;
+    return mapParty(selectActivePartyByLoginStmt.get({ $login: String(login) }));
+}
+
 /** Ротация инвайт-токена. Возвращает установленное значение. */
 export function rotateToken(partyId, inviteToken) {
     updateTokenStmt.run({ $token: inviteToken, $id: String(partyId) });
@@ -553,6 +600,38 @@ const deletePartyTx = db.transaction((partyId) => {
 export function deleteParty(partyId) {
     deletePartyTx(String(partyId));
     return true;
+}
+
+/**
+ * TTL-чистка заброшенных пати (v11.6.5.1).
+ *
+ * Удаляем пати, созданные больше 24 часов назад, если за последние 2 часа
+ * никто из участников не присылал state (party_states.updated_at). Такой
+ * «след» остаётся у пати, в которой реально играли, даже если потом все
+ * закрыли браузер и забыли нажать «Выйти».
+ *
+ * Удаление идёт через deletePartyTx, а не одним DELETE FROM parties: на
+ * sessions висит FOREIGN KEY на parties, и прямой DELETE упал бы с
+ * SQLITE_CONSTRAINT, не удалив ничего. Транзакция чистит states, log,
+ * sessions и только потом саму пати.
+ *
+ * @returns {number} сколько пати удалено (0 при ошибке БД)
+ */
+export function cleanupStaleParties() {
+    const now = Date.now();
+    const staleThreshold = now - 24 * 60 * 60 * 1000;
+    const activeThreshold = now - 2 * 60 * 60 * 1000;
+    try {
+        const rows = selectStalePartiesStmt.all({
+            $stale: staleThreshold,
+            $active: activeThreshold
+        });
+        for (const row of rows) deletePartyTx(row.id);
+        return rows.length;
+    } catch (err) {
+        console.error('[legion-party] cleanupStaleParties:', err);
+        return 0;
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -930,3 +1009,61 @@ export function getMedians(itemIds) {
     }
     return out;
 }
+
+/* ------------------------------------------------------------------ */
+/* Кэш медиан в памяти (v11.6.5.1)                                     */
+/* ------------------------------------------------------------------ */
+
+// Витрина аукциона запрашивает медианы на каждый рендер одним и тем же
+// набором id, а CTE с ROW_NUMBER по market_prices — самый тяжёлый запрос
+// сервера. 60 секунд кэша снимают почти весь повторный трафик: за это время
+// новая цена не успевает стать статистически значимой (окно медианы — 72 ч).
+const mediansCache = new Map();
+const MEDIAN_CACHE_TTL_MS = 60_000;
+// Верхняя граница карты: после неё выкидываем протухшие записи. Жёсткого
+// лимита нет намеренно — за один запрос добавляется не больше
+// MARKET_LIMITS.maxIdsPerQuery (200) ключей.
+const MEDIAN_CACHE_MAX_ENTRIES = 2000;
+
+/**
+ * Медианы с кэшем в памяти (v11.6.5.1): та же форма ответа, что у getMedians
+ * ({id: number|null}), но свежие id считаются в SQL, а повторные — из Map.
+ *
+ * null тоже кэшируется: «наблюдений нет» — валидный ответ, и повторять
+ * тяжёлый запрос ради него бессмысленно.
+ *
+ * @param {string[]} itemIds
+ * @returns {Record<string, number|null>}
+ */
+export function getCachedMedians(itemIds) {
+    const now = Date.now();
+    const result = {};
+    const missingIds = [];
+
+    for (const id of Array.isArray(itemIds) ? itemIds : []) {
+        const cached = mediansCache.get(id);
+        if (cached && cached.expiresAt > now) {
+            result[id] = cached.median;
+        } else {
+            missingIds.push(id);
+        }
+    }
+
+    if (missingIds.length > 0) {
+        const fresh = getMedians(missingIds);
+        for (const [id, median] of Object.entries(fresh)) {
+            mediansCache.set(id, { median, expiresAt: now + MEDIAN_CACHE_TTL_MS });
+            result[id] = median;
+        }
+    }
+
+    // Ленивая чистка: иначе карта растёт от каждого нового предмета навсегда.
+    if (mediansCache.size > MEDIAN_CACHE_MAX_ENTRIES) {
+        for (const [key, record] of mediansCache) {
+            if (record.expiresAt <= now) mediansCache.delete(key);
+        }
+    }
+
+    return result;
+}
+

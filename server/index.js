@@ -32,6 +32,16 @@
  * ключ), memberId отдельно от sessionId, DELETE /party/:id/leave, логины
  * в нижнем регистре.
  *
+ * v11.6.5.1 (hotfix, только сервер): единый RateLimiter на IP для уязвимых
+ * эндпоинтов (/party, /users, /market/*, state/log), кэш медиан на 60 с в
+ * памяти процесса и TTL-чистка заброшенных пати (24 часа). POST /party
+ * теперь отклоняет логин, у которого уже есть активная пати (409).
+ *
+ * v11.6.5.1a: лимиты подняты под реальные сценарии клиента (полный скан
+ * витрины, несколько вкладок с одного IP), а проверка активной пати в
+ * POST /party считает только владельцев — участнику чужой пати создавать
+ * свою больше не запрещено.
+ *
  * Без CORS: клиент ходит через GM_xmlhttpRequest, который CORS игнорирует.
  * Браузерный fetch к этому серверу не используется, поэтому preflight
  * обрабатывать не нужно (и нечем: OPTIONS отдаст 405).
@@ -43,12 +53,13 @@ import {
     bindSession,
     checkpointDb,
     cleanupActiveUsers,
+    cleanupStaleParties,
     closeDb,
     createParty,
     deleteParty,
     getActiveUsers,
+    getCachedMedians,
     getLog,
-    getMedians,
     getParty,
     getPartyByInvite,
     getSession,
@@ -56,6 +67,7 @@ import {
     getSessionByMemberId,
     getStates,
     getStats,
+    getUserActiveParty,
     isConstraintError,
     kickSession,
     listSessions,
@@ -139,6 +151,92 @@ class HttpError extends Error {
         this.extra = extra;
     }
 }
+
+/* ------------------------------------------------------------------ */
+/* Универсальный rate limit (v11.6.5.1)                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Счётчик запросов в фиксированном окне (fixed window) по ключу (обычно IP).
+ *
+ * Map живёт в памяти процесса: для одного Bun-инстанса этого достаточно,
+ * кластеру понадобился бы общий стор (Redis). Протухшие окна удаляет
+ * cleanup(), который вызывается общим таймером ниже, — иначе Map росла бы
+ * от каждого нового IP бесконечно.
+ */
+class RateLimiter {
+    constructor(limit, windowMs) {
+        this.limit = limit;
+        this.windowMs = windowMs;
+        this.store = new Map();
+    }
+
+    /**
+     * Регистрирует запрос или бросает 429 rate_limited с retryAfter.
+     * @param {string} key например IP клиента
+     */
+    check(key) {
+        const now = Date.now();
+        const record = this.store.get(key);
+        if (!record || record.resetAt <= now) {
+            this.store.set(key, { count: 1, resetAt: now + this.windowMs });
+            return;
+        }
+        if (record.count >= this.limit) {
+            const retryAfter = Math.max(1, Math.ceil((record.resetAt - now) / 1000));
+            throw new HttpError(429, 'rate_limited', `Слишком много запросов. Повторите через ${retryAfter} с.`);
+        }
+        record.count += 1;
+    }
+
+    cleanup() {
+        const now = Date.now();
+        for (const [key, record] of this.store) {
+            if (record.resetAt <= now) this.store.delete(key);
+        }
+    }
+}
+
+/*
+ * Лимиты уязвимых эндпоинтов (v11.6.5.1, значения уточнены в v11.6.5.1a).
+ * Подобраны по реальной частоте клиента аддона, чтобы легитимные сценарии
+ * не упирались в 429:
+ *   • marketScan    — полный скан витрины шлёт до 10 пачек по 500 лотов;
+ *   • marketMedians — полный скан запрашивает до 25 чанков по 200 id плюс
+ *                     тултипы и рендеры витрины;
+ *   • partyCreate   — пати создаётся вручную, но из одной сети может играть
+ *                     несколько человек;
+ *   • usersGet      — клиент опрашивает /users раз в 30 секунд (2/мин);
+ *   • heartbeat     — клиент шлёт heartbeat раз в 30 секунд (2/мин);
+ *   • partyState    — HP-панель шлёт state не чаще раза в 3 с на вкладку
+ *                     (до 20/мин), две вкладки с одного IP — до 40/мин;
+ *   • partyLog      — журнал пишется на события боя, пачками.
+ * Лимит на join остался отдельным (checkJoinRate, 10/мин): у него своё
+ * сообщение об ошибке, которое клиент уже показывает игроку.
+ */
+const limiters = {
+    marketScan: new RateLimiter(12, 120_000),     // 12 пачек по 500 лотов за 2 мин на IP
+    marketMedians: new RateLimiter(60, 60_000),   // 60 запросов за 60 сек на IP
+    partyCreate: new RateLimiter(5, 600_000),     // 5 пати за 10 мин на IP
+    usersGet: new RateLimiter(10, 60_000),        // 10 /users за минуту на IP
+    heartbeat: new RateLimiter(6, 60_000),        // 6 heartbeat за минуту на IP
+    partyState: new RateLimiter(60, 60_000),      // 60 обновлений state/мин на IP
+    partyLog: new RateLimiter(20, 60_000)         // 20 записей в лог/мин на IP
+};
+
+// Чистка лимитеров — раз в минуту, TTL заброшенных пати — раз в 30 минут
+// по тому же таймеру (каждые 30 тиков).
+let cleanupTick = 0;
+setInterval(() => {
+    for (const limiter of Object.values(limiters)) {
+        limiter.cleanup();
+    }
+    cleanupTick += 1;
+    if (cleanupTick % 30 === 0) {
+        const removed = cleanupStaleParties();
+        if (removed > 0) console.log(`[legion-party] TTL-чистка пати: удалено ${removed}`);
+    }
+}, 60_000);
 
 function json(data, status = 200) {
     return new Response(JSON.stringify(data), {
@@ -268,41 +366,13 @@ function checkJoinRate(ip) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Rate limit на heartbeat (v11.6.0g-6)                                */
+/* Rate limit на heartbeat (v11.6.0g-6, переведён на limiters)         */
 /* ------------------------------------------------------------------ */
 
-// 6 запросов в минуту на IP (v11.6.1c: было 3). Клиент шлёт heartbeat раз в
-// 30 с (2 в минуту), поэтому лимит срабатывает только на спам; запас в 3x
-// покрывает перезагрузки страницы и несколько вкладок с одного IP. 429 клиент
-// молча проглатывает и повторяет на следующем тике.
-const HEARTBEAT_LIMIT = 6;
-const HEARTBEAT_WINDOW_MS = 60_000;
-
-// ip -> { count, resetAt }. Как и joinAttempts, Map живёт в памяти процесса:
-// одного Bun-инстанса достаточно, кластеру понадобился бы общий стор.
-const heartbeatAttempts = new Map();
-
-function checkHeartbeatRate(ip) {
-    const now = Date.now();
-
-    // Ленивая чистка: иначе Map растёт от каждого нового IP бесконечно.
-    if (heartbeatAttempts.size > 5000) {
-        for (const [key, rec] of heartbeatAttempts) {
-            if (rec.resetAt <= now) heartbeatAttempts.delete(key);
-        }
-    }
-
-    const rec = heartbeatAttempts.get(ip);
-    if (!rec || rec.resetAt <= now) {
-        heartbeatAttempts.set(ip, { count: 1, resetAt: now + HEARTBEAT_WINDOW_MS });
-        return;
-    }
-    if (rec.count >= HEARTBEAT_LIMIT) {
-        const retryAfter = Math.max(1, Math.ceil((rec.resetAt - now) / 1000));
-        throw new HttpError(429, 'too_many_requests', `Слишком частый heartbeat, повторите через ${retryAfter} c.`);
-    }
-    rec.count += 1;
-}
+// v11.6.5.1: отдельный счётчик heartbeat удалён — лимит (6 запросов в минуту
+// на IP) теперь живёт в общем limiters.heartbeat. Клиент шлёт heartbeat раз
+// в 30 с, запас в 3x покрывает перезагрузки страницы и несколько вкладок
+// с одного IP; 429 клиент молча проглатывает и повторяет на следующем тике.
 
 /* ------------------------------------------------------------------ */
 /* Auth и проверки прав                                                */
@@ -349,9 +419,27 @@ function requireOwner(session, party) {
 /* ------------------------------------------------------------------ */
 
 // POST /party {login}
-async function handleCreateParty(req) {
+async function handleCreateParty(req, server) {
+    // v11.6.5.1: 3 пати за 10 минут на IP. Лимит считается до чтения тела,
+    // чтобы спам не доходил ни до JSON-парсера, ни до БД.
+    const ip = server.requestIP(req)?.address || 'unknown';
+    limiters.partyCreate.check(ip);
+
     const body = await readJson(req);
     const login = normalizeLogin(body.login);
+
+    // v11.6.5.1a: блокируем только ВЛАДЕЛЬЦА активной пати. Участник чужой
+    // пати может создать свою (клиент держит одно состояние, но сервер не
+    // должен запрещать это из-за membership).
+    // 409, а не 429: игроку нужно понять, что делать (выйти/перевыпустить
+    // инвайт), а не ждать окно лимитера.
+    if (getUserActiveParty(login)) {
+        throw new HttpError(
+            409,
+            'party_exists',
+            'У вас уже есть активная пати. Покиньте её или перевыпустите инвайт'
+        );
+    }
 
     const sessionId = newSessionId();
     const inviteToken = newInviteToken();
@@ -485,7 +573,13 @@ async function handleMembers(req, partyId) {
  * любой участник мог бы перезаписать чужую строку party_states.
  * Ответ короткий ({ok:true}): клиент не ждёт данных, он сразу делает GET.
  */
-async function handleStatePost(req, partyId) {
+async function handleStatePost(req, partyId, server) {
+    // v11.6.5.1: 30 обновлений state в минуту на IP (limiters.partyState).
+    // Проверяем до Bearer и до БД: спам не должен трогать ни sessions, ни
+    // party_states.
+    const ip = server.requestIP(req)?.address || 'unknown';
+    limiters.partyState.check(ip);
+
     const session = authenticate(req);
     const party = requireParty(partyId);
     requireMember(session, party);
@@ -527,8 +621,14 @@ async function handleStateGet(req, partyId) {
  * login берётся из сессии, а не из тела: клиент не должен уметь писать
  * в журнал от чужого имени. type — только из белого списка, text —
  * строка 1..500 символов после стрипа тегов (normalizeLogText).
+ *
+ * v11.6.5.1: 20 записей в минуту на IP (limiters.partyLog) — журнал
+ * пишется событиями боя, пачками по нескольку строк.
  */
-async function handleLogPost(req, partyId) {
+async function handleLogPost(req, partyId, server) {
+    const ip = server.requestIP(req)?.address || 'unknown';
+    limiters.partyLog.check(ip);
+
     const session = authenticate(req);
     const party = requireParty(partyId);
     requireMember(session, party);
@@ -621,14 +721,15 @@ async function handleLeave(req, partyId) {
  * v11.6.0g-5: необязательное поле version уходит в users_stats (GET /stats:
  * dau/mau) и на форму ответа не влияет.
  *
- * v11.6.0g-6: 3 запроса в минуту на IP (checkHeartbeatRate) -> 429
- * too_many_requests. Лимит проверяется до чтения тела.
+ * v11.6.0g-6: лимит по IP -> 429. v11.6.5.1: отдельный счётчик заменён на
+ * общий limiters.heartbeat (6 запросов в минуту на IP, код rate_limited).
+ * Лимит проверяется до чтения тела.
  */
 async function handleHeartbeat(req, server) {
-    // v11.6.0g-6: 3 запроса в минуту на IP. Лимит проверяем до чтения тела —
-    // спам не должен доходить даже до JSON-парсера.
+    // Лимит проверяем до чтения тела — спам не должен доходить даже до
+    // JSON-парсера.
     const ip = server.requestIP(req)?.address || 'unknown';
-    checkHeartbeatRate(ip);
+    limiters.heartbeat.check(ip);
 
     const body = await readJson(req);
     const login = normalizeLogin(body.login);
@@ -648,8 +749,14 @@ async function handleHeartbeat(req, server) {
  * Сначала чистим протухшие отметки (last_seen <= now - 15 мин), затем
  * отдаём живые. Чистка именно здесь, а не отдельным таймером: запрос
  * приходит от клиентов раз в 30 с, так что таблица не растёт бесконтрольно.
+ *
+ * v11.6.5.1: 10 запросов в минуту на IP (limiters.usersGet) — клиент ходит
+ * сюда раз в 30 с, запас покрывает несколько вкладок с одного IP.
  */
-async function handleActiveUsers() {
+async function handleActiveUsers(req, server) {
+    const ip = server.requestIP(req)?.address || 'unknown';
+    limiters.usersGet.check(ip);
+
     cleanupActiveUsers();
     return json({ users: getActiveUsers() });
 }
@@ -692,8 +799,14 @@ async function handleLatestVersion() {
  *
  * Мусор ВНУТРИ пачки не роняет запрос (addMarketPrices пропускает его
  * молча), но пустой или не-массив lots — 400: это ошибка клиента.
+ *
+ * v11.6.5.1: 2 скана за 2 минуты на IP (limiters.marketScan) — клиент и так
+ * шлёт снимок не чаще раза в 5 минут, лимит отсекает только спам.
  */
-async function handleMarketScan(req) {
+async function handleMarketScan(req, server) {
+    const ip = server.requestIP(req)?.address || 'unknown';
+    limiters.marketScan.check(ip);
+
     const body = await readJson(req, MAX_MARKET_BODY_BYTES);
     const lots = body.lots;
     if (!Array.isArray(lots) || lots.length === 0) {
@@ -718,8 +831,16 @@ async function handleMarketScan(req) {
  * в db.js), причём не более 100 самых свежих на предмет.
  * Ключ с null означает «данных нет» — клиент не показывает тултип.
  * Пустой ids — 400: без списка запрос бессмысленен.
+ *
+ * v11.6.5.1: ответ кэшируется в памяти на 60 с (getCachedMedians), а запрос
+ * ограничен 30 вызовами в минуту на IP (limiters.marketMedians): витрина
+ * запрашивает медианы при каждом рендере, и без кэша один и тот же CTE
+ * считался бы заново.
  */
-async function handleMarketMedians(url) {
+async function handleMarketMedians(req, url, server) {
+    const ip = server.requestIP(req)?.address || 'unknown';
+    limiters.marketMedians.check(ip);
+
     const raw = url.searchParams.get('ids') || '';
     const ids = [];
     for (const part of raw.split(',')) {
@@ -733,7 +854,7 @@ async function handleMarketMedians(url) {
         throw new HttpError(400, 'bad_ids', 'ids: список id предметов через запятую');
     }
 
-    return json({ medians: getMedians(ids) });
+    return json({ medians: getCachedMedians(ids) });
 }
 
 /* ------------------------------------------------------------------ */
@@ -771,7 +892,7 @@ const server = Bun.serve({
                 if (req.method !== 'GET') {
                     throw new HttpError(405, 'method_not_allowed', 'Ожидается GET /users');
                 }
-                return await handleActiveUsers();
+                return await handleActiveUsers(req, srv);
             }
             // Статистика аддона (v11.6.0g-5): online/dau/mau, только чтение.
             if (url.pathname === '/stats') {
@@ -794,13 +915,13 @@ const server = Bun.serve({
                 if (req.method !== 'POST') {
                     throw new HttpError(405, 'method_not_allowed', 'Ожидается POST /market/scan');
                 }
-                return await handleMarketScan(req);
+                return await handleMarketScan(req, srv);
             }
             if (url.pathname === '/market/medians') {
                 if (req.method !== 'GET') {
                     throw new HttpError(405, 'method_not_allowed', 'Ожидается GET /market/medians');
                 }
-                return await handleMarketMedians(url);
+                return await handleMarketMedians(req, url, srv);
             }
 
             if (parts[0] !== 'party') {
@@ -812,7 +933,7 @@ const server = Bun.serve({
                 if (req.method !== 'POST') {
                     throw new HttpError(405, 'method_not_allowed', 'Ожидается POST /party');
                 }
-                return await handleCreateParty(req);
+                return await handleCreateParty(req, srv);
             }
 
             // POST /party/join — вход по inviteToken (groupId больше не нужен).
@@ -860,7 +981,7 @@ const server = Bun.serve({
             // Состояние участников (v11.6.0b): POST — свой hp/maxHp, GET — все.
             if (action === 'state') {
                 if (req.method === 'POST') {
-                    return await handleStatePost(req, partyId);
+                    return await handleStatePost(req, partyId, srv);
                 }
                 if (req.method === 'GET') {
                     return await handleStateGet(req, partyId);
@@ -870,7 +991,7 @@ const server = Bun.serve({
             // Журнал боя (v11.6.0c): POST — запись, GET — догрузка по since.
             if (action === 'log') {
                 if (req.method === 'POST') {
-                    return await handleLogPost(req, partyId);
+                    return await handleLogPost(req, partyId, srv);
                 }
                 if (req.method === 'GET') {
                     return await handleLogGet(req, partyId, url);
