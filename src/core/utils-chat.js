@@ -258,7 +258,14 @@
                 list.forEach(item => {
                     const nick = extractNick(item);
                     if (nick && nick.length >= 2 && nick.length <= 30 && nick.toLowerCase() !== 'me') {
-                        window.__lgOnlinePlayers.set(nick.toLowerCase(), { loc, ts: now, src });
+                        // 11.6.6c: firstSeen — время первого обнаружения сессии.
+                        // Пауза больше 5 минут считается новым заходом: SSE-события
+                        // города/шахты обновляют ts постоянно, так что «тишина»
+                        // означает выход игрока (модуль guild-stats.js).
+                        const nickKey = nick.toLowerCase();
+                        const prev = window.__lgOnlinePlayers.get(nickKey);
+                        const firstSeen = (prev && (now - prev.ts < 300_000)) ? (prev.firstSeen || prev.ts) : now;
+                        window.__lgOnlinePlayers.set(nickKey, { loc, ts: now, firstSeen, src });
                         updated = true;
                     }
                 });

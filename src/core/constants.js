@@ -15,6 +15,9 @@
     // 0.1. ГЛОБАЛЬНЫЙ КЭШ ОНЛАЙНА ИГРОКОВ (сетевой перехват)
     window.__lgOnlinePlayers = window.__lgOnlinePlayers || new Map();
     window.__lgMineTotalHere = window.__lgMineTotalHere || 0;
+    // 11.6.6c: отметка старта аддона — верхняя граница длительности сессий
+    // (трекер онлайна не может знать о заходе раньше, чем мы запустились).
+    G.__lguStartTime = G.__lguStartTime || Date.now();
 
     // 0.0. РАНДОМИЗАЦИЯ DOM-ПРЕФИКСОВ
     const RAND_ID = 'x-' + Math.random().toString(36).substring(2, 6);

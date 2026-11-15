@@ -1111,4 +1111,46 @@
         .hp-gear-pill.ok { color: #1d1620; background: #8ff2a0; }
         .hp-gear-pill.bad { color: #1d1620; background: #ffb3a0; }
 
+        /* 11.6.6c: «Гильдия» — расширенный состав для офицеров
+           (modules/guild-stats.js). Бейджи висят после <b> с ником внутри
+           .gl-mn и НЕ перехватывают клики: pointer-events здесь не
+           переопределяем, на строке висит контекстное меню действий
+           (li.gl-hasm в нативной разметке гильдий). */
+        .lgu-guild-badges {
+            display: inline-flex; flex-wrap: wrap; align-items: center;
+            gap: 4px; margin-left: 6px; vertical-align: middle;
+            font-size: 11px; line-height: 1.2; font-weight: normal;
+        }
+        .lgu-gst {
+            display: inline-flex; align-items: center; gap: 3px;
+            padding: 1px 6px; border-radius: 9px; white-space: nowrap;
+            border: 1px solid #3d2f44; background: #201826; color: #cfc6d6;
+            cursor: help;
+        }
+        .lgu-gst.on { border-color: #3d7a4a; background: #17301f; color: #8ff2a0; }
+        .lgu-gst.on.mine { border-color: #4a6f8f; background: #16242e; color: #9fd6ff; }
+        .lgu-gst.time { border-color: #4a4437; background: #241f16; color: #ffcf6a; }
+        .lgu-gst.friend { border-color: #6b4a7a; background: #2a1f33; color: #e5b3ff; }
+        .lgu-gst.warn { border-color: #7a3d3d; background: #2e1717; color: #ffb3a0; }
+        .lgu-gst.off { border-color: #3d3d44; background: #1b1b20; color: #8a8a92; }
+
+        /* 11.6.6c.1: уровень и класс героя. Классы .lgu-cls-* повторяют
+           палитру игры (CLASS_META в reference/LegionFrontSRC/lib/game-data.js). */
+        .lgu-gbadge {
+            display: inline-flex; align-items: center; gap: 3px;
+            padding: 1px 6px; border-radius: 9px; white-space: nowrap;
+            border: 1px solid #3d2f44; background: #201826; color: #cfc6d6;
+            font-weight: bold; cursor: help;
+        }
+        .lgu-glvl { border-color: #5a5142; background: #241f18; color: #ffcf6a; }
+        .lgu-gcls { border-color: #4a5f7a; background: #17222e; color: #9fd6ff; }
+        .lgu-cls-legionary { border-color: #a3122a; background: #2a1216; color: #ff9aa2; }
+        .lgu-cls-archer { border-color: #2f7a3a; background: #142318; color: #9fe3a2; }
+        .lgu-cls-rogue { border-color: #4a4a6a; background: #1b1b24; color: #c9c9e0; }
+        .lgu-cls-mage { border-color: #5b3aa8; background: #1e1730; color: #c3a4ff; }
+        .lgu-cls-necromancer { border-color: #2f5a4a; background: #14231e; color: #8fe3c4; }
+        .lgu-cls-priest { border-color: #9a6a1a; background: #2a2212; color: #ffd88a; }
+        .lgu-cls-paladin { border-color: #8a7a2a; background: #262212; color: #ffe9a0; }
+        .lgu-cls-recruit { border-color: #3d3d44; background: #1b1b20; color: #b9b9c2; }
+
     `;

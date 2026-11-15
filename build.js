@@ -98,6 +98,12 @@ const SHARED_MODULES = [
     // поэтому место внутри списка модулей не критично. Держим до CHAT_MODULES:
     // фасад chat.js по контракту обязан склеиваться последним.
     'modules/party.js',
+    // 11.6.6c: «Состав гильдии для офицеров» (modules/guild-stats.js) —
+    // бейджи онлайна/сессии/друзей в окне гильдий (.gl-modal). Нужны только
+    // G/Utils из core (уже объявлены), права проверяются через G.LGGuilds.
+    // main.js вызывает GuildStats.init() в boot(); место в списке —
+    // до CHAT_MODULES, фасад chat.js по контракту склеивается последним.
+    'modules/guild-stats.js',
     // Чат — отдельным блоком в конце (см. CHAT_MODULES): фасад chat.js
     // обязан склеиться последним, чтобы main.js увидел готовый Chat.
     ...CHAT_MODULES
