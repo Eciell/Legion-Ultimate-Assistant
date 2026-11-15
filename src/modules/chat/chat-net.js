@@ -418,6 +418,11 @@
         // ТЗ 11.6.0h.2: DOM-наблюдатель удалён — подсветку рисует CSS.
         _addonPollTimer: null,
 
+        // ПАТЧ 11.6.6d: токен этого клиента, закэшированный на время жизни
+        // страницы. Хранится в GM_setValue('lgClientToken') — привязан к
+        // браузеру/профилю, поэтому переживает перезагрузку вкладки.
+        _clientTokenCache: null,
+
         /**
          * База сервера аддона: сначала адрес пати (Party.getBaseUrl), затем
          * прод-домен. Party объявлен раньше чата (build.js: SHARED_MODULES
@@ -432,6 +437,77 @@
                 }
             } catch (e) {}
             return 'https://legion.ctrlfree.host';
+        },
+
+        /**
+         * Генерация нового clientToken (ПАТЧ 11.6.6d).
+         *
+         * Основной путь — crypto.randomUUID() (36 символов, https-контекст
+         * игры это позволяет). Фолбэк — случайная base36-строка: длина
+         * гарантируется циклом, потому что сервер отклоняет токены короче
+         * 16 символов (400 bad_client_token), а «сырой» Math.random() даёт
+         * всего ~10-11 значимых символов.
+         *
+         * @returns {string} токен длиной ≥ 16 символов
+         */
+        _newClientToken() {
+            try {
+                if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+                    const uuid = crypto.randomUUID();
+                    if (typeof uuid === 'string' && uuid.length >= 16) return uuid;
+                }
+            } catch (e) {}
+
+            let rand = '';
+            while (rand.length < 16) {
+                rand += Math.random().toString(36).slice(2);
+            }
+            return 'lgu-' + rand;
+        },
+
+        /**
+         * Стабильный идентификатор клиента для POST /heartbeat (ПАТЧ 11.6.6d).
+         *
+         * Сервер резервирует ник за первым clientToken'ом на 15 минут: чужой
+         * (или второй, «пустой») клиент с тем же ником получит 409
+         * login_claimed. Поэтому токен генерируется один раз и хранится в
+         * GM_setValue — иначе каждая перезагрузка страницы считалась бы новым
+         * клиентом и отбирала ник у самой себя.
+         *
+         * localStorage — фолбэк для окружений без @grant (и на случай, если
+         * GM_getValue бросит): это не секрет, а метка устройства.
+         *
+         * @returns {string} токен длиной ≥ 16 символов (никогда не пустой)
+         */
+        getClientToken() {
+            if (this._clientTokenCache) return this._clientTokenCache;
+
+            let token = '';
+            try {
+                if (typeof GM_getValue === 'function') {
+                    token = String(GM_getValue('lgClientToken') || '').trim();
+                }
+            } catch (e) {}
+            if (!token) {
+                try {
+                    token = String(localStorage.getItem('lgClientToken') || '').trim();
+                } catch (e) {}
+            }
+
+            // Значение из хранилища могло быть испорчено вручную или быть
+            // короче минимума сервера — тогда молча перегенерируем.
+            if (token.length < 16) {
+                token = this._newClientToken();
+                try {
+                    if (typeof GM_setValue === 'function') GM_setValue('lgClientToken', token);
+                } catch (e) {}
+                try {
+                    localStorage.setItem('lgClientToken', token);
+                } catch (e) {}
+            }
+
+            this._clientTokenCache = token;
+            return token;
         },
 
         /**
@@ -534,10 +610,14 @@
         /**
          * Отметка «я онлайн» + обновление списка пользователей аддона.
          *
-         * POST /heartbeat {login, version} — чтобы нас видели другие (и чтобы
-         * сервер знал версию аддона для GET /stats); GET /users — чтобы увидели
-         * мы. Ошибки сети не всплывают тостом: сервер аддона может быть
+         * POST /heartbeat {login, version, clientToken} — чтобы нас видели другие
+         * (и чтобы сервер знал версию аддона для GET /stats); GET /users — чтобы
+         * увидели мы. Ошибки сети не всплывают тостом: сервер аддона может быть
          * недоступен, подсветка просто остаётся на прошлом наборе.
+         *
+         * ПАТЧ 11.6.6d: clientToken обязателен — сервер резервирует ник за
+         * клиентом (409 login_claimed для чужих токенов), поэтому вторым
+         * «нами» из другой вкладки чужого профиля ник уже не отметишь.
          */
         async syncAddonUsers() {
             // v11.6.1c: раз в час заодно спрашиваем сервер о новой версии.
@@ -557,7 +637,16 @@
                 // Версия из шапки userscript'а: GM_info доступен в песочнице
                 // Tampermonkey и не зависит от игры (фолбэк 'unknown').
                 const ver = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || 'unknown';
-                await this._addonRequest('POST', base + '/heartbeat', { login: nick, version: ver });
+                // ПАТЧ 11.6.6d: clientToken — метка «это тот же клиент». Сервер
+                // держит ник за первым токеном 15 минут и отвечает 409
+                // login_claimed всем остальным, поэтому подставить чужой ник
+                // в /heartbeat (и в подсветку /users) больше нельзя.
+                await this._addonRequest('POST', base + '/heartbeat', {
+                    login: nick,
+                    version: ver,
+                    clientToken: this.getClientToken()
+                });
+
                 const data = await this._addonRequest('GET', base + '/users');
                 const list = (data && Array.isArray(data.users)) ? data.users : [];
 

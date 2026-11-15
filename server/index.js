@@ -42,6 +42,11 @@
  * POST /party считает только владельцев — участнику чужой пати создавать
  * свою больше не запрещено.
  *
+ * ПАТЧ 11.6.6d (анти-спуфинг): POST /heartbeat требует clientToken (16–128
+ * символов [A-Za-z0-9_-]) и резервирует ник за первым клиентом на 15 минут.
+ * Без токена -> 400 bad_client_token, чужой токен для занятого ника ->
+ * 409 login_claimed. Резервирования живут в Map в памяти процесса.
+ *
  * Без CORS: клиент ходит через GM_xmlhttpRequest, который CORS игнорирует.
  * Браузерный fetch к этому серверу не используется, поэтому preflight
  * обрабатывать не нужно (и нечем: OPTIONS отдаст 405).
@@ -111,6 +116,37 @@ const TOKEN_RE = /^[A-Za-z0-9_-]{16,64}$/;
 // игнорируется, чтобы старая или битая версия клиента не теряла отметку
 // «онлайн» из-за одного поля.
 const VERSION_RE = /^[A-Za-z0-9._-]{1,32}$/;
+// ПАТЧ 11.6.6d: clientToken — обязательная метка клиента в heartbeat.
+// Алфавит тот же, что у токенов пати (crypto.randomUUID даёт дефисы,
+// фолбэк клиента — 'lgu-' + base36). Минимум 16 символов и конечная
+// верхняя граница: токен короче — 400 bad_client_token, а гигантская
+// строка не должна раздувать ключи Map в памяти.
+const CLIENT_TOKEN_RE = /^[A-Za-z0-9_-]{16,128}$/;
+
+// ПАТЧ 11.6.6d: сколько живёт резервирование ника за клиентом. Совпадает с
+// окном «онлайн» активных пользователей (ACTIVE_WINDOW_MS в db.js): пока
+// ник виден в GET /users, он же и закреплён за своим клиентом. Каждый
+// успешный heartbeat продлевает аренду.
+const HEARTBEAT_CLAIM_TTL_MS = 15 * 60 * 1000;
+
+// Порог, после которого общий таймер чистит протухшие резервирования.
+// До него Map растёт естественным образом (по одному ключу на игрока),
+// и обход всех записей раз в минуту был бы лишней работой.
+const ACTIVE_CLAIMS_CLEANUP_THRESHOLD = 2000;
+
+/*
+ * Резервирование ников (ПАТЧ 11.6.6d): login -> { clientToken, ip, expiresAt }.
+ *
+ * Зачем: до этого любой клиент мог слать heartbeat с чужим login, и ник
+ * появлялся в подсветке /users как «играет с аддоном», хотя человек в игре
+ * не был. Теперь ник закрепляется за первым clientToken'ом, а остальным
+ * отдаётся 409 login_claimed.
+ *
+ * Map только в памяти процесса: это анти-спуфинг «здесь и сейчас», а не
+ * реестр устройств. После рестарта сервера ник заново займёт тот, кто
+ * первым отправит heartbeat, — старые клиенты об этом не заметят.
+ */
+const activeUserClaims = new Map();
 
 // Антибрутфорс на join: 10 попыток в минуту на IP.
 const JOIN_LIMIT = 10;
@@ -226,10 +262,19 @@ const limiters = {
 
 // Чистка лимитеров — раз в минуту, TTL заброшенных пати — раз в 30 минут
 // по тому же таймеру (каждые 30 тиков).
+// ПАТЧ 11.6.6d: здесь же ленивая чистка резервирований ников — протухшие
+// записи удаляются, только если Map переросла порог (иначе бесплатно):
+// живой состав онлайна — это сотни ключей, а не тысячи.
 let cleanupTick = 0;
 setInterval(() => {
     for (const limiter of Object.values(limiters)) {
         limiter.cleanup();
+    }
+    if (activeUserClaims.size > ACTIVE_CLAIMS_CLEANUP_THRESHOLD) {
+        const now = Date.now();
+        for (const [k, v] of activeUserClaims) {
+            if (v.expiresAt <= now) activeUserClaims.delete(k);
+        }
     }
     cleanupTick += 1;
     if (cleanupTick % 30 === 0) {
@@ -298,6 +343,63 @@ function normalizeVersion(value) {
     if (typeof value !== 'string') return null;
     const version = value.trim();
     return VERSION_RE.test(version) ? version : null;
+}
+
+/**
+ * clientToken из тела heartbeat (ПАТЧ 11.6.6d): строка 16..128 символов
+ * [A-Za-z0-9_-]. Пустое/битое значение — 400 bad_client_token.
+ *
+ * Проверка строгая (в отличие от version): без токена нельзя отличить свой
+ * клиент от чужого, то есть весь смысл резервирования ника теряется.
+ * Клиенты до 11.6.6 токен не шлют и получат этот 400 — они обновятся.
+ *
+ * @returns {string} токен в исходном виде (trim, регистр сохраняется)
+ */
+function normalizeClientToken(value) {
+    if (typeof value !== 'string') {
+        throw new HttpError(400, 'bad_client_token', 'clientToken: 16–128 символов a-z, A-Z, 0-9, _ и -');
+    }
+    const token = value.trim();
+    if (!CLIENT_TOKEN_RE.test(token)) {
+        throw new HttpError(400, 'bad_client_token', 'clientToken: 16–128 символов a-z, A-Z, 0-9, _ и -');
+    }
+    return token;
+}
+
+/**
+ * Резервирование ника за клиентом (ПАТЧ 11.6.6d).
+ *
+ * Первый heartbeat с токеном занимает login на HEARTBEAT_CLAIM_TTL_MS;
+ * повторный heartbeat того же токена продлевает аренду, а любой другой
+ * токен получает 409 login_claimed. Просроченное резервирование (ник 15
+ * минут не мигал) переходит к следующему клиенту — это и есть «выход из
+ * игры»: держать ник вечно нельзя.
+ *
+ * ip пишется только для диагностики (логи/разбор инцидентов). Решение о
+ * владении принимается по токену: у нескольких игроков за одним NAT
+ * (или с одного IP) адрес одинаковый, и сравнивать его было бы ложным
+ * запретом на вход.
+ *
+ * @param {string} login нормализованный ник
+ * @param {string} clientToken нормализованный clientToken
+ * @param {string} ip адрес клиента (только для диагностики)
+ */
+function verifyHeartbeatOwnership(login, clientToken, ip = 'unknown') {
+    const now = Date.now();
+    const claim = activeUserClaims.get(login);
+    if (claim && claim.expiresAt > now) {
+        if (claim.clientToken !== clientToken) {
+            throw new HttpError(409, 'login_claimed', 'Этот ник уже активен с другого клиента');
+        }
+        claim.expiresAt = now + HEARTBEAT_CLAIM_TTL_MS;
+        claim.ip = ip;
+    } else {
+        activeUserClaims.set(login, {
+            clientToken,
+            ip,
+            expiresAt: now + HEARTBEAT_CLAIM_TTL_MS
+        });
+    }
 }
 
 /**
@@ -710,7 +812,7 @@ async function handleLeave(req, partyId) {
 /* ------------------------------------------------------------------ */
 
 /*
- * POST /heartbeat {login, version?}
+ * POST /heartbeat {login, version?, clientToken}
  *
  * Отметка «я в игре с аддоном». Bearer не нужен: эндпоинт общий, к пати
  * отношения не имеет. Ник валидируется тем же normalizeLogin, что и при
@@ -724,6 +826,10 @@ async function handleLeave(req, partyId) {
  * v11.6.0g-6: лимит по IP -> 429. v11.6.5.1: отдельный счётчик заменён на
  * общий limiters.heartbeat (6 запросов в минуту на IP, код rate_limited).
  * Лимит проверяется до чтения тела.
+ *
+ * ПАТЧ 11.6.6d: обязательный clientToken + резервирование ника за клиентом.
+ * Нет/битый токен -> 400 bad_client_token, чужой токен для занятого ника ->
+ * 409 login_claimed. Так чужой ник нельзя «подсветить» со своего клиента.
  */
 async function handleHeartbeat(req, server) {
     // Лимит проверяем до чтения тела — спам не должен доходить даже до
@@ -733,6 +839,11 @@ async function handleHeartbeat(req, server) {
 
     const body = await readJson(req);
     const login = normalizeLogin(body.login);
+    // ПАТЧ 11.6.6d: до записи в БД — проверяем, что клиент владеет ником.
+    // Порядок важен: 409 и 400 не должны оставлять след в active_users,
+    // иначе заспуфленный ник всплыл бы в подсветке /users.
+    const clientToken = normalizeClientToken(body.clientToken);
+    verifyHeartbeatOwnership(login, clientToken, ip);
     const lastSeen = updateHeartbeat(login);
     // v11.6.0g-5: версия необязательна. Клиенты 11.6.0g-4 и старше её не шлют —
     // для них heartbeat работает как раньше, просто без строки в users_stats.

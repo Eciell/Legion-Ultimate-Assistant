@@ -3208,6 +3208,22 @@
             // «|| 400» и зажим по высоте окна — как в старом обработчике FAB.
             const menuHeight = Math.min(menu.scrollHeight || 400, viewportH - 120);
 
+            // ПАТЧ 11.6.6e: снимаем inline-координаты, выставленные в прошлый
+            // раз для нативной кнопки, иначе меню «прилипнет» к краю экрана
+            // и в шахте, где снова работает плавающая FAB.
+            this._resetMenuPosition(menu);
+
+            // ПАТЧ 11.6.6e: в городе вход — кнопка «Аддон» в нижнем баре.
+            // Раньше якорем всегда считалась плавающая FAB, но в городе она
+            // скрыта (display:none), и меню (position:absolute от
+            // .legion-fab-wrap) уезжало в правый нижний угол экрана.
+            const nativeBtn = this._getNativeNavButton();
+            if ((this._navMode === 'native' || nativeBtn) && this._positionMenuAboveButton(menu, nativeBtn)) {
+                menu.classList.remove('open-down');
+                menu.classList.add('open');
+                return true;
+            }
+
             // Якорь — сама FAB, а когда она скрыта (город) — её обёртка:
             // wrap сохраняет позицию, выбранную перетаскиванием.
             let anchorTop = null;
@@ -3221,6 +3237,64 @@
             return true;
         },
 
+        // ПАТЧ 11.6.6e: нативная кнопка «Аддон» в баре города (создаётся в
+        // syncNavButton). Берём только реально отрисованную: бар скрывается
+        // при открытом окне героя/чате на мобиле — тогда единственный вход
+        // в меню остаётся плавающая FAB, и якорем должна быть она.
+        _getNativeNavButton() {
+            const btn = document.querySelector('.lgu-nav-btn');
+            if (!btn || btn.getClientRects().length === 0) return null;
+            return btn;
+        },
+
+        // ПАТЧ 11.6.6e: меню — ребёнок .legion-fab-wrap (position:fixed в
+        // правом нижнем углу), поэтому position:absolute + right/bottom
+        // привязывали его к углу экрана, а не к кнопке. Прибиваем меню к
+        // нативной кнопке через position:fixed с координатами окна.
+        _positionMenuAboveButton(menu, btn) {
+            if (!menu || !btn) return false;
+            const rect = btn.getBoundingClientRect();
+            if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+
+            const viewportW = window.innerWidth || 1000;
+            const viewportH = window.innerHeight || 800;
+            // У скрытого (display:none) меню offsetWidth/scrollHeight равны 0 —
+            // берём значения из CSS: min-width 220px, запас по высоте «|| 400».
+            const menuWidth = menu.offsetWidth || 220;
+            const menuHeight = Math.min(menu.scrollHeight || 400, viewportH - 120);
+
+            // По горизонтали центрируем меню над кнопкой и зажимаем в окно,
+            // чтобы у правого края оно не обрезалось.
+            let left = rect.left + rect.width / 2 - menuWidth / 2;
+            left = Math.max(8, Math.min(left, viewportW - menuWidth - 8));
+
+            menu.style.position = 'fixed';
+            menu.style.right = 'auto';
+            menu.style.left = left + 'px';
+
+            if (rect.top >= menuHeight + 20) {
+                // Место есть — раскрываем над кнопкой:
+                // bottom = высота окна − верх кнопки + отступ 10px.
+                menu.style.top = 'auto';
+                menu.style.bottom = (viewportH - rect.top + 10) + 'px';
+            } else {
+                // Места сверху мало (мобильный ландшафт) — раскрываем вниз,
+                // но не выпускаем меню за нижнюю границу окна.
+                menu.style.bottom = 'auto';
+                menu.style.top = Math.max(8, Math.min(rect.bottom + 10, viewportH - menuHeight - 8)) + 'px';
+            }
+            return true;
+        },
+
+        // ПАТЧ 11.6.6e: сбрасываем inline-координаты нативной кнопки, чтобы
+        // меню снова подчинялось стилям .legion-fab-menu (absolute от wrap).
+        _resetMenuPosition(menu) {
+            if (!menu) return;
+            ['position', 'left', 'right', 'top', 'bottom'].forEach(prop => {
+                menu.style.removeProperty(prop);
+            });
+        },
+
         closeFabMenu() {
             const menu = this._fabMenu
                 || document.getElementById(DOM_IDS.fabMenu)
@@ -3228,6 +3302,9 @@
             if (!menu) return;
             menu.classList.remove('open');
             menu.classList.remove('open-down');
+            // ПАТЧ 11.6.6e: иначе следующее открытие из FAB унаследует
+            // координаты нативной кнопки.
+            this._resetMenuPosition(menu);
         },
 
         // Кнопка «Аддон» для нативного бара игры. Классы .gu-b/.gu-bi/.gu-bl
@@ -3391,28 +3468,17 @@
                         }));
                     } catch (err) {}
                 } else {
-                    const isOpen = menu.classList.toggle('open');
-                    if (isOpen) {
-                        // Меню не должно улетать за край экрана: если над кнопкой
-                        // мало места — раскрываем его вниз (класс open-down).
-                        const rect = btn.getBoundingClientRect();
-                        const viewportH = window.innerHeight || 800;
-                        const menuHeight = Math.min(menu.scrollHeight || 400, viewportH - 120);
-                        if (rect.top < menuHeight + 20) {
-                            menu.classList.add('open-down');
-                        } else {
-                            menu.classList.remove('open-down');
-                        }
-                    } else {
-                        menu.classList.remove('open-down');
-                    }
+                    // ПАТЧ 11.6.6e: единая точка входа — toggleFabMenu() сама
+                    // выбирает якорь (FAB или кнопка в баре города) и
+                    // раскрывает меню в свободную сторону.
+                    UI.toggleFabMenu();
                 }
             });
 
             // Закрытие меню при клике снаружи
             document.addEventListener('pointerdown', (e) => {
                 if (!wrap.contains(e.target)) {
-                    menu.classList.remove('open');
+                    UI.closeFabMenu();
                 }
             });
 
@@ -3420,7 +3486,7 @@
             menu.querySelectorAll('.fab-menu-item').forEach(item => {
                 item.addEventListener('click', (e) => {
                     if (e.target.tagName === 'INPUT' || e.target.closest('input')) return;
-                    menu.classList.remove('open');
+                    UI.closeFabMenu();
                 });
             });
 
@@ -14012,6 +14078,11 @@ const Players = {
         // ТЗ 11.6.0h.2: DOM-наблюдатель удалён — подсветку рисует CSS.
         _addonPollTimer: null,
 
+        // ПАТЧ 11.6.6d: токен этого клиента, закэшированный на время жизни
+        // страницы. Хранится в GM_setValue('lgClientToken') — привязан к
+        // браузеру/профилю, поэтому переживает перезагрузку вкладки.
+        _clientTokenCache: null,
+
         /**
          * База сервера аддона: сначала адрес пати (Party.getBaseUrl), затем
          * прод-домен. Party объявлен раньше чата (build.js: SHARED_MODULES
@@ -14026,6 +14097,77 @@ const Players = {
                 }
             } catch (e) {}
             return 'https://legion.ctrlfree.host';
+        },
+
+        /**
+         * Генерация нового clientToken (ПАТЧ 11.6.6d).
+         *
+         * Основной путь — crypto.randomUUID() (36 символов, https-контекст
+         * игры это позволяет). Фолбэк — случайная base36-строка: длина
+         * гарантируется циклом, потому что сервер отклоняет токены короче
+         * 16 символов (400 bad_client_token), а «сырой» Math.random() даёт
+         * всего ~10-11 значимых символов.
+         *
+         * @returns {string} токен длиной ≥ 16 символов
+         */
+        _newClientToken() {
+            try {
+                if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+                    const uuid = crypto.randomUUID();
+                    if (typeof uuid === 'string' && uuid.length >= 16) return uuid;
+                }
+            } catch (e) {}
+
+            let rand = '';
+            while (rand.length < 16) {
+                rand += Math.random().toString(36).slice(2);
+            }
+            return 'lgu-' + rand;
+        },
+
+        /**
+         * Стабильный идентификатор клиента для POST /heartbeat (ПАТЧ 11.6.6d).
+         *
+         * Сервер резервирует ник за первым clientToken'ом на 15 минут: чужой
+         * (или второй, «пустой») клиент с тем же ником получит 409
+         * login_claimed. Поэтому токен генерируется один раз и хранится в
+         * GM_setValue — иначе каждая перезагрузка страницы считалась бы новым
+         * клиентом и отбирала ник у самой себя.
+         *
+         * localStorage — фолбэк для окружений без @grant (и на случай, если
+         * GM_getValue бросит): это не секрет, а метка устройства.
+         *
+         * @returns {string} токен длиной ≥ 16 символов (никогда не пустой)
+         */
+        getClientToken() {
+            if (this._clientTokenCache) return this._clientTokenCache;
+
+            let token = '';
+            try {
+                if (typeof GM_getValue === 'function') {
+                    token = String(GM_getValue('lgClientToken') || '').trim();
+                }
+            } catch (e) {}
+            if (!token) {
+                try {
+                    token = String(localStorage.getItem('lgClientToken') || '').trim();
+                } catch (e) {}
+            }
+
+            // Значение из хранилища могло быть испорчено вручную или быть
+            // короче минимума сервера — тогда молча перегенерируем.
+            if (token.length < 16) {
+                token = this._newClientToken();
+                try {
+                    if (typeof GM_setValue === 'function') GM_setValue('lgClientToken', token);
+                } catch (e) {}
+                try {
+                    localStorage.setItem('lgClientToken', token);
+                } catch (e) {}
+            }
+
+            this._clientTokenCache = token;
+            return token;
         },
 
         /**
@@ -14128,10 +14270,14 @@ const Players = {
         /**
          * Отметка «я онлайн» + обновление списка пользователей аддона.
          *
-         * POST /heartbeat {login, version} — чтобы нас видели другие (и чтобы
-         * сервер знал версию аддона для GET /stats); GET /users — чтобы увидели
-         * мы. Ошибки сети не всплывают тостом: сервер аддона может быть
+         * POST /heartbeat {login, version, clientToken} — чтобы нас видели другие
+         * (и чтобы сервер знал версию аддона для GET /stats); GET /users — чтобы
+         * увидели мы. Ошибки сети не всплывают тостом: сервер аддона может быть
          * недоступен, подсветка просто остаётся на прошлом наборе.
+         *
+         * ПАТЧ 11.6.6d: clientToken обязателен — сервер резервирует ник за
+         * клиентом (409 login_claimed для чужих токенов), поэтому вторым
+         * «нами» из другой вкладки чужого профиля ник уже не отметишь.
          */
         async syncAddonUsers() {
             // v11.6.1c: раз в час заодно спрашиваем сервер о новой версии.
@@ -14151,7 +14297,16 @@ const Players = {
                 // Версия из шапки userscript'а: GM_info доступен в песочнице
                 // Tampermonkey и не зависит от игры (фолбэк 'unknown').
                 const ver = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || 'unknown';
-                await this._addonRequest('POST', base + '/heartbeat', { login: nick, version: ver });
+                // ПАТЧ 11.6.6d: clientToken — метка «это тот же клиент». Сервер
+                // держит ник за первым токеном 15 минут и отвечает 409
+                // login_claimed всем остальным, поэтому подставить чужой ник
+                // в /heartbeat (и в подсветку /users) больше нельзя.
+                await this._addonRequest('POST', base + '/heartbeat', {
+                    login: nick,
+                    version: ver,
+                    clientToken: this.getClientToken()
+                });
+
                 const data = await this._addonRequest('GET', base + '/users');
                 const list = (data && Array.isArray(data.users)) ? data.users : [];
 

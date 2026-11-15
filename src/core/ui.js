@@ -343,6 +343,22 @@
             // «|| 400» и зажим по высоте окна — как в старом обработчике FAB.
             const menuHeight = Math.min(menu.scrollHeight || 400, viewportH - 120);
 
+            // ПАТЧ 11.6.6e: снимаем inline-координаты, выставленные в прошлый
+            // раз для нативной кнопки, иначе меню «прилипнет» к краю экрана
+            // и в шахте, где снова работает плавающая FAB.
+            this._resetMenuPosition(menu);
+
+            // ПАТЧ 11.6.6e: в городе вход — кнопка «Аддон» в нижнем баре.
+            // Раньше якорем всегда считалась плавающая FAB, но в городе она
+            // скрыта (display:none), и меню (position:absolute от
+            // .legion-fab-wrap) уезжало в правый нижний угол экрана.
+            const nativeBtn = this._getNativeNavButton();
+            if ((this._navMode === 'native' || nativeBtn) && this._positionMenuAboveButton(menu, nativeBtn)) {
+                menu.classList.remove('open-down');
+                menu.classList.add('open');
+                return true;
+            }
+
             // Якорь — сама FAB, а когда она скрыта (город) — её обёртка:
             // wrap сохраняет позицию, выбранную перетаскиванием.
             let anchorTop = null;
@@ -356,6 +372,64 @@
             return true;
         },
 
+        // ПАТЧ 11.6.6e: нативная кнопка «Аддон» в баре города (создаётся в
+        // syncNavButton). Берём только реально отрисованную: бар скрывается
+        // при открытом окне героя/чате на мобиле — тогда единственный вход
+        // в меню остаётся плавающая FAB, и якорем должна быть она.
+        _getNativeNavButton() {
+            const btn = document.querySelector('.lgu-nav-btn');
+            if (!btn || btn.getClientRects().length === 0) return null;
+            return btn;
+        },
+
+        // ПАТЧ 11.6.6e: меню — ребёнок .legion-fab-wrap (position:fixed в
+        // правом нижнем углу), поэтому position:absolute + right/bottom
+        // привязывали его к углу экрана, а не к кнопке. Прибиваем меню к
+        // нативной кнопке через position:fixed с координатами окна.
+        _positionMenuAboveButton(menu, btn) {
+            if (!menu || !btn) return false;
+            const rect = btn.getBoundingClientRect();
+            if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+
+            const viewportW = window.innerWidth || 1000;
+            const viewportH = window.innerHeight || 800;
+            // У скрытого (display:none) меню offsetWidth/scrollHeight равны 0 —
+            // берём значения из CSS: min-width 220px, запас по высоте «|| 400».
+            const menuWidth = menu.offsetWidth || 220;
+            const menuHeight = Math.min(menu.scrollHeight || 400, viewportH - 120);
+
+            // По горизонтали центрируем меню над кнопкой и зажимаем в окно,
+            // чтобы у правого края оно не обрезалось.
+            let left = rect.left + rect.width / 2 - menuWidth / 2;
+            left = Math.max(8, Math.min(left, viewportW - menuWidth - 8));
+
+            menu.style.position = 'fixed';
+            menu.style.right = 'auto';
+            menu.style.left = left + 'px';
+
+            if (rect.top >= menuHeight + 20) {
+                // Место есть — раскрываем над кнопкой:
+                // bottom = высота окна − верх кнопки + отступ 10px.
+                menu.style.top = 'auto';
+                menu.style.bottom = (viewportH - rect.top + 10) + 'px';
+            } else {
+                // Места сверху мало (мобильный ландшафт) — раскрываем вниз,
+                // но не выпускаем меню за нижнюю границу окна.
+                menu.style.bottom = 'auto';
+                menu.style.top = Math.max(8, Math.min(rect.bottom + 10, viewportH - menuHeight - 8)) + 'px';
+            }
+            return true;
+        },
+
+        // ПАТЧ 11.6.6e: сбрасываем inline-координаты нативной кнопки, чтобы
+        // меню снова подчинялось стилям .legion-fab-menu (absolute от wrap).
+        _resetMenuPosition(menu) {
+            if (!menu) return;
+            ['position', 'left', 'right', 'top', 'bottom'].forEach(prop => {
+                menu.style.removeProperty(prop);
+            });
+        },
+
         closeFabMenu() {
             const menu = this._fabMenu
                 || document.getElementById(DOM_IDS.fabMenu)
@@ -363,6 +437,9 @@
             if (!menu) return;
             menu.classList.remove('open');
             menu.classList.remove('open-down');
+            // ПАТЧ 11.6.6e: иначе следующее открытие из FAB унаследует
+            // координаты нативной кнопки.
+            this._resetMenuPosition(menu);
         },
 
         // Кнопка «Аддон» для нативного бара игры. Классы .gu-b/.gu-bi/.gu-bl
@@ -526,28 +603,17 @@
                         }));
                     } catch (err) {}
                 } else {
-                    const isOpen = menu.classList.toggle('open');
-                    if (isOpen) {
-                        // Меню не должно улетать за край экрана: если над кнопкой
-                        // мало места — раскрываем его вниз (класс open-down).
-                        const rect = btn.getBoundingClientRect();
-                        const viewportH = window.innerHeight || 800;
-                        const menuHeight = Math.min(menu.scrollHeight || 400, viewportH - 120);
-                        if (rect.top < menuHeight + 20) {
-                            menu.classList.add('open-down');
-                        } else {
-                            menu.classList.remove('open-down');
-                        }
-                    } else {
-                        menu.classList.remove('open-down');
-                    }
+                    // ПАТЧ 11.6.6e: единая точка входа — toggleFabMenu() сама
+                    // выбирает якорь (FAB или кнопка в баре города) и
+                    // раскрывает меню в свободную сторону.
+                    UI.toggleFabMenu();
                 }
             });
 
             // Закрытие меню при клике снаружи
             document.addEventListener('pointerdown', (e) => {
                 if (!wrap.contains(e.target)) {
-                    menu.classList.remove('open');
+                    UI.closeFabMenu();
                 }
             });
 
@@ -555,7 +621,7 @@
             menu.querySelectorAll('.fab-menu-item').forEach(item => {
                 item.addEventListener('click', (e) => {
                     if (e.target.tagName === 'INPUT' || e.target.closest('input')) return;
-                    menu.classList.remove('open');
+                    UI.closeFabMenu();
                 });
             });
 
