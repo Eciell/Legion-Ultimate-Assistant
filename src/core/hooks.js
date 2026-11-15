@@ -128,24 +128,6 @@
                 patched = true;
             }
 
-            // 3) data(q) — сеттер игры: сохраняем СЫРОЙ пакет до буферизации.
-            //    quest.js кладёт его в RAW и показывает с задержкой стрима (q.dl),
-            //    поэтому _view() отстаёт.
-            // TODO: REMOVE — снимок писался для Ассистента Жреца
-            // (modules/priest-assistant.js удалён в 11.6.0g-1); сейчас
-            // G.__lgRawQuestData никто не читает. Хук оставлен, пока
-            // пользователь не подтвердил удаление.
-            if (typeof val.data === 'function' && !val.__dataHooked) {
-                const origData = val.data;
-                val.data = function (q) {
-                    // G — это unsafeWindow (см. core/constants.js).
-                    if (q) G.__lgRawQuestData = q;
-                    return origData.apply(this, arguments);
-                };
-                val.__dataHooked = true;
-                patched = true;
-            }
-
             // Метку ставим только если реально что-то подменили: если
             // методы ещё не созданы, следующий сеттер LGQuest (или сторож)
             // попробует повесить хук повторно.

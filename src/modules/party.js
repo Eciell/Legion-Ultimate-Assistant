@@ -130,12 +130,6 @@
         // Журнал боя: панель и состояние догрузки.
         LOG_PANEL_ID: `${RAND_ID}-party-log-panel`,
         _prevMe: null,       // предыдущий снимок /api/me для детектора событий
-        // v11.6.0d: логины, по которым прямо сейчас идёт POST /api/qact.
-        // v11.6.2b.1: хил переведён на вставку текста («лечить @ник»), набор
-        // больше не заполняется, а _renderPanel по-прежнему читает его в
-        // busy-проверке кнопки «❤» (всегда false).
-        // TODO: REMOVE — удалить поле и busy-ветку в _renderPanel вместе.
-        _healBusy: new Set(),
         _logOpen: true,      // панель развёрнута (свёрнутая не опрашивает сервер)
         _logBusy: false,     // GET/POST журнала уже в полёте
         _logSince: 0,        // nextSince с сервера (id последней известной строки)
@@ -856,7 +850,6 @@
 
                 // Кнопка «Хил» (ТЗ 11.6.0d) — только если: мы жрец, цель не мы,
                 // цель ранена (hp < maxHp) и свой герой в походе.
-                const busy = this._healBusy.has(nick.toLowerCase());
                 const showHeal = isPriest
                     && inQuest
                     && nick.toLowerCase() !== selfLogin
@@ -864,7 +857,7 @@
                     && rawHp < rawMax;
                 const healBtn = showHeal
                     ? `<button type="button" class="${this.HEAL_BTN_CLASS}" data-party-heal="${login}"`
-                        + ` title="Вставить команду лечения в чат"${busy ? ' disabled' : ''}>${busy ? '...' : '❤'}</button>`
+                        + ' title="Вставить команду лечения в чат">❤</button>'
                     : '';
 
                 return `<div style="margin-bottom:6px;">

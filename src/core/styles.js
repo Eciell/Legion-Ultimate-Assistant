@@ -149,14 +149,6 @@
            -webkit-line-clamp убран, слово переносится, а не режется. */
         .sim-node-name { max-width: 130px !important; margin-top: 2px; padding: 0 3px; font-size: 12px !important; line-height: 1.2 !important; font-weight: 700; text-align: center; color: var(--tb-chalk, #f4f1e4); background: var(--tb-slate, #25302c); border-radius: 4px; display: block; overflow: visible; hyphens: auto; word-wrap: break-word !important; overflow-wrap: anywhere; }
         .sim-node.locked .sim-node-name { color: var(--tb-chalk2, #c9d2c3); opacity: 0.8; }
-        .sim-card { position: fixed; background: #f5e9c8; color: #2a2010; border: 3px solid #2b1d18; border-radius: 12px; padding: 15px; width: 280px; z-index: 10001; box-shadow: 0 10px 25px rgba(0,0,0,0.6); display: none; }
-        .sim-card h4 { margin: 0 0 5px 0; font-size: 16px; color: #2b1d18; display: flex; justify-content: space-between; }
-        .sim-card .desc { font-size: 13px; margin-bottom: 10px; line-height: 1.3; }
-        .sim-card .req { font-size: 12px; color: #c2405a; font-weight: bold; margin-bottom: 10px; }
-        .sim-card .controls { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
-        .sim-card button { background: #caa55c; border: 2px solid #2b1d18; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; color: #2b1d18; font-size: 13px; }
-        .sim-card button:disabled { opacity: 0.5; cursor: not-allowed; }
-        .sim-card-close { position: absolute; top: 8px; right: 8px; cursor: pointer; font-size: 16px; color: #888; }
         /* Тултип узла навыка (v11.6.1d).
            Один элемент на модалку, position: absolute: containing block —
            padding-box .custom-modal (она position: fixed), поэтому overflow
@@ -225,8 +217,7 @@
             background: linear-gradient(90deg, transparent, #3d2f44 15%, #3d2f44 85%, transparent);
         }
         /* v11.6.3: метка класса-владельца общих очков (режим sk.md =
-           'shared') и плашка-предупреждение над деревом. Аналог нативных
-           .skc-ow / .busybar.sk-sh из skills.js. */
+           'shared'). Аналог нативного .skc-ow из skills.js. */
         .sim-sidebar .modal-tab.sim-tab .sim-tab-own {
             margin-left: auto;
             flex: none;
@@ -239,42 +230,6 @@
             font-weight: 900;
             line-height: 16px;
             text-align: center;
-        }
-        .sim-sidebar .modal-tab.sim-tab .sim-tab-lock {
-            margin-left: auto;
-            flex: none;
-            font-size: 11px;
-            line-height: 16px;
-            opacity: 0.75;
-        }
-        .sim-shared-host { flex: none; }
-        .sim-shared-note {
-            margin: 0 0 8px;
-            padding: 7px 10px;
-            border: 1px solid rgba(255, 190, 90, 0.45);
-            border-radius: 6px;
-            background: rgba(120, 70, 20, 0.35);
-            color: #ffd9a0;
-            font-size: 12px;
-            line-height: 1.35;
-        }
-        .sim-shared-note.own {
-            border-color: rgba(120, 220, 140, 0.45);
-            background: rgba(30, 90, 40, 0.3);
-            color: #b9f0c0;
-        }
-        /* v11.6.5b.1: плашка доступного пула очков («Доступно сейчас: N»).
-           Голубая, чтобы не путалась с оранжевым предупреждением о чужом
-           дереве и зелёной плашкой «очки вложены сюда». */
-        .sim-avail-note {
-            margin: 0 0 8px;
-            padding: 7px 10px;
-            border: 1px solid rgba(120, 180, 255, 0.45);
-            border-radius: 6px;
-            background: rgba(30, 60, 120, 0.3);
-            color: #bcd8ff;
-            font-size: 12px;
-            line-height: 1.35;
         }
         /* Кнопка класса в сайдбаре: вертикальный список, цветная полоска слева.
            Цвет класса в --c (инлайн-стиль таба из BuildSim.classColors),
@@ -422,12 +377,12 @@
         .${DOM_IDS.chatBadge}, .chat-badge { position: absolute; top: -6px; right: -6px; background: #ff5a7a; color: #fff; border-radius: 50%; padding: 2px 7px; font-size: 12px; font-weight: 900; box-shadow: 0 2px 5px rgba(0,0,0,0.5); display: none; pointer-events: none; z-index: 2; }
         .${DOM_IDS.chatWidget}, .chat-widget { position: fixed; bottom: 80px; right: 20px; width: 320px; height: 400px; min-width: 320px; min-height: 400px; max-width: 95vw; max-height: 95vh; resize: both; background: #1d1620; border: 2px solid #caa55c; border-radius: 12px; display: flex; flex-direction: column; z-index: 10000; box-shadow: 0 10px 30px rgba(0,0,0,0.8); overflow: hidden; transition: transform 0.2s, opacity 0.2s; transform: translateY(20px); opacity: 0; pointer-events: none; }
         .${DOM_IDS.chatWidget}.open, .chat-widget.open { transform: translateY(0); opacity: 1; pointer-events: auto; }
-        .chat-top-bar, .chat-header { background: #2a2030; padding: 10px 12px; font-weight: bold; color: #ffcf6a; display: flex; justify-content: space-between; align-items: center; gap: 8px; overflow: hidden; border-bottom: 1px solid #444; cursor: move; user-select: none; touch-action: none; box-sizing: border-box; flex-shrink: 0; }
+        .chat-top-bar { background: #2a2030; padding: 10px 12px; font-weight: bold; color: #ffcf6a; display: flex; justify-content: space-between; align-items: center; gap: 8px; overflow: hidden; border-bottom: 1px solid #444; cursor: move; user-select: none; touch-action: none; box-sizing: border-box; flex-shrink: 0; }
         /* ПАТЧ 11.6.4g: вкладок стало пять (Общий/Торговля/Ремёсла/Гильдия/
            Личные), а ширина PiP-окна всего 350px. Поэтому горизонтальный
            padding урезан до 6px, шрифт — 11px, а ряд вкладок переносится
            (flex-wrap), если не влезает в одну строку рядом с кнопкой «✖». */
-        .chat-main-tabs, .chat-tabs { display: flex; flex-wrap: wrap; gap: 3px; flex: 1; min-width: 0; }
+        .chat-main-tabs { display: flex; flex-wrap: wrap; gap: 3px; flex: 1; min-width: 0; }
         .chat-main-tab, .chat-tab { background: #1d1620; border: 1px solid #444; color: #aaa; padding: 3px 6px; border-radius: 6px; cursor: pointer; font-size: 11px; white-space: nowrap; font-weight: bold; user-select: none; pointer-events: auto; }
         .chat-main-tab.active, .chat-tab.active { background: #caa55c; color: #1d1620; border-color: #caa55c; font-weight: bold; }
         .chat-sub-tabs { display: flex; gap: 6px; padding: 6px 12px; background: #231929; border-bottom: 1px solid #3a2b42; flex-shrink: 0; }
@@ -450,17 +405,6 @@
         .chat-send { background: #caa55c; color: #1d1620; border: none; padding: 0 15px; border-radius: 6px; font-weight: bold; cursor: pointer; user-select: none; pointer-events: auto; }
         .chat-send:hover { background: #ffcf6a; }
         .chat-widget button { user-select: none; pointer-events: auto; }
-        .${DOM_IDS.hudLog}, .hud-log { position: fixed; bottom: 20px; left: 20px; width: 480px; max-height: 300px; background: rgba(29, 22, 32, 0.95); border: 2px solid #caa55c; border-radius: 8px; padding: 10px; z-index: 9999; overflow-y: auto; font-family: monospace; font-size: 12px; color: #f7eadf; box-shadow: 0 4px 10px rgba(0,0,0,0.5); display: none; }
-        .${DOM_IDS.hudLog}.active, .hud-log.active { display: block; }
-        .hud-log-header { font-weight: bold; color: #ffcf6a; margin-bottom: 8px; border-bottom: 1px solid #555; padding-bottom: 4px; display: flex; justify-content: space-between; align-items: center; cursor: move; user-select: none; touch-action: none; }
-        .hud-log-close { cursor: pointer; color: #ff8fa3; padding: 5px; }
-        .hud-log-close:hover { color: #fff; }
-        .hud-line { margin-bottom: 4px; line-height: 1.3; word-wrap: break-word; }
-        .hud-line.info { color: #8fd3ff; }
-        .hud-line.success { color: #4cc95a; }
-        .hud-line.warn { color: #ff9800; }
-        .hud-line.action { color: #ffcf6a; font-weight: bold; }
-        .hud-line.error { color: #ff5a7a; }
         .auc-buy-btn { padding: 4px 8px; background: #28a745; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 11px; transition: background 0.2s, opacity 0.2s; }
         .auc-buy-btn:hover { background: #218838; }
         .auc-buy-btn:disabled { opacity: 0.6; cursor: not-allowed; }
@@ -562,9 +506,6 @@
         .player-hud-close { background: none; border: none; color: #ff8fa3; font-size: 14px; cursor: pointer; padding: 0 2px; line-height: 1; }
         .player-hud-close:hover { color: #fff; }
         .player-hud-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
-        .player-hud-row { display: flex; justify-content: space-between; align-items: center; }
-        .player-hud-label { color: #aaa; }
-        .player-hud-val { font-weight: bold; }
         /* ── Пати (v11.6.0g-2): модалка, HP-панель и журнал ──
            Раньше формы окна «Пати» рисовались инлайном (серые рамки #444) —
            теперь это классы: тёмный фон, золотистые акценты #caa55c/#ffcf6a
@@ -617,15 +558,6 @@
            даёт свечение ровно в его родном цвете. */
         .legion-addon-user {
             text-shadow: 0 0 4px currentColor, 0 0 10px currentColor !important;
-        }
-        .legion-addon-badge {
-            display: inline-block;
-            margin-right: 3px;
-            font-size: 11px;
-            /* Фирменное золотое свечение аддона (было голубое #00f0ff). */
-            filter: drop-shadow(0 0 4px rgba(255, 207, 106, 0.7));
-            vertical-align: middle;
-            user-select: none;
         }
 
         /* ============================================================
@@ -980,7 +912,6 @@
         .hp-ab-pips i.sim { background: #4aa3ff; border-color: #7ad1ff; box-shadow: 0 0 6px rgba(74, 163, 255, 0.55); }
         .hp-ab-val { font-size: 11px; color: #9c8fa8; white-space: nowrap; font-variant-numeric: tabular-nums; }
         .hp-ab-val b { color: #ffcf6a; font-size: 12px; }
-        .hp-ab-val .hp-ab-sim { font-style: normal; color: #7ad1ff; }
         .hp-ab-btn {
             width: 26px; height: 26px; padding: 0; line-height: 1;
             border-radius: 6px; border: 1px solid #caa55c;
@@ -998,12 +929,7 @@
         .hp-ab-btn.minus { border-color: #6b5570; background: rgba(255, 255, 255, 0.05); color: #d8c9a8; }
         .hp-ab-btn.minus:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); }
         .hp-ab-desc { grid-column: 1 / -1; font-size: 10px; color: #7f7389; line-height: 1.4; }
-        /* ── Плашка нехватки жетонов и панель действий ── */
-        .hp-arena-alert {
-            background: rgba(200, 30, 30, 0.18); border: 1px solid rgba(255, 90, 90, 0.55);
-            color: #ffb3a0; font-size: 12px; font-weight: bold;
-            border-radius: 6px; padding: 6px 10px;
-        }
+        /* ── Панель действий ── */
         .hp-arena-sim-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         /* 11.6.5c.2: сводка плана — кошелёк, стоимость плана, дефицит.
            Дефицит ничего не блокирует: это подсказка «сколько фармить». */
@@ -1022,8 +948,6 @@
             transition: background 0.15s, border-color 0.15s, opacity 0.15s;
         }
         .hp-arena-btn:hover:not(:disabled) { background: #352941; border-color: #caa55c; }
-        .hp-arena-btn.primary { background: #caa55c; border-color: #caa55c; color: #1d1620; }
-        .hp-arena-btn.primary:hover:not(:disabled) { background: #ffcf4a; border-color: #ffcf4a; }
         .hp-arena-btn:disabled { opacity: 0.45; cursor: not-allowed; }
         /* ── Подвал карточки/вкладки ── */
         .hp-card-foot { font-size: 11px; color: #8b7f96; line-height: 1.5; }

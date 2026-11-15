@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Legion: Ultimate Assistant (Chat, Auction, Pocket City)
 // @namespace    http://tampermonkey.net/
-// @version      11.6.5
+// @version      11.6.6
 // @description  QoL-аддон для Легиона: Умный чат, Сканер аукциона, Разведка, Планировщик, Карманный город. Без авто-копания.
 // @connect      7tv.io
 // @connect      cdn.7tv.app
@@ -54,10 +54,7 @@
         fabBtn: `${RAND_ID}-fab-btn`,
         fabIcon: `${RAND_ID}-fab-icon`,
         btnAutoMine: `${RAND_ID}-btn-auto-mine`,
-        hudLog: `${RAND_ID}-hud-log`,
-        hudLogContent: `${RAND_ID}-hud-log-content`,
         hudDragHandle: `${RAND_ID}-hud-drag-handle`,
-        hudLogCloseBtn: `${RAND_ID}-hud-log-close-btn`,
         btnBuildSim: `${RAND_ID}-btn-build-sim`,
         btnAuctionScan: `${RAND_ID}-btn-auction-scan`,
         btnPlayers: `${RAND_ID}-btn-players`,
@@ -1313,14 +1310,6 @@
            -webkit-line-clamp убран, слово переносится, а не режется. */
         .sim-node-name { max-width: 130px !important; margin-top: 2px; padding: 0 3px; font-size: 12px !important; line-height: 1.2 !important; font-weight: 700; text-align: center; color: var(--tb-chalk, #f4f1e4); background: var(--tb-slate, #25302c); border-radius: 4px; display: block; overflow: visible; hyphens: auto; word-wrap: break-word !important; overflow-wrap: anywhere; }
         .sim-node.locked .sim-node-name { color: var(--tb-chalk2, #c9d2c3); opacity: 0.8; }
-        .sim-card { position: fixed; background: #f5e9c8; color: #2a2010; border: 3px solid #2b1d18; border-radius: 12px; padding: 15px; width: 280px; z-index: 10001; box-shadow: 0 10px 25px rgba(0,0,0,0.6); display: none; }
-        .sim-card h4 { margin: 0 0 5px 0; font-size: 16px; color: #2b1d18; display: flex; justify-content: space-between; }
-        .sim-card .desc { font-size: 13px; margin-bottom: 10px; line-height: 1.3; }
-        .sim-card .req { font-size: 12px; color: #c2405a; font-weight: bold; margin-bottom: 10px; }
-        .sim-card .controls { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
-        .sim-card button { background: #caa55c; border: 2px solid #2b1d18; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; color: #2b1d18; font-size: 13px; }
-        .sim-card button:disabled { opacity: 0.5; cursor: not-allowed; }
-        .sim-card-close { position: absolute; top: 8px; right: 8px; cursor: pointer; font-size: 16px; color: #888; }
         /* Тултип узла навыка (v11.6.1d).
            Один элемент на модалку, position: absolute: containing block —
            padding-box .custom-modal (она position: fixed), поэтому overflow
@@ -1389,8 +1378,7 @@
             background: linear-gradient(90deg, transparent, #3d2f44 15%, #3d2f44 85%, transparent);
         }
         /* v11.6.3: метка класса-владельца общих очков (режим sk.md =
-           'shared') и плашка-предупреждение над деревом. Аналог нативных
-           .skc-ow / .busybar.sk-sh из skills.js. */
+           'shared'). Аналог нативного .skc-ow из skills.js. */
         .sim-sidebar .modal-tab.sim-tab .sim-tab-own {
             margin-left: auto;
             flex: none;
@@ -1403,42 +1391,6 @@
             font-weight: 900;
             line-height: 16px;
             text-align: center;
-        }
-        .sim-sidebar .modal-tab.sim-tab .sim-tab-lock {
-            margin-left: auto;
-            flex: none;
-            font-size: 11px;
-            line-height: 16px;
-            opacity: 0.75;
-        }
-        .sim-shared-host { flex: none; }
-        .sim-shared-note {
-            margin: 0 0 8px;
-            padding: 7px 10px;
-            border: 1px solid rgba(255, 190, 90, 0.45);
-            border-radius: 6px;
-            background: rgba(120, 70, 20, 0.35);
-            color: #ffd9a0;
-            font-size: 12px;
-            line-height: 1.35;
-        }
-        .sim-shared-note.own {
-            border-color: rgba(120, 220, 140, 0.45);
-            background: rgba(30, 90, 40, 0.3);
-            color: #b9f0c0;
-        }
-        /* v11.6.5b.1: плашка доступного пула очков («Доступно сейчас: N»).
-           Голубая, чтобы не путалась с оранжевым предупреждением о чужом
-           дереве и зелёной плашкой «очки вложены сюда». */
-        .sim-avail-note {
-            margin: 0 0 8px;
-            padding: 7px 10px;
-            border: 1px solid rgba(120, 180, 255, 0.45);
-            border-radius: 6px;
-            background: rgba(30, 60, 120, 0.3);
-            color: #bcd8ff;
-            font-size: 12px;
-            line-height: 1.35;
         }
         /* Кнопка класса в сайдбаре: вертикальный список, цветная полоска слева.
            Цвет класса в --c (инлайн-стиль таба из BuildSim.classColors),
@@ -1586,12 +1538,12 @@
         .${DOM_IDS.chatBadge}, .chat-badge { position: absolute; top: -6px; right: -6px; background: #ff5a7a; color: #fff; border-radius: 50%; padding: 2px 7px; font-size: 12px; font-weight: 900; box-shadow: 0 2px 5px rgba(0,0,0,0.5); display: none; pointer-events: none; z-index: 2; }
         .${DOM_IDS.chatWidget}, .chat-widget { position: fixed; bottom: 80px; right: 20px; width: 320px; height: 400px; min-width: 320px; min-height: 400px; max-width: 95vw; max-height: 95vh; resize: both; background: #1d1620; border: 2px solid #caa55c; border-radius: 12px; display: flex; flex-direction: column; z-index: 10000; box-shadow: 0 10px 30px rgba(0,0,0,0.8); overflow: hidden; transition: transform 0.2s, opacity 0.2s; transform: translateY(20px); opacity: 0; pointer-events: none; }
         .${DOM_IDS.chatWidget}.open, .chat-widget.open { transform: translateY(0); opacity: 1; pointer-events: auto; }
-        .chat-top-bar, .chat-header { background: #2a2030; padding: 10px 12px; font-weight: bold; color: #ffcf6a; display: flex; justify-content: space-between; align-items: center; gap: 8px; overflow: hidden; border-bottom: 1px solid #444; cursor: move; user-select: none; touch-action: none; box-sizing: border-box; flex-shrink: 0; }
+        .chat-top-bar { background: #2a2030; padding: 10px 12px; font-weight: bold; color: #ffcf6a; display: flex; justify-content: space-between; align-items: center; gap: 8px; overflow: hidden; border-bottom: 1px solid #444; cursor: move; user-select: none; touch-action: none; box-sizing: border-box; flex-shrink: 0; }
         /* ПАТЧ 11.6.4g: вкладок стало пять (Общий/Торговля/Ремёсла/Гильдия/
            Личные), а ширина PiP-окна всего 350px. Поэтому горизонтальный
            padding урезан до 6px, шрифт — 11px, а ряд вкладок переносится
            (flex-wrap), если не влезает в одну строку рядом с кнопкой «✖». */
-        .chat-main-tabs, .chat-tabs { display: flex; flex-wrap: wrap; gap: 3px; flex: 1; min-width: 0; }
+        .chat-main-tabs { display: flex; flex-wrap: wrap; gap: 3px; flex: 1; min-width: 0; }
         .chat-main-tab, .chat-tab { background: #1d1620; border: 1px solid #444; color: #aaa; padding: 3px 6px; border-radius: 6px; cursor: pointer; font-size: 11px; white-space: nowrap; font-weight: bold; user-select: none; pointer-events: auto; }
         .chat-main-tab.active, .chat-tab.active { background: #caa55c; color: #1d1620; border-color: #caa55c; font-weight: bold; }
         .chat-sub-tabs { display: flex; gap: 6px; padding: 6px 12px; background: #231929; border-bottom: 1px solid #3a2b42; flex-shrink: 0; }
@@ -1614,17 +1566,6 @@
         .chat-send { background: #caa55c; color: #1d1620; border: none; padding: 0 15px; border-radius: 6px; font-weight: bold; cursor: pointer; user-select: none; pointer-events: auto; }
         .chat-send:hover { background: #ffcf6a; }
         .chat-widget button { user-select: none; pointer-events: auto; }
-        .${DOM_IDS.hudLog}, .hud-log { position: fixed; bottom: 20px; left: 20px; width: 480px; max-height: 300px; background: rgba(29, 22, 32, 0.95); border: 2px solid #caa55c; border-radius: 8px; padding: 10px; z-index: 9999; overflow-y: auto; font-family: monospace; font-size: 12px; color: #f7eadf; box-shadow: 0 4px 10px rgba(0,0,0,0.5); display: none; }
-        .${DOM_IDS.hudLog}.active, .hud-log.active { display: block; }
-        .hud-log-header { font-weight: bold; color: #ffcf6a; margin-bottom: 8px; border-bottom: 1px solid #555; padding-bottom: 4px; display: flex; justify-content: space-between; align-items: center; cursor: move; user-select: none; touch-action: none; }
-        .hud-log-close { cursor: pointer; color: #ff8fa3; padding: 5px; }
-        .hud-log-close:hover { color: #fff; }
-        .hud-line { margin-bottom: 4px; line-height: 1.3; word-wrap: break-word; }
-        .hud-line.info { color: #8fd3ff; }
-        .hud-line.success { color: #4cc95a; }
-        .hud-line.warn { color: #ff9800; }
-        .hud-line.action { color: #ffcf6a; font-weight: bold; }
-        .hud-line.error { color: #ff5a7a; }
         .auc-buy-btn { padding: 4px 8px; background: #28a745; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 11px; transition: background 0.2s, opacity 0.2s; }
         .auc-buy-btn:hover { background: #218838; }
         .auc-buy-btn:disabled { opacity: 0.6; cursor: not-allowed; }
@@ -1726,9 +1667,6 @@
         .player-hud-close { background: none; border: none; color: #ff8fa3; font-size: 14px; cursor: pointer; padding: 0 2px; line-height: 1; }
         .player-hud-close:hover { color: #fff; }
         .player-hud-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
-        .player-hud-row { display: flex; justify-content: space-between; align-items: center; }
-        .player-hud-label { color: #aaa; }
-        .player-hud-val { font-weight: bold; }
         /* ── Пати (v11.6.0g-2): модалка, HP-панель и журнал ──
            Раньше формы окна «Пати» рисовались инлайном (серые рамки #444) —
            теперь это классы: тёмный фон, золотистые акценты #caa55c/#ffcf6a
@@ -1781,15 +1719,6 @@
            даёт свечение ровно в его родном цвете. */
         .legion-addon-user {
             text-shadow: 0 0 4px currentColor, 0 0 10px currentColor !important;
-        }
-        .legion-addon-badge {
-            display: inline-block;
-            margin-right: 3px;
-            font-size: 11px;
-            /* Фирменное золотое свечение аддона (было голубое #00f0ff). */
-            filter: drop-shadow(0 0 4px rgba(255, 207, 106, 0.7));
-            vertical-align: middle;
-            user-select: none;
         }
 
         /* ============================================================
@@ -2144,7 +2073,6 @@
         .hp-ab-pips i.sim { background: #4aa3ff; border-color: #7ad1ff; box-shadow: 0 0 6px rgba(74, 163, 255, 0.55); }
         .hp-ab-val { font-size: 11px; color: #9c8fa8; white-space: nowrap; font-variant-numeric: tabular-nums; }
         .hp-ab-val b { color: #ffcf6a; font-size: 12px; }
-        .hp-ab-val .hp-ab-sim { font-style: normal; color: #7ad1ff; }
         .hp-ab-btn {
             width: 26px; height: 26px; padding: 0; line-height: 1;
             border-radius: 6px; border: 1px solid #caa55c;
@@ -2162,12 +2090,7 @@
         .hp-ab-btn.minus { border-color: #6b5570; background: rgba(255, 255, 255, 0.05); color: #d8c9a8; }
         .hp-ab-btn.minus:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); }
         .hp-ab-desc { grid-column: 1 / -1; font-size: 10px; color: #7f7389; line-height: 1.4; }
-        /* ── Плашка нехватки жетонов и панель действий ── */
-        .hp-arena-alert {
-            background: rgba(200, 30, 30, 0.18); border: 1px solid rgba(255, 90, 90, 0.55);
-            color: #ffb3a0; font-size: 12px; font-weight: bold;
-            border-radius: 6px; padding: 6px 10px;
-        }
+        /* ── Панель действий ── */
         .hp-arena-sim-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         /* 11.6.5c.2: сводка плана — кошелёк, стоимость плана, дефицит.
            Дефицит ничего не блокирует: это подсказка «сколько фармить». */
@@ -2186,8 +2109,6 @@
             transition: background 0.15s, border-color 0.15s, opacity 0.15s;
         }
         .hp-arena-btn:hover:not(:disabled) { background: #352941; border-color: #caa55c; }
-        .hp-arena-btn.primary { background: #caa55c; border-color: #caa55c; color: #1d1620; }
-        .hp-arena-btn.primary:hover:not(:disabled) { background: #ffcf4a; border-color: #ffcf4a; }
         .hp-arena-btn:disabled { opacity: 0.45; cursor: not-allowed; }
         /* ── Подвал карточки/вкладки ── */
         .hp-card-foot { font-size: 11px; color: #8b7f96; line-height: 1.5; }
@@ -2481,24 +2402,6 @@
                     G.__lgQuestOn = true;
                     return origViewCall.apply(this, arguments);
                 };
-                patched = true;
-            }
-
-            // 3) data(q) — сеттер игры: сохраняем СЫРОЙ пакет до буферизации.
-            //    quest.js кладёт его в RAW и показывает с задержкой стрима (q.dl),
-            //    поэтому _view() отстаёт.
-            // TODO: REMOVE — снимок писался для Ассистента Жреца
-            // (modules/priest-assistant.js удалён в 11.6.0g-1); сейчас
-            // G.__lgRawQuestData никто не читает. Хук оставлен, пока
-            // пользователь не подтвердил удаление.
-            if (typeof val.data === 'function' && !val.__dataHooked) {
-                const origData = val.data;
-                val.data = function (q) {
-                    // G — это unsafeWindow (см. core/constants.js).
-                    if (q) G.__lgRawQuestData = q;
-                    return origData.apply(this, arguments);
-                };
-                val.__dataHooked = true;
                 patched = true;
             }
 
@@ -5379,21 +5282,6 @@
             return { pct: Math.min(GAME_DATA.GEAR_PEN_CAP, pct), parts };
         },
 
-        // Короткая строка-резюме по экипировке. 11.6.5f.1: вкладка «Заточка»
-        // больше не рисует отдельную полосу — статус показывается иконкой
-        // (gearSummaryIcon) рядом с названием предмета; метод оставлен как
-        // текстовый вариант для отладки/других вызовов.
-        gearSummaryHtml(role, items) {
-            const eff = this.gearPenaltyTotal(role, items);
-            if (!eff.parts.length) {
-                return '<span style="color:#8ff2a0;">✓ Экипировка подходит классу: штрафа нет.</span>';
-            }
-            const list = eff.parts
-                .map(p => `${Utils.escapeHtml(p.item.name || p.item.slot)} −${p.pct}%`)
-                .join(', ');
-            return `<span style="color:#ffb3a0;">⚠ Штраф к основному стату: −${eff.pct}%</span> <span style="color:#888;">(${list})</span>`;
-        },
-
         /**
          * 11.6.5f.1: компактный статус экипировки — одна иконка рядом с
          * названием предмета вместо отдельной полосы над таблицей.
@@ -5413,12 +5301,6 @@
                 .join(', ');
             const tip = `Штраф к основному стату: −${eff.pct}% (${list})`;
             return `<span class="hp-gear-pill bad" title="${Utils.escapeHtml(tip)}">⚠</span>`;
-        },
-
-        // Ожидаемое число попыток (при 0% — Infinity)
-        expectedAttempts(level) {
-            const p = this.enchantChance(level) / 100;
-            return p > 0 ? 1 / p : Infinity;
         },
 
         /* ---------------------------------------------------------- */
@@ -10602,6 +10484,13 @@ const Players = {
     // ответа игры, а не по таймеру. Интервал 3 с оставлен фолбэком и растянут
     // до 30 с (АФК, скрытая вкладка, игра перестала слать запросы). Серии
     // запросов при загрузке страницы гасит троттлинг 2 с в _hpTick().
+    // v11.6.6: штатный источник HP — событие `me` живого канала игры
+    // (LGLiveLink.open -> SSE/WS). Оно несёт полный стейт героя (hpNow,
+    // stats.hp), поэтому свой GET /api/me на каждое изменение больше не
+    // нужен: _onHeroUpdate() обновляет панель по кэшу и шлёт нашему серверу
+    // снимок. PerformanceObserver остаётся резервом: он не запускается, если
+    // канал подтверждён событием `me`, и работает, если LGLiveLink недоступен
+    // или хук не успел к уже открытому каналу.
     // ============================================================
     const Party = {
         BASE_URL_KEY: 'lgPartyBaseUrl',
@@ -10654,6 +10543,15 @@ const Players = {
         _hpBusy: false,      // тик уже в работе (медленная сеть)
         _lastHpTick: 0,      // Date.now() прошлого тика — троттлинг HP_TICK_MIN_MS
         _perfObserver: null, // PerformanceObserver: resource-записи /api/me, /api/qact
+        // v11.6.6: живой канал игры (LGLiveLink) — штатный источник HP.
+        _liveLinkHooked: false,  // обёртка LGLiveLink.open установлена
+        _liveLinkSeen: false,    // пришло хотя бы одно событие `me`
+        _liveLinkDead: false,    // инстанс выключен (destroy) — события игнорируем
+        _liveLinkOrigOpen: null, // оригинальный LGLiveLink.open (для снятия хука)
+        _liveLinkWrapper: null,  // наша обёртка (identity-проверка при unhook)
+        _liveLinkInstance: null, // последний открытый инстанс канала
+        _lastStates: null,       // последний GET /party/:id/state (кэш панели)
+        _lastSelfHp: null,       // {hp, maxHp} последней отрисовки — фильтр повторов
         _cachedLogin: '',    // последний ник из /api/me — для синхронного рендера
         // Промис фонового /api/me для .party-self-nick: повторные open() не
         // должны плодить одинаковые запросы, пока первый ещё в полёте.
@@ -10668,12 +10566,6 @@ const Players = {
         // Журнал боя: панель и состояние догрузки.
         LOG_PANEL_ID: `${RAND_ID}-party-log-panel`,
         _prevMe: null,       // предыдущий снимок /api/me для детектора событий
-        // v11.6.0d: логины, по которым прямо сейчас идёт POST /api/qact.
-        // v11.6.2b.1: хил переведён на вставку текста («лечить @ник»), набор
-        // больше не заполняется, а _renderPanel по-прежнему читает его в
-        // busy-проверке кнопки «❤» (всегда false).
-        // TODO: REMOVE — удалить поле и busy-ветку в _renderPanel вместе.
-        _healBusy: new Set(),
         _logOpen: true,      // панель развёрнута (свёрнутая не опрашивает сервер)
         _logBusy: false,     // GET/POST журнала уже в полёте
         _logSince: 0,        // nextSince с сервера (id последней известной строки)
@@ -11359,9 +11251,13 @@ const Players = {
          * v11.6.0d: у раненого союзника в строке есть кнопка «❤» (_healMember).
          * v11.6.0g-2: кнопка — только жрецу (this._prevMe.role === 'priest');
          * заголовок панели стал drag-handle для перетаскивания HUD.
+         * v11.6.6: opts.skipLog — не трогать журнал. Нужен _patchSelfHp():
+         * событие `me` приходит часто, а _syncLogPanel() каждый раз делает
+         * GET /party/:id/log. Журнал опрашивает тик синхронизации.
          * @param {Array<{login: string, hp: number, maxHp: number}>} states
+         * @param {{skipLog?: boolean}} [opts]
          */
-        _renderPanel(states) {
+        _renderPanel(states, opts = {}) {
             const el = this._ensurePanel();
             const list = Array.isArray(states) ? states : [];
 
@@ -11390,7 +11286,6 @@ const Players = {
 
                 // Кнопка «Хил» (ТЗ 11.6.0d) — только если: мы жрец, цель не мы,
                 // цель ранена (hp < maxHp) и свой герой в походе.
-                const busy = this._healBusy.has(nick.toLowerCase());
                 const showHeal = isPriest
                     && inQuest
                     && nick.toLowerCase() !== selfLogin
@@ -11398,7 +11293,7 @@ const Players = {
                     && rawHp < rawMax;
                 const healBtn = showHeal
                     ? `<button type="button" class="${this.HEAL_BTN_CLASS}" data-party-heal="${login}"`
-                        + ` title="Вставить команду лечения в чат"${busy ? ' disabled' : ''}>${busy ? '...' : '❤'}</button>`
+                        + ' title="Вставить команду лечения в чат">❤</button>'
                     : '';
 
                 return `<div style="margin-bottom:6px;">
@@ -11431,8 +11326,9 @@ const Players = {
             this._applyHudPosition();
 
             // Журнал — сосед по HUD-контейнеру; его видимость и догрузку
-            // синхронизируем на каждом тике.
-            this._syncLogPanel();
+            // синхронизируем на каждом тике (v11.6.6: кроме быстрых
+            // перерисовок из _patchSelfHp, иначе каждое `me` = GET журнала).
+            if (!opts.skipLog) this._syncLogPanel();
         },
 
         /* ---------------------------------------------------------- */
@@ -11646,6 +11542,8 @@ const Players = {
          *
          * v11.6.3c: тик запускается по событию (ответ игры на /api/me, /api/qact)
          * через PerformanceObserver; интервал HP_SYNC_MS (30 с) — только фолбэк.
+         * v11.6.6: основной триггер — событие `me` из LGLiveLink (см.
+         * _onHeroUpdate); observer поднимается только как резерв.
          * Повторный вызов безопасен: второй интервал и observer не создаются.
          * Вызывается из _writeState() (создали/вошли) и init() (перезагрузка).
          */
@@ -11655,6 +11553,12 @@ const Players = {
                 this.stopHpSync();
                 return;
             }
+
+            // v11.6.6: сначала вешаем хук на живой канал игры (он же снимает
+            // флаг «мёртв» после возможного destroy старого инстанса), и
+            // только потом решаем, нужен ли PerformanceObserver-фолбэк.
+            this._hookLiveLink();
+
             if (this._hpTimer) return;
 
             this._ensurePanel();
@@ -11678,6 +11582,12 @@ const Players = {
          */
         _startHpObserver() {
             if (this._perfObserver) return; // уже слушаем
+            // v11.6.6: канал игры подтверждён событием `me` — observer не нужен,
+            // HP приходит по живому потоку без наших запросов к /api/me.
+            if (this._liveLinkHooked && this._liveLinkSeen) {
+                dbg('[PARTY] HP: источник — LGLiveLink, PerformanceObserver не запускаем');
+                return;
+            }
             if (typeof PerformanceObserver !== 'function') {
                 console.warn('[LGU] PerformanceObserver не поддерживается — HP обновляется по таймеру');
                 return;
@@ -11707,6 +11617,190 @@ const Players = {
             }
         },
 
+        /* ---------------------------------------------------------- */
+        /* Живой канал игры (v11.6.6)                                  */
+        /* ---------------------------------------------------------- */
+
+        /**
+         * v11.6.6: подписка на событие `me` живого канала игры.
+         *
+         * Раньше HP-панель обновлялась по PerformanceObserver: мы замечали
+         * запрос игры к /api/me и делали СВОЙ /api/me, чтобы узнать hp.
+         * Теперь игра сама присылает полный стейт героя (hero.hpNow /
+         * hero.stats.hp) в SSE-событии `me` — второй запрос не нужен.
+         *
+         * LGLiveLink хранит свой инстанс в замыкании site-live.js, поэтому
+         * единственная точка доступа — обёртка его `open()`: при каждом
+         * (пере)открытии канала подписываемся на `me` у нового инстанса.
+         *
+         * Хук идемпотентен: повторные startHpSync()/init() второй обёртки
+         * не создают. Если LGLiveLink нет (старая версия сайта) — возвращаем
+         * false, и модуль остаётся на PerformanceObserver (см. _startHpObserver).
+         *
+         * @returns {boolean} хук стоит (или уже стоял) и события доступны
+         */
+        _hookLiveLink() {
+            const link = G.LGLiveLink;
+            if (!link || typeof link.open !== 'function') return false;
+            if (this._liveLinkWrapper && link.open === this._liveLinkWrapper) {
+                this._liveLinkHooked = true;
+                this._liveLinkDead = false;
+                return true;
+            }
+
+            const self = this;
+            const origOpen = link.open;
+
+            // Обёртка обязана быть обычной function: игру интересует только
+            // возвращённый инстанс, но apply(this) сохраняет поведение, если
+            // LGLiveLink позовут как метод.
+            const wrapper = function (opts) {
+                const instance = origOpen.apply(this, arguments);
+                try {
+                    if (instance && typeof instance.addEventListener === 'function') {
+                        self._liveLinkInstance = instance;
+                        instance.addEventListener('me', (e) => {
+                            try {
+                                const data = JSON.parse(e.data);
+                                if (data && data.hero) self._onHeroUpdate(data.hero);
+                            } catch (err) {
+                                // Битую строку канала игнорируем: игра делает то же.
+                            }
+                        });
+                    }
+                } catch (err) {
+                    console.warn('[PARTY] LGLiveLink: подписка на `me` не удалась:', err);
+                }
+                return instance;
+            };
+
+            this._liveLinkOrigOpen = origOpen;
+            this._liveLinkWrapper = wrapper;
+            this._liveLinkDead = false;
+            this._liveLinkHooked = true;
+            link.open = wrapper;
+            dbg('[PARTY] HP: подписались на LGLiveLink `me`');
+            return true;
+        },
+
+        /**
+         * v11.6.6: снять обёртку (destroy при перезапуске скрипта).
+         *
+         * Проверяем, что в link.open всё ещё наша обёртка: если поверх уже
+         * навернулся новый инстанс скрипта, чужой хук не трогаем — иначе
+         * сломали бы ему поток. Свой инстанс при этом помечен мёртвым и
+         * событий не обрабатывает.
+         */
+        _unhookLiveLink() {
+            const link = G.LGLiveLink;
+            if (link && this._liveLinkWrapper && link.open === this._liveLinkWrapper) {
+                link.open = this._liveLinkOrigOpen;
+            }
+            this._liveLinkWrapper = null;
+            this._liveLinkOrigOpen = null;
+            this._liveLinkInstance = null;
+            this._liveLinkHooked = false;
+        },
+
+        /**
+         * v11.6.6: новое состояние героя из события `me` LGLiveLink.
+         *
+         * data героя — полный объект (как в GET /api/me): hpNow, stats.hp,
+         * ghost, role. Состояния похода (ql) в `me` НЕТ — оно идёт отдельным
+         * событием `q`, поэтому quest берём из прошлого снимка: иначе каждый
+         * тик выглядел бы как «вышел из похода» (ложный quest_end).
+         *
+         * Снимок сразу становится _prevMe (до await'ов): параллельные
+         * события не должны дважды отправлять одно и то же событие журнала.
+         * @param {object} hero hero из JSON события `me`
+         */
+        async _onHeroUpdate(hero) {
+            if (this._liveLinkDead) return;
+            if (!hero || typeof hero !== 'object') return;
+            if (!this._readState()) return;
+
+            // Первое событие подтверждает, что канал живой: резервный
+            // PerformanceObserver (если он успел подняться) больше не нужен.
+            if (!this._liveLinkSeen) {
+                this._liveLinkSeen = Date.now();
+                this._stopHpObserver();
+            }
+
+            const prev = this._prevMe;
+            const hpRaw = Number(hero.hpNow);
+            // stats.hp — максимум (docs/API.md); hpMax — фолбэк для старых
+            // ответов, где максимум лежит в hero.hpMax.
+            const maxRaw = Number(hero.stats && hero.stats.hp !== undefined ? hero.stats.hp : hero.hpMax);
+            const hp = Number.isFinite(hpRaw) ? hpRaw : (prev ? prev.hp : null);
+            const maxHp = (Number.isFinite(maxRaw) && maxRaw > 0) ? maxRaw : (prev ? prev.maxHp ?? null : null);
+
+            const next = {
+                hp,
+                maxHp,
+                quest: prev ? prev.quest ?? null : null,
+                ghost: hero.ghost === true,
+                role: hero.role || (prev ? prev.role : 'unknown')
+            };
+
+            // Журнал боя: те же правила, что в _hpTick(). Снимок пришёл из
+            // живого канала, поэтому death/heal/damage по нему валидны.
+            const events = prev ? this._detectLogEvents(prev, next) : [];
+            this._prevMe = next; // до await: защита от двойной отправки
+
+            // 1. Панель — сразу, по кэшу состояний, без запросов.
+            this._patchSelfHp(next.hp, next.maxHp);
+            // 2. Стейт на наш сервер (POST + GET) — «как обычно», но с
+            //    готовым снимком: /api/me не запрашиваем. Внутри _hpTick()
+            //    живёт троттлинг HP_TICK_MIN_MS, поэтому серия `me`-событий
+            //    боя не превратится в серию запросов.
+            this._hpTick(next).catch((e) => {
+                console.warn('[PARTY] синхронизация HP (live):', e?.message || e);
+            });
+
+            // 3. События журнала — последовательно: id в БД должны идти по порядку.
+            for (const ev of events) {
+                if (this._liveLinkDead) return;
+                if (!(await this._postLogEvent(ev.type, ev.text))) break;
+                if (!this._readState()) return;
+            }
+        },
+
+        /**
+         * v11.6.6: мгновенная перерисовка своей строки по кэшу состояний.
+         *
+         * GET /party/:id/state не нужен: берём последний ответ сервера
+         * (_lastStates) и подменяем в нём свой hp/maxHp. Если кэша ещё нет
+         * (первый тик не ответил), рисуем одну свою строку — панель не
+         * должна пустовать до ответа нашего сервера.
+         *
+         * Одинаковые значения пропускаем: событие `me` приходит и на монеты
+         * или очередь действий, герой при этом не меняется.
+         * @param {number|null} hp
+         * @param {number|null} maxHp
+         */
+        _patchSelfHp(hp, maxHp) {
+            if (!Number.isFinite(hp) || !Number.isFinite(maxHp) || maxHp <= 0) return;
+            if (this._lastSelfHp && this._lastSelfHp.hp === hp && this._lastSelfHp.maxHp === maxHp) return;
+            this._lastSelfHp = { hp, maxHp };
+
+            const state = this._readState();
+            if (!state) return;
+            const selfLogin = String(state.login || this._cachedLogin || '').toLowerCase();
+            if (!selfLogin) return;
+
+            const list = Array.isArray(this._lastStates) ? this._lastStates.slice() : [];
+            const idx = list.findIndex((s) => String(s?.login || '').toLowerCase() === selfLogin);
+            if (idx >= 0) {
+                list[idx] = { ...list[idx], login: list[idx].login || selfLogin, hp, maxHp };
+            } else {
+                list.push({ login: selfLogin, hp, maxHp });
+            }
+            this._lastStates = list;
+            // skipLog: журнал опрашивает тик синхронизации; иначе каждое
+            // событие `me` (а их в бою много) давало бы GET /party/:id/log.
+            this._renderPanel(list, { skipLog: true });
+        },
+
         /** v11.6.3c: отключить observer (выход, 401, перезапуск скрипта). */
         _stopHpObserver() {
             if (this._perfObserver) {
@@ -11724,6 +11818,11 @@ const Players = {
                 this._hpTimer = null;
             }
             this._stopHpObserver();
+            // v11.6.6: кэш панели и признак живого канала сбрасываем — при
+            // следующем входе в пати observer снова подстрахует до первого `me`.
+            this._lastStates = null;
+            this._lastSelfHp = null;
+            this._liveLinkSeen = false;
             this._hidePanel();
             // leave/401: журнал прошлой пати очищается и прячется.
             this._hideLogPanel();
@@ -11738,11 +11837,15 @@ const Players = {
          * страховка на случай, если observer уже отключён.
          */
         destroy() {
+            // v11.6.6: старый инстанс не должен ни принимать `me` из
+            // LGLiveLink, ни слать state на наш сервер после перезапуска.
+            this._liveLinkDead = true;
             if (this._perfObserver) {
                 this._perfObserver.disconnect();
                 this._perfObserver = null;
             }
             this.stopHpSync();
+            this._unhookLiveLink();
         },
 
         /**
@@ -11821,15 +11924,21 @@ const Players = {
         /**
          * Один такт синхронизации: /api/me -> POST state -> GET state -> рендер.
          *
-         * Запускается событием PerformanceObserver (ответ игры на /api/me или
-         * /api/qact) и фолбэк-интервалом HP_SYNC_MS; не чаще HP_TICK_MIN_MS.
+         * Запускается событием `me` LGLiveLink (v11.6.6), событием
+         * PerformanceObserver (ответ игры на /api/me или /api/qact) и
+         * фолбэк-интервалом HP_SYNC_MS; не чаще HP_TICK_MIN_MS.
+         *
+         * v11.6.6: meOverride — готовый снимок героя из события `me`
+         * (см. _onHeroUpdate). С ним шаг 1 (/api/me) пропускается, а шаг 1a
+         * (детектор журнала) не нужен: снимок уже сравнён и записан в
+         * _prevMe вызывающей стороной.
          *
          * Ошибки сети и валидации намеренно «тихие» (console.warn): панель
          * обновляется часто, тосты на каждую ошибку были бы невыносимы.
          * Исключение — 401: он означает кик/удалённую пати, здесь нужен и
          * тост, и полный локальный сброс (его делает _request()).
          */
-        async _hpTick() {
+        async _hpTick(meOverride = null) {
             // v11.6.3c: троттлинг. Observer срабатывает на каждый /api/me, а
             // игра при загрузке страницы может отдать несколько подряд —
             // без ограничения это серия POST state + GET state на наш сервер.
@@ -11848,12 +11957,16 @@ const Players = {
             const path = `/party/${encodeURIComponent(party.groupId)}/state`;
             this._hpBusy = true;
             try {
-                // 1. Свой HP из игры. Если /api/me недоступен — просто не
-                //    отправляем стейт, панель строится по данным сервера.
-                const me = await this._fetchMe();
+                // 1. Свой HP из игры. v11.6.6: если снимок пришёл событием
+                //    `me` LGLiveLink (_onHeroUpdate), /api/me не запрашиваем.
+                //    Без снимка — обычный GET /api/me; если он недоступен,
+                //    стейт не отправляем, панель строится по данным сервера.
+                const me = meOverride || await this._fetchMe();
 
                 // 1a. Детектор журнала — только по «живому» снимку /api/me.
                 //     Фолбэк (live:false) не должен выглядеть как quest_end/death.
+                //     v11.6.6: у снимка из LGLiveLink флага live нет — события
+                //     уже разобраны в _onHeroUpdate, повторять их нельзя.
                 if (me.live) {
                     const events = this._detectLogEvents(this._prevMe, me);
                     for (const ev of events) {
@@ -11862,7 +11975,7 @@ const Players = {
                     }
                     // _prevMe обновляем даже при ошибке сети: иначе одно и то же
                     // событие отправлялось бы каждый тик.
-                    this._prevMe = { hp: me.hp, quest: me.quest, ghost: me.ghost, role: me.role };
+                    this._prevMe = { hp: me.hp, maxHp: me.maxHp, quest: me.quest, ghost: me.ghost, role: me.role };
                     // 401 внутри POST уже сбросил локальное состояние.
                     if (!this._readState()) return;
                 }
@@ -11885,6 +11998,9 @@ const Players = {
                 const res = await this._request('GET', path);
                 // Пока ждали ответ, могли выйти из пати — тогда рендер не нужен.
                 if (!this._readState()) return;
+                // v11.6.6: кэш состояний — по нему _patchSelfHp() мгновенно
+                // перерисовывает свою строку на событиях `me`.
+                this._lastStates = Array.isArray(res?.states) ? res.states : null;
                 this._renderPanel(res?.states);
             } catch (e) {
                 console.warn('[PARTY] синхронизация HP:', e?.message || e);
@@ -11950,6 +12066,12 @@ const Players = {
                     else prev.stopHpSync?.();
                 } catch (e) {}
             }
+
+            // v11.6.6: пытаемся навеситься на живой канал игры как можно
+            // раньше — до того, как LGLiveLink переоткроется (смена вкладки,
+            // реконнект). Если он откроется после нашего boot, событие `me`
+            // пойдёт уже в _onHeroUpdate без запросов к /api/me.
+            this._hookLiveLink();
 
             const btn = document.getElementById(DOM_IDS.btnParty) || document.getElementById('btn-party');
             btn?.addEventListener('click', () => this.open());
@@ -12830,15 +12952,6 @@ const Players = {
             if (added) this.renderMessages();
         },
 
-        processRawMessages(msgs) {
-            if (!msgs || !Array.isArray(msgs)) return;
-            msgs.forEach(m => {
-                const { author, text, id, seq, role, rank, isSystem, aw, channel } = Utils.extractChatFields(m);
-                if (!text) return;
-                this.handleIncoming(author || 'Игрок', text, false, id, seq, role, isSystem, aw, channel, null, null, rank);
-            });
-        },
-
         // Определяем канал живого потока: город или шахта
         resolveLiveChannel(data) {
             try {
@@ -13565,12 +13678,6 @@ const Players = {
         // Документ PiP-окна. С v11.5.3 это единственное место, где живёт DOM чата:
         // обычный (встроенный) виджет удалён, за него отвечает плагин Legion7TV.
         _pipDoc: null,
-        _origWidgetStyles: null,
-        // Наследие встроенного виджета (возврат в родной парент). // TODO: REMOVE
-        _origWidgetParent: null,
-        _origWidgetNextSibling: null,
-        _origWidgetClasses: null,
-        _origWidgetHadOpen: false,
         cooldownUntil: 0,
         _toastTimer: null,
 
@@ -13762,69 +13869,8 @@ const Players = {
             // по документу его вкладок не найдёт (по элементу — найдёт).
             this._syncTabs(widget);
 
-            this.setupDrag();
             this.syncMe();
             return widget;
-        },
-
-        setupDrag() {
-            // Виджет теперь живёт только внутри PiP-окна и растянут на всё окно,
-            // поэтому перетаскивание не нужно. Код оставлен на случай возврата
-            // обычного виджета. // TODO: REMOVE
-            if (this._popoutWin) return;
-
-            const handle = this.widget?.querySelector('#chat-drag-handle') || document.getElementById('chat-drag-handle');
-            if (!handle) return;
-            let dragging = false, offX = 0, offY = 0;
-            handle.addEventListener('pointerdown', (e) => {
-                // Если чат вынесен в отдельное PiP-окно, перетаскивание внутри виджета отключаем
-                if (this._popoutWin) return;
-
-                const target = e.target?.closest ? e.target : (e.target?.parentElement || e.target);
-                if (!target || !target.closest) return;
-
-                // Проверка: клик по кнопке, вкладке, скроллбару или инпуту отменяет перетаскивание
-                if (
-                    target.closest('button') ||
-                    target.closest('.chat-tab') ||
-                    target.closest('.chat-main-tab') ||
-                    target.closest('.chat-sub-tab') ||
-                    target.closest('.chat-close') ||
-                    target.closest('input, textarea, select')
-                ) {
-                    return;
-                }
-
-                // Проверка клика по полосе прокрутки
-                if (e.offsetX > handle.clientWidth || e.offsetY > handle.clientHeight) {
-                    return;
-                }
-
-                dragging = true;
-                try { handle.setPointerCapture(e.pointerId); } catch (_) {}
-                const r = this.widget.getBoundingClientRect();
-                offX = e.clientX - r.left;
-                offY = e.clientY - r.top;
-                this.widget.style.left = r.left + 'px';
-                this.widget.style.top = r.top + 'px';
-                this.widget.style.right = 'auto';
-                this.widget.style.bottom = 'auto';
-            });
-            handle.addEventListener('pointermove', (e) => {
-                if (!dragging) return;
-                this.widget.style.left = (e.clientX - offX) + 'px';
-                this.widget.style.top = (e.clientY - offY) + 'px';
-            });
-            const stopDrag = (e) => {
-                if (!dragging) return;
-                dragging = false;
-                try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
-            };
-            handle.addEventListener('pointerup', stopDrag);
-            handle.addEventListener('pointercancel', stopDrag);
-
-            // 7TV (размер смайлов, загрузка эмоутов, кнопка настроек канала)
-            // перенесён в init(): он нужен PiP-чату даже при закрытом окне.
         },
 
         open7tvSettings() {
@@ -15473,7 +15519,7 @@ const Players = {
                 // старый инстанс продолжал бы слушать запросы игры (/api/me,
                 // /api/qact) и слать state на наш сервер после перезапуска.
                 Party.destroy();
-                document.querySelectorAll('.' + DOM_IDS.customModal + ', .sim-card, .' + DOM_IDS.chatWidget + ', .float-btns, .' + DOM_IDS.fabWrap + ', #' + DOM_IDS.playerHud + ', .' + DOM_IDS.hudLog + ', #' + DOM_IDS.hudLog + ', .hud-log, .custom-modal, .chat-widget, .legion-fab-wrap, #legion-player-hud').forEach(el => el.remove());
+                document.querySelectorAll('.' + DOM_IDS.customModal + ', .sim-card, .' + DOM_IDS.chatWidget + ', .float-btns, .' + DOM_IDS.fabWrap + ', #' + DOM_IDS.playerHud + ', .custom-modal, .chat-widget, .legion-fab-wrap, #legion-player-hud').forEach(el => el.remove());
                 legionApi._booted = false;
             }
         };

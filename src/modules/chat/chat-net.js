@@ -87,15 +87,6 @@
             if (added) this.renderMessages();
         },
 
-        processRawMessages(msgs) {
-            if (!msgs || !Array.isArray(msgs)) return;
-            msgs.forEach(m => {
-                const { author, text, id, seq, role, rank, isSystem, aw, channel } = Utils.extractChatFields(m);
-                if (!text) return;
-                this.handleIncoming(author || 'Игрок', text, false, id, seq, role, isSystem, aw, channel, null, null, rank);
-            });
-        },
-
         // Определяем канал живого потока: город или шахта
         resolveLiveChannel(data) {
             try {

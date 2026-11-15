@@ -184,21 +184,6 @@
             return { pct: Math.min(GAME_DATA.GEAR_PEN_CAP, pct), parts };
         },
 
-        // Короткая строка-резюме по экипировке. 11.6.5f.1: вкладка «Заточка»
-        // больше не рисует отдельную полосу — статус показывается иконкой
-        // (gearSummaryIcon) рядом с названием предмета; метод оставлен как
-        // текстовый вариант для отладки/других вызовов.
-        gearSummaryHtml(role, items) {
-            const eff = this.gearPenaltyTotal(role, items);
-            if (!eff.parts.length) {
-                return '<span style="color:#8ff2a0;">✓ Экипировка подходит классу: штрафа нет.</span>';
-            }
-            const list = eff.parts
-                .map(p => `${Utils.escapeHtml(p.item.name || p.item.slot)} −${p.pct}%`)
-                .join(', ');
-            return `<span style="color:#ffb3a0;">⚠ Штраф к основному стату: −${eff.pct}%</span> <span style="color:#888;">(${list})</span>`;
-        },
-
         /**
          * 11.6.5f.1: компактный статус экипировки — одна иконка рядом с
          * названием предмета вместо отдельной полосы над таблицей.
@@ -218,12 +203,6 @@
                 .join(', ');
             const tip = `Штраф к основному стату: −${eff.pct}% (${list})`;
             return `<span class="hp-gear-pill bad" title="${Utils.escapeHtml(tip)}">⚠</span>`;
-        },
-
-        // Ожидаемое число попыток (при 0% — Infinity)
-        expectedAttempts(level) {
-            const p = this.enchantChance(level) / 100;
-            return p > 0 ? 1 / p : Infinity;
         },
 
         /* ---------------------------------------------------------- */

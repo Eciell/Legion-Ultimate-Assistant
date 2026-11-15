@@ -27,12 +27,6 @@
         // Документ PiP-окна. С v11.5.3 это единственное место, где живёт DOM чата:
         // обычный (встроенный) виджет удалён, за него отвечает плагин Legion7TV.
         _pipDoc: null,
-        _origWidgetStyles: null,
-        // Наследие встроенного виджета (возврат в родной парент). // TODO: REMOVE
-        _origWidgetParent: null,
-        _origWidgetNextSibling: null,
-        _origWidgetClasses: null,
-        _origWidgetHadOpen: false,
         cooldownUntil: 0,
         _toastTimer: null,
 
@@ -224,69 +218,8 @@
             // по документу его вкладок не найдёт (по элементу — найдёт).
             this._syncTabs(widget);
 
-            this.setupDrag();
             this.syncMe();
             return widget;
-        },
-
-        setupDrag() {
-            // Виджет теперь живёт только внутри PiP-окна и растянут на всё окно,
-            // поэтому перетаскивание не нужно. Код оставлен на случай возврата
-            // обычного виджета. // TODO: REMOVE
-            if (this._popoutWin) return;
-
-            const handle = this.widget?.querySelector('#chat-drag-handle') || document.getElementById('chat-drag-handle');
-            if (!handle) return;
-            let dragging = false, offX = 0, offY = 0;
-            handle.addEventListener('pointerdown', (e) => {
-                // Если чат вынесен в отдельное PiP-окно, перетаскивание внутри виджета отключаем
-                if (this._popoutWin) return;
-
-                const target = e.target?.closest ? e.target : (e.target?.parentElement || e.target);
-                if (!target || !target.closest) return;
-
-                // Проверка: клик по кнопке, вкладке, скроллбару или инпуту отменяет перетаскивание
-                if (
-                    target.closest('button') ||
-                    target.closest('.chat-tab') ||
-                    target.closest('.chat-main-tab') ||
-                    target.closest('.chat-sub-tab') ||
-                    target.closest('.chat-close') ||
-                    target.closest('input, textarea, select')
-                ) {
-                    return;
-                }
-
-                // Проверка клика по полосе прокрутки
-                if (e.offsetX > handle.clientWidth || e.offsetY > handle.clientHeight) {
-                    return;
-                }
-
-                dragging = true;
-                try { handle.setPointerCapture(e.pointerId); } catch (_) {}
-                const r = this.widget.getBoundingClientRect();
-                offX = e.clientX - r.left;
-                offY = e.clientY - r.top;
-                this.widget.style.left = r.left + 'px';
-                this.widget.style.top = r.top + 'px';
-                this.widget.style.right = 'auto';
-                this.widget.style.bottom = 'auto';
-            });
-            handle.addEventListener('pointermove', (e) => {
-                if (!dragging) return;
-                this.widget.style.left = (e.clientX - offX) + 'px';
-                this.widget.style.top = (e.clientY - offY) + 'px';
-            });
-            const stopDrag = (e) => {
-                if (!dragging) return;
-                dragging = false;
-                try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
-            };
-            handle.addEventListener('pointerup', stopDrag);
-            handle.addEventListener('pointercancel', stopDrag);
-
-            // 7TV (размер смайлов, загрузка эмоутов, кнопка настроек канала)
-            // перенесён в init(): он нужен PiP-чату даже при закрытом окне.
         },
 
         open7tvSettings() {
