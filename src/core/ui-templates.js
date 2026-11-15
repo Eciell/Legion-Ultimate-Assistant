@@ -292,14 +292,26 @@
         /**
          * Модалка «🏰 Карманный Город»: сетка кнопок-зданий.
          * Обработчики (hover + клик по data-room) навешивает PocketCity.open().
+         *
+         * v11.6.6f: добавлена карточка «Гильдия» (data-room="guild"). Это не
+         * здание города, а окно LGGuilds, поэтому доступность считает
+         * PocketCity.isGuildLocked() и передаёт её флагом — шаблон остаётся
+         * «глупым» и не лезет в ME.
+         *
+         * @param {boolean} guildLocked нет доступа к гильдиям: карточка серая,
+         *                              клик по ней PocketCity превращает в тост
          */
-        pocketCityModal() {
+        pocketCityModal(guildLocked = false) {
+            // Стиль кнопки один и тот же; серое состояние — отдельным хвостом,
+            // чтобы не дублировать всю строку inline-стилей.
+            const guildStyle = 'padding:16px 10px; background:#2a2140; border:2px solid #6c4fa8; border-radius:10px; color:#cbb6ff; font-weight:bold; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s; '
+                + (guildLocked ? 'cursor:not-allowed; opacity:0.45; filter:grayscale(1);' : 'cursor:pointer;');
             return `
                 <h2>🏰 Карманный Город <button class="custom-close" id="custom-close-btn">✖</button></h2>
                 <div style="font-size:13px; color:#aaa; margin-bottom:15px; text-align:center;">
                     Прямой доступ к официальным зданиям игры из любой локации:
                 </div>
-                <!-- minmax(120px): 7 карточек-зданий укладываются в один ряд при ширине окна 1200px -->
+                <!-- minmax(120px): 8 карточек (7 зданий + гильдия) укладываются в один ряд при ширине окна 1200px -->
                 <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:12px; margin-bottom:10px;">
                     <button class="pocket-grid-btn" data-room="auction" style="padding:16px 10px; background:#1b2838; border:2px solid #335577; border-radius:10px; color:#8fd3ff; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
                         <span style="font-size:32px;">🏛️</span>
@@ -335,6 +347,15 @@
                         <span style="font-size:32px;">🔮</span>
                         <span>Звездочёт</span>
                         <small style="color:#8899aa; font-size:10px; font-weight:normal;">Зелья/Свитки</small>
+                    </button>
+                    <!-- v11.6.6f: Гильдия — не здание города (LGCity.panel('guild')
+                         не существует), а отдельное окно модуля гильдий LGGuilds.
+                         aria-disabled вместо disabled: клик должен доходить до
+                         обработчика PocketCity, чтобы показать тост. -->
+                    <button class="pocket-grid-btn" data-room="guild"${guildLocked ? ' aria-disabled="true" title="Недоступно"' : ''} style="${guildStyle}">
+                        <span style="font-size:32px;">🛡️</span>
+                        <span>Гильдия</span>
+                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">${guildLocked ? 'Недоступно' : 'Альянс'}</small>
                     </button>
                 </div>
             `;

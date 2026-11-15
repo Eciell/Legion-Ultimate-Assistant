@@ -106,11 +106,18 @@
             // HUD игра строит лениво (guRender -> guHud) и после выхода из
             // города оставляет узел в DOM, переключая только html.gu-city.
             // Слушаем две дешёвые цели (появление #gu-hud в body и смену
-            // классов на <html>), а не subtree всего документа: в городе
-            // мутаций слишком много. Повторные вызовы склеиваем в один кадр.
+            // классов на <html> и <body>), а не subtree всего документа: в
+            // городе мутаций слишком много. Повторные вызовы склеиваем в один кадр.
             // Тумблер «📌 Кнопка аддона в нижнем меню игры» проверяется внутри
             // UI.syncNavButton(): при выключенном тумблере метод снимает нативную
             // кнопку и сразу выходит, поэтому наблюдатель её обратно не вернёт.
+            //
+            // ПАТЧ 11.6.6g: класс body отслеживаем из-за шахты — mine.js вешает
+            // `mn-on` именно на body, а html.gu-city при этом остаётся (шахта
+            // лежит оверлеем поверх города) и наш syncNavButton считал бы, что
+            // мы в городе. ВАЖНО: повторный observe() на том же узле не
+            // дополняет, а ЗАМЕНЯЕТ опции, поэтому childList и attributes для
+            // body слиты в один вызов.
             let navSyncScheduled = false;
             const scheduleNavSync = () => {
                 if (navSyncScheduled) return;
@@ -120,7 +127,7 @@
                 else setTimeout(run, 150);
             };
             const navObserver = new MutationObserver(scheduleNavSync);
-            navObserver.observe(document.body, { childList: true });
+            navObserver.observe(document.body, { childList: true, attributes: true, attributeFilter: ['class'] });
             navObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
             UI._navObserver = navObserver;
         }

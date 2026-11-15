@@ -17,6 +17,12 @@
     // Шахта в игре — не вкладка, а оверлей `.mn` (body.mn-on) поверх «Города»,
     // поэтому её запоминаем отдельно, чат LGChatOne перевешиваем обратно в шахту,
     // а городской слой гасим через LGCity.sleep() (как это делает openMine).
+    //
+    // v11.6.6f: карточка «Гильдия» в Карманном Городе. Гильдии — не здание
+    // города (LGCity.panel('guild') не существует), поэтому открываем нативное
+    // окно игры LGGuilds.open({ big: true }) из любой локации. Фолбэк — клик по
+    // нативной кнопке входа (#gu-hud [data-gu="guild"] / .cy-hud .gl-entry).
+    // Доступность считаем по флагу героя ME.hero.gu (см. isGuildLocked).
     // ============================================================
     const PocketCity = {
         // Ожидание готовности города (v11.6.4c). Два этапа:
@@ -37,18 +43,34 @@
             // Модалку берём из возврата showModal: её класс — с рандомным
             // префиксом (DOM_IDS.customModal), поэтому поиск
             // `.custom-modal:last-of-type` по документу ненадёжен.
-            const modal = UI.showModal(UITemplates.pocketCityModal());
+            //
+            // v11.6.6f: доступность гильдии считаем ДО рендера — карточка
+            // «Гильдия» сразу рисуется в финальном состоянии, без мигания
+            // «активна -> недоступна» после ответа /api/me.
+            const guildLocked = PocketCity.isGuildLocked();
+            const modal = UI.showModal(UITemplates.pocketCityModal(guildLocked));
             if (!modal) return;
 
             // Обработчики вешаем только на кнопки этой модалки: раньше поиск
             // шёл по всему документу и мог зацепить чужие .pocket-grid-btn.
             modal.querySelectorAll('.pocket-grid-btn').forEach(btn => {
-                btn.addEventListener('mouseenter', () => { btn.style.transform = 'translateY(-3px)'; btn.style.boxShadow = '0 6px 15px rgba(0,0,0,0.5)'; });
-                btn.addEventListener('mouseleave', () => { btn.style.transform = 'none'; btn.style.boxShadow = 'none'; });
+                // Серая карточка «Гильдия» не должна «подпрыгивать» на hover.
+                if (btn.getAttribute('aria-disabled') !== 'true') {
+                    btn.addEventListener('mouseenter', () => { btn.style.transform = 'translateY(-3px)'; btn.style.boxShadow = '0 6px 15px rgba(0,0,0,0.5)'; });
+                    btn.addEventListener('mouseleave', () => { btn.style.transform = 'none'; btn.style.boxShadow = 'none'; });
+                }
                 btn.addEventListener('click', (e) => {
-                    const room = e.currentTarget.getAttribute('data-room');
+                    const el = e.currentTarget;
+                    const room = el.getAttribute('data-room');
+                    // Недоступную карточку гасим через aria-disabled, а не
+                    // disabled: disabled-кнопка не присылает клик, и игрок не
+                    // поймёт, почему карточка не реагирует. Здесь — тост.
+                    if (el.getAttribute('aria-disabled') === 'true') {
+                        UI.showToast('Гильдия пока недоступна вашему герою', true);
+                        return;
+                    }
                     UI.closeModals();
-                    if (room) PocketCity.openNativeBuilding(room);
+                    if (room) PocketCity.openBuilding(room);
                 });
             });
         },
@@ -210,6 +232,80 @@
             if (btn && !btn.hidden) {
                 try { btn.click(); } catch (e) { dbg(`Возврат на вкладку «${want}» не сработал:`, e); }
             }
+        },
+        /**
+         * Роутер карточек Карманного Города (v11.6.6f).
+         *
+         * «guild» — окно гильдий альянса (LGGuilds), всё остальное — нативные
+         * здания города через openNativeBuilding().
+         */
+        openBuilding(roomId) {
+            if (roomId === 'guild') return PocketCity.openGuild();
+            return PocketCity.openNativeBuilding(roomId);
+        },
+        /**
+         * Окно гильдий альянса из Карманного Города (v11.6.6f).
+         *
+         * Гильдии живут не в городе, а в отдельном модуле игры
+         * (site/guilds.js -> window.LGGuilds), поэтому городской конвейер
+         * (вкладка «Город», LGCity.panel, ожидание .cy-room) здесь не нужен:
+         * окно открывается из любой локации. Кнопка «Гильдия» в игровом HUD
+         * (#gu-hud [data-gu="guild"]) делает ровно то же самое:
+         * LGGuilds.open({ big: true }).
+         */
+        openGuild() {
+            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
+
+            // 1. Нативный API модуля гильдий — основной путь.
+            const guilds = pageWin.LGGuilds;
+            if (guilds && typeof guilds.open === 'function') {
+                try {
+                    guilds.open({ big: true });
+                    dbg('Гильдии открыты через LGGuilds.open()');
+                    return;
+                } catch (e) {
+                    // Не падаем: у игры бывают версии, где окно ещё не готово.
+                    dbg('LGGuilds.open() не сработал:', e);
+                }
+            }
+
+            // 2. Фолбэк — клик по нативной кнопке входа. Их две:
+            //    #gu-hud [data-gu="guild"] — шапка игры (app.js);
+            //    .cy-hud .gl-entry — вход, который guilds.js сам дорисовывает
+            //    в шапку города (есть только на вкладке «Город»).
+            const btn = document.querySelector('#gu-hud [data-gu="guild"], .cy-hud .gl-entry');
+            if (btn) {
+                try {
+                    btn.click();
+                    dbg('Гильдии открыты кликом по нативной кнопке');
+                    return;
+                } catch (e) {
+                    dbg('Клик по нативной кнопке гильдий не сработал:', e);
+                }
+            }
+
+            UI.showToast('Окно гильдии недоступно', true);
+        },
+        /**
+         * Недоступна ли гильдия герою (v11.6.6f).
+         *
+         * Флаг доступа держит сама игра: app.js (guOn) пускает в игровое меню
+         * только при ME.user && ME.hero.gu && ME.hero.cy. Берём именно gu —
+         * это флаг гильдий. Флаг города cy намеренно НЕ дублируем: в тюрьме и
+         * во время похода город закрыт, но окно гильдий у игрока всё равно
+         * должно открываться.
+         *
+         * Пока /api/me не пришёл (нет ME/hero) или поля gu нет вовсе
+         * (undefined/null — флаг переименовали или убрали), считаем гильдию
+         * доступной: иначе карточка была бы серой у всех подряд. Гасим только
+         * явный «ноль»: false или 0.
+         */
+        isGuildLocked() {
+            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
+            const me = pageWin.ME;
+            const hero = me && me.hero;
+            if (!hero || hero.gu == null) return false;
+            return !hero.gu;
         },
         async openNativeBuilding(roomId) {
             dbg(`Открытие нативного здания «${roomId}»...`);
