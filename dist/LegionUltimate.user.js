@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Legion: Ultimate Assistant (Chat, Auction, Pocket City)
 // @namespace    http://tampermonkey.net/
-// @version      11.6.6
+// @version      11.6.7
 // @description  QoL-аддон для Легиона: Умный чат, Сканер аукциона, Разведка, Планировщик, Карманный город. Без авто-копания.
 // @connect      7tv.io
 // @connect      cdn.7tv.app
@@ -9,8 +9,9 @@
 // @connect      localhost
 // @connect      127.0.0.1
 // @connect      legion.ctrlfree.host
+// @connect      legiongame.gg
 // @author       eciell
-// @match        https://play.multidonate.ru/c/*
+// @match        https://legiongame.gg/c/*
 // @noframes
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest
@@ -11869,7 +11870,7 @@ const Players = {
             this._perfObserver = new PerformanceObserver((list) => {
                 for (const entry of list.getEntries()) {
                     // includes, а не ===: name — полный URL вида
-                    // https://play.multidonate.ru/c/<канал>/api/me?...
+                    // https://legiongame.gg/c/<канал>/api/me?...
                     // Лишние совпадения (/api/members и т.п.) отсекает
                     // троттлинг: лишний тик не чаще раза в HP_TICK_MIN_MS.
                     if (entry.name.includes('/api/me') || entry.name.includes('/api/qact')) {
@@ -14171,7 +14172,7 @@ const Players = {
                     for (const entry of list.getEntries()) {
                         const name = entry && entry.name ? entry.name : '';
                         // includes, а не ===: name — полный URL вида
-                        // https://play.multidonate.ru/c/<канал>/api/me?...
+                        // https://legiongame.gg/c/<канал>/api/me?...
                         if (name.includes('/api/me')) {
                             this._onGameMeTraffic();
                             break;
@@ -15643,7 +15644,7 @@ const Players = {
 
                 // ПАТЧ 11.6.4h: адрес всегда собираем через Utils.apiPath — он
                 // добавляет префикс /c/<channel>/. Голый fetch('/api/...') уходил
-                // в корень домена (play.multidonate.ru/api/...) и получал 404:
+                // в корень домена (legiongame.gg/api/...) и получал 404:
                 // переписывание путей делает window.fetch самой страницы, а из
                 // песочницы Tampermonkey запрос идёт мимо него.
                 let endpoint = '/api/chat/say';

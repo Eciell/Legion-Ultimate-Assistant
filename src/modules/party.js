@@ -1160,7 +1160,7 @@
             this._perfObserver = new PerformanceObserver((list) => {
                 for (const entry of list.getEntries()) {
                     // includes, а не ===: name — полный URL вида
-                    // https://play.multidonate.ru/c/<канал>/api/me?...
+                    // https://legiongame.gg/c/<канал>/api/me?...
                     // Лишние совпадения (/api/members и т.п.) отсекает
                     // троттлинг: лишний тик не чаще раза в HP_TICK_MIN_MS.
                     if (entry.name.includes('/api/me') || entry.name.includes('/api/qact')) {

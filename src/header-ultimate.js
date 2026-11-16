@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Legion: Ultimate Assistant (Chat, Auction, Pocket City)
 // @namespace    http://tampermonkey.net/
-// @version      11.6.6
+// @version      11.6.7
 // @description  QoL-аддон для Легиона: Умный чат, Сканер аукциона, Разведка, Планировщик, Карманный город. Без авто-копания.
 // @connect      7tv.io
 // @connect      cdn.7tv.app
@@ -9,8 +9,9 @@
 // @connect      localhost
 // @connect      127.0.0.1
 // @connect      legion.ctrlfree.host
+// @connect      legiongame.gg
 // @author       eciell
-// @match        https://play.multidonate.ru/c/*
+// @match        https://legiongame.gg/c/*
 // @noframes
 // @run-at       document-start
 // @grant        GM_xmlhttpRequest

@@ -356,7 +356,7 @@
                     for (const entry of list.getEntries()) {
                         const name = entry && entry.name ? entry.name : '';
                         // includes, а не ===: name — полный URL вида
-                        // https://play.multidonate.ru/c/<канал>/api/me?...
+                        // https://legiongame.gg/c/<канал>/api/me?...
                         if (name.includes('/api/me')) {
                             this._onGameMeTraffic();
                             break;
