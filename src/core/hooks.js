@@ -15,6 +15,7 @@
         let rawLGCity = G.LGCity;
         let rawLGAuction = G.LGAuction;
         let rawLGQuest = G.LGQuest;
+        let rawLGArena = G.LGArena;
 
         const hookCity = (val) => {
             rawLGCity = val;
@@ -134,9 +135,73 @@
             if (patched) val.__hooked = true;
         };
 
+        // ------------------------------------------------------------
+        // LGArena (арена 5×5)
+        //
+        // Точка входа нативной арены — open(el, x) (reference/…/arena.js,
+        // экспорт в конце файла): x — контекст сайта с api(path, body),
+        // el — контейнер экрана. Подменяем ТОЛЬКО эти два метода, ничего
+        // не перезаписывая в window.fetch и не трогая LGMine.
+        //
+        // x.api оборачиваем лениво, из open(): контекст приходит аргументом,
+        // раньше его взять неоткуда. После успешного ответа (res && res.ok)
+        // зовём window.__LEGION__.Arena.onApiResponse(path, res, body):
+        // модуль кэширует /api/arena и /api/arena/hero и перерисовывает
+        // свои вставки. Ошибку/исключение в обработчике глушим — игровой
+        // вызов обязан вернуть ровно то, что вернул оригинал.
+        // ------------------------------------------------------------
+        const hookArena = (val) => {
+            rawLGArena = val;
+            if (!val || val.__hooked) return;
+            if (typeof val.open !== 'function') return;
+
+            val.__hooked = true;
+            const origOpen = val.open;
+            val.open = function (el, x) {
+                try {
+                    G.__lgArenaContext = (x && typeof x === 'object') ? x : null;
+                } catch (e) {}
+
+                try {
+                    if (x && typeof x.api === 'function' && !x.__apiHooked) {
+                        x.__apiHooked = true;
+                        const origApi = x.api;
+                        x.api = function (path) {
+                            // Аргументы пробрасываем как есть (body может быть
+                            // undefined), а path запоминаем для обработчика:
+                            // к моменту resolve замыкание уже не меняется.
+                            const reqPath = String(path || '');
+                            const reqBody = arguments.length > 1 ? arguments[1] : undefined;
+                            const notify = (res) => {
+                                try {
+                                    if (res && res.ok) {
+                                        window.__LEGION__?.Arena?.onApiResponse?.(reqPath, res, reqBody);
+                                    }
+                                } catch (e) {}
+                                return res;
+                            };
+                            let out;
+                            try {
+                                out = origApi.apply(this, arguments);
+                            } catch (e) {
+                                throw e;
+                            }
+                            // api() игры асинхронный; синхронный результат
+                            // (кэш/фолбэк) тоже поддерживаем — на всякий случай.
+                            if (out && typeof out.then === 'function') return out.then(notify);
+                            return notify(out);
+                        };
+                    }
+                } catch (e) {}
+
+                return origOpen.apply(this, arguments);
+            };
+        };
+
         if (rawLGCity) hookCity(rawLGCity);
         if (rawLGAuction) hookAuc(rawLGAuction);
         if (rawLGQuest) hookQuest(rawLGQuest);
+        if (rawLGArena) hookArena(rawLGArena);
 
         try {
             Object.defineProperty(G, 'LGCity', {
@@ -156,6 +221,15 @@
                 enumerable: true,
                 get: () => rawLGQuest,
                 set: (v) => hookQuest(v)
+            });
+            // LGArena: сайт присваивает window.LGArena один раз при загрузке
+            // (site/arena.js), но при перезагрузке модуля присваивание может
+            // повториться — сеттер повесит хук на новую версию.
+            Object.defineProperty(G, 'LGArena', {
+                configurable: true,
+                enumerable: true,
+                get: () => rawLGArena,
+                set: (v) => hookArena(v)
             });
         } catch (e) {}
     }

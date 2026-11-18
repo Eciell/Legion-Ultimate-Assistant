@@ -14,7 +14,8 @@
     //   core/ui-templates.js -> UITemplates (HTML: FAB-меню, модалки, HUD)
     //   core/ui.js     -> UI
     //   modules/*      -> BuildSim, HeroPlanner, Auction, Players,
-    //                     PocketCity, CombatAssistant, Party, Miner (заглушка), Chat
+    //                     PocketCity, CombatAssistant, Party, Arena,
+    //                     Miner (заглушка), Chat
     // ============================================================
 
     // 5.3. Защита от повторного запуска (single-instance guard)
@@ -158,6 +159,11 @@
         // 🏰 Состав гильдии для офицеров (11.6.6c): бейджи онлайна/сессии/друзей
         //    в окне гильдий. Сам модуль проверяет права через G.LGGuilds.index().
         GuildStats.init();
+        // ⚔️ Арена 5×5: шанс победы, согильдейцы в отряде противника и
+        //    вкладка «Согильдейцы» в модалке приглашения. Контекст арены
+        //    приходит из хука LGArena.open (core/hooks.js), своих патчей
+        //    window.fetch/LGMine модуль не делает.
+        Arena.init();
         Chat.init();
 
         Chat.interceptEventSource();
@@ -188,6 +194,7 @@
             PocketCity,
             CombatAssistant,
             GuildStats,
+            Arena,
             Party,
             Chat,
             DOM_IDS,
@@ -230,6 +237,9 @@
                 // «онлайн / был N назад», иначе после перезапуска скрипта
                 // работали бы два наблюдателя и два интервала.
                 GuildStats.destroy();
+                // Арена: снимаем MutationObserver, чистим кэши героев/состава
+                // и убираем свои бейджи и вкладку из живого DOM.
+                try { Arena.destroy?.(); } catch (e) {}
                 // ТЗ 11.6.0g-3: гасим поллинг /heartbeat + /users и
                 // MutationObserver нативной ленты (иначе после перезапуска
                 // скрипта остались бы два интервала).

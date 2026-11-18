@@ -19,6 +19,13 @@
     // (трекер онлайна не может знать о заходе раньше, чем мы запустились).
     G.__lguStartTime = G.__lguStartTime || Date.now();
 
+    // «Арена» (modules/arena.js): контекст экрана (x из LGArena.open) и
+    // последний снимок GET /api/arena. Заполняются в core/hooks.js —
+    // до первого открытия арены оба значения null, а не undefined, чтобы
+    // модуль мог проверять их без лишних typeof.
+    G.__lgArenaContext = G.__lgArenaContext || null;
+    G.__lgArenaData = G.__lgArenaData || null;
+
     // 0.0. РАНДОМИЗАЦИЯ DOM-ПРЕФИКСОВ
     const RAND_ID = 'x-' + Math.random().toString(36).substring(2, 6);
 
@@ -38,6 +45,15 @@
         // v11.6.0: «Пати» (modules/party.js) — кнопка в блоке «Социальное».
         btnParty: `${RAND_ID}-btn-party`,
         btnProfile: `${RAND_ID}-btn-profile`,
+        // Модуль «Арена» (modules/arena.js): собственные классы/идентификаторы
+        // вставок. Префикс RAND_ID нужен, чтобы после перезапуска скрипта
+        // stale-копии можно было найти и убрать в destroy(), не задевая
+        // нативную разметку арены (.arb / .ar-mw8).
+        arenaBadgeBox: `${RAND_ID}-arena-badge-box`,
+        arenaWinChance: `${RAND_ID}-arena-win-chance`,
+        arenaFoeWarn: `${RAND_ID}-arena-foe-warn`,
+        arenaGuildList: `${RAND_ID}-arena-guild-list`,
+        arenaGuildTab: `${RAND_ID}-arena-guild-tab`,
         chkChatDisable: `${RAND_ID}-chk-chat-disable`,
         chatBadge: `${RAND_ID}-chat-badge`,
         fabChatBadge: `${RAND_ID}-fab-chat-badge`,

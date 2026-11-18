@@ -1153,4 +1153,107 @@
         .lgu-cls-paladin { border-color: #8a7a2a; background: #262212; color: #ffe9a0; }
         .lgu-cls-recruit { border-color: #3d3d44; background: #1b1b20; color: #b9b9c2; }
 
+        /* «Арена» (modules/arena.js): бейдж шанса победы, плашка
+           согильдейцев и подсветка слотов. Палитра — нативная светлая
+           карточка Арены (reference/LegionFrontSRC/site/arena.css:
+           --gw-card: #fff, --gw-sep, --gw-rc, --gw-bt, --ar-win/--ar-lose). */
+
+        /* Бейдж шанса победы — в стиле .arb-gain: светлая карточка,
+           тонкая коричневая рамка, шрифт заголовков Арены. */
+        .lgu-win-chance {
+            margin: 6px 0 0;
+            padding: 5px 10px;
+            border: 2px solid var(--gw-sep, rgba(43, 29, 24, .12));
+            border-radius: var(--gw-rc, 12px);
+            background: var(--gw-card, #fff);
+            color: var(--ar-win, #2f6b1a);
+            font: var(--gw-btw, 400) 13px var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            line-height: 1.25;
+            text-align: center;
+            white-space: nowrap;
+            cursor: help;
+        }
+        .lgu-win-chance.high {
+            background: #f1f9ed;
+            border: 2px solid rgba(47, 107, 26, .28);
+            color: var(--ar-win, #2f6b1a);
+        }
+        .lgu-win-chance.mid {
+            background: #fff9e6;
+            border: 2px solid rgba(176, 118, 12, .28);
+            color: #8a5800;
+        }
+        .lgu-win-chance.low {
+            background: #fdf0ed;
+            border: 2px solid rgba(163, 48, 28, .28);
+            color: var(--ar-lose, #a3301c);
+        }
+        /* Карточка соперника — display:grid с gap 10px (arena.css:393),
+           поэтому внутри неё бейдж идёт отдельной строкой без своего
+           внешнего отступа. */
+        .arb-card > .lgu-win-chance { margin: 0; }
+
+        /* Плашка «Согильдейцы» — единый стиль с .arb-chip.sm, но в
+           светло-зелёной гамме согильдейцев, чтобы не спорить с тёмным
+           бейджем рейтинга. В шапке текст компактный (см. arena.js),
+           полный список имён — всегда в title. */
+        .lgu-guild-foe-warn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 9px;
+            border-radius: var(--gw-rc, 12px);
+            border: 2px solid rgba(47, 107, 26, .35);
+            background: var(--gw-ok, #e0f2d8);
+            color: var(--gw-on-ok, #1e4a12);
+            font: var(--gw-btw, 400) 12px var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            line-height: 1.3;
+            white-space: nowrap;
+            flex-shrink: 0;
+            max-width: 100%;
+            vertical-align: middle;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: help;
+        }
+        /* .arb-ch — flex с space-between (arena.css:394): плашка не должна
+           распирать шапку. Ник (.arb-cn) сохраняет min-width: 0 и
+           ellipsis, поэтому при нехватке места обрезается он, а не бейдж.
+           order/margin-left выравнивают пару «согильдейцы + рейтинг»
+           вправо: иначе третий элемент сдвинул бы чип рейтинга в центр. */
+        .arb-ch > .lgu-guild-foe-warn { order: 2; margin-left: auto; flex: 0 0 auto; max-width: 60%; }
+        .arb-ch > .arb-chip { order: 3; }
+        .arb-ch > .arb-cn { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+        /* Контейнер бейджей на экране подготовки к атаке (ar-foe):
+           встаёт сразу под заголовком «Отряд соперника». */
+        .lgu-arena-card-badge {
+            display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+            margin: 4px 0 8px;
+        }
+        .lgu-arena-card-badge .lgu-win-chance { margin: 0; }
+        .lgu-arena-card-badge .lgu-guild-foe-warn { margin-left: 0; }
+
+        /* Подсветка слота согильдейца прямо на поле боя (.arb-scene).
+           Класс ставится только на контейнеры .ar-mw-lb / .ar-mw-h:
+           textContent, отступы и шрифт .ar-mw-n не трогаем — иначе
+           сломается нативный авто-подбор размера шрифта fitBand(). */
+        .arb-card .ar-mw-lb.lgu-ally-slot {
+            background: rgba(47, 107, 26, 0.52);
+            box-shadow: inset 0 0 0 1.5px #6ee787;
+            border-radius: 6px;
+        }
+        .arb-card .ar-mw-lb.lgu-ally-slot .ar-mw-lv {
+            outline: 2px solid #4ade80;
+            box-shadow: 0 0 6px rgba(74, 222, 128, 0.8);
+        }
+        .arb-card .ar-mw-lb.lgu-ally-slot .ar-mw-n {
+            color: #86efac !important;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+        }
+        .arb-card .ar-mw-h.lgu-ally-slot {
+            filter: drop-shadow(0 0 5px rgba(74, 222, 128, 0.85));
+        }
+
+
     `;

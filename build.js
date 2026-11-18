@@ -104,6 +104,12 @@ const SHARED_MODULES = [
     // main.js вызывает GuildStats.init() в boot(); место в списке —
     // до CHAT_MODULES, фасад chat.js по контракту склеивается последним.
     'modules/guild-stats.js',
+    // «Арена» (modules/arena.js) — оценка шанса победы, детект согильдейцев
+    // в отряде противника и вкладка «Согильдейцы» в модалке приглашения.
+    // Идёт после guild-stats.js: берёт из него состав гильдии (_guildData,
+    // _legionCache) и уровень/класс участников. Хуки — только через
+    // core/hooks.js (LGArena.open), window.fetch не патчится.
+    'modules/arena.js',
     // Чат — отдельным блоком в конце (см. CHAT_MODULES): фасад chat.js
     // обязан склеиться последним, чтобы main.js увидел готовый Chat.
     ...CHAT_MODULES
