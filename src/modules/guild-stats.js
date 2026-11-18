@@ -1,7 +1,8 @@
     // ============================================================
     // 6.7. МОДУЛЬ: СОСТАВ ГИЛЬДИИ ДЛЯ ОФИЦЕРОВ (modules/guild-stats.js)
     //
-    // Патч 11.6.6c (+ 11.6.6c.1: уровни и классы). В окне «Гильдии альянса»
+    // Патч 11.6.6c (+ 11.6.6c.1: уровни и классы, + 11.6.8: сборы у стен).
+    // В окне «Гильдии альянса»
     // (.gl-modal) на вкладке «Участники» дописывает к нику бейджи: уровень,
     // класс, онлайн и где, длительность сессии, «был N назад», друг ли игрок,
     // мут и ожидание переезда.
@@ -11,7 +12,9 @@
     //     (role, joinedAt, pending, mutedUntil);
     //   - права: G.LGGuilds.index() -> mine.member.role;
     //   - уровень и класс: GET /api/legion -> roster[] (до 120 героев) и
-    //     roles{} + фолбэк на своего героя G.ME.hero;
+    //     roles{}; 11.6.8 — второй источник POST /api/citymon/act {op:'elist'}
+    //     (состав открытых сборов элитных у стен, кэш _citymonCache);
+    //     фолбэк — свой герой G.ME.hero;
     //   - онлайн и история заходов: window.__lgOnlinePlayers
     //     ({ loc, ts, firstSeen, src }, см. Utils.updateOnlinePlayers);
     //   - друзья: G.LGFriends.friends() / G.LGFriends.state(login).
@@ -49,6 +52,13 @@
         _legionAt: 0,
         // Предупреждение про пустой/битый ростер — не чаще раза в 5 минут.
         _legionWarnAt: 0,
+        // 11.6.8: кэш уровней и классов из открытых сборов элитных монстров
+        // у стен. Ростер /api/legion отдаёт только топ-120 героев канала, а в
+        // лобби сборов видны участники гильдии с реальным уровнем и классом.
+        // Ключи: lowercase логин и name; значение { level, role, roleName, at }.
+        _citymonCache: new Map(),
+        // Время последнего запроса /api/citymon/act (троттлинг).
+        _citymonFetchAt: 0,
         // Своя история первого обнаружения сессии: players.js (SSE/DOM/API)
         // перезаписывает записи window.__lgOnlinePlayers без firstSeen.
         _seen: new Map(),
@@ -59,6 +69,9 @@
         GUILD_TTL: 60000,
         FRIENDS_TTL: 60000,
         LEGION_TTL: 60000,
+        // Не чаще раза в минуту: сборы меняются не мгновенно, а окно
+        // гильдии перерисовывается куда чаще.
+        CITYMON_COOLDOWN_MS: 60000,
         MINE_TTL: 15000,
         // Шаг обновления «онлайн / был N назад» у открытого окна.
         TICK_MS: 30000,
@@ -110,6 +123,8 @@
             this._legionCache = null;
             this._legionAt = 0;
             this._legionWarnAt = 0;
+            this._citymonCache.clear();
+            this._citymonFetchAt = 0;
             this._seen.clear();
         },
 
@@ -297,6 +312,68 @@
             try { console.warn('[GuildStats] ' + msg, data === undefined ? '' : data); } catch (e) {}
         },
 
+        // 11.6.8: разбор ответа POST /api/citymon/act { op: 'elist' }.
+        // В лобби сборов элитных у стен игра отдаёт участников гильдии с
+        // полями { login, name, level, role }, включая тех, кого нет в
+        // топ-120 /api/legion. Складываем в _citymonCache по lowercase
+        // логину и по имени (бейджи ищут по обоим, см. _heroStats).
+        // rosterRoles — словарь roles{} из /api/legion для имени класса.
+        _parseCityMonLobbies(res, rosterRoles) {
+            // Utils.fetchApi кладёт тело и в body, и в корень ответа.
+            const body = (res && res.body && typeof res.body === 'object') ? res.body : res;
+            if (!body || body.ok === false || !Array.isArray(body.list)) return 0;
+
+            const roles = rosterRoles
+                || (this._legionCache && this._legionCache.roles)
+                || null;
+            const at = Date.now();
+            let added = 0;
+
+            for (const lobby of body.list) {
+                if (!lobby || !Array.isArray(lobby.members)) continue;
+                for (const m of lobby.members) {
+                    if (!m || typeof m !== 'object') continue;
+                    const login = String(m.login || '').trim().toLowerCase();
+                    const name = String(m.name || '').trim();
+                    const role = m.role ? String(m.role) : '';
+                    const entry = {
+                        level: Number(m.level) || 0,
+                        role,
+                        roleName: this._roleName(role, roles),
+                        at
+                    };
+
+                    const keys = [login];
+                    const nameKey = name.toLowerCase();
+                    if (nameKey && nameKey !== login) keys.push(nameKey);
+                    for (const key of keys) {
+                        if (!key) continue;
+                        this._citymonCache.set(key, entry);
+                        added += 1;
+                    }
+                }
+            }
+            return added;
+        },
+
+        // 11.6.8: запрос открытых сборов у стен с троттлингом.
+        // _citymonFetchAt ставим ДО запроса: параллельный вызов (тик окна
+        // и мутация DOM) не должен уйти вторым запросом. Ошибки глушим —
+        // окно гильдии обязано рисоваться и без сборов.
+        async fetchCityMonLobbies() {
+            const now = Date.now();
+            if (now - this._citymonFetchAt < this.CITYMON_COOLDOWN_MS) return 0;
+            this._citymonFetchAt = now;
+
+            let res = null;
+            try {
+                res = await Utils.fetchApi('/api/citymon/act', { op: 'elist' });
+            } catch (e) {
+                return 0;
+            }
+            return this._parseCityMonLobbies(res);
+        },
+
         // Карта друзей: логин -> 'friends'. Остальные состояния (in/out/blocked)
         // берём точечно через G.LGFriends.state() в mergeStats().
         async getFriendsMap() {
@@ -322,10 +399,12 @@
             return map;
         },
 
-        // 11.6.6c.1: уровень и класс участника.
+        // 11.6.6c.1 (+ 11.6.8): уровень и класс участника.
         //   1) ростер /api/legion (до 120 героев канала);
-        //   2) свой герой G.ME.hero — если строка про тебя (логин/имя);
-        //   3) данных нет — level 0 (бейдж «ур. —»), класс не рисуем.
+        //   2) кэш сборов у стен _citymonCache (11.6.8) — для остальных;
+        //   3) свой герой G.ME.hero — если строка про тебя (логин/имя);
+        //   4) данных нет — level 0 (бейдж «ур. —»), класс не рисуем.
+        // src возвращаем наружу: по нему _injectBadges() рисует подсказку.
         _heroStats(member, domNick, roster) {
             const api = member || {};
             const login = String(api.login || '').trim().toLowerCase();
@@ -340,7 +419,27 @@
                         return {
                             level: hit.level,
                             role: hit.role,
-                            roleName: hit.roleName || this._roleName(hit.role, roster.roles)
+                            roleName: hit.roleName || this._roleName(hit.role, roster.roles),
+                            src: 'legion'
+                        };
+                    }
+                }
+            }
+
+            // 11.6.8: второй источник — открытые сборы элитных монстров у стен.
+            // Ростер /api/legion покрывает только топ-120 героев канала, а лобби
+            // сборов отдают уровень и класс всех участников гильдии в них.
+            // Запись без уровня и класса (level 0, role '') бесполезна — пропускаем,
+            // чтобы не перекрыть фолбэк на своего героя.
+            if (this._citymonCache && typeof this._citymonCache.get === 'function') {
+                for (const key of names) {
+                    const hit = this._citymonCache.get(key);
+                    if (hit && (hit.level || hit.role)) {
+                        return {
+                            level: Number(hit.level) || 0,
+                            role: hit.role || '',
+                            roleName: hit.roleName || this._roleName(hit.role, roster && roster.roles),
+                            src: 'citymon'
                         };
                     }
                 }
@@ -361,12 +460,13 @@
                     return {
                         level: Number(myHero.level) || 0,
                         role,
-                        roleName: myHero.roleName || this._roleName(role, roster && roster.roles)
+                        roleName: myHero.roleName || this._roleName(role, roster && roster.roles),
+                        src: 'me'
                     };
                 }
             }
 
-            return { level: 0, role: '', roleName: '' };
+            return { level: 0, role: '', roleName: '', src: '' };
         },
 
         // Сводит профиль участника (API), ник из DOM, карту онлайна, друзей
@@ -410,8 +510,8 @@
             const online = !!(on && ts && (now - ts) < this.ONLINE_TTL);
             const firstSeen = online ? (Number(on.firstSeen) || ts) : 0;
 
-            // 11.6.6c.1: уровень и класс из ростера /api/legion
-            // (фолбэк — свой герой G.ME.hero).
+            // 11.6.6c.1 (+ 11.6.8: сборы у стен) — уровень и класс из
+            // ростера /api/legion, кэша сборов или своего героя G.ME.hero.
             const hero = this._heroStats(api, domNick, roster);
 
             return {
@@ -422,6 +522,8 @@
                 role: hero.role,
                 roleName: hero.roleName,
                 level: hero.level,
+                // 11.6.8: источник уровня/класса (legion | citymon | me | '').
+                levelSrc: hero.src,
                 online,
                 loc: online ? (on.loc || null) : null,
                 src: online ? (on.src || null) : null,
@@ -498,6 +600,17 @@
                     if (m && m.tid != null) byTid.set(String(m.tid), m);
                 }
 
+                // 11.6.8: сборы у стен (POST /api/citymon/act {op:'elist'})
+                // пополняют уровни и классы участников, которых нет в топ-120
+                // /api/legion. Ходим только при реально открытом окне гильдии
+                // (.gl-modal) и не чаще CITYMON_COOLDOWN_MS — троттлинг внутри
+                // fetchCityMonLobbies(); словарь roles{} он берёт из уже
+                // загруженного ростера (_legionCache), поэтому вызываем ПОСЛЕ
+                // Promise.all выше, иначе класс из сборов остался бы без имени.
+                if (document.querySelector('.gl-modal')) {
+                    await this.fetchCityMonLobbies();
+                }
+
                 // 3. Бейджи по строкам. Строки без профиля в составе пропускаем:
                 // это чужой профиль гильдии (окно открыто на другой гильдии)
                 // или состав уже перерисовался — врать про онлайн нельзя.
@@ -545,15 +658,21 @@
 
             const badges = [];
 
-            // 11.6.6c.1: уровень и класс (ростер /api/legion, фолбэк G.ME.hero).
+            // 11.6.6c.1 (+ 11.6.8: сборы у стен): уровень и класс
+            // (ростер /api/legion -> кэш сборов -> свой герой G.ME.hero).
             // Уровень рисуем всегда — «ур. —» честно показывает, что данных нет.
+            const lvlTitle = !stats.level
+                ? 'Уровень неизвестен: героя нет ни в ростере /api/legion, ни в сборах у стен'
+                : (stats.levelSrc === 'citymon'
+                    ? 'Уровень героя (данные сборов у стен)'
+                    : (stats.levelSrc === 'me'
+                        ? 'Уровень своего героя (G.ME.hero)'
+                        : 'Уровень героя (данные /api/legion)'));
             badges.push({
                 cls: 'lgu-gbadge lgu-glvl',
                 raw: true,
                 text: stats.level ? `ур. ${stats.level}` : 'ур. —',
-                title: stats.level
-                    ? 'Уровень героя (данные /api/legion)'
-                    : 'Уровень неизвестен: героя нет в ростере /api/legion'
+                title: lvlTitle
             });
             if (stats.roleName) {
                 badges.push({
