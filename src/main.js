@@ -161,6 +161,11 @@
         //    приходит из хука LGArena.open (core/hooks.js), своих патчей
         //    window.fetch/LGMine модуль не делает.
         Arena.init();
+        // 📊 Статистика гильдии: четвёртая вкладка в нативном окне гильдии
+        //    (.gl-modal). Появляется только своему руководству/доверенным
+        //    (leader/lead/officer/trusted); данные — /api/guilds/guild
+        //    с кэшем в памяти, window.fetch не патчится.
+        GuildSummary.init();
         Chat.init();
 
         Chat.interceptEventSource();
@@ -191,6 +196,7 @@
             PocketCity,
             CombatAssistant,
             Arena,
+            GuildSummary,
             Party,
             Chat,
             DOM_IDS,
@@ -232,6 +238,9 @@
                 // Арена: снимаем MutationObserver, чистим кэши героев/состава
                 // и убираем свои бейджи и вкладку из живого DOM.
                 try { Arena.destroy?.(); } catch (e) {}
+                // Статистика гильдии: снимаем наблюдатель и capture-клик,
+                // чистим кэш состава и убираем вкладку/панель из .gl-modal.
+                try { GuildSummary.destroy?.(); } catch (e) {}
                 // ТЗ 11.6.0g-3: гасим поллинг /heartbeat + /users и
                 // MutationObserver нативной ленты (иначе после перезапуска
                 // скрипта остались бы два интервала).

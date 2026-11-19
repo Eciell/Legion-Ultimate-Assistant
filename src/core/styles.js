@@ -1234,5 +1234,150 @@
             box-shadow: 0 0 0 1.5px #86efac;
         }
 
+        /* ============================================================
+           «СТАТИСТИКА ГИЛЬДИИ» (modules/guild-summary.js)
+           Четвёртая вкладка в НАТИВНОМ окне гильдии (.gl-modal ->
+           .gl-tabs.gl-tabs1 -> .gl-pane). Палитра — переменные темы
+           reference/LegionFrontSRC/site/guilds.css / guilds2.css:
+           --gw-card, --gw-sep, --gw-line, --gw-rc, --gw-bt, --gw-title,
+           --gw-sel, --gw-acc. Своих цветов не вводим, чтобы сводка
+           совпадала с нативной карточкой в любом скине.
+           ============================================================ */
+        .gl-tabs1 .lgu-gl-tab { display: inline-flex; align-items: center; }
+        .gl-tabs1 .lgu-gl-tab > svg.i {
+            width: 18px; height: 18px; flex: none; margin-right: 5px;
+            display: block;
+        }
+        /* Нативная панель скрывается только на время показа нашей вкладки;
+           селектор повторяет .gl-wide .gl-pane, поэтому !important нужен. */
+        .gl-body > .gl-pane.lgu-gl-pane-hidden { display: none !important; }
+
+        .gl-pane.lgu-gl-stats-pane {
+            box-sizing: border-box;
+            color: var(--gw-ink, #2b1d18);
+            font-family: var(--gw-tx, system-ui, sans-serif);
+        }
+
+        .lgu-gl-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+            gap: 10px;
+            align-items: start;
+        }
+        .lgu-gl-card {
+            min-width: 0;
+            padding: 10px 12px 12px;
+            border: 2px solid var(--gw-sep, rgba(43, 29, 24, .15));
+            border-radius: var(--gw-rc, 12px);
+            background: var(--gw-card, #fff);
+        }
+        .lgu-gl-card-wide { grid-column: 1 / -1; }
+
+        .lgu-gl-h4 {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 8px; margin: 0 0 8px; padding-bottom: 6px;
+            border-bottom: 2px dashed var(--gw-sep, rgba(43, 29, 24, .15));
+            font: 400 15px/1.2 var(--gw-bt, 'Russo One', sans-serif);
+            color: var(--gw-title, #5a3458);
+        }
+        .lgu-gl-h4 > span {
+            font: 400 12px var(--gw-bt, 'Russo One', sans-serif);
+            color: var(--gw-mute, #6b5148);
+            white-space: nowrap;
+        }
+
+        /* Строки метрик: подпись слева, значение справа. */
+        .lgu-gl-rows { display: flex; flex-direction: column; }
+        .lgu-gl-row {
+            display: flex; align-items: baseline; justify-content: space-between;
+            gap: 10px; padding: 4px 0; font-size: 13.5px;
+            border-bottom: 1px dashed var(--gw-sep, rgba(43, 29, 24, .15));
+        }
+        .lgu-gl-row:last-child { border-bottom: 0; }
+        .lgu-gl-row > span { color: var(--gw-mute, #6b5148); }
+        .lgu-gl-row > b {
+            font: 400 14px var(--gw-bt, 'Russo One', sans-serif);
+            white-space: nowrap;
+        }
+        .lgu-gl-row > b.on { color: var(--gw-sel, #5a3458); }
+        .lgu-gl-row > b.warn { color: var(--gw-hot, #b2442c); }
+
+        /* Классы: название, доля и прогресс-бар (заливка --gw-sel). */
+        .lgu-gl-classes {
+            list-style: none; margin: 0; padding: 0;
+            display: flex; flex-direction: column; gap: 7px;
+        }
+        .lgu-gl-cl-head {
+            display: flex; align-items: baseline; justify-content: space-between;
+            gap: 8px; font-size: 13px;
+        }
+        .lgu-gl-cl-head > b {
+            font: 400 13.5px var(--gw-bt, 'Russo One', sans-serif);
+            color: var(--gw-title, #5a3458);
+        }
+        .lgu-gl-cl-head > span { color: var(--gw-mute, #6b5148); white-space: nowrap; }
+        .lgu-gl-bar {
+            height: 10px; margin-top: 3px; overflow: hidden;
+            border: 2px solid var(--gw-line, #2b1d18);
+            border-radius: 999px;
+            background: var(--gw-chip, rgba(43, 29, 24, .12));
+        }
+        .lgu-gl-bar > i {
+            display: block; height: 100%; width: 0; border-radius: 999px;
+            background: var(--gw-sel, #5a3458);
+            transition: width .25s;
+        }
+
+        /* Топ-5 по силе и список неактивных. */
+        .lgu-gl-top, .lgu-gl-idle {
+            list-style: none; margin: 0; padding: 0;
+            display: flex; flex-direction: column; gap: 4px;
+        }
+        .lgu-gl-toprow, .lgu-gl-idlerow {
+            display: flex; align-items: center; gap: 9px;
+            padding: 5px 7px;
+            border: 2px solid transparent;
+            border-radius: calc(var(--gw-rc, 12px) * .6);
+            background: var(--gw-soft, rgba(43, 29, 24, .04));
+        }
+        .lgu-gl-toprow.first {
+            border-color: var(--gw-acc, #ffcf4a);
+            background: var(--gw-hi, rgba(255, 207, 74, .2));
+        }
+        .lgu-gl-rank {
+            flex: none; display: grid; place-items: center;
+            width: 24px; height: 24px; border-radius: 50%;
+            background: var(--gw-sel, #5a3458);
+            color: var(--gw-on-sel, #fff1d6);
+            font: 400 12px var(--gw-bt, 'Russo One', sans-serif);
+        }
+        .lgu-gl-toprow.first .lgu-gl-rank {
+            background: var(--gw-acc, #ffcf4a);
+            color: var(--gw-on-acc, #2b1d18);
+        }
+        .lgu-gl-who { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+        .lgu-gl-who > b {
+            font: 400 13.5px var(--gw-bt, 'Russo One', sans-serif);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .lgu-gl-who > small { font-size: 11.5px; color: var(--gw-mute, #6b5148); }
+        .lgu-gl-power {
+            flex: none; white-space: nowrap;
+            font: 400 13.5px var(--gw-bt, 'Russo One', sans-serif);
+            color: var(--gw-title, #5a3458);
+        }
+        .lgu-gl-idledays {
+            flex: none; white-space: nowrap;
+            font: 400 13px var(--gw-bt, 'Russo One', sans-serif);
+            color: var(--gw-hot, #b2442c);
+        }
+
+        .lgu-gl-note { margin: 6px 0 0; font-size: 12.5px; color: var(--gw-mute, #6b5148); }
+        .lgu-gl-foot { margin-top: 10px; text-align: right; }
+
+        @media (max-width: 560px) {
+            .lgu-gl-grid { grid-template-columns: minmax(0, 1fr); }
+        }
+
 
     `;

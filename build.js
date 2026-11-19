@@ -105,6 +105,13 @@ const SHARED_MODULES = [
     // arena2.js (.av-off / .av-fwin / .av-invwin). Хуки — только через
     // core/hooks.js (LGArena.open), window.fetch не патчится.
     'modules/arena.js',
+    // «Статистика гильдии» (modules/guild-summary.js) — четвёртая вкладка
+    // в НАТИВНОМ окне гильдии (guilds2.js: .gl-modal / .gl-tabs1 / .gl-pane).
+    // Модуль автономен: id гильдии берёт из G.ME / G.LGGuilds.index(),
+    // состав — GET /api/guilds/guild с кэшем в Map (TTL 60 c). window.fetch,
+    // LGMine.open/onEvent не патчатся, localStorage не используется.
+    // main.js вызывает init() в boot(), destroy() — в shutdown().
+    'modules/guild-summary.js',
     // Чат — отдельным блоком в конце (см. CHAT_MODULES): фасад chat.js
     // обязан склеиться последним, чтобы main.js увидел готовый Chat.
     ...CHAT_MODULES
