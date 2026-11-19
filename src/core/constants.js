@@ -48,7 +48,7 @@
         // Модуль «Арена» (modules/arena.js): собственные классы/идентификаторы
         // вставок. Префикс RAND_ID нужен, чтобы после перезапуска скрипта
         // stale-копии можно было найти и убрать в destroy(), не задевая
-        // нативную разметку арены (.arb / .ar-mw8).
+        // нативную разметку арены (.arb / .av-root.av-wrap.arb в arena2.js).
         arenaBadgeBox: `${RAND_ID}-arena-badge-box`,
         arenaWinChance: `${RAND_ID}-arena-win-chance`,
         arenaFoeWarn: `${RAND_ID}-arena-foe-warn`,

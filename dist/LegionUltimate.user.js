@@ -78,7 +78,7 @@
         // Модуль «Арена» (modules/arena.js): собственные классы/идентификаторы
         // вставок. Префикс RAND_ID нужен, чтобы после перезапуска скрипта
         // stale-копии можно было найти и убрать в destroy(), не задевая
-        // нативную разметку арены (.arb / .ar-mw8).
+        // нативную разметку арены (.arb / .av-root.av-wrap.arb в arena2.js).
         arenaBadgeBox: `${RAND_ID}-arena-badge-box`,
         arenaWinChance: `${RAND_ID}-arena-win-chance`,
         arenaFoeWarn: `${RAND_ID}-arena-foe-warn`,
@@ -1039,7 +1039,7 @@
                         // 11.6.6c: firstSeen — время первого обнаружения сессии.
                         // Пауза больше 5 минут считается новым заходом: SSE-события
                         // города/шахты обновляют ts постоянно, так что «тишина»
-                        // означает выход игрока (модуль guild-stats.js).
+                        // означает выход игрока (трекер онлайна аддона).
                         const nickKey = nick.toLowerCase();
                         const prev = window.__lgOnlinePlayers.get(nickKey);
                         const firstSeen = (prev && (now - prev.ts < 300_000)) ? (prev.firstSeen || prev.ts) : now;
@@ -2299,11 +2299,10 @@
         .hp-gear-pill.ok { color: #1d1620; background: #8ff2a0; }
         .hp-gear-pill.bad { color: #1d1620; background: #ffb3a0; }
 
-        /* 11.6.6c: «Гильдия» — расширенный состав для офицеров
-           (modules/guild-stats.js). Бейджи висят после <b> с ником внутри
-           .gl-mn и НЕ перехватывают клики: pointer-events здесь не
-           переопределяем, на строке висит контекстное меню действий
-           (li.gl-hasm в нативной разметке гильдий). */
+        /* 11.6.6c: палитра компактных бейджей участников (уровень, класс,
+           роль, онлайн). v11.7: игра нативно показывает уровни, классы, силу
+           и онлайн согильдейцев, поэтому окно гильдий аддон больше не
+           размечает — правила оставлены как общая палитра для бейджей. */
         .lgu-guild-badges {
             display: inline-flex; flex-wrap: wrap; align-items: center;
             gap: 4px; margin-left: 6px; vertical-align: middle;
@@ -2343,78 +2342,61 @@
 
         /* «Арена» (modules/arena.js): бейдж шанса победы, плашка
            согильдейцев и подсветка слотов. Палитра — нативная светлая
-           карточка Арены (reference/LegionFrontSRC/site/arena.css:
-           --gw-card: #fff, --gw-sep, --gw-rc, --gw-bt, --ar-win/--ar-lose). */
+           карточка новой арены (reference/LegionFrontSRC/site/arena2.css:
+           --gw-sep, --gw-soft, --gw-line, --gw-bt, --ar-win/--ar-lose). */
 
-        /* Бейдж шанса победы — в стиле .arb-gain: светлая карточка,
-           тонкая коричневая рамка, шрифт заголовков Арены. */
+        /* Бейдж шанса победы — в стиле .av-gain: светлая «пилюля» с рамкой,
+           шрифт заголовков арены. */
         .lgu-win-chance {
-            margin: 6px 0 0;
-            padding: 5px 10px;
-            border: 2px solid var(--gw-sep, rgba(43, 29, 24, .12));
-            border-radius: var(--gw-rc, 12px);
-            background: var(--gw-card, #fff);
-            color: var(--ar-win, #2f6b1a);
-            font: var(--gw-btw, 400) 13px var(--gw-bt, 'Russo One', system-ui, sans-serif);
-            line-height: 1.25;
+            display: flex;
+            align-items: center;
+            border-radius: 999px;
+            border: 2px solid var(--gw-sep, rgba(43, 29, 24, .2));
+            background: var(--gw-soft, rgba(255, 255, 255, .7));
+            font: 800 13px var(--gw-bt, 'Russo One', sans-serif);
+            padding: 5px 12px;
             text-align: center;
-            white-space: nowrap;
+            justify-content: center;
             cursor: help;
         }
         .lgu-win-chance.high {
-            background: #f1f9ed;
-            border: 2px solid rgba(47, 107, 26, .28);
+            background: #eef8e8;
+            border-color: rgba(47, 107, 26, .35);
             color: var(--ar-win, #2f6b1a);
         }
         .lgu-win-chance.mid {
-            background: #fff9e6;
-            border: 2px solid rgba(176, 118, 12, .28);
+            background: #fff8e2;
+            border-color: rgba(176, 118, 12, .35);
             color: #8a5800;
         }
         .lgu-win-chance.low {
-            background: #fdf0ed;
-            border: 2px solid rgba(163, 48, 28, .28);
+            background: #fdeceb;
+            border-color: rgba(163, 48, 28, .35);
             color: var(--ar-lose, #a3301c);
         }
-        /* Карточка соперника — display:grid с gap 10px (arena.css:393),
-           поэтому внутри неё бейдж идёт отдельной строкой без своего
-           внешнего отступа. */
-        .arb-card > .lgu-win-chance { margin: 0; }
+        /* .av-panel.av-off — блочная карточка с padding 12px, поэтому бейдж
+           встаёт отдельной строкой перед .av-gain без своего отступа. */
+        .av-panel.av-off > .lgu-win-chance { margin: 2px 0 0; }
 
-        /* Плашка «Согильдейцы» — единый стиль с .arb-chip.sm, но в
-           светло-зелёной гамме согильдейцев, чтобы не спорить с тёмным
-           бейджем рейтинга. В шапке текст компактный (см. arena.js),
+        /* Плашка «Согильдейцы» — нативная «пилюля» .av-chip в зелёной гамме,
+           чтобы не спорить с чипом рейтинга. margin-left: auto прижимает пару
+           «бейдж + чип» вправо в .av-oh (display:flex;
+           justify-content:space-between). Текст компактный (arena.js),
            полный список имён — всегда в title. */
         .lgu-guild-foe-warn {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
+            background: #e0f2d8;
+            color: #1e4a12;
+            border: 2px solid var(--gw-line, #2b1d18);
+            border-radius: 999px;
+            font: 800 12px var(--gw-bt, 'Russo One', sans-serif);
             padding: 3px 9px;
-            border-radius: var(--gw-rc, 12px);
-            border: 2px solid rgba(47, 107, 26, .35);
-            background: var(--gw-ok, #e0f2d8);
-            color: var(--gw-on-ok, #1e4a12);
-            font: var(--gw-btw, 400) 12px var(--gw-bt, 'Russo One', system-ui, sans-serif);
-            line-height: 1.3;
             white-space: nowrap;
             flex-shrink: 0;
-            max-width: 100%;
-            vertical-align: middle;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            margin-left: auto;
             cursor: help;
         }
-        /* .arb-ch — flex с space-between (arena.css:394): плашка не должна
-           распирать шапку. Ник (.arb-cn) сохраняет min-width: 0 и
-           ellipsis, поэтому при нехватке места обрезается он, а не бейдж.
-           order/margin-left выравнивают пару «согильдейцы + рейтинг»
-           вправо: иначе третий элемент сдвинул бы чип рейтинга в центр. */
-        .arb-ch > .lgu-guild-foe-warn { order: 2; margin-left: auto; flex: 0 0 auto; max-width: 60%; }
-        .arb-ch > .arb-chip { order: 3; }
-        .arb-ch > .arb-cn { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
-        /* Контейнер бейджей на экране подготовки к атаке (ar-foe):
-           встаёт сразу под заголовком «Отряд соперника». */
+        /* Контейнер бейджей окна боя (.av-fwin): встаёт перед .av-fbtns. */
         .lgu-arena-card-badge {
             display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
             margin: 4px 0 8px;
@@ -2422,25 +2404,22 @@
         .lgu-arena-card-badge .lgu-win-chance { margin: 0; }
         .lgu-arena-card-badge .lgu-guild-foe-warn { margin-left: 0; }
 
-        /* Подсветка слота согильдейца прямо на поле боя (.arb-scene).
-           Класс ставится только на контейнеры .ar-mw-lb / .ar-mw-h:
-           textContent, отступы и шрифт .ar-mw-n не трогаем — иначе
-           сломается нативный авто-подбор размера шрифта fitBand(). */
-        .arb-card .ar-mw-lb.lgu-ally-slot {
-            background: rgba(47, 107, 26, 0.52);
-            box-shadow: inset 0 0 0 1.5px #6ee787;
-            border-radius: 6px;
+        /* Подсветка согильдейца на мини-сцене карточки (.av-mh.av-pN) и на
+           поле боя (.av-hero.av-foe). Класс ставится только на контейнер:
+           textContent, отступы и --fs внутри .av-nm не трогаем — иначе
+           сломается нативный подбор размера шрифта ника (nm() в arena2.js). */
+        .av-mh.lgu-ally-slot .av-nm {
+            background: rgba(34, 98, 26, .92) !important;
+            box-shadow: 0 0 0 1.5px #86efac;
         }
-        .arb-card .ar-mw-lb.lgu-ally-slot .ar-mw-lv {
-            outline: 2px solid #4ade80;
-            box-shadow: 0 0 6px rgba(74, 222, 128, 0.8);
+        .av-mh.lgu-ally-slot .av-nm span { color: #bbf7d0 !important; }
+        .av-mh.lgu-ally-slot .av-f,
+        .av-hero.av-foe.lgu-ally-slot .av-f {
+            filter: drop-shadow(0 0 5px rgba(74, 222, 128, .9));
         }
-        .arb-card .ar-mw-lb.lgu-ally-slot .ar-mw-n {
-            color: #86efac !important;
-            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
-        }
-        .arb-card .ar-mw-h.lgu-ally-slot {
-            filter: drop-shadow(0 0 5px rgba(74, 222, 128, 0.85));
+        .av-hero.av-foe.lgu-ally-slot .av-nm {
+            background: rgba(34, 98, 26, .92) !important;
+            box-shadow: 0 0 0 1.5px #86efac;
         }
 
 
@@ -12901,849 +12880,62 @@ const Players = {
         }
     };
 
-    // ===== src/modules/guild-stats.js =====
-    // ============================================================
-    // 6.7. МОДУЛЬ: СОСТАВ ГИЛЬДИИ ДЛЯ ОФИЦЕРОВ (modules/guild-stats.js)
-    //
-    // Патч 11.6.6c (+ 11.6.6c.1: уровни и классы, + 11.6.8: сборы у стен).
-    // В окне «Гильдии альянса»
-    // (.gl-modal) на вкладке «Участники» дописывает к нику бейджи: уровень,
-    // класс, онлайн и где, длительность сессии, «был N назад», друг ли игрок,
-    // мут и ожидание переезда.
-    //
-    // Источники данных (docs/API.md):
-    //   - состав и роли: GET /api/guilds/guild?id=<guildId> -> members[]
-    //     (role, joinedAt, pending, mutedUntil);
-    //   - права: G.LGGuilds.index() -> mine.member.role;
-    //   - уровень и класс: GET /api/legion -> roster[] (до 120 героев) и
-    //     roles{}; 11.6.8 — второй источник POST /api/citymon/act {op:'elist'}
-    //     (состав открытых сборов элитных у стен, кэш _citymonCache);
-    //     фолбэк — свой герой G.ME.hero;
-    //   - онлайн и история заходов: window.__lgOnlinePlayers
-    //     ({ loc, ts, firstSeen, src }, см. Utils.updateOnlinePlayers);
-    //   - друзья: G.LGFriends.friends() / G.LGFriends.state(login).
-    //
-    // Модуль работает ТОЛЬКО у руководства: leader / lead / officer.
-    // member / novice / trusted ничего не получают — ни бейджей, ни запросов.
-    //
-    // Подключается после core/ui.js (SHARED_MODULES в build.js), поэтому
-    // G/Utils уже объявлены; main.js вызывает init() в boot().
-    // ============================================================
-    const GuildStats = {
-        _observer: null,
-        _timer: null,
-        // Склейка нескольких мутаций в один проход.
-        _scheduled: false,
-        // Защита от повторного входа: _refresh() асинхронный.
-        _busy: false,
-        // Наша собственная инъекция — тоже мутация, поэтому ставим флаг.
-        _injecting: false,
-        _lastRun: 0,
-
-        // Кэш профиля гильдии: состав меняется редко, окно открывают повторно.
-        _guildId: null,
-        _guildData: null,
-        _guildAt: 0,
-        // Снимок LGGuilds.index(): своя роль и id гильдии.
-        _mine: null,
-        _mineAt: 0,
-        // Друзья: LGFriends.friends() отдаёт массив логинов (кэш игры 60 с).
-        _friends: null,
-        _friendsAt: 0,
-        // 11.6.6c.1: ростер /api/legion — уровни и классы для бейджей.
-        // { byLogin: Map<логин|имя, {level, role, roleName}>, roles, at, total }.
-        _legionCache: null,
-        _legionAt: 0,
-        // Предупреждение про пустой/битый ростер — не чаще раза в 5 минут.
-        _legionWarnAt: 0,
-        // 11.6.8: кэш уровней и классов из открытых сборов элитных монстров
-        // у стен. Ростер /api/legion отдаёт только топ-120 героев канала, а в
-        // лобби сборов видны участники гильдии с реальным уровнем и классом.
-        // Ключи: lowercase логин и name; значение { level, role, roleName, at }.
-        _citymonCache: new Map(),
-        // Время последнего запроса /api/citymon/act (троттлинг).
-        _citymonFetchAt: 0,
-        // Своя история первого обнаружения сессии: players.js (SSE/DOM/API)
-        // перезаписывает записи window.__lgOnlinePlayers без firstSeen.
-        _seen: new Map(),
-
-        // Игрока не видели 5 минут — сессия считается завершённой. Тот же
-        // порог, по которому updateOnlinePlayers() начинает новый firstSeen.
-        ONLINE_TTL: 300000,
-        GUILD_TTL: 60000,
-        FRIENDS_TTL: 60000,
-        LEGION_TTL: 60000,
-        // Не чаще раза в минуту: сборы меняются не мгновенно, а окно
-        // гильдии перерисовывается куда чаще.
-        CITYMON_COOLDOWN_MS: 60000,
-        MINE_TTL: 15000,
-        // Шаг обновления «онлайн / был N назад» у открытого окна.
-        TICK_MS: 30000,
-
-        // Основной селектор из ТЗ (в некоторых сборках игры у .gl-pane есть
-        // data-tab) и фолбэк на фактическую разметку reference/.../guilds.js,
-        // где data-tab висит только на кнопках .gl-tabs.
-        MEM_SELECTOR: '.gl-modal .gl-pane[data-tab="mem"] ul.gl-mem li[data-mtid]',
-        MEM_FALLBACK: '.gl-modal .gl-pane ul.gl-mem li[data-mtid]',
-
-        init() {
-            // Повторный init (перезапуск скрипта) не должен плодить наблюдатели.
-            if (this._observer) return;
-            if (typeof MutationObserver === 'undefined') return;
-
-            this._observer = new MutationObserver(() => this._onMutation());
-            // Только childList: атрибуты нам не нужны, а в городе их сотни.
-            // Окно гильдий игра создаёт в body и перерисовывает панель целиком.
-            this._observer.observe(document.body, { childList: true, subtree: true });
-
-            // Пока окно открыто — раз в 30 с обновляем «онлайн / был N назад»
-            // даже без мутаций: время идёт, а DOM стоит.
-            this._timer = setInterval(() => {
-                if (!document.querySelector('.gl-modal')) return;
-                if (!this._rows().length) return;
-                this._refresh(false).catch(() => {});
-            }, this.TICK_MS);
-        },
-
-        // Гасим наблюдатель и таймер при перезапуске скрипта (shutdown в main.js).
-        destroy() {
-            if (this._observer) {
-                try { this._observer.disconnect(); } catch (e) {}
-            }
-            this._observer = null;
-            if (this._timer) clearInterval(this._timer);
-            this._timer = null;
-            this._scheduled = false;
-            this._busy = false;
-            this._injecting = false;
-            this._lastRun = 0;
-            this._guildId = null;
-            this._guildData = null;
-            this._guildAt = 0;
-            this._mine = null;
-            this._mineAt = 0;
-            this._friends = null;
-            this._friendsAt = 0;
-            this._legionCache = null;
-            this._legionAt = 0;
-            this._legionWarnAt = 0;
-            this._citymonCache.clear();
-            this._citymonFetchAt = 0;
-            this._seen.clear();
-        },
-
-        // Руководство гильдии. trusted намеренно исключён: у него нет прав
-        // на управление составом (docs/API.md, «Иерархия ролей»).
-        isOfficer(role) {
-            return role === 'leader' || role === 'lead' || role === 'officer';
-        },
-
-        // Полный профиль гильдии: состав, роли, pending, мут.
-        async fetchGuildData(guildId) {
-            const id = (guildId == null) ? '' : String(guildId);
-            if (!id) return null;
-
-            const now = Date.now();
-            if (this._guildId === id && this._guildData && (now - this._guildAt) < this.GUILD_TTL) {
-                return this._guildData;
-            }
-
-            let res = null;
-            try {
-                // Utils.fetchApi добавляет префикс /c/<канал>/ (см. core/utils-api.js)
-                // и кладёт данные и в body, и в корень ответа.
-                res = await Utils.fetchApi('/api/guilds/guild?id=' + encodeURIComponent(id));
-            } catch (e) {
-                return null;
-            }
-
-            const body = (res && res.body) || res;
-            if (!body || body.ok === false || !Array.isArray(body.members)) return null;
-
-            this._guildId = id;
-            this._guildData = body;
-            this._guildAt = now;
-            return body;
-        },
-
-        // Снимок индекса гильдий: своя роль и гильдия. У игры ответ кэшируется
-        // внутри, но мы держим свой короткий TTL — окно может перерисовываться.
-        async _mineIndex(force) {
-            const now = Date.now();
-            if (!force && this._mine && (now - this._mineAt) < this.MINE_TTL) return this._mine;
-
-            const LGG = G.LGGuilds;
-            if (!LGG || typeof LGG.index !== 'function') return null;
-
-            let res = null;
-            try { res = await LGG.index(); } catch (e) { return null; }
-            if (!res || typeof res !== 'object') return null;
-
-            this._mine = res;
-            this._mineAt = now;
-            return res;
-        },
-
-        // Карта онлайна из трекера сессий: ключ — ник в нижнем регистре.
-        getLegionMap() {
-            const map = new Map();
-            const src = window.__lgOnlinePlayers || G.__lgOnlinePlayers;
-            if (!src || typeof src.forEach !== 'function') return map;
-
-            const now = Date.now();
-            // Верхняя граница длительности сессии: раньше запуска аддона
-            // мы о заходе игрока знать не могли (см. core/constants.js).
-            const started = Number(G.__lguStartTime) || 0;
-
-            src.forEach((info, nick) => {
-                if (!info) return;
-                const key = String(nick || '').trim().toLowerCase();
-                if (!key) return;
-
-                const ts = Number(info.ts) || 0;
-                if (!ts) return;
-                const prev = map.get(key);
-                // Одна запись обновляется из SSE/DOM/API — берём самое свежее.
-                if (prev && (prev.ts || 0) >= ts) return;
-
-                // players.js перезаписывает записи трекера без firstSeen,
-                // поэтому историю дублируем в _seen: пока разрыв между
-                // наблюдениями меньше ONLINE_TTL, это та же сессия.
-                const memo = this._seen.get(key);
-                const seamless = !!(memo && (ts - memo.ts) < this.ONLINE_TTL);
-                let firstSeen = seamless ? memo.firstSeen : (Number(info.firstSeen) || ts);
-                if (!firstSeen || firstSeen > ts) firstSeen = ts;
-                if (started > 0 && firstSeen < started) firstSeen = started;
-                this._seen.set(key, { ts, firstSeen });
-
-                map.set(key, {
-                    loc: info.loc || null,
-                    ts,
-                    firstSeen,
-                    src: info.src || null
-                });
-            });
-
-            // Чистим историю давно ушедших, чтобы Map не рос бесконечно.
-            if (this._seen.size > 500) {
-                for (const [k, v] of this._seen) {
-                    if ((now - v.ts) > 86400000) this._seen.delete(k);
-                }
-            }
-            return map;
-        },
-
-        // 11.6.6c.1: ростер /api/legion — единственный массовый источник
-        // уровня и класса (docs/API.md, «GET /api/legion»). В ответе до 120
-        // самых опытных героев канала, поэтому для остальных участников
-        // уровень останется «ур. —», а класс не рисуется.
-        async fetchLegionRoster(force) {
-            const now = Date.now();
-            if (!force && this._legionCache && (now - this._legionAt) < this.LEGION_TTL) {
-                return this._legionCache;
-            }
-
-            let res = null;
-            try {
-                res = await Utils.fetchApi('/api/legion');
-            } catch (e) {
-                this._warnLegion('запрос /api/legion упал: ' + (e && e.message ? e.message : e));
-                return this._legionCache;
-            }
-
-            const body = (res && res.body) || res;
-            if (!body || body.ok === false) {
-                this._warnLegion('ответ /api/legion без ok', body);
-                return this._legionCache;
-            }
-
-            const roles = (body.roles && typeof body.roles === 'object') ? body.roles : {};
-            const roster = Array.isArray(body.roster) ? body.roster : [];
-            const byLogin = new Map();
-
-            for (const h of roster) {
-                if (!h) continue;
-                const keys = [h.login, h.name]
-                    .filter(Boolean)
-                    .map((s) => String(s).trim().toLowerCase());
-                if (!keys.length) continue;
-                const role = h.role ? String(h.role) : '';
-                const entry = {
-                    level: Number(h.level) || 0,
-                    role,
-                    roleName: this._roleName(role, roles),
-                    ghost: !!h.ghost
-                };
-                for (const key of keys) if (key) byLogin.set(key, entry);
-            }
-
-            // Пустой ростер — не ошибка (права/сезон/пустой канал), но
-            // молча терять уровни нельзя: один warn в 5 минут в консоль.
-            if (!roster.length) {
-                this._warnLegion('/api/legion вернул пустой ростер: уровни и классы недоступны');
-            }
-
-            this._legionCache = {
-                byLogin,
-                roles,
-                at: Number(body.at) || now,
-                total: body.total || null
-            };
-            this._legionAt = now;
-            return this._legionCache;
-        },
-
-        // Имя класса: сначала словарь roles из /api/legion, затем classes
-        // из /api/me (G.ME.classes), иначе пусто — бейдж не рисуем.
-        _roleName(role, roles) {
-            const id = String(role || '');
-            if (!id) return '';
-            if (roles && roles[id] && roles[id].name) return String(roles[id].name);
-            const me = G.ME;
-            if (me && Array.isArray(me.classes)) {
-                const hit = me.classes.find((c) => c && c.id === id);
-                if (hit && hit.name) return String(hit.name);
-            }
-            return '';
-        },
-
-        // console.warn про /api/legion: не чаще раза в 5 минут, чтобы тик
-        // обновления окна не заливал консоль.
-        _warnLegion(msg, data) {
-            const now = Date.now();
-            if (this._legionWarnAt && (now - this._legionWarnAt) < 300000) return;
-            this._legionWarnAt = now;
-            try { console.warn('[GuildStats] ' + msg, data === undefined ? '' : data); } catch (e) {}
-        },
-
-        // 11.6.8: разбор ответа POST /api/citymon/act { op: 'elist' }.
-        // В лобби сборов элитных у стен игра отдаёт участников гильдии с
-        // полями { login, name, level, role }, включая тех, кого нет в
-        // топ-120 /api/legion. Складываем в _citymonCache по lowercase
-        // логину и по имени (бейджи ищут по обоим, см. _heroStats).
-        // rosterRoles — словарь roles{} из /api/legion для имени класса.
-        _parseCityMonLobbies(res, rosterRoles) {
-            // Utils.fetchApi кладёт тело и в body, и в корень ответа.
-            const body = (res && res.body && typeof res.body === 'object') ? res.body : res;
-            if (!body || body.ok === false || !Array.isArray(body.list)) return 0;
-
-            const roles = rosterRoles
-                || (this._legionCache && this._legionCache.roles)
-                || null;
-            const at = Date.now();
-            let added = 0;
-
-            for (const lobby of body.list) {
-                if (!lobby || !Array.isArray(lobby.members)) continue;
-                for (const m of lobby.members) {
-                    if (!m || typeof m !== 'object') continue;
-                    const login = String(m.login || '').trim().toLowerCase();
-                    const name = String(m.name || '').trim();
-                    const role = m.role ? String(m.role) : '';
-                    const entry = {
-                        level: Number(m.level) || 0,
-                        role,
-                        roleName: this._roleName(role, roles),
-                        at
-                    };
-
-                    const keys = [login];
-                    const nameKey = name.toLowerCase();
-                    if (nameKey && nameKey !== login) keys.push(nameKey);
-                    for (const key of keys) {
-                        if (!key) continue;
-                        this._citymonCache.set(key, entry);
-                        added += 1;
-                    }
-                }
-            }
-            return added;
-        },
-
-        // 11.6.8: запрос открытых сборов у стен с троттлингом.
-        // _citymonFetchAt ставим ДО запроса: параллельный вызов (тик окна
-        // и мутация DOM) не должен уйти вторым запросом. Ошибки глушим —
-        // окно гильдии обязано рисоваться и без сборов.
-        async fetchCityMonLobbies() {
-            const now = Date.now();
-            if (now - this._citymonFetchAt < this.CITYMON_COOLDOWN_MS) return 0;
-            this._citymonFetchAt = now;
-
-            let res = null;
-            try {
-                res = await Utils.fetchApi('/api/citymon/act', { op: 'elist' });
-            } catch (e) {
-                return 0;
-            }
-            return this._parseCityMonLobbies(res);
-        },
-
-        // Карта друзей: логин -> 'friends'. Остальные состояния (in/out/blocked)
-        // берём точечно через G.LGFriends.state() в mergeStats().
-        async getFriendsMap() {
-            const now = Date.now();
-            if (this._friends && (now - this._friendsAt) < this.FRIENDS_TTL) return this._friends;
-
-            const map = new Map();
-            const F = G.LGFriends;
-            if (F && typeof F.friends === 'function') {
-                try {
-                    const list = await F.friends();
-                    for (const login of (Array.isArray(list) ? list : [])) {
-                        const key = String(login || '').trim().toLowerCase();
-                        if (key) map.set(key, 'friends');
-                    }
-                } catch (e) {
-                    // /api/friends не ответил — рисуем без метки друга.
-                }
-            }
-
-            this._friends = map;
-            this._friendsAt = now;
-            return map;
-        },
-
-        // 11.6.6c.1 (+ 11.6.8): уровень и класс участника.
-        //   1) ростер /api/legion (до 120 героев канала);
-        //   2) кэш сборов у стен _citymonCache (11.6.8) — для остальных;
-        //   3) свой герой G.ME.hero — если строка про тебя (логин/имя);
-        //   4) данных нет — level 0 (бейдж «ур. —»), класс не рисуем.
-        // src возвращаем наружу: по нему _injectBadges() рисует подсказку.
-        _heroStats(member, domNick, roster) {
-            const api = member || {};
-            const login = String(api.login || '').trim().toLowerCase();
-            const names = [api.name, api.login, domNick]
-                .filter(Boolean)
-                .map((s) => String(s).trim().toLowerCase());
-
-            if (roster && roster.byLogin && typeof roster.byLogin.get === 'function') {
-                for (const key of names) {
-                    const hit = roster.byLogin.get(key);
-                    if (hit) {
-                        return {
-                            level: hit.level,
-                            role: hit.role,
-                            roleName: hit.roleName || this._roleName(hit.role, roster.roles),
-                            src: 'legion'
-                        };
-                    }
-                }
-            }
-
-            // 11.6.8: второй источник — открытые сборы элитных монстров у стен.
-            // Ростер /api/legion покрывает только топ-120 героев канала, а лобби
-            // сборов отдают уровень и класс всех участников гильдии в них.
-            // Запись без уровня и класса (level 0, role '') бесполезна — пропускаем,
-            // чтобы не перекрыть фолбэк на своего героя.
-            if (this._citymonCache && typeof this._citymonCache.get === 'function') {
-                for (const key of names) {
-                    const hit = this._citymonCache.get(key);
-                    if (hit && (hit.level || hit.role)) {
-                        return {
-                            level: Number(hit.level) || 0,
-                            role: hit.role || '',
-                            roleName: hit.roleName || this._roleName(hit.role, roster && roster.roles),
-                            src: 'citymon'
-                        };
-                    }
-                }
-            }
-
-            // Фолбэк: у своего героя уровень и класс всегда известны.
-            const me = G.ME;
-            const myHero = me && (me.hero || me.me);
-            if (myHero) {
-                const myLogin = me.user ? String(me.user.login || '').trim().toLowerCase() : '';
-                const heroLogin = String(myHero.login || '').trim().toLowerCase();
-                const heroName = String(myHero.name || '').trim().toLowerCase();
-                const mine = (login && (login === myLogin || login === heroLogin))
-                    || (!!heroName && names.includes(heroName))
-                    || (!!myLogin && names.includes(myLogin));
-                if (mine) {
-                    const role = myHero.role || myHero.class || '';
-                    return {
-                        level: Number(myHero.level) || 0,
-                        role,
-                        roleName: myHero.roleName || this._roleName(role, roster && roster.roles),
-                        src: 'me'
-                    };
-                }
-            }
-
-            return { level: 0, role: '', roleName: '', src: '' };
-        },
-
-        // Сводит профиль участника (API), ник из DOM, карту онлайна, друзей
-        // и ростер /api/legion в один плоский объект для _injectBadges().
-        mergeStats(member, nick, legion, friends, now = Date.now(), roster = null) {
-            const api = member || {};
-            const domNick = String(nick || '').trim();
-            const apiNick = String(api.name || api.login || '').trim();
-            const login = String(api.login || '').trim();
-
-            // Трекер онлайна ключуется ником из чата (обычно имя героя),
-            // поэтому пробуем имя, логин и ник из DOM — первый найденный побеждает.
-            const keys = [apiNick, login, domNick]
-                .filter(Boolean)
-                .map((s) => s.toLowerCase());
-
-            let on = null;
-            let usedKey = '';
-            for (const key of keys) {
-                const hit = (legion && typeof legion.get === 'function') ? legion.get(key) : null;
-                if (hit) {
-                    on = hit;
-                    usedKey = key;
-                    break;
-                }
-            }
-
-            // Друзья в LGFriends хранятся по Twitch-логину.
-            let friend = null;
-            if (friends && typeof friends.get === 'function') {
-                friend = friends.get(login.toLowerCase()) || friends.get(domNick.toLowerCase()) || null;
-            }
-            if (!friend) {
-                const F = G.LGFriends;
-                if (F && typeof F.state === 'function') {
-                    try { friend = F.state(login || domNick) || null; } catch (e) { friend = null; }
-                }
-            }
-
-            const ts = on ? (Number(on.ts) || 0) : 0;
-            const online = !!(on && ts && (now - ts) < this.ONLINE_TTL);
-            const firstSeen = online ? (Number(on.firstSeen) || ts) : 0;
-
-            // 11.6.6c.1 (+ 11.6.8: сборы у стен) — уровень и класс из
-            // ростера /api/legion, кэша сборов или своего героя G.ME.hero.
-            const hero = this._heroStats(api, domNick, roster);
-
-            return {
-                tid: (api.tid != null) ? String(api.tid) : null,
-                nick: apiNick || domNick,
-                // Гильдейская роль (member/leader/...) и класс героя — разные вещи.
-                guildRole: api.role || null,
-                role: hero.role,
-                roleName: hero.roleName,
-                level: hero.level,
-                // 11.6.8: источник уровня/класса (legion | citymon | me | '').
-                levelSrc: hero.src,
-                online,
-                loc: online ? (on.loc || null) : null,
-                src: online ? (on.src || null) : null,
-                key: usedKey,
-                lastTs: ts,
-                firstSeen,
-                // Длительность текущей сессии: от первого обнаружения захода.
-                sessionMs: online ? Math.max(0, now - firstSeen) : 0,
-                offlineMs: (!online && ts) ? Math.max(0, now - ts) : 0,
-                friend,
-                joinedAt: Number(api.joinedAt) || 0,
-                pending: !!api.pending,
-                mutedUntil: Number(api.mutedUntil) || 0,
-                now
-            };
-        },
-
-        _onMutation() {
-            // Наша инъекция бейджей тоже мутация — иначе получили бы цикл.
-            if (this._injecting || this._scheduled) return;
-            this._scheduled = true;
-
-            const run = () => {
-                this._scheduled = false;
-                // Дешёвый фильтр: в городе и шахте модалки гильдий нет.
-                if (!document.querySelector('.gl-modal')) return;
-                if (!this._rows().length) return;
-                this._refresh(false).catch(() => {});
-            };
-            if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
-            else setTimeout(run, 100);
-        },
-
-        // Строки состава текущего окна. Разметка игры: li[data-mtid] внутри
-        // ul.gl-mem (заявки идут с data-req — они нам не нужны).
-        _rows() {
-            const rows = document.querySelectorAll(this.MEM_SELECTOR);
-            if (rows.length) return Array.from(rows);
-            return Array.from(document.querySelectorAll(this.MEM_FALLBACK));
-        },
-
-        async _refresh(force) {
-            if (this._busy) return;
-            if (!this._rows().length) return;
-
-            const now = Date.now();
-            if (!force && (now - this._lastRun) < 250) return;
-            this._lastRun = now;
-
-            this._busy = true;
-            try {
-                // 1. Права: без офицерской роли молчим и в API не ходим.
-                const idx = await this._mineIndex();
-                const me = (idx && idx.mine && idx.mine.member) ? idx.mine.member : null;
-                if (!me || !this.isOfficer(me.role)) {
-                    this._rows().forEach((li) => this._removeBadges(li));
-                    return;
-                }
-
-                // 2. Состав гильдии и сопутствующие карты.
-                const data = await this.fetchGuildData(me.guild);
-                if (!data) return;
-
-                const legion = this.getLegionMap();
-                // 11.6.6c.1: ростер /api/legion и друзья грузим ДО обхода
-                // строк, иначе первый проход рисовал бы «ур. —» без класса.
-                const [roster, friends] = await Promise.all([
-                    this.fetchLegionRoster(),
-                    this.getFriendsMap()
-                ]);
-
-                const byTid = new Map();
-                for (const m of (data.members || [])) {
-                    if (m && m.tid != null) byTid.set(String(m.tid), m);
-                }
-
-                // 11.6.8: сборы у стен (POST /api/citymon/act {op:'elist'})
-                // пополняют уровни и классы участников, которых нет в топ-120
-                // /api/legion. Ходим только при реально открытом окне гильдии
-                // (.gl-modal) и не чаще CITYMON_COOLDOWN_MS — троттлинг внутри
-                // fetchCityMonLobbies(); словарь roles{} он берёт из уже
-                // загруженного ростера (_legionCache), поэтому вызываем ПОСЛЕ
-                // Promise.all выше, иначе класс из сборов остался бы без имени.
-                if (document.querySelector('.gl-modal')) {
-                    await this.fetchCityMonLobbies();
-                }
-
-                // 3. Бейджи по строкам. Строки без профиля в составе пропускаем:
-                // это чужой профиль гильдии (окно открыто на другой гильдии)
-                // или состав уже перерисовался — врать про онлайн нельзя.
-                this._injecting = true;
-                let matched = 0;
-                const stamp = Date.now();
-                try {
-                    for (const li of this._rows()) {
-                        const tid = li.getAttribute('data-mtid');
-                        const member = byTid.get(String(tid)) || null;
-                        if (!member) {
-                            this._removeBadges(li);
-                            continue;
-                        }
-                        matched += 1;
-                        const stats = this.mergeStats(member, this._rowNick(li), legion, friends, stamp, roster);
-                        this._injectBadges(li, stats);
-                    }
-                } finally {
-                    this._injecting = false;
-                }
-
-                // Ни одна строка не совпала с составом своей гильдии — значит
-                // открыт профиль чужой гильдии: бейджи там не нужны.
-                if (!matched) this._rows().forEach((li) => this._removeBadges(li));
-            } finally {
-                this._busy = false;
-            }
-        },
-
-        // Ник из строки состава: <b> внутри .gl-mn. Игра дописывает «(ты)»
-        // в тот же <b>, поэтому суффикс вырезаем.
-        _rowNick(li) {
-            const b = li ? li.querySelector('.gl-mn > b') : null;
-            if (!b) return '';
-            return String(b.textContent || '').replace(/\(\s*ты\s*\)/ig, '').trim();
-        },
-
-        // Бейджи встают сразу после <b> с ником, внутри .gl-mn. pointer-events
-        // не переопределяем: на строке висит контекстное меню действий.
-        _injectBadges(li, stats) {
-            if (!li || !stats) return;
-            const nickEl = li.querySelector('.gl-mn > b');
-            if (!nickEl) return;
-
-            const badges = [];
-
-            // 11.6.6c.1 (+ 11.6.8: сборы у стен): уровень и класс
-            // (ростер /api/legion -> кэш сборов -> свой герой G.ME.hero).
-            // Уровень рисуем всегда — «ур. —» честно показывает, что данных нет.
-            const lvlTitle = !stats.level
-                ? 'Уровень неизвестен: героя нет ни в ростере /api/legion, ни в сборах у стен'
-                : (stats.levelSrc === 'citymon'
-                    ? 'Уровень героя (данные сборов у стен)'
-                    : (stats.levelSrc === 'me'
-                        ? 'Уровень своего героя (G.ME.hero)'
-                        : 'Уровень героя (данные /api/legion)'));
-            badges.push({
-                cls: 'lgu-gbadge lgu-glvl',
-                raw: true,
-                text: stats.level ? `ур. ${stats.level}` : 'ур. —',
-                title: lvlTitle
-            });
-            if (stats.roleName) {
-                badges.push({
-                    cls: `lgu-gbadge lgu-gcls lgu-cls-${stats.role || 'recruit'}`,
-                    raw: true,
-                    text: stats.roleName,
-                    title: stats.role ? `Класс героя: ${stats.role}` : 'Класс героя'
-                });
-            }
-
-            if (stats.online) {
-                // Город/шахта: подпись из loc трекера онлайна.
-                const where = stats.loc === 'mine' ? '⛏ шахта'
-                    : (stats.loc === 'city' ? '🏙 город' : '🟢 онлайн');
-                const title = `Онлайн: ${where} · найден ${this._formatAgo(stats.firstSeen)}`
-                    + (stats.src ? ` · источник: ${stats.src}` : '');
-                badges.push({ cls: stats.loc === 'mine' ? 'on mine' : 'on', text: where, title });
-
-                // Сессию короче минуты не показываем — это шум.
-                if (stats.sessionMs >= 60000) {
-                    badges.push({
-                        cls: 'time',
-                        text: '⏱ ' + this._formatDuration(stats.sessionMs),
-                        title: 'В игре с ' + new Date(stats.firstSeen).toLocaleTimeString('ru-RU')
-                    });
-                }
-            } else if (stats.lastTs) {
-                badges.push({
-                    cls: 'off',
-                    text: '⚪ был ' + this._formatAgo(stats.lastTs),
-                    title: 'Последняя активность: ' + new Date(stats.lastTs).toLocaleString('ru-RU')
-                });
-            } else {
-                badges.push({
-                    cls: 'off',
-                    text: '⚪ офлайн',
-                    title: 'Ни разу не попал в трекер онлайна аддона'
-                });
-            }
-
-            if (stats.friend === 'friends') {
-                badges.push({ cls: 'friend', text: '⭐ друг', title: 'Игрок у тебя в друзьях' });
-            } else if (stats.friend === 'in') {
-                badges.push({ cls: 'friend', text: '✉ зовёт', title: 'Прислал заявку в друзья' });
-            }
-
-            if (stats.mutedUntil > stats.now) {
-                badges.push({
-                    cls: 'warn',
-                    text: '🔇 мут',
-                    title: 'Мут в чате гильдии до ' + new Date(stats.mutedUntil).toLocaleString('ru-RU')
-                });
-            }
-            if (stats.pending) {
-                badges.push({ cls: 'warn', text: '⏳ переезд', title: 'Ждёт решения о переезде в гильдию' });
-            }
-
-            // Подпись содержимого: если ничего не изменилось, DOM не трогаем
-            // (наблюдатель иначе раскрутил бы цикл мутаций).
-            const sig = badges.map((b) => b.cls + ':' + b.text).join('|');
-            let box = li.querySelector('.gl-mn > .lgu-guild-badges');
-            if (box && box.dataset.sig === sig) return;
-
-            if (!box) {
-                box = document.createElement('span');
-                box.className = 'lgu-guild-badges';
-                nickEl.insertAdjacentElement('afterend', box);
-            }
-
-            box.dataset.sig = sig;
-            box.innerHTML = '';
-            for (const b of badges) {
-                const el = document.createElement('span');
-                // Уровень/класс используют собственные классы (.lgu-gbadge),
-                // остальные бейджи — общий .lgu-gst.
-                el.className = b.raw ? b.cls : 'lgu-gst ' + b.cls;
-                el.textContent = b.text;
-                if (b.title) el.title = b.title;
-                box.appendChild(el);
-            }
-        },
-
-        _removeBadges(li) {
-            if (!li) return;
-            li.querySelectorAll('.gl-mn > .lgu-guild-badges').forEach((el) => el.remove());
-        },
-
-        // Компактная подпись давности для бейджа: «только что», «5м назад»…
-        _formatAgo(ts) {
-            const t = Number(ts) || 0;
-            if (!t) return 'неизвестно';
-            const diff = Math.max(0, Date.now() - t);
-            if (diff < 60000) return 'только что';
-            const min = Math.floor(diff / 60000);
-            if (min < 60) return min + 'м назад';
-            const hours = Math.floor(min / 60);
-            if (hours < 24) return hours + 'ч назад';
-            return Math.floor(hours / 24) + 'д назад';
-        },
-
-        // Длительность сессии: «45м», «2ч 10м», «1д 3ч».
-        _formatDuration(diffMs) {
-            const sec = Math.max(0, Math.floor((Number(diffMs) || 0) / 1000));
-            if (sec < 60) return Math.max(1, sec) + 'с';
-            const min = Math.floor(sec / 60);
-            if (min < 60) return min + 'м';
-            const hours = Math.floor(min / 60);
-            const rest = min % 60;
-            if (hours < 24) return rest ? `${hours}ч ${rest}м` : `${hours}ч`;
-            return `${Math.floor(hours / 24)}д ${hours % 24}ч`;
-        }
-    };
-
-    // Для доступа из консоли страницы: window аддона — песочница, поэтому
-    // публикуем в page-context через G (unsafeWindow), как это делает main.js.
-    try {
-        const gsWin = (typeof G !== 'undefined' && G) ? G : window;
-        gsWin.LegionGuildStats = GuildStats;
-    } catch (e) {}
-
     // ===== src/modules/arena.js =====
     // ============================================================
     // 6.9. МОДУЛЬ: АРЕНА 5×5 (modules/arena.js)
     //
-    // Три функции поверх нативного экрана арены (.arb / .ar-mw8):
-    //   1) оценка шанса победы над каждым отрядом соперника — компактный
-    //      бейдж в карточке оффера и на экране подготовки к атаке;
-    //   2) предупреждение «Согильдейцы в команде противника» — плашка в
-    //      шапке карточки и в заголовке экрана атаки;
+    // Три функции поверх НОВОЙ арены клиента (reference/LegionFrontSRC/site/
+    // arena2.js.txt + arena2.css): лобби с карточками .av-panel.av-off, окно
+    // подготовки к бою .av-win.av-fwin и модалка приглашения .av-win.av-invwin.
+    //   1) плашка шанса победы в карточке соперника и в окне боя;
+    //   2) предупреждение «Согильдейцы в отряде противника» — компактный бейдж
+    //      в шапке карточки (.av-oh) и подсветка фигурок (.av-mh.av-pN на
+    //      мини-сцене .av-scene, .av-hero.av-foe в окне боя);
     //   3) четвёртая вкладка «Согильдейцы» в модалке «Пригласить в отряд»
-    //      с приглашением в один клик.
+    //      (.av-itabs / .av-ibody) с приглашением в один клик.
     //
     // Античит/CSP:
     //   - window.fetch, LGMine.open и LGMine.onEvent НЕ патчим;
     //   - контекст арены и её api() приходят из core/hooks.js (хук
     //     LGArena.open), оттуда же — onApiResponse(path, res, body);
-    //   - никаких localStorage: кэши героев/состава живут в Map с TTL,
-    //     при destroy() они очищаются.
+    //   - никаких localStorage: кэш героев и состав гильдии живут в Map
+    //     с TTL, при destroy() они очищаются.
     //
-    // Данные (reference/LegionFrontSRC/site/arena.js.txt):
-    //   GET  /api/arena            -> { duel, mine, bots, ... }
-    //        duel.me   — мой профиль: rating, power?, squad { full, members[], lead }
-    //        duel.offers[] — соперники: login, title, rating, power, win, lose,
-    //                        def[] (клин обороны), squad[] (список для атаки)
-    //   GET  /api/arena/hero?login -> { hero } — arena { hp, atk, mag, def },
-    //                                 items[] (en, gear, slot), sk.t (навыки)
-    //   POST /api/arena/act        -> { ok, error? } (invite и т.д.)
+    // Данные (arena2.js):
+    //   GET  /api/arena             -> { duel, mine, ... }
+    //        duel.me.squad.members[] — свой клин: login, name, role, level, lead
+    //        duel.offers[]          — соперники: login, title, rating, power,
+    //                                 win, lose, def[] (клин обороны), test
+    //   GET  /api/guilds/guild?id=  -> { guild, members[] } — состав гильдии;
+    //        members[]: login, name, role (гильдейская), online, seenAt,
+    //                   hero { level, role, roleName, power }
+    //   GET  /api/arena/hero?login= -> { hero } — arena { hp, atk, mag, def },
+    //                                  items[] (en, gear, slot), sk.t (навыки)
+    //   POST /api/arena/act         -> { ok, error? }; приглашение — { op: 'inv', who }
     //
-    // Подключается после core/ui.js и modules/guild-stats.js (SHARED_MODULES
-    // в build.js); main.js вызывает init() в boot(), destroy() — в shutdown().
+    // Подключается после core/ui.js (SHARED_MODULES в build.js) и не зависит
+    // от других модулей: состав гильдии запрашивает сам.
+    // main.js вызывает init() в boot(), destroy() — в shutdown().
     // ============================================================
     const Arena = (() => {
         // TTL кэшей. Герой меняется редко, состав гильдии — раз в минуту,
-        // снимок арены перезапрашиваем не чаще 20 с (нативный экран и сам
-        // обновляет его по кнопке «Обновить»).
+        // снимок арены перезапрашиваем не чаще 20 с (сам экран арены тоже
+        // обновляет его кнопкой «Другие соперники»).
         const HERO_TTL = 600000;
         const GUILD_TTL = 60000;
         const STATE_TTL = 20000;
         const STATE_FAIL_TTL = 15000;
-        // Тот же порог, что у GuildStats/updateOnlinePlayers: 5 минут без
-        // событий — игрок считается вышедшим.
+        // Тот же порог, что у Utils.updateOnlinePlayers: 5 минут без событий
+        // города/шахты — игрок считается вышедшим. Это резервный источник
+        // онлайна, если сервер гильдии не отдал members[].online.
         const ONLINE_TTL = 300000;
+        // LGGuilds.index() — сетевой запрос: без гильдии не дёргаем чаще 30 с.
+        const GUILD_ID_TTL = 30000;
         // Склейка мутаций: не чаще четырёх проходов в секунду.
         const RUN_THROTTLE = 250;
 
-        // Русские имена классов (ROLE в site/arena.js). Фолбэк, если
-        // GuildStats ещё не загрузил словарь roles{}.
+        // Русские имена классов (ROLE в arena2.js). Сервер гильдии отдаёт
+        // hero.roleName готовым; словарь — фолбэк для старых ответов.
         const ROLE_RU = {
             legionary: 'Легионер', paladin: 'Паладин', rogue: 'Разбойник',
             recruit: 'Новобранец', archer: 'Лучник', mage: 'Маг',
@@ -13762,8 +12954,8 @@ const Players = {
         // 1234567 -> «1 234 567» (как big() в нативной арене).
         const fmt = (v) => String(Math.round(num(v))).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 
-        // Последний снимок арены. mine — очередь командных боёв из ответа
-        // (в site/arena.js это v.mine), поэтому отряд берём из duel.me.squad.
+        // Последний снимок арены. mine — журнал командных боёв из ответа
+        // (в arena2.js это d.mine), поэтому отряд берём из duel.me.squad.
         const state = {
             duel: null,
             mine: null,
@@ -13779,16 +12971,22 @@ const Players = {
         // и риск 429.
         const heroCache = new Map();
 
-        // Состав нашей гильдии: два ключа на участника (login и name),
-        // значение { login, name, role, level }.
+        // Состав нашей гильдии: два ключа на участника (login и имя),
+        // значение — запись applyGuildData (см. блок «Состав гильдии»).
         let guildMap = new Map();
         // Уникальные записи (для вкладки): тот же состав без дублей по ключам.
         let guildRecords = [];
+        // id текущей гильдии и время последнего обращения к LGGuilds.index().
         let guildId = null;
-        let guildAt = 0;
+        let guildIdAt = 0;
         let guildBusy = null;
         // Гильдия вообще есть? Отдельный флаг: пустой ответ ≠ «не в гильдии».
         let inGuild = false;
+        // Логин соперника из последнего клика «⚔ Атака» ([data-atk] в
+        // arena2.js): по нему окно боя находит свой offer в duel.offers[].
+        let lastAtkTarget = '';
+        // Делегированный слушатель кликов (снимается в destroy()).
+        let onDocClick = null;
 
         let observer = null;
         let scheduled = false;
@@ -13797,9 +12995,8 @@ const Players = {
         let stateBusy = false;
         // Проход уже идёт (внутри есть await) — второй не запускаем.
         let running = false;
-        // Время последней попытки определить гильдию: если игрок без гильдии,
-        // не дёргаем LGGuilds.index() на каждой мутации DOM.
-        let guildTriedAt = 0;
+        // Отложенный повтор после окна троттлинга (см. run/runLater).
+        let deferredTimer = null;
         let destroyed = false;
 
         // ------------------------------------------------------------
@@ -13874,14 +13071,19 @@ const Players = {
         // ------------------------------------------------------------
         // Состав гильдии
         //
-        // Источники (по приоритету):
-        //   1) кэш GuildStats._guildData — если окно гильдии уже открывали,
-        //      состав лежит там и второй запрос не нужен;
-        //   2) GET /api/guilds/guild?id=<guildId> (docs/API.md) — раз в минуту.
-        // id гильдии берём из G.ME.guild, иначе из G.LGGuilds.index()
-        // (res.mine.member.guild), как это делает guild-stats.js.
+        // Модуль автономен: раньше состав гильдии брался из кэшей окна
+        // гильдий, теперь его нет — запрашиваем состав сами:
+        // GET /api/guilds/guild?id=<id> (docs/API.md), не чаще раза в минуту.
+        // Кэш — Map с TTL: ключ — id гильдии, значение { at, map, records };
+        // map — поиск по логину/имени, records — список без дублей для вкладки.
         // ------------------------------------------------------------
-        const applyGuildData = (body) => {
+        const guildCache = new Map();
+
+        // Разбор members[] нового ответа сервера: уровень/класс/сила лежат в
+        // hero { level, role, roleName, power }, онлайн — готовым флагом.
+        // Если сервер online не отдал (undefined), смотрим трекер аддона
+        // window.__lgOnlinePlayers с TTL 5 минут.
+        const applyGuildData = (body, id) => {
             const map = new Map();
             const seen = new Map();
             let any = false;
@@ -13889,36 +13091,52 @@ const Players = {
             for (const m of ((body && body.members) || [])) {
                 if (!m || !(m.login || m.name)) continue;
                 any = true;
-                const login = String(m.login || '').trim();
-                const name = String(m.name || '').trim();
+
+                const login = low(m.login);
+                const name = String(m.name || m.login || '').trim();
+                const hero = (m.hero && typeof m.hero === 'object') ? m.hero : null;
+                const online = (m.online === undefined)
+                    ? !!onlineInfo({ login, name })
+                    : !!m.online;
+
                 const rec = {
                     login,
                     name: name || login,
-                    // role в гильдии (leader/officer/member) — не класс героя!
+                    // role в members[] — гильдейская роль (leader/officer/...),
+                    // класс героя лежит отдельно в hero.role.
                     guildRole: String(m.role || ''),
-                    level: num(m.level),
+                    online,
+                    seenAt: num(m.seenAt),
+                    level: num(hero && hero.level) || num(m.level),
+                    role: String((hero && hero.role) || ''),
+                    roleName: String((hero && hero.roleName) || ''),
+                    power: num(hero && hero.power),
                     pending: !!m.pending
                 };
-                for (const key of [low(login), low(name)]) {
+
+                for (const key of [login, low(rec.name)]) {
                     if (key) map.set(key, rec);
                 }
-                const uniq = low(login || name);
+                const uniq = login || low(rec.name);
                 if (uniq && !seen.has(uniq)) seen.set(uniq, rec);
             }
 
-            if (!any) return;
+            if (!any) return false;
+            const records = Array.from(seen.values());
+            const key = String(id || guildId || '');
+            if (key) guildCache.set(key, { at: Date.now(), map, records });
             guildMap = map;
-            guildRecords = Array.from(seen.values());
-            guildAt = Date.now();
+            guildRecords = records;
             inGuild = true;
+            return true;
         };
 
-        // id своей гильдии. Синхронные источники -> индекс LGGuilds.
+        // id своей гильдии. Синхронные источники -> индекс игры
+        // (G.LGGuilds.index() -> mine.member.guild). Индекс — сетевой запрос,
+        // поэтому отметку ставим ДО await и не повторяем чаще GUILD_ID_TTL:
+        // иначе каждая мутация DOM на арене без гильдии дёргала бы API.
         const resolveGuildId = async () => {
             if (guildId) return guildId;
-            // Без гильдии индекс игры дёргать не чаще раза в 30 с.
-            const now = Date.now();
-            if (guildTriedAt && (now - guildTriedAt) < 30000) return null;
 
             const me = G.ME;
             let id = me && (me.guild != null ? me.guild
@@ -13932,73 +13150,85 @@ const Players = {
 
             const LGG = G.LGGuilds;
             if (!LGG || typeof LGG.index !== 'function') return null;
+
+            const now = Date.now();
+            if (guildIdAt && (now - guildIdAt) < GUILD_ID_TTL) return null;
+            guildIdAt = now;
+
             let res = null;
-            // Отметку ставим ДО запроса: параллельные проходы не должны
-            // уйти вторым вызовом index().
-            guildTriedAt = Date.now();
             try { res = await LGG.index(); } catch (e) { return null; }
-            const member = res && res.mine && (res.mine.member || res.mine);
+            const member = res && res.mine && res.mine.member;
             const mid = member && (member.guild != null ? member.guild : member.gid);
             if (mid != null && mid !== '') {
                 guildId = String(mid);
-                guildTriedAt = 0;
+                guildIdAt = 0;
                 return guildId;
             }
-            // Ответ есть, а гильдии нет — запоминаем, чтобы не дёргать API
-            // на каждой мутации DOM.
+            // Ответ есть, а гильдии нет: запоминаем, чтобы пустой ответ не
+            // выглядел ошибкой сети.
             if (res && res.ok !== false) inGuild = false;
             return null;
         };
 
         const ensureGuild = async () => {
             if (guildBusy) return guildBusy;
-            if (!destroyed) {
-                guildBusy = (async () => {
-                    try {
-                        const id = await resolveGuildId();
-                        if (!id) {
-                            guildRecords = [];
-                            guildMap = new Map();
-                            return;
-                        }
-                        inGuild = true;
-                        if (guildId === id && guildAt && (Date.now() - guildAt) < GUILD_TTL) return;
+            if (destroyed) return Promise.resolve();
 
-                        // 1) Кэш GuildStats (тот же формат /api/guilds/guild).
-                        const gs = (typeof GuildStats !== 'undefined') ? GuildStats : null;
-                        if (gs && gs._guildData && String(gs._guildId || '') === id
-                            && (Date.now() - num(gs._guildAt)) < GUILD_TTL) {
-                            applyGuildData(gs._guildData);
-                            return;
-                        }
-
-                        // 2) Свой запрос. Utils.fetchApi добавит /c/<канал>/.
-                        let res = null;
-                        try {
-                            res = await Utils.fetchApi('/api/guilds/guild?id=' + encodeURIComponent(id));
-                        } catch (e) {
-                            return;
-                        }
-                        const body = (res && res.body && typeof res.body === 'object') ? res.body : res;
-                        if (body && body.ok !== false) applyGuildData(body);
-                    } catch (e) {
-                        // Состав гильдии — необязательные данные: без него
-                        // арена работает, бейджи просто не появятся.
-                    } finally {
-                        guildBusy = null;
+            guildBusy = (async () => {
+                try {
+                    const id = await resolveGuildId();
+                    if (!id) {
+                        guildMap = new Map();
+                        guildRecords = [];
+                        return;
                     }
-                })();
-            }
-            return guildBusy || Promise.resolve();
+                    inGuild = true;
+
+                    const cached = guildCache.get(id);
+                    if (cached && (Date.now() - cached.at) < GUILD_TTL) {
+                        guildMap = cached.map;
+                        guildRecords = cached.records;
+                        return;
+                    }
+
+                    // Свой запрос. Utils.fetchApi добавит /c/<канал>/.
+                    let res = null;
+                    try {
+                        res = await Utils.fetchApi('/api/guilds/guild?id=' + encodeURIComponent(id));
+                    } catch (e) {
+                        return;
+                    }
+                    const body = (res && res.body && typeof res.body === 'object') ? res.body : res;
+                    if (!body || body.ok === false) return;
+                    // Пустой состав тоже кэшируем — иначе на каждую мутацию DOM
+                    // улетал бы новый запрос к /api/guilds/guild.
+                    if (!applyGuildData(body, id)) {
+                        guildCache.set(id, { at: Date.now(), map: new Map(), records: [] });
+                    }
+                } catch (e) {
+                    // Состав гильдии — необязательные данные: без него арена
+                    // работает, бейджи просто не появятся.
+                } finally {
+                    guildBusy = null;
+                }
+            })();
+
+            return guildBusy;
         };
 
-        // Согильдеец? Проверяем логин и имя бойца, себя исключаем.
+        // Согильдеец? nick — ключ из DOM (title ника в .av-nm), fighter —
+        // объект бойца из offer.def[] / duel.me.squad.members[].
+        const isGuildmateKey = (nick) => {
+            const key = low(nick);
+            if (!key || !guildMap.size) return false;
+            if (key === myLogin()) return false;
+            return guildMap.has(key);
+        };
+
         const isGuildmate = (fighter) => {
             if (!fighter || !guildMap.size) return false;
-            const mine = myLogin();
             for (const key of heroKeys(fighter)) {
-                if (mine && key === mine) return false;
-                if (guildMap.has(key)) return true;
+                if (isGuildmateKey(key)) return true;
             }
             return false;
         };
@@ -14018,61 +13248,28 @@ const Players = {
             return null;
         };
 
-        // Друг? G.LGFriends.state(login) -> 'friends' | 'in' | 'out' | ...
-        const friendState = (rec) => {
-            const F = G.LGFriends;
-            if (!F || typeof F.state !== 'function') return '';
-            const login = String((rec && rec.login) || '').trim();
-            const name = String((rec && rec.name) || '').trim();
-            for (const key of [login, name]) {
-                if (!key) continue;
-                try {
-                    const st = F.state(key);
-                    if (st) return String(st);
-                } catch (e) { /* друзья не загрузились — молчим */ }
-            }
-            return '';
-        };
-
-        // Уровень и класс согильдейца. В members[] гильдии лежит только
-        // гильдейская роль, поэтому класс/уровень ищем в кэшах GuildStats:
-        //   _legionCache.byLogin — ростер /api/legion (топ-120 канала);
-        //   _citymonCache        — сборы элитных у стен (достаёт остальных).
+        // Уровень, класс и сила согильдейца. Новый ответ /api/guilds/guild
+        // отдаёт их готовыми (hero.level, hero.role, hero.roleName,
+        // hero.power), поэтому отдельных кэшей ростера не нужно.
+        // Если полей нет (старый сервер), уточняем по кэшу /api/arena/hero.
         const heroInfo = (rec) => {
             let level = num(rec && rec.level);
-            let role = '';
-            let roleName = '';
+            let role = low(rec && rec.role);
+            let roleName = String((rec && rec.roleName) || '');
 
-            const gs = (typeof GuildStats !== 'undefined') ? GuildStats : null;
-            const keys = [low(rec && rec.login), low(rec && rec.name)].filter(Boolean);
-
-            const roster = gs && gs._legionCache;
-            if (roster && roster.byLogin && typeof roster.byLogin.get === 'function') {
-                for (const key of keys) {
-                    const hit = roster.byLogin.get(key);
-                    if (!hit) continue;
-                    level = num(hit.level) || level;
-                    role = hit.role || role;
-                    roleName = hit.roleName || roleName;
-                    break;
-                }
-            }
-
-            if (!role && gs && gs._citymonCache && typeof gs._citymonCache.get === 'function') {
-                for (const key of keys) {
-                    const hit = gs._citymonCache.get(key);
-                    if (!hit) continue;
-                    level = num(hit.level) || level;
-                    role = hit.role || role;
-                    roleName = hit.roleName || roleName;
-                    break;
+            if (!level || !role) {
+                const hit = getHero(rec);
+                if (hit) {
+                    level = level || num(hit.level);
+                    role = role || low(hit.role || hit.class);
                 }
             }
 
             return {
                 level,
                 role,
-                roleName: roleName || ROLE_RU[role] || role || ''
+                roleName: roleName || ROLE_RU[role] || role || '',
+                power: num(rec && rec.power)
             };
         };
 
@@ -14413,15 +13610,16 @@ const Players = {
             return out;
         };
 
-        // Плашка «Согильдейцы в команде противника». Одна на контейнер:
+        // Плашка «Согильдейцы в отряде противника». Одна на контейнер:
         // повторные мутации только обновляют текст, дубликатов не появляется.
         //
-        // opts.compact — режим шапки карточки (.arb-ch, там мало места):
+        // opts.compact — режим шапки карточки (.av-oh, там мало места):
         //   один короткий ник (<= 12 символов) -> «🛡️ Ник»,
         //   один длинный -> «🛡️ Согильдеец»,
         //   несколько -> «🛡️ Согильдейцы: N» (без списка имён).
-        // На широком экране подготовки к атаке (ar-foe) выводим полный
-        // список. Полный перечень имён всегда лежит в title.
+        // opts.before — узел, перед которым встаёт бейдж: нативный
+        // <span class="av-chip">🏆 …</span> в .av-oh.
+        // В окне боя выводим полный список; перечень имён всегда в title.
         const renderGuildWarn = (parent, names, opts) => {
             if (!parent) return;
             const el = findOwn(parent, DOM_IDS.arenaFoeWarn);
@@ -14432,7 +13630,7 @@ const Players = {
             }
 
             const compact = !!(opts && opts.compact);
-            const host = opts && opts.host;
+            const before = (opts && opts.before) || null;
             let text;
             if (!compact) {
                 text = '🛡️ Согильдейцы: ' + names.join(', ');
@@ -14447,9 +13645,16 @@ const Players = {
 
             let badge = el;
             if (!badge) {
+                // Класс av-chip даёт нативную «пилюлю», lgu-guild-foe-warn
+                // перекрашивает её в зелёный (styles.js).
                 badge = document.createElement('span');
-                badge.className = WARN_CLS + ' ' + DOM_IDS.arenaFoeWarn;
-                (host || parent).appendChild(badge);
+                badge.className = 'av-chip ' + WARN_CLS + ' ' + DOM_IDS.arenaFoeWarn;
+                if (before && before.parentNode === parent) parent.insertBefore(badge, before);
+                else parent.appendChild(badge);
+            } else if (before && before.parentNode === parent && badge.nextSibling !== before) {
+                // Игра могла переставить узлы — держим бейдж непосредственно
+                // перед нативным чипом рейтинга.
+                parent.insertBefore(badge, before);
             }
             const sig = text + '|' + title;
             if (badge.dataset.sig === sig) return;
@@ -14458,59 +13663,87 @@ const Players = {
             badge.title = title;
         };
 
-        // Подсветка слотов согильдейцев прямо на поле боя (.arb-scene).
+        // Подсветка слотов согильдейцев на мини-сцене карточки (.av-scene).
         //
-        // Массив o.def карточки соперника (индексы 0..4) строго соответствует
-        // data-slot у плашек .ar-mw-lb и фигурок .ar-mw-h (см. miniWedge в
-        // reference/LegionFrontSRC/site/arena.js.txt). Внутрь .ar-mw-n не
-        // лезем: нативная fitBand() сама подбирает размер шрифта ника по
-        // ширине слота, любые правки textContent/отступов её сломают —
-        // поэтому только добавляем/снимаем класс на контейнерах.
+        // arena2.js рендерит клин обороны так: массив MW = [3, 4, 1, 2, 0]
+        // задаёт только ПОРЯДОК ВЫВОДА, а класс .av-pN — это индекс бойца в
+        // offer.def[]. Поэтому ищем строго по селектору .av-mh.av-p${i}, а не
+        // по позиции элемента в DOM (иначе бойцы перепутаются).
+        // Внутрь .av-nm не лезем: nm() задаёт размер шрифта через --fs и
+        // <wbr>, правки textContent/innerHTML сломают нативную вёрстку —
+        // ставим только класс на контейнер.
         const renderAllySlots = (card, offer) => {
             if (!card) return;
             const def = (offer && Array.isArray(offer.def)) ? offer.def : [];
-            const slots = Math.max(5, def.length);
-            for (let i = 0; i < slots; i += 1) {
-                const ally = !!(def[i] && isGuildmate(def[i]));
-                for (const sel of [
-                    '.ar-mw-lb[data-slot="' + i + '"]',
-                    '.ar-mw-h[data-slot="' + i + '"]'
-                ]) {
-                    const node = card.querySelector(sel);
-                    if (node) node.classList.toggle(ALLY_CLS, ally);
+
+            for (let i = 0; i < 5; i += 1) {
+                const slotEl = card.querySelector('.av-mh.av-p' + i);
+                if (!slotEl) continue;
+
+                let ally = !!(def[i] && isGuildmate(def[i]));
+                if (!def[i]) {
+                    // Резерв: полный ник бойца лежит в title у span внутри .av-nm.
+                    const nick = slotEl.querySelector('.av-nm span');
+                    ally = isGuildmateKey(nick && nick.getAttribute('title'));
                 }
+                slotEl.classList.toggle(ALLY_CLS, ally);
             }
         };
 
-        // Карточки соперников в лобби: бейдж — между .arb-scene и .arb-gain,
-        // плашка согильдейцев — в шапку .arb-ch.ar-oh.
+        // Соперник по логину. В arena2.js у карточки лобби нет data-off:
+        // логин лидера лежит в кнопке сцены (.av-scene[data-sq]) и в кнопке
+        // атаки ([data-atk]), поэтому ищем offer в duel.offers[] по нему.
+        const offerByLogin = (login) => {
+            const duel = state.duel;
+            if (!duel || !Array.isArray(duel.offers)) return null;
+            const key = low(login);
+            if (!key) return null;
+            for (const o of duel.offers) {
+                if (o && low(o.login) === key) return o;
+            }
+            return null;
+        };
+
+        // Карточки соперников в лобби (.av-offs .av-panel.av-off):
+        // плашка шанса — перед .av-gain, бейдж согильдейцев — в шапку .av-oh.
         const injectOfferCards = () => {
             const duel = state.duel;
             if (!duel || !Array.isArray(duel.offers)) return;
 
-            const byLogin = new Map();
-            for (const o of duel.offers) {
-                if (o && o.login != null) byLogin.set(String(o.login), o);
-            }
+            for (const card of document.querySelectorAll('.av-offs .av-panel.av-off')) {
+                const scene = card.querySelector('.av-scene');
+                const atk = card.querySelector('[data-atk]');
+                const targetLogin = (scene && scene.dataset.sq) || (atk && atk.dataset.atk);
+                // Карточка-заглушка .av-ghost: ни сцены с data-sq, ни атаки.
+                if (!targetLogin) continue;
 
-            for (const card of document.querySelectorAll('.arb-card.ar-off[data-off]')) {
-                const offer = byLogin.get(card.getAttribute('data-off'));
+                const offer = offerByLogin(targetLogin);
                 if (!offer) continue;
 
-                const gain = card.querySelector('.arb-gain') || card.querySelector('.ar-gain');
-                renderWinBadge(card, offer, (gain && gain.parentNode === card) ? gain : null);
+                // Плашка шанса — перед .av-gain («Победа/Поражение»), если его
+                // нет — перед .av-cf (сила + кнопка «⚔ Атака»).
+                const gain = card.querySelector('.av-gain');
+                const cf = card.querySelector('.av-cf');
+                const before = (gain && gain.parentNode === card) ? gain
+                    : ((cf && cf.parentNode === card) ? cf : null);
+                renderWinBadge(card, offer, before);
 
                 // Шапка карточки узкая — компактный бейдж, полный список в title.
-                const head = card.querySelector('.arb-ch.ar-oh') || card.querySelector('.arb-ch');
-                if (head) renderGuildWarn(head, guildNamesFor(offer), { compact: true });
+                const head = card.querySelector('.av-oh');
+                if (head) {
+                    const chip = head.querySelector('.av-chip:not(.' + WARN_CLS + ')');
+                    renderGuildWarn(head, guildNamesFor(offer), { compact: true, before: chip });
+                }
 
-                // Прямая подсветка слотов клина обороны на самом поле боя.
+                // Прямая подсветка слотов клина обороны на самой мини-сцене.
                 renderAllySlots(card, offer);
             }
         };
 
-        // Экран подготовки к атаке (section.arb-panel.ar-foe). Оффер ищем по
-        // никам из .ar-mini: нативная арена не оставляет login в разметке.
+        // Окно подготовки к бою (.av-win.av-fwin). У arena2.js это отдельная
+        // модалка: поле .av-bf, фигурки противника .av-hero.av-foe и кнопки
+        // «Как в обороне / ⚔ В бой» (.av-fbtns). Оффер ищем по никам из
+        // .av-nm span[title]; если ников в DOM ещё нет — по lastAtkTarget.
         const findOfferByNames = (names) => {
             const duel = state.duel;
             if (!duel || !Array.isArray(duel.offers)) return null;
@@ -14533,43 +13766,87 @@ const Players = {
             return bestHit > 0 ? best : null;
         };
 
-        const injectFoeScreen = () => {
-            const foe = document.querySelector('section.arb-panel.ar-foe');
-            if (!foe) return;
+        // Окно боя. Класс av-fwin есть не во всех сборках клиента, поэтому
+        // дополнительно узнаём его по полю .av-bf и кнопкам .av-fbtns.
+        const fightWindow = () => {
+            const direct = document.querySelector('.av-win.av-fwin');
+            if (direct) return direct;
+            for (const win of document.querySelectorAll('.av-win')) {
+                if (win.querySelector('.av-fbtns') || win.querySelector('.av-bf')) return win;
+            }
+            return null;
+        };
 
-            const names = Array.from(foe.querySelectorAll('.ar-mini .ar-n'))
-                .map((el) => String(el.textContent || ''));
-            const offer = findOfferByNames(names);
-            if (!offer) {
-                // Соперника в новом снимке уже нет — убираем устаревшую плашку.
-                const stale = findOwn(foe, DOM_IDS.arenaBadgeBox);
-                if (stale) stale.remove();
+        // Отряд, на который открыто окно боя. Точный источник — последний клик
+        // «⚔ Атака» (data-atk), но в окне может оказаться и месть (реванш):
+        // поэтому сверяем ники фигурок врага из .av-hero.av-foe .av-nm span.
+        const pickFightOffer = (nickNames) => {
+            const want = new Set((nickNames || []).map(low).filter(Boolean));
+            const target = offerByLogin(lastAtkTarget);
+            if (target && (!want.size || foeSquad(target).some((h) => want.has(low(h && (h.name || h.login)))))) {
+                return target;
+            }
+            return findOfferByNames(nickNames);
+        };
+
+        const injectFightWindow = () => {
+            const win = fightWindow();
+            if (!win) return;
+
+            const nickNames = Array.from(win.querySelectorAll('.av-hero.av-foe .av-nm span'))
+                .map((el) => String(el.getAttribute('title') || el.textContent || '').trim())
+                .filter(Boolean);
+
+            const offer = pickFightOffer(nickNames);
+            const names = offer ? guildNamesFor(offer) : [];
+
+            // Подсветка вражеских фигурок: def отряда надёжнее DOM, но ник из
+            // title работает и когда оффер в новом снимке не нашёлся.
+            for (const hero of win.querySelectorAll('.av-hero.av-foe')) {
+                const span = hero.querySelector('.av-nm span');
+                const nick = String((span && span.getAttribute('title')) || '').trim();
+                const ally = isGuildmateKey(nick);
+                hero.classList.toggle(ALLY_CLS, ally);
+                if (ally && nick && !names.includes(nick)) names.push(nick);
+            }
+
+            // Сводная строка встаёт перед .av-fbtns («Как в обороне / В бой»).
+            // Если показать нечего (нет снимка арены и нет согильдейцев),
+            // коробку не создаём вовсе — иначе «создать -> удалить» крутило бы
+            // MutationObserver бесконечным циклом.
+            let box = win.querySelector('.' + DOM_IDS.arenaBadgeBox);
+            if (!offer && !names.length) {
+                if (box) box.remove();
                 return;
             }
 
-            let box = findOwn(foe, DOM_IDS.arenaBadgeBox);
             if (!box) {
                 box = document.createElement('div');
                 box.className = 'lgu-arena-card-badge ' + DOM_IDS.arenaBadgeBox;
-                const head = foe.querySelector('.arb-pt');
-                if (head) head.insertAdjacentElement('afterend', box);
-                else foe.insertBefore(box, foe.firstChild);
+                const btns = win.querySelector('.av-fbtns');
+                if (btns && btns.parentNode) btns.parentNode.insertBefore(box, btns);
+                else win.appendChild(box);
             }
 
             renderWinBadge(box, offer, null);
-            renderGuildWarn(box, guildNamesFor(offer));
+            renderGuildWarn(box, names);
         };
 
         // ------------------------------------------------------------
         // Вкладка «Согильдейцы» в модалке «Пригласить в отряд»
+        // (.av-win.av-invwin -> .av-itabs / .av-ibody)
         // ------------------------------------------------------------
-        const tabPanel = (dlg) => (dlg ? dlg.querySelector('#arTabP') : null);
+        const inviteWin = () => document.querySelector('.av-win.av-invwin');
 
-        // Приглашение в один клик: op:'invite' (site/arena.js, act()).
-        // Контекст арены (x.api) сохранён хуком LGArena.open; фолбэк —
-        // Utils.fetchApi, он сам выберет G.X.api или обычный запрос.
+        // Приглашение в один клик. В arena2.js действие идёт как
+        // { op: 'inv', who: <login> } — не путать со старой ареной, где было
+        // { op: 'invite', login }. Контекст арены (x.api) сохранён хуком
+        // LGArena.open; фолбэк — Utils.fetchApi, он сам выберет G.X.api.
         const guildInvite = async (login, btn) => {
             if (!btn || btn.dataset.busy === '1') return;
+            const who = String(login || '').trim();
+            if (!who) return;
+
             const label = btn.textContent;
             btn.dataset.busy = '1';
             btn.disabled = true;
@@ -14582,7 +13859,7 @@ const Players = {
 
             let res = null;
             try {
-                res = await apiFn('/api/arena/act', { op: 'invite', login });
+                res = await apiFn('/api/arena/act', { op: 'inv', who });
             } catch (e) {
                 res = { ok: false, error: (e && e.message) || 'сеть недоступна' };
             }
@@ -14596,10 +13873,10 @@ const Players = {
                 btn.disabled = true;
                 delete btn.dataset.busy;
                 if (typeof UI !== 'undefined' && UI.showToast) {
-                    UI.showToast('Приглашение отправлено: ' + login);
+                    UI.showToast('Приглашение отправлено: ' + who);
                 }
                 // Следующий проход заново возьмёт /api/arena: состав отряда
-                // меняется после accept, а не сразу после invite.
+                // меняется после accept, а не сразу после приглашения.
                 state.at = 0;
                 state.failAt = 0;
                 schedule(true);
@@ -14617,30 +13894,32 @@ const Players = {
             }, 2000);
         };
 
-        // Список согильдейцев в #arTabP. Разметка повторяет нативную вкладку
-        // «Друзья» (friendsHtml): .ar-frbox / .ar-frh / ul.ar-frl / li.ar-fr.
-        const renderGuildList = (panel) => {
-            if (!panel) return;
+        // Список согильдейцев в .av-ibody. Разметка повторяет нативную
+        // вкладку «Поиск» (arena2.js: .av-ih4 / ul.av-ilist / li.av-irow):
+        // первая ячейка строки — статичный глиф .av-f.av-fe (как ⚑ в нативном
+        // наборе), сетка .av-irow рассчитана на «44px 1fr auto auto».
+        const renderGuildList = (body) => {
+            if (!body) return;
             const duel = state.duel;
             const me = duel && duel.me;
             const sq = me && me.squad;
+            const members = mySquad();
             const team = num(duel && duel.rules && duel.rules.team) || 5;
-            const members = (sq && Array.isArray(sq.members)) ? sq.members : [];
-            const full = !!(sq && (sq.full || members.length >= team));
+            const full = !!(sq && sq.full) || members.length >= team;
 
-            // 1) Отряд уже собран — нативная заглушка.
+            // 1) Отряд уже собран — нативная формулировка.
             if (full) {
-                panel.innerHTML = '<p class="arb-mute ar-pr">В отряде уже 5 игроков.</p>';
+                body.innerHTML = '<p class="av-inote">В отряде уже 5 игроков.</p>';
                 return;
             }
             // 2) Гильдии нет — звать некого.
-            if (!inGuild) {
-                panel.innerHTML = '<p class="arb-mute ar-pr">Ты не состоишь в гильдии.</p>';
+            if (!inGuild && !guildId) {
+                body.innerHTML = '<p class="av-inote">Ты не состоишь в гильдии.</p>';
                 return;
             }
             // Состав не пришёл (сеть/права) — не врём про «нет гильдии».
             if (!guildRecords.length) {
-                panel.innerHTML = '<p class="arb-mute ar-pr">Не удалось загрузить состав гильдии.</p>';
+                body.innerHTML = '<p class="av-inote">Не удалось загрузить состав гильдии.</p>';
                 return;
             }
 
@@ -14653,123 +13932,112 @@ const Players = {
             const rows = [];
             for (const rec of guildRecords) {
                 if (rec.pending) continue;
-                const keys = heroKeys(rec);
-                if (!keys.length) continue;
-                if (own && keys.includes(own)) continue;
-                if (keys.some((key) => taken.has(key))) continue;
-                rows.push({
-                    rec,
-                    on: onlineInfo(rec),
-                    friend: friendState(rec),
-                    info: heroInfo(rec)
-                });
+                const key = rec.login || low(rec.name);
+                if (!key) continue;
+                if (own && key === own) continue;
+                if (taken.has(key) || (rec.name && taken.has(low(rec.name)))) continue;
+                rows.push(rec);
             }
 
-            // Онлайн — сверху, остальные по алфавиту.
+            // Онлайн — сверху, затем по времени последней сессии, затем по алфавиту.
             rows.sort((a, b) => {
-                const diff = (b.on ? 1 : 0) - (a.on ? 1 : 0);
+                const diff = (b.online ? 1 : 0) - (a.online ? 1 : 0);
                 if (diff) return diff;
-                return String(a.rec.name || '').localeCompare(String(b.rec.name || ''), 'ru');
+                const seen = num(b.seenAt) - num(a.seenAt);
+                if (seen) return seen;
+                return String(a.name || '').localeCompare(String(b.name || ''), 'ru');
             });
 
             if (!rows.length) {
-                panel.innerHTML = '<p class="arb-mute ar-pr">Все согильдейцы уже в отряде.</p>';
+                body.innerHTML = '<p class="av-inote">Все согильдейцы уже в отряде.</p>';
                 return;
             }
 
-            const item = (row) => {
-                const { rec, info, on, friend } = row;
-                // Онлайн в трекере аддона (город/шахта за последние 5 минут) —
-                // для арены это максимум доступной информации о присутствии.
-                const online = on
-                    ? '<span class="ar-on here">онлайн здесь</span>'
-                    : '<span class="ar-off0">не в сети</span>';
+            const item = (rec) => {
+                const info = heroInfo(rec);
                 const meta = [];
-                if (info.roleName) meta.push(esc(info.roleName));
+                if (info.roleName) meta.push(info.roleName);
                 if (info.level) meta.push(info.level + ' ур.');
-                if (friend === 'friends') meta.push('⭐ друг');
-                const login = rec.login || rec.name;
-                return `<li class="ar-fr" data-login="${esc(login)}">`
-                    + `<span class="ar-frn"><b class="ar-n">${esc(rec.name)}</b>${online}</span>`
-                    + `<span class="muted ar-frw">${meta.join(', ')}</span>`
-                    + `<button type="button" class="arb-btn sm" data-gldinv="${esc(login)}">Позвать</button></li>`;
+                if (info.power) meta.push('сила ' + fmt(info.power));
+                const status = rec.online
+                    ? '<span class="av-st av-on">в сети</span>'
+                    : '<span class="av-st">не в сети</span>';
+                const login = rec.login || low(rec.name);
+                return `<li class="av-irow"><span class="av-f av-fe">🛡</span>`
+                    + `<span><b>${esc(rec.name)}</b><small>${esc(meta.join(' · '))}</small></span>`
+                    + status
+                    + `<button type="button" class="av-btn av-red" data-gldinv="${esc(login)}">Позвать</button></li>`;
             };
 
-            panel.innerHTML = `<div class="ar-frbox ${DOM_IDS.arenaGuildList}" role="region" aria-label="Согильдейцы">`
-                + '<div class="ar-frh"><b>Согильдейцы</b><span class="muted">онлайн — сверху</span></div>'
-                + `<ul class="ar-frl">${rows.map(item).join('')}</ul></div>`;
+            const onlineCount = rows.filter((rec) => rec.online).length;
+            body.innerHTML = `<h4 class="av-ih4"><span class="av-onl"></span> Согильдейцы онлайн <span>${onlineCount}</span></h4>`
+                + `<ul class="av-ilist ${DOM_IDS.arenaGuildList}">${rows.map(item).join('')}</ul>`;
 
-            panel.querySelectorAll('[data-gldinv]').forEach((btn) => {
-                btn.addEventListener('click', () => guildInvite(btn.dataset.gldinv, btn));
+            body.querySelectorAll('[data-gldinv]').forEach((btn) => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    guildInvite(btn.dataset.gldinv, btn);
+                });
             });
         };
 
-        // Подсветка вкладки: .on + aria-selected/tabindex, как у нативных
-        // кнопок в inviteHtml() игры.
-        const activateGuildTab = (tabs, btn) => {
-            for (const tab of tabs.querySelectorAll('.arb-tab')) {
-                const on = tab === btn;
-                tab.classList.toggle('on', on);
-                tab.setAttribute('aria-selected', String(on));
-                tab.tabIndex = on ? 0 : -1;
+        // Подсветка вкладки. arena2.css красит активную кнопку по
+        // button[aria-selected="true"] -> --gw-sel, поэтому классы не нужны.
+        const activateGuildTab = (tabs) => {
+            if (!tabs) return;
+            for (const tab of tabs.querySelectorAll('[data-it]')) {
+                tab.setAttribute('aria-selected', String(tab.dataset.it === 'guild'));
             }
         };
 
-        // Модалка «Пригласить в отряд»: .ar-mw8.arb .ar-dlg[aria-label=…].
-        // Игра перерисовывает .ar-dlg целиком при каждой смене вкладки
-        // (modalSet в site/arena.js), поэтому кнопку и обработчики ставим
+        // Модалка «Пригласить в отряд»: .av-win.av-invwin -> .av-itabs /
+        // .av-ibody. Игра перерисовывает её целиком на каждое действие
+        // (draw(): w.innerHTML = ...), поэтому кнопку и обработчик ставим
         // заново на новый DOM; dataset.lguBound защищает от дублей, пока
         // узел жив.
         const injectInviteTab = () => {
-            const dlg = document.querySelector('.ar-mw8.arb .ar-dlg[aria-label="Пригласить в отряд"]');
-            if (!dlg) return;
-            const tabs = dlg.querySelector('.arb-tabs');
-            const panel = tabPanel(dlg);
-            if (!tabs || !panel) return;
+            const win = inviteWin();
+            if (!win) return;
+            const tabs = win.querySelector('.av-itabs');
+            const body = win.querySelector('.av-ibody');
+            if (!tabs || !body) return;
 
-            let btn = tabs.querySelector('#arTab-guild');
+            let btn = tabs.querySelector('[data-it="guild"]');
             if (!btn) {
                 btn = document.createElement('button');
                 btn.type = 'button';
                 btn.setAttribute('role', 'tab');
-                btn.className = 'arb-tab ' + DOM_IDS.arenaGuildTab;
-                btn.id = 'arTab-guild';
-                btn.dataset.invtab = 'guild';
+                btn.dataset.it = 'guild';
                 btn.setAttribute('aria-selected', 'false');
-                btn.setAttribute('aria-controls', 'arTabP');
-                btn.tabIndex = -1;
+                btn.className = DOM_IDS.arenaGuildTab;
                 btn.textContent = 'Согильдейцы';
 
-                const find = tabs.querySelector('#arTab-find');
+                const find = tabs.querySelector('[data-it="find"]');
                 if (find) find.insertAdjacentElement('afterend', btn);
                 else tabs.appendChild(btn);
             }
 
-            if (!btn.dataset.lguBound) {
-                btn.dataset.lguBound = '1';
-                btn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    activateGuildTab(tabs, btn);
-                    renderGuildList(panel);
-                    // Состав мог устареть — подтягиваем и дорисовываем.
-                    ensureGuild().then(() => {
-                        if (!btn.isConnected || !btn.classList.contains('on')) return;
-                        renderGuildList(panel);
-                    }).catch(() => {});
-                });
-            }
+            if (btn.dataset.lguBound === '1') return;
+            btn.dataset.lguBound = '1';
 
-            // Клик по любой нативной вкладке (nick/fr/find) снимает
-            // активность с нашей: игра считает активной только свою.
-            for (const tab of tabs.querySelectorAll('.arb-tab:not(#arTab-guild)')) {
-                if (tab.dataset.lguWatch) continue;
-                tab.dataset.lguWatch = '1';
-                tab.addEventListener('click', () => {
-                    btn.classList.remove('on');
-                    btn.setAttribute('aria-selected', 'false');
-                    btn.tabIndex = -1;
-                });
-            }
+            btn.addEventListener('click', (e) => {
+                // У нативных вкладок стоит onclick, который зовёт draw() и
+                // перерисовывает модалку — всплытие останавливаем.
+                e.preventDefault();
+                e.stopPropagation();
+                activateGuildTab(tabs);
+
+                // Состав уже в памяти — рисуем сразу, иначе заглушка и
+                // повторная отрисовка после ответа /api/guilds/guild.
+                if (guildRecords.length || guildId || inGuild) renderGuildList(body);
+                else body.innerHTML = '<p class="av-inote">Загружаем состав гильдии…</p>';
+
+                ensureGuild().then(() => {
+                    if (!btn.isConnected) return;
+                    if (btn.getAttribute('aria-selected') !== 'true') return;
+                    renderGuildList(body);
+                }).catch(() => {});
+            });
         };
 
         // ------------------------------------------------------------
@@ -14781,8 +14049,8 @@ const Players = {
             if (!duel || typeof duel !== 'object') return;
 
             state.duel = duel;
-            // mine — очередь командных боёв (site/arena.js, logList), а не
-            // состав отряда; храним как есть, отряд берём из duel.me.squad.
+            // mine — журнал командных боёв (arena2.js, logList), а не состав
+            // отряда; храним как есть, отряд берём из duel.me.squad.
             state.mine = Array.isArray(data.mine) ? data.mine : state.mine;
             state.me = duel.me || state.me;
             state.at = Date.now();
@@ -14857,7 +14125,7 @@ const Players = {
             injecting = true;
             try {
                 injectOfferCards();
-                injectFoeScreen();
+                injectFightWindow();
                 injectInviteTab();
             } finally {
                 injecting = false;
@@ -14871,10 +14139,18 @@ const Players = {
         const run = async (force) => {
             if (destroyed || running) return;
             // Дешёвый фильтр: вне арены (город/шахта/поход) ничего не делаем.
-            if (!arenaRoot() && !document.querySelector('.ar-mw8.arb')) return;
+            // .arb — корень arena2 (.av-root.av-wrap.arb) и подложка модалки
+            // (.av-root.av-dim.arb); .av-win — окно боя/приглашения.
+            if (!arenaRoot() && !document.querySelector('.av-win')) return;
 
             const now = Date.now();
-            if (!force && (now - lastRun) < RUN_THROTTLE) return;
+            if (!force && (now - lastRun) < RUN_THROTTLE) {
+                // Проход не выбрасываем: модалка арены ставится одним
+                // innerHTML, и без повтора наши вставки в неё не появятся до
+                // следующей мутации (которой может и не быть).
+                runLater();
+                return;
+            }
             lastRun = now;
 
             running = true;
@@ -14887,6 +14163,15 @@ const Players = {
             } finally {
                 running = false;
             }
+        };
+
+        // Отложенный повтор после окна троттлинга (один таймер на модуль).
+        const runLater = () => {
+            if (destroyed || deferredTimer) return;
+            deferredTimer = setTimeout(() => {
+                deferredTimer = null;
+                run(true).catch(() => {});
+            }, RUN_THROTTLE);
         };
 
         // Склейка мутаций в один кадр (requestAnimationFrame), с сохранением
@@ -14907,6 +14192,22 @@ const Players = {
 
         const init = () => {
             destroyed = false;
+
+            // Логин соперника из клика «⚔ Атака» ([data-atk] в карточке
+            // .av-off): по нему окно боя находит свой offer в duel.offers[].
+            // Слушаем в capture-фазе, чтобы значение было готово раньше, чем
+            // обработчик игры откроет модалку.
+            if (!onDocClick) {
+                onDocClick = (e) => {
+                    const btn = (e.target && e.target.closest) ? e.target.closest('[data-atk]') : null;
+                    if (!btn) return;
+                    const login = btn.dataset.atk;
+                    if (!login) return;
+                    lastAtkTarget = String(login);
+                };
+                document.addEventListener('click', onDocClick, true);
+            }
+
             if (observer || typeof MutationObserver === 'undefined') {
                 schedule(true);
                 return;
@@ -14916,7 +14217,7 @@ const Players = {
                 // Проход уже запланирован — не сканируем документ на каждой
                 // пачке мутаций (в чате/городе их сотни в секунду).
                 if (injecting || scheduled) return;
-                if (!arenaRoot() && !document.querySelector('.ar-mw8.arb')) return;
+                if (!arenaRoot() && !document.querySelector('.av-win')) return;
                 schedule(false);
             });
             observer.observe(document.body, { childList: true, subtree: true });
@@ -14931,12 +14232,21 @@ const Players = {
                 try { observer.disconnect(); } catch (e) {}
             }
             observer = null;
+            if (onDocClick) {
+                try { document.removeEventListener('click', onDocClick, true); } catch (e) {}
+                onDocClick = null;
+            }
+            if (deferredTimer) {
+                clearTimeout(deferredTimer);
+                deferredTimer = null;
+            }
             scheduled = false;
             pendingForce = false;
             injecting = false;
             lastRun = 0;
             stateBusy = false;
             guildBusy = null;
+            lastAtkTarget = '';
 
             state.duel = null;
             state.mine = null;
@@ -14945,23 +14255,22 @@ const Players = {
             state.failAt = 0;
 
             heroCache.clear();
+            guildCache.clear();
             guildMap = new Map();
             guildRecords = [];
             guildId = null;
-            guildAt = 0;
-            guildTriedAt = 0;
+            guildIdAt = 0;
             inGuild = false;
 
             // Убираем свои вставки из живого DOM: нативные узлы остаются,
             // наши бейджи и вкладка не должны переживать перезапуск скрипта.
-            document.querySelectorAll('.' + WIN_CLS + ', .' + WARN_CLS + ', .' + DOM_IDS.arenaBadgeBox)
+            document.querySelectorAll('.' + WIN_CLS + ', .' + WARN_CLS + ', .' + DOM_IDS.arenaBadgeBox + ', .' + DOM_IDS.arenaGuildTab)
                 .forEach((el) => el.remove());
             // Классы подсветки живут на нативных слотах арены — снимаем их,
             // чтобы после выключения аддона поле выглядело как в игре.
             document.querySelectorAll('.' + ALLY_CLS).forEach((el) => el.classList.remove(ALLY_CLS));
+            document.querySelectorAll('.av-itabs [data-it="guild"]').forEach((el) => el.remove());
             document.querySelectorAll('.' + DOM_IDS.arenaGuildList).forEach((el) => el.remove());
-            const tab = document.getElementById('arTab-guild');
-            if (tab) tab.remove();
         };
 
         return { init, destroy, onApiResponse };
@@ -18081,9 +17390,6 @@ const Players = {
         // ⚔️ Боевой ассистент (11.6.2b): подсказки по механикам боссов в походе.
         //    Отдельного пункта меню нет — тумблер в «⚙️ Настройках аддона».
         CombatAssistant.init();
-        // 🏰 Состав гильдии для офицеров (11.6.6c): бейджи онлайна/сессии/друзей
-        //    в окне гильдий. Сам модуль проверяет права через G.LGGuilds.index().
-        GuildStats.init();
         // ⚔️ Арена 5×5: шанс победы, согильдейцы в отряде противника и
         //    вкладка «Согильдейцы» в модалке приглашения. Контекст арены
         //    приходит из хука LGArena.open (core/hooks.js), своих патчей
@@ -18118,7 +17424,6 @@ const Players = {
             Players,
             PocketCity,
             CombatAssistant,
-            GuildStats,
             Arena,
             Party,
             Chat,
@@ -18158,10 +17463,6 @@ const Players = {
                 // 11.6.2b: гасим интервал боевого ассистента и убираем его контейнер,
                 // иначе после перезапуска скрипта тикали бы два таймера.
                 CombatAssistant.destroy();
-                // 11.6.6c: снимаем MutationObserver окна гильдий и тик
-                // «онлайн / был N назад», иначе после перезапуска скрипта
-                // работали бы два наблюдателя и два интервала.
-                GuildStats.destroy();
                 // Арена: снимаем MutationObserver, чистим кэши героев/состава
                 // и убираем свои бейджи и вкладку из живого DOM.
                 try { Arena.destroy?.(); } catch (e) {}
