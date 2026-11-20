@@ -607,11 +607,19 @@
             flex: 1 1 auto !important;
             min-height: 0 !important;
             height: auto !important;
-            max-height: none !important;
+            /* v11.6.9: было max-height: none — теперь потолок = высота вкладки
+               внутри модалки, иначе контент уезжает под нижнюю границу окна. */
+            max-height: 100% !important;
             overflow: hidden !important;
         }
+        /* v11.6.9: контейнер BuildSim — собственный scrollport. При штатной
+           работе скроллит .sim-main-content (там sticky-сайдбар классов), но
+           если браузер не сожмёт flex-цепочку, колесо всё равно прокрутит
+           вкладку до «Навыков Арены» и сводки статов, а не обрежет низ. */
         #hp-buildsim-container {
             padding-bottom: 10px !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
         }
         #hp-buildsim-container .tab-content.active {
             overflow: visible !important;
@@ -1254,6 +1262,7 @@
 
         .gl-pane.lgu-gl-stats-pane {
             box-sizing: border-box;
+            padding: 14px 16px 18px;
             color: var(--gw-ink, #2b1d18);
             font-family: var(--gw-tx, system-ui, sans-serif);
         }
@@ -1266,7 +1275,7 @@
         }
         .lgu-gl-card {
             min-width: 0;
-            padding: 10px 12px 12px;
+            padding: 14px 18px;
             border: 2px solid var(--gw-sep, rgba(43, 29, 24, .15));
             border-radius: var(--gw-rc, 12px);
             background: var(--gw-card, #fff);
@@ -1277,11 +1286,16 @@
             display: flex; align-items: center; justify-content: space-between;
             gap: 8px; margin: 0 0 8px; padding-bottom: 6px;
             border-bottom: 2px dashed var(--gw-sep, rgba(43, 29, 24, .15));
-            font: 400 15px/1.2 var(--gw-bt, 'Russo One', sans-serif);
+            font-family: var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            font-weight: var(--gw-btw, 400);
+            font-size: 15px;
+            letter-spacing: 0.2px;
             color: var(--gw-title, #5a3458);
         }
         .lgu-gl-h4 > span {
-            font: 400 12px var(--gw-bt, 'Russo One', sans-serif);
+            font-family: var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            font-weight: var(--gw-btw, 400);
+            font-size: 14px;
             color: var(--gw-mute, #6b5148);
             white-space: nowrap;
         }
@@ -1294,9 +1308,11 @@
             border-bottom: 1px dashed var(--gw-sep, rgba(43, 29, 24, .15));
         }
         .lgu-gl-row:last-child { border-bottom: 0; }
-        .lgu-gl-row > span { color: var(--gw-mute, #6b5148); }
+        .lgu-gl-row > span { color: var(--gw-mute, #6b5148); font-weight: 600; }
         .lgu-gl-row > b {
-            font: 400 14px var(--gw-bt, 'Russo One', sans-serif);
+            font-family: var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            font-weight: var(--gw-btw, 400);
+            font-size: 14px;
             white-space: nowrap;
         }
         .lgu-gl-row > b.on { color: var(--gw-sel, #5a3458); }
@@ -1312,10 +1328,18 @@
             gap: 8px; font-size: 13px;
         }
         .lgu-gl-cl-head > b {
-            font: 400 13.5px var(--gw-bt, 'Russo One', sans-serif);
+            font-family: var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            font-weight: 600;
+            font-size: 13.5px;
             color: var(--gw-title, #5a3458);
         }
-        .lgu-gl-cl-head > span { color: var(--gw-mute, #6b5148); white-space: nowrap; }
+        .lgu-gl-cl-head > span {
+            font-family: var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            font-weight: var(--gw-btw, 400);
+            font-size: 14px;
+            color: var(--gw-mute, #6b5148);
+            white-space: nowrap;
+        }
         .lgu-gl-bar {
             height: 10px; margin-top: 3px; overflow: hidden;
             border: 2px solid var(--gw-line, #2b1d18);
@@ -1349,7 +1373,9 @@
             width: 24px; height: 24px; border-radius: 50%;
             background: var(--gw-sel, #5a3458);
             color: var(--gw-on-sel, #fff1d6);
-            font: 400 12px var(--gw-bt, 'Russo One', sans-serif);
+            font-family: var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            font-weight: var(--gw-btw, 400);
+            font-size: 14px;
         }
         .lgu-gl-toprow.first .lgu-gl-rank {
             background: var(--gw-acc, #ffcf4a);
@@ -1357,18 +1383,24 @@
         }
         .lgu-gl-who { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
         .lgu-gl-who > b {
-            font: 400 13.5px var(--gw-bt, 'Russo One', sans-serif);
+            font-family: var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            font-weight: 600;
+            font-size: 13.5px;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         .lgu-gl-who > small { font-size: 11.5px; color: var(--gw-mute, #6b5148); }
         .lgu-gl-power {
             flex: none; white-space: nowrap;
-            font: 400 13.5px var(--gw-bt, 'Russo One', sans-serif);
+            font-family: var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            font-weight: var(--gw-btw, 400);
+            font-size: 14px;
             color: var(--gw-title, #5a3458);
         }
         .lgu-gl-idledays {
             flex: none; white-space: nowrap;
-            font: 400 13px var(--gw-bt, 'Russo One', sans-serif);
+            font-family: var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            font-weight: var(--gw-btw, 400);
+            font-size: 14px;
             color: var(--gw-hot, #b2442c);
         }
 
@@ -1377,6 +1409,254 @@
 
         @media (max-width: 560px) {
             .lgu-gl-grid { grid-template-columns: minmax(0, 1fr); }
+        }
+
+        /* ============================================================
+           ПЛАНИРОВЩИК БИЛДОВ — РАДИАЛЬНОЕ СОЗВЕЗДИЕ
+           Модуль: modules/build-sim.js. Карта повторяет skillmap.js:
+           viewBox="-600 -600 1200 1200", центр 'hub' в (0,0),
+           ветки окрашены по bi % 3 (--bc-0..2 как в skillmap.css).
+           ============================================================ */
+        .lgu-skm-layout [hidden] { display: none !important; }
+        /* v11.6.9: было align-items: flex-start — из-за этого .sim-main-content
+           рос по контенту, его overflow-y: auto не включался, и низ вкладки
+           («Навыки Арены», «Что дают открытые навыки») обрезался overflow:
+           hidden у #tab-hero-build / #hp-buildsim-container. Сайдбар классов
+           по-прежнему не растягивается: у .sim-sidebar свой align-self:
+           flex-start + position: sticky. */
+        .lgu-skm-layout { align-items: stretch; }
+        .lgu-skm-layout > .sim-main-content { min-height: 0; max-height: 100%; }
+        /* Дети колонки не сжимаются: иначе flex-shrink мог «сплющить» блок
+           «Навыки Арены» или сводку, и вместо прокрутки вкладки появился бы
+           второй, внутренний скролл. */
+        .lgu-skm-layout .sim-main-content > * { flex: none; }
+        .lgu-skm-layout .sim-sidebar .lgu-skm-i { width: 16px; height: 16px; flex: none; }
+        .lgu-skm-layout .sim-tab.active .lgu-skm-i { color: inherit; }
+
+        /* Шапка: счётчики SP/жетонов + пресеты. */
+        .lgu-skm-bar {
+            height: auto !important;
+            min-height: 38px;
+            flex-wrap: wrap;
+            row-gap: 6px;
+            padding: 6px 8px !important;
+        }
+        .lgu-skm-res { display: inline-flex; align-items: baseline; gap: 5px; white-space: nowrap; font-size: 12px; color: var(--tb-chalk2, #c9d2c3); }
+        .lgu-skm-res em { font-style: normal; }
+        .lgu-skm-res > b { color: var(--tb-gold, #ffcf4a); font-size: 16px; line-height: 1; font-variant-numeric: tabular-nums; }
+        .lgu-skm-res > b.over { color: #ff6b81; }
+        .lgu-skm-res > small { color: #9c8fa8; font-size: 11px; }
+        .lgu-skm-bar .lgu-skm-build-list { width: 180px; flex: 0 1 180px; }
+        .lgu-skm-bar .sim-save-name { width: 140px; flex: 0 1 140px; }
+
+        /* Панель героя над картой. */
+        .lgu-skm-hero {
+            display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+            margin: 0 0 10px; padding: 8px 12px;
+            background: linear-gradient(120deg, #1e1724, #241c2b);
+            border: 1px solid #3d2f44; border-radius: 10px;
+        }
+        .lgu-skm-avat {
+            display: grid; place-items: center; width: 34px; height: 34px; flex: none;
+            border-radius: 50%; border: 2px solid var(--c, #ffd24a); color: var(--c, #ffd24a);
+            background: rgba(0, 0, 0, .35);
+        }
+        .lgu-skm-avat .lgu-skm-i { width: 20px; height: 20px; }
+        .lgu-skm-who { display: flex; flex-direction: column; min-width: 0; }
+        .lgu-skm-who > b { color: #f7eadf; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .lgu-skm-who > small { color: #9c8fa8; font-size: 11.5px; }
+        .lgu-skm-pill {
+            display: inline-flex; align-items: baseline; gap: 5px; padding: 3px 10px;
+            border-radius: 999px; border: 1px solid #44374a; background: rgba(0, 0, 0, .3);
+            color: #d8c9a8; font-size: 12px; white-space: nowrap;
+        }
+        .lgu-skm-pill em { font-style: normal; color: #9c8fa8; font-size: 10.5px; }
+        /* Статус умения класса прижат вправо (бейдж «песочница» удалён). */
+        .lgu-skm-pill.status { margin-left: auto; }
+        /* Порог умения класса пройден: активный статус (зелёный), а не «перебор». */
+        .lgu-skm-pill.hub-on {
+            border-color: rgba(126, 217, 129, .55);
+            background: rgba(64, 160, 82, .16);
+            color: #8ee59a;
+            box-shadow: 0 0 8px rgba(126, 217, 129, .22);
+        }
+
+        /* Карта + инспектор. */
+        .lgu-skm-stage { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 12px; align-items: start; margin-bottom: 12px; }
+        .lgu-skm-map {
+            position: relative; overflow: hidden; border-radius: 12px;
+            border: 1px solid #2c3547;
+            background: linear-gradient(160deg, #0b0f19 0%, #070a12 55%, #05070c 100%);
+            height: clamp(360px, 56vh, 640px);
+            cursor: grab;
+            touch-action: none;
+        }
+        .lgu-skm-map.dragging { cursor: grabbing; }
+        .lgu-skm-svg { display: block; width: 100%; height: 100%; user-select: none; }
+        .lgu-skm-bg { fill: transparent; }
+        .lgu-skm-zoom { position: absolute; right: 10px; bottom: 10px; display: flex; flex-direction: column; gap: 4px; }
+        .lgu-skm-zoom button {
+            width: 28px; height: 28px; padding: 0; border-radius: 7px; cursor: pointer;
+            border: 1px solid #3d4a5f; background: rgba(12, 17, 26, .85); color: #cfe0f5; font-size: 14px; line-height: 1;
+        }
+        .lgu-skm-zoom button:hover { border-color: #7fa7d6; color: #fff; }
+        .lgu-skm-wait { fill: #9fb3c8; font: 16px 'Nunito', system-ui, sans-serif; }
+        .lgu-skm-wait.bad { fill: #ff9aa8; }
+
+        /* Рёбра созвездия. */
+        .lgu-skm-edge { stroke: var(--bc, #5cc8ff); stroke-width: 2; stroke-linecap: round; opacity: .18; }
+        .lgu-skm-edge.avail { opacity: .6; stroke-dasharray: 7 7; }
+        .lgu-skm-edge.on { opacity: .95; stroke-width: 2.6; filter: drop-shadow(0 0 4px var(--bc, #5cc8ff)); }
+        .lgu-skm-edge.q { stroke-dasharray: 2 7; opacity: .3; }
+        .lgu-skm-edge.q.on { opacity: .9; }
+
+        /* Центр (hub). */
+        .lgu-skm-hub { color: var(--c, #ffd24a); cursor: pointer; }
+        .lgu-skm-hub > circle { fill: rgba(12, 17, 26, .92); stroke: var(--c, #ffd24a); stroke-width: 2.4; }
+        .lgu-skm-hub.on > circle { filter: drop-shadow(0 0 12px var(--c, #ffd24a)); stroke-width: 3; }
+        .lgu-skm-hub.sel > circle { stroke: #fff; }
+        .lgu-skm-hubcnt { fill: #9fb3c8; font: 12px 'Nunito', system-ui, sans-serif; }
+        .lgu-skm-hub.on .lgu-skm-hubcnt { fill: var(--c, #ffd24a); font-size: 15px; }
+
+        /* Пассивные узлы. */
+        .lgu-skm-node { cursor: pointer; }
+        .lgu-skm-node > circle { fill: rgba(9, 13, 21, .94); stroke: var(--bc, #5cc8ff); stroke-width: 2; transition: stroke-width .15s; }
+        .lgu-skm-node > svg { color: var(--bc, #5cc8ff); opacity: .8; }
+        .lgu-skm-node.has > circle { fill: color-mix(in srgb, var(--bc, #5cc8ff) 34%, #070a12); stroke-width: 2.6; }
+        .lgu-skm-node.has > svg { color: #fff; opacity: 1; filter: drop-shadow(0 0 4px var(--bc, #5cc8ff)); }
+        .lgu-skm-node.can > circle { stroke-dasharray: 5 4; }
+        .lgu-skm-node.can > circle, .lgu-skm-node.can > svg { animation: lguSkmPulse 1.6s ease-in-out infinite; }
+        .lgu-skm-node.cap > circle { stroke: #ffd24a; }
+        .lgu-skm-node.sel > circle { stroke: #fff; stroke-width: 3; }
+        .lgu-skm-node .rank { fill: #cbd5e1; font: 11px 'Nunito', system-ui, sans-serif; paint-order: stroke; stroke: #05070c; stroke-width: 3px; }
+        .lgu-skm-node.has .rank { fill: #ffd24a; }
+        @keyframes lguSkmPulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+
+        /* Ромбы способностей Арены. */
+        .lgu-skm-ab { cursor: pointer; }
+        .lgu-skm-ab .shape { fill: rgba(9, 13, 21, .94); stroke: var(--bc, #c4a0ff); stroke-width: 2; }
+        .lgu-skm-ab .glyph { fill: var(--bc, #c4a0ff); font: 16px 'Nunito', system-ui, sans-serif; }
+        .lgu-skm-ab.has .shape { fill: color-mix(in srgb, var(--bc, #c4a0ff) 38%, #070a12); stroke-width: 2.6; }
+        .lgu-skm-ab.has .glyph { fill: #fff; }
+        .lgu-skm-ab.eq .shape { stroke: #ffd24a; filter: drop-shadow(0 0 7px rgba(255, 210, 74, .8)); }
+        .lgu-skm-ab.can .shape { stroke-dasharray: 5 4; animation: lguSkmPulse 1.6s ease-in-out infinite; }
+        .lgu-skm-ab.sel .shape { stroke: #fff; stroke-width: 3; }
+        .lgu-skm-ab .badge { fill: #ffd24a; font: 11px 'Nunito', system-ui, sans-serif; paint-order: stroke; stroke: #05070c; stroke-width: 3px; }
+
+        /* Молнии похода. */
+        .lgu-skm-q rect { fill: rgba(9, 13, 21, .92); stroke: #55647c; stroke-width: 1.6; }
+        .lgu-skm-q text { fill: #93a4bb; font: 13px 'Nunito', system-ui, sans-serif; }
+        .lgu-skm-q.on rect { stroke: #ffd24a; filter: drop-shadow(0 0 6px rgba(255, 210, 74, .7)); }
+        .lgu-skm-q.on text { fill: #ffd24a; }
+
+        /* Подписи веток. */
+        .lgu-skm-blab .nm { fill: var(--bc, #5cc8ff); font: 16px 'Russo One', 'Nunito', system-ui, sans-serif; letter-spacing: .03em; }
+        .lgu-skm-blab .cnt { fill: #8fa1b8; font: 12px 'Nunito', system-ui, sans-serif; }
+
+        /* Инспектор узла/способности/центра. */
+        .lgu-skm-inspector {
+            min-width: 0; padding: 12px; border-radius: 12px;
+            border: 1px solid #3d2f44; background: #1e1724;
+            max-height: clamp(360px, 56vh, 640px); overflow-y: auto;
+        }
+        .lgu-skm-hint { color: #c9d2c3; font-size: 12.5px; line-height: 1.45; }
+        .lgu-skm-hint > b { display: block; margin-bottom: 8px; color: #ffcf6a; font-size: 13.5px; }
+        .lgu-skm-hint p { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 6px; }
+        .lgu-skm-hint i { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; font-style: normal; }
+        .lgu-skm-hint i.dot { border-radius: 50%; border: 2px solid #5cc8ff; margin-top: 2px; }
+        .lgu-skm-hint i.diamond { border: 2px solid #c4a0ff; transform: rotate(45deg) scale(.72); margin-top: 2px; }
+        .lgu-skm-hint i.bolt { color: #ffd24a; }
+        .lgu-skm-hint .muted { color: #8b7f96; font-size: 11.5px; }
+
+        .lgu-skm-ins { color: #e8e1d5; font-size: 12.5px; line-height: 1.4; }
+        .lgu-skm-ins-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; padding-bottom: 7px; border-bottom: 1px dashed rgba(255, 255, 255, .14); }
+        .lgu-skm-ins-head > b { flex: 1; min-width: 0; color: var(--bc, #ffcf6a); font-size: 15px; line-height: 1.25; }
+        .lgu-skm-ins-head > small { color: #9c8fa8; font-size: 11px; white-space: nowrap; }
+        .lgu-skm-ins-x { flex: none; width: 20px; height: 20px; padding: 0; border: none; border-radius: 5px; background: transparent; color: #c9b184; cursor: pointer; font-size: 12px; }
+        .lgu-skm-ins-x:hover { color: #fff; background: rgba(255, 255, 255, .08); }
+        .lgu-skm-ins-kind { margin-bottom: 6px; color: #9c8fa8; font-size: 11.5px; }
+        .lgu-skm-ins-rank { margin-bottom: 6px; color: #c9d2c3; }
+        .lgu-skm-ins-rank > b { color: #ffcf6a; font-size: 15px; }
+        .lgu-skm-ins-fx { margin: 0 0 6px; color: #f4f1e4; }
+        .lgu-skm-ins-next { margin: 0 0 6px; color: #9fb3c8; font-size: 11.5px; }
+        .lgu-skm-ins-next.warn { color: #ffb3a0; }
+        .lgu-skm-ins-cost { margin: 8px 0; padding: 6px 8px; border-radius: 7px; background: rgba(202, 165, 92, .12); color: #d8c9a8; }
+        .lgu-skm-ins-cost b { color: #ffcf6a; }
+        .lgu-skm-ins-nodes { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+        .lgu-skm-ins-nodes li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 6px; border-radius: 6px; background: rgba(0, 0, 0, .22); }
+        .lgu-skm-ins-nodes span { color: #9c8fa8; font-size: 11.5px; }
+        .lgu-skm-ins-nodes b { color: #f4f1e4; font-size: 11.5px; text-align: right; }
+        .lgu-skm-ins-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+        .lgu-skm-btn {
+            flex: 1 1 auto; min-width: 64px; height: 30px; padding: 0 10px;
+            border: 1px solid #caa55c; border-radius: 7px; cursor: pointer;
+            background: transparent; color: #ffcf6a; font: 700 12px 'Nunito', system-ui, sans-serif;
+            transition: filter .15s, background .15s;
+        }
+        .lgu-skm-btn:hover:not(:disabled) { background: rgba(202, 165, 92, .16); }
+        .lgu-skm-btn.main { background: #caa55c; border-color: #caa55c; color: #1d1620; }
+        .lgu-skm-btn.main:hover:not(:disabled) { filter: brightness(1.1); }
+        .lgu-skm-btn.danger { color: #ff8fa3; border-color: rgba(255, 90, 122, .6); }
+        .lgu-skm-btn.danger:hover:not(:disabled) { background: rgba(255, 90, 122, .14); }
+        .lgu-skm-btn:disabled { opacity: .42; cursor: not-allowed; }
+
+        /* Блок «Навыки Арены». */
+        .lgu-skm-arena { margin-bottom: 12px; padding: 12px 14px; border: 1px solid #3d2f44; border-radius: 10px; background: #1a1420; }
+        .lgu-skm-arena-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; padding-bottom: 7px; border-bottom: 1px dashed #3d2f44; }
+        .lgu-skm-arena-head > b { color: #ffcf6a; font-size: 14px; }
+        .lgu-skm-arena-head > span { color: #9c8fa8; font-size: 12px; }
+        .lgu-skm-arena-head > span b { color: #ffcf6a; font-size: 14px; }
+        /* v11.6.9: красная подсветка (.over) у жетонов Арены удалена —
+           жёсткого лимита жетонов в планировщике нет. */
+        .lgu-skm-slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 10px; }
+        .lgu-skm-slot { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 2px solid var(--bc, #6b6478); border-radius: 9px; background: rgba(0, 0, 0, .28); }
+        .lgu-skm-slot.empty { border-style: dashed; opacity: .85; }
+        .lgu-skm-slot-k { color: #c9d2c3; font-size: 11.5px; }
+        .lgu-skm-slot select { height: 28px; padding: 0 8px; border: 1px solid #44374a; border-radius: 6px; background: #0f0f15; color: #fff; font: 700 12px 'Nunito', system-ui, sans-serif; }
+        .lgu-skm-slot-meta { display: flex; flex-direction: column; gap: 2px; min-height: 30px; }
+        .lgu-skm-slot-meta > b { color: #f4f1e4; font-size: 12.5px; }
+        .lgu-skm-slot-meta > em { color: #9fb3c8; font-size: 11px; font-style: normal; }
+        .lgu-skm-slot-meta > small { color: #8b7f96; font-size: 11.5px; }
+        .lgu-skm-ups { display: flex; flex-direction: column; gap: 6px; }
+        .lgu-skm-up { border: 1px solid #3d2f44; border-radius: 8px; background: rgba(0, 0, 0, .22); }
+        .lgu-skm-up > summary { padding: 7px 10px; cursor: pointer; color: #f4f1e4; font-size: 12.5px; }
+        .lgu-skm-up > summary small { color: #9c8fa8; font-size: 11px; }
+        .lgu-skm-up[open] > summary { border-bottom: 1px dashed #3d2f44; }
+        .lgu-skm-up-rows { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; }
+        .lgu-skm-up-row { display: grid; grid-template-columns: 90px 24px 24px auto 24px 52px; align-items: center; gap: 4px; font-size: 12px; }
+        .lgu-skm-up-row > span { color: #9c8fa8; }
+        .lgu-skm-up-row > b { color: #ffcf6a; text-align: center; font-variant-numeric: tabular-nums; }
+        .lgu-skm-up-row > small { color: #8b7f96; font-size: 11px; }
+        .lgu-skm-up-row > em { color: #c9d2c3; font-style: normal; text-align: right; white-space: nowrap; }
+        .lgu-skm-mini { width: 22px; height: 22px; padding: 0; border-radius: 5px; border: 1px solid #44374a; background: #241c2b; color: #f4f1e4; cursor: pointer; font-size: 12px; line-height: 1; }
+        .lgu-skm-mini:hover:not(:disabled) { border-color: #caa55c; color: #ffcf6a; }
+        .lgu-skm-mini:disabled { opacity: .35; cursor: not-allowed; }
+        .lgu-skm-loads { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+        .lgu-skm-loadbtn { height: 26px; padding: 0 12px; border-radius: 6px; border: 1px solid #44374a; background: #241c2b; color: #d8c9a8; cursor: pointer; font: 700 12px 'Nunito', system-ui, sans-serif; }
+        .lgu-skm-loadbtn:hover { border-color: #caa55c; color: #ffcf6a; }
+        .lgu-skm-loadbtn.game { border-color: #caa55c; color: #ffcf6a; }
+
+        /* Сводка. */
+        .lgu-skm-summary { padding: 12px 14px; border: 1px solid #3d2f44; border-radius: 10px; background: #1a1420; }
+        .lgu-skm-sum-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; padding-bottom: 7px; border-bottom: 1px dashed #3d2f44; }
+        .lgu-skm-sum-head > b { color: #ffcf6a; font-size: 14px; }
+        .lgu-skm-sum-head > span { color: #9c8fa8; font-size: 11.5px; }
+        .lgu-skm-stats { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 5px 12px; }
+        .lgu-skm-stats li { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 4px 8px; border-left: 3px solid var(--bc, #5cc8ff); border-radius: 4px; background: rgba(0, 0, 0, .22); font-size: 12px; }
+        .lgu-skm-stats li > span { color: #c9d2c3; }
+        .lgu-skm-stats li > b { color: #7ee08a; white-space: nowrap; }
+        .lgu-skm-note { margin: 6px 0 0; color: #8b7f96; font-size: 12px; }
+        .lgu-skm-error { padding: 18px; color: #ffb3a0; font-size: 13px; text-align: center; }
+
+        /* Вкладка «Экипировка». */
+        .lgu-skm-gear { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+        .lgu-skm-gear-col { min-width: 0; padding: 12px; border: 1px solid #3d2f44; border-radius: 10px; background: #1a1420; overflow-x: auto; }
+        .lgu-skm-gear-col h3 { margin: 0 0 8px; color: #ffcf6a; font-size: 14px; }
+
+        /* На узких экранах карта и инспектор — в колонку. */
+        @media (max-width: 900px) {
+            .lgu-skm-stage { grid-template-columns: minmax(0, 1fr); }
+            .lgu-skm-inspector { max-height: none; }
         }
 
 

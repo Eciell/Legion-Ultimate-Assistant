@@ -1795,11 +1795,19 @@
             flex: 1 1 auto !important;
             min-height: 0 !important;
             height: auto !important;
-            max-height: none !important;
+            /* v11.6.9: было max-height: none — теперь потолок = высота вкладки
+               внутри модалки, иначе контент уезжает под нижнюю границу окна. */
+            max-height: 100% !important;
             overflow: hidden !important;
         }
+        /* v11.6.9: контейнер BuildSim — собственный scrollport. При штатной
+           работе скроллит .sim-main-content (там sticky-сайдбар классов), но
+           если браузер не сожмёт flex-цепочку, колесо всё равно прокрутит
+           вкладку до «Навыков Арены» и сводки статов, а не обрежет низ. */
         #hp-buildsim-container {
             padding-bottom: 10px !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
         }
         #hp-buildsim-container .tab-content.active {
             overflow: visible !important;
@@ -2442,6 +2450,7 @@
 
         .gl-pane.lgu-gl-stats-pane {
             box-sizing: border-box;
+            padding: 14px 16px 18px;
             color: var(--gw-ink, #2b1d18);
             font-family: var(--gw-tx, system-ui, sans-serif);
         }
@@ -2454,7 +2463,7 @@
         }
         .lgu-gl-card {
             min-width: 0;
-            padding: 10px 12px 12px;
+            padding: 14px 18px;
             border: 2px solid var(--gw-sep, rgba(43, 29, 24, .15));
             border-radius: var(--gw-rc, 12px);
             background: var(--gw-card, #fff);
@@ -2465,11 +2474,16 @@
             display: flex; align-items: center; justify-content: space-between;
             gap: 8px; margin: 0 0 8px; padding-bottom: 6px;
             border-bottom: 2px dashed var(--gw-sep, rgba(43, 29, 24, .15));
-            font: 400 15px/1.2 var(--gw-bt, 'Russo One', sans-serif);
+            font-family: var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            font-weight: var(--gw-btw, 400);
+            font-size: 15px;
+            letter-spacing: 0.2px;
             color: var(--gw-title, #5a3458);
         }
         .lgu-gl-h4 > span {
-            font: 400 12px var(--gw-bt, 'Russo One', sans-serif);
+            font-family: var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            font-weight: var(--gw-btw, 400);
+            font-size: 14px;
             color: var(--gw-mute, #6b5148);
             white-space: nowrap;
         }
@@ -2482,9 +2496,11 @@
             border-bottom: 1px dashed var(--gw-sep, rgba(43, 29, 24, .15));
         }
         .lgu-gl-row:last-child { border-bottom: 0; }
-        .lgu-gl-row > span { color: var(--gw-mute, #6b5148); }
+        .lgu-gl-row > span { color: var(--gw-mute, #6b5148); font-weight: 600; }
         .lgu-gl-row > b {
-            font: 400 14px var(--gw-bt, 'Russo One', sans-serif);
+            font-family: var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            font-weight: var(--gw-btw, 400);
+            font-size: 14px;
             white-space: nowrap;
         }
         .lgu-gl-row > b.on { color: var(--gw-sel, #5a3458); }
@@ -2500,10 +2516,18 @@
             gap: 8px; font-size: 13px;
         }
         .lgu-gl-cl-head > b {
-            font: 400 13.5px var(--gw-bt, 'Russo One', sans-serif);
+            font-family: var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            font-weight: 600;
+            font-size: 13.5px;
             color: var(--gw-title, #5a3458);
         }
-        .lgu-gl-cl-head > span { color: var(--gw-mute, #6b5148); white-space: nowrap; }
+        .lgu-gl-cl-head > span {
+            font-family: var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            font-weight: var(--gw-btw, 400);
+            font-size: 14px;
+            color: var(--gw-mute, #6b5148);
+            white-space: nowrap;
+        }
         .lgu-gl-bar {
             height: 10px; margin-top: 3px; overflow: hidden;
             border: 2px solid var(--gw-line, #2b1d18);
@@ -2537,7 +2561,9 @@
             width: 24px; height: 24px; border-radius: 50%;
             background: var(--gw-sel, #5a3458);
             color: var(--gw-on-sel, #fff1d6);
-            font: 400 12px var(--gw-bt, 'Russo One', sans-serif);
+            font-family: var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            font-weight: var(--gw-btw, 400);
+            font-size: 14px;
         }
         .lgu-gl-toprow.first .lgu-gl-rank {
             background: var(--gw-acc, #ffcf4a);
@@ -2545,18 +2571,24 @@
         }
         .lgu-gl-who { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
         .lgu-gl-who > b {
-            font: 400 13.5px var(--gw-bt, 'Russo One', sans-serif);
+            font-family: var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            font-weight: 600;
+            font-size: 13.5px;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         .lgu-gl-who > small { font-size: 11.5px; color: var(--gw-mute, #6b5148); }
         .lgu-gl-power {
             flex: none; white-space: nowrap;
-            font: 400 13.5px var(--gw-bt, 'Russo One', sans-serif);
+            font-family: var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            font-weight: var(--gw-btw, 400);
+            font-size: 14px;
             color: var(--gw-title, #5a3458);
         }
         .lgu-gl-idledays {
             flex: none; white-space: nowrap;
-            font: 400 13px var(--gw-bt, 'Russo One', sans-serif);
+            font-family: var(--gw-bt, 'Russo One', system-ui, sans-serif);
+            font-weight: var(--gw-btw, 400);
+            font-size: 14px;
             color: var(--gw-hot, #b2442c);
         }
 
@@ -2565,6 +2597,254 @@
 
         @media (max-width: 560px) {
             .lgu-gl-grid { grid-template-columns: minmax(0, 1fr); }
+        }
+
+        /* ============================================================
+           ПЛАНИРОВЩИК БИЛДОВ — РАДИАЛЬНОЕ СОЗВЕЗДИЕ
+           Модуль: modules/build-sim.js. Карта повторяет skillmap.js:
+           viewBox="-600 -600 1200 1200", центр 'hub' в (0,0),
+           ветки окрашены по bi % 3 (--bc-0..2 как в skillmap.css).
+           ============================================================ */
+        .lgu-skm-layout [hidden] { display: none !important; }
+        /* v11.6.9: было align-items: flex-start — из-за этого .sim-main-content
+           рос по контенту, его overflow-y: auto не включался, и низ вкладки
+           («Навыки Арены», «Что дают открытые навыки») обрезался overflow:
+           hidden у #tab-hero-build / #hp-buildsim-container. Сайдбар классов
+           по-прежнему не растягивается: у .sim-sidebar свой align-self:
+           flex-start + position: sticky. */
+        .lgu-skm-layout { align-items: stretch; }
+        .lgu-skm-layout > .sim-main-content { min-height: 0; max-height: 100%; }
+        /* Дети колонки не сжимаются: иначе flex-shrink мог «сплющить» блок
+           «Навыки Арены» или сводку, и вместо прокрутки вкладки появился бы
+           второй, внутренний скролл. */
+        .lgu-skm-layout .sim-main-content > * { flex: none; }
+        .lgu-skm-layout .sim-sidebar .lgu-skm-i { width: 16px; height: 16px; flex: none; }
+        .lgu-skm-layout .sim-tab.active .lgu-skm-i { color: inherit; }
+
+        /* Шапка: счётчики SP/жетонов + пресеты. */
+        .lgu-skm-bar {
+            height: auto !important;
+            min-height: 38px;
+            flex-wrap: wrap;
+            row-gap: 6px;
+            padding: 6px 8px !important;
+        }
+        .lgu-skm-res { display: inline-flex; align-items: baseline; gap: 5px; white-space: nowrap; font-size: 12px; color: var(--tb-chalk2, #c9d2c3); }
+        .lgu-skm-res em { font-style: normal; }
+        .lgu-skm-res > b { color: var(--tb-gold, #ffcf4a); font-size: 16px; line-height: 1; font-variant-numeric: tabular-nums; }
+        .lgu-skm-res > b.over { color: #ff6b81; }
+        .lgu-skm-res > small { color: #9c8fa8; font-size: 11px; }
+        .lgu-skm-bar .lgu-skm-build-list { width: 180px; flex: 0 1 180px; }
+        .lgu-skm-bar .sim-save-name { width: 140px; flex: 0 1 140px; }
+
+        /* Панель героя над картой. */
+        .lgu-skm-hero {
+            display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+            margin: 0 0 10px; padding: 8px 12px;
+            background: linear-gradient(120deg, #1e1724, #241c2b);
+            border: 1px solid #3d2f44; border-radius: 10px;
+        }
+        .lgu-skm-avat {
+            display: grid; place-items: center; width: 34px; height: 34px; flex: none;
+            border-radius: 50%; border: 2px solid var(--c, #ffd24a); color: var(--c, #ffd24a);
+            background: rgba(0, 0, 0, .35);
+        }
+        .lgu-skm-avat .lgu-skm-i { width: 20px; height: 20px; }
+        .lgu-skm-who { display: flex; flex-direction: column; min-width: 0; }
+        .lgu-skm-who > b { color: #f7eadf; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .lgu-skm-who > small { color: #9c8fa8; font-size: 11.5px; }
+        .lgu-skm-pill {
+            display: inline-flex; align-items: baseline; gap: 5px; padding: 3px 10px;
+            border-radius: 999px; border: 1px solid #44374a; background: rgba(0, 0, 0, .3);
+            color: #d8c9a8; font-size: 12px; white-space: nowrap;
+        }
+        .lgu-skm-pill em { font-style: normal; color: #9c8fa8; font-size: 10.5px; }
+        /* Статус умения класса прижат вправо (бейдж «песочница» удалён). */
+        .lgu-skm-pill.status { margin-left: auto; }
+        /* Порог умения класса пройден: активный статус (зелёный), а не «перебор». */
+        .lgu-skm-pill.hub-on {
+            border-color: rgba(126, 217, 129, .55);
+            background: rgba(64, 160, 82, .16);
+            color: #8ee59a;
+            box-shadow: 0 0 8px rgba(126, 217, 129, .22);
+        }
+
+        /* Карта + инспектор. */
+        .lgu-skm-stage { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 12px; align-items: start; margin-bottom: 12px; }
+        .lgu-skm-map {
+            position: relative; overflow: hidden; border-radius: 12px;
+            border: 1px solid #2c3547;
+            background: linear-gradient(160deg, #0b0f19 0%, #070a12 55%, #05070c 100%);
+            height: clamp(360px, 56vh, 640px);
+            cursor: grab;
+            touch-action: none;
+        }
+        .lgu-skm-map.dragging { cursor: grabbing; }
+        .lgu-skm-svg { display: block; width: 100%; height: 100%; user-select: none; }
+        .lgu-skm-bg { fill: transparent; }
+        .lgu-skm-zoom { position: absolute; right: 10px; bottom: 10px; display: flex; flex-direction: column; gap: 4px; }
+        .lgu-skm-zoom button {
+            width: 28px; height: 28px; padding: 0; border-radius: 7px; cursor: pointer;
+            border: 1px solid #3d4a5f; background: rgba(12, 17, 26, .85); color: #cfe0f5; font-size: 14px; line-height: 1;
+        }
+        .lgu-skm-zoom button:hover { border-color: #7fa7d6; color: #fff; }
+        .lgu-skm-wait { fill: #9fb3c8; font: 16px 'Nunito', system-ui, sans-serif; }
+        .lgu-skm-wait.bad { fill: #ff9aa8; }
+
+        /* Рёбра созвездия. */
+        .lgu-skm-edge { stroke: var(--bc, #5cc8ff); stroke-width: 2; stroke-linecap: round; opacity: .18; }
+        .lgu-skm-edge.avail { opacity: .6; stroke-dasharray: 7 7; }
+        .lgu-skm-edge.on { opacity: .95; stroke-width: 2.6; filter: drop-shadow(0 0 4px var(--bc, #5cc8ff)); }
+        .lgu-skm-edge.q { stroke-dasharray: 2 7; opacity: .3; }
+        .lgu-skm-edge.q.on { opacity: .9; }
+
+        /* Центр (hub). */
+        .lgu-skm-hub { color: var(--c, #ffd24a); cursor: pointer; }
+        .lgu-skm-hub > circle { fill: rgba(12, 17, 26, .92); stroke: var(--c, #ffd24a); stroke-width: 2.4; }
+        .lgu-skm-hub.on > circle { filter: drop-shadow(0 0 12px var(--c, #ffd24a)); stroke-width: 3; }
+        .lgu-skm-hub.sel > circle { stroke: #fff; }
+        .lgu-skm-hubcnt { fill: #9fb3c8; font: 12px 'Nunito', system-ui, sans-serif; }
+        .lgu-skm-hub.on .lgu-skm-hubcnt { fill: var(--c, #ffd24a); font-size: 15px; }
+
+        /* Пассивные узлы. */
+        .lgu-skm-node { cursor: pointer; }
+        .lgu-skm-node > circle { fill: rgba(9, 13, 21, .94); stroke: var(--bc, #5cc8ff); stroke-width: 2; transition: stroke-width .15s; }
+        .lgu-skm-node > svg { color: var(--bc, #5cc8ff); opacity: .8; }
+        .lgu-skm-node.has > circle { fill: color-mix(in srgb, var(--bc, #5cc8ff) 34%, #070a12); stroke-width: 2.6; }
+        .lgu-skm-node.has > svg { color: #fff; opacity: 1; filter: drop-shadow(0 0 4px var(--bc, #5cc8ff)); }
+        .lgu-skm-node.can > circle { stroke-dasharray: 5 4; }
+        .lgu-skm-node.can > circle, .lgu-skm-node.can > svg { animation: lguSkmPulse 1.6s ease-in-out infinite; }
+        .lgu-skm-node.cap > circle { stroke: #ffd24a; }
+        .lgu-skm-node.sel > circle { stroke: #fff; stroke-width: 3; }
+        .lgu-skm-node .rank { fill: #cbd5e1; font: 11px 'Nunito', system-ui, sans-serif; paint-order: stroke; stroke: #05070c; stroke-width: 3px; }
+        .lgu-skm-node.has .rank { fill: #ffd24a; }
+        @keyframes lguSkmPulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+
+        /* Ромбы способностей Арены. */
+        .lgu-skm-ab { cursor: pointer; }
+        .lgu-skm-ab .shape { fill: rgba(9, 13, 21, .94); stroke: var(--bc, #c4a0ff); stroke-width: 2; }
+        .lgu-skm-ab .glyph { fill: var(--bc, #c4a0ff); font: 16px 'Nunito', system-ui, sans-serif; }
+        .lgu-skm-ab.has .shape { fill: color-mix(in srgb, var(--bc, #c4a0ff) 38%, #070a12); stroke-width: 2.6; }
+        .lgu-skm-ab.has .glyph { fill: #fff; }
+        .lgu-skm-ab.eq .shape { stroke: #ffd24a; filter: drop-shadow(0 0 7px rgba(255, 210, 74, .8)); }
+        .lgu-skm-ab.can .shape { stroke-dasharray: 5 4; animation: lguSkmPulse 1.6s ease-in-out infinite; }
+        .lgu-skm-ab.sel .shape { stroke: #fff; stroke-width: 3; }
+        .lgu-skm-ab .badge { fill: #ffd24a; font: 11px 'Nunito', system-ui, sans-serif; paint-order: stroke; stroke: #05070c; stroke-width: 3px; }
+
+        /* Молнии похода. */
+        .lgu-skm-q rect { fill: rgba(9, 13, 21, .92); stroke: #55647c; stroke-width: 1.6; }
+        .lgu-skm-q text { fill: #93a4bb; font: 13px 'Nunito', system-ui, sans-serif; }
+        .lgu-skm-q.on rect { stroke: #ffd24a; filter: drop-shadow(0 0 6px rgba(255, 210, 74, .7)); }
+        .lgu-skm-q.on text { fill: #ffd24a; }
+
+        /* Подписи веток. */
+        .lgu-skm-blab .nm { fill: var(--bc, #5cc8ff); font: 16px 'Russo One', 'Nunito', system-ui, sans-serif; letter-spacing: .03em; }
+        .lgu-skm-blab .cnt { fill: #8fa1b8; font: 12px 'Nunito', system-ui, sans-serif; }
+
+        /* Инспектор узла/способности/центра. */
+        .lgu-skm-inspector {
+            min-width: 0; padding: 12px; border-radius: 12px;
+            border: 1px solid #3d2f44; background: #1e1724;
+            max-height: clamp(360px, 56vh, 640px); overflow-y: auto;
+        }
+        .lgu-skm-hint { color: #c9d2c3; font-size: 12.5px; line-height: 1.45; }
+        .lgu-skm-hint > b { display: block; margin-bottom: 8px; color: #ffcf6a; font-size: 13.5px; }
+        .lgu-skm-hint p { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 6px; }
+        .lgu-skm-hint i { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; font-style: normal; }
+        .lgu-skm-hint i.dot { border-radius: 50%; border: 2px solid #5cc8ff; margin-top: 2px; }
+        .lgu-skm-hint i.diamond { border: 2px solid #c4a0ff; transform: rotate(45deg) scale(.72); margin-top: 2px; }
+        .lgu-skm-hint i.bolt { color: #ffd24a; }
+        .lgu-skm-hint .muted { color: #8b7f96; font-size: 11.5px; }
+
+        .lgu-skm-ins { color: #e8e1d5; font-size: 12.5px; line-height: 1.4; }
+        .lgu-skm-ins-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; padding-bottom: 7px; border-bottom: 1px dashed rgba(255, 255, 255, .14); }
+        .lgu-skm-ins-head > b { flex: 1; min-width: 0; color: var(--bc, #ffcf6a); font-size: 15px; line-height: 1.25; }
+        .lgu-skm-ins-head > small { color: #9c8fa8; font-size: 11px; white-space: nowrap; }
+        .lgu-skm-ins-x { flex: none; width: 20px; height: 20px; padding: 0; border: none; border-radius: 5px; background: transparent; color: #c9b184; cursor: pointer; font-size: 12px; }
+        .lgu-skm-ins-x:hover { color: #fff; background: rgba(255, 255, 255, .08); }
+        .lgu-skm-ins-kind { margin-bottom: 6px; color: #9c8fa8; font-size: 11.5px; }
+        .lgu-skm-ins-rank { margin-bottom: 6px; color: #c9d2c3; }
+        .lgu-skm-ins-rank > b { color: #ffcf6a; font-size: 15px; }
+        .lgu-skm-ins-fx { margin: 0 0 6px; color: #f4f1e4; }
+        .lgu-skm-ins-next { margin: 0 0 6px; color: #9fb3c8; font-size: 11.5px; }
+        .lgu-skm-ins-next.warn { color: #ffb3a0; }
+        .lgu-skm-ins-cost { margin: 8px 0; padding: 6px 8px; border-radius: 7px; background: rgba(202, 165, 92, .12); color: #d8c9a8; }
+        .lgu-skm-ins-cost b { color: #ffcf6a; }
+        .lgu-skm-ins-nodes { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+        .lgu-skm-ins-nodes li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 6px; border-radius: 6px; background: rgba(0, 0, 0, .22); }
+        .lgu-skm-ins-nodes span { color: #9c8fa8; font-size: 11.5px; }
+        .lgu-skm-ins-nodes b { color: #f4f1e4; font-size: 11.5px; text-align: right; }
+        .lgu-skm-ins-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+        .lgu-skm-btn {
+            flex: 1 1 auto; min-width: 64px; height: 30px; padding: 0 10px;
+            border: 1px solid #caa55c; border-radius: 7px; cursor: pointer;
+            background: transparent; color: #ffcf6a; font: 700 12px 'Nunito', system-ui, sans-serif;
+            transition: filter .15s, background .15s;
+        }
+        .lgu-skm-btn:hover:not(:disabled) { background: rgba(202, 165, 92, .16); }
+        .lgu-skm-btn.main { background: #caa55c; border-color: #caa55c; color: #1d1620; }
+        .lgu-skm-btn.main:hover:not(:disabled) { filter: brightness(1.1); }
+        .lgu-skm-btn.danger { color: #ff8fa3; border-color: rgba(255, 90, 122, .6); }
+        .lgu-skm-btn.danger:hover:not(:disabled) { background: rgba(255, 90, 122, .14); }
+        .lgu-skm-btn:disabled { opacity: .42; cursor: not-allowed; }
+
+        /* Блок «Навыки Арены». */
+        .lgu-skm-arena { margin-bottom: 12px; padding: 12px 14px; border: 1px solid #3d2f44; border-radius: 10px; background: #1a1420; }
+        .lgu-skm-arena-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; padding-bottom: 7px; border-bottom: 1px dashed #3d2f44; }
+        .lgu-skm-arena-head > b { color: #ffcf6a; font-size: 14px; }
+        .lgu-skm-arena-head > span { color: #9c8fa8; font-size: 12px; }
+        .lgu-skm-arena-head > span b { color: #ffcf6a; font-size: 14px; }
+        /* v11.6.9: красная подсветка (.over) у жетонов Арены удалена —
+           жёсткого лимита жетонов в планировщике нет. */
+        .lgu-skm-slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 10px; }
+        .lgu-skm-slot { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 2px solid var(--bc, #6b6478); border-radius: 9px; background: rgba(0, 0, 0, .28); }
+        .lgu-skm-slot.empty { border-style: dashed; opacity: .85; }
+        .lgu-skm-slot-k { color: #c9d2c3; font-size: 11.5px; }
+        .lgu-skm-slot select { height: 28px; padding: 0 8px; border: 1px solid #44374a; border-radius: 6px; background: #0f0f15; color: #fff; font: 700 12px 'Nunito', system-ui, sans-serif; }
+        .lgu-skm-slot-meta { display: flex; flex-direction: column; gap: 2px; min-height: 30px; }
+        .lgu-skm-slot-meta > b { color: #f4f1e4; font-size: 12.5px; }
+        .lgu-skm-slot-meta > em { color: #9fb3c8; font-size: 11px; font-style: normal; }
+        .lgu-skm-slot-meta > small { color: #8b7f96; font-size: 11.5px; }
+        .lgu-skm-ups { display: flex; flex-direction: column; gap: 6px; }
+        .lgu-skm-up { border: 1px solid #3d2f44; border-radius: 8px; background: rgba(0, 0, 0, .22); }
+        .lgu-skm-up > summary { padding: 7px 10px; cursor: pointer; color: #f4f1e4; font-size: 12.5px; }
+        .lgu-skm-up > summary small { color: #9c8fa8; font-size: 11px; }
+        .lgu-skm-up[open] > summary { border-bottom: 1px dashed #3d2f44; }
+        .lgu-skm-up-rows { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; }
+        .lgu-skm-up-row { display: grid; grid-template-columns: 90px 24px 24px auto 24px 52px; align-items: center; gap: 4px; font-size: 12px; }
+        .lgu-skm-up-row > span { color: #9c8fa8; }
+        .lgu-skm-up-row > b { color: #ffcf6a; text-align: center; font-variant-numeric: tabular-nums; }
+        .lgu-skm-up-row > small { color: #8b7f96; font-size: 11px; }
+        .lgu-skm-up-row > em { color: #c9d2c3; font-style: normal; text-align: right; white-space: nowrap; }
+        .lgu-skm-mini { width: 22px; height: 22px; padding: 0; border-radius: 5px; border: 1px solid #44374a; background: #241c2b; color: #f4f1e4; cursor: pointer; font-size: 12px; line-height: 1; }
+        .lgu-skm-mini:hover:not(:disabled) { border-color: #caa55c; color: #ffcf6a; }
+        .lgu-skm-mini:disabled { opacity: .35; cursor: not-allowed; }
+        .lgu-skm-loads { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+        .lgu-skm-loadbtn { height: 26px; padding: 0 12px; border-radius: 6px; border: 1px solid #44374a; background: #241c2b; color: #d8c9a8; cursor: pointer; font: 700 12px 'Nunito', system-ui, sans-serif; }
+        .lgu-skm-loadbtn:hover { border-color: #caa55c; color: #ffcf6a; }
+        .lgu-skm-loadbtn.game { border-color: #caa55c; color: #ffcf6a; }
+
+        /* Сводка. */
+        .lgu-skm-summary { padding: 12px 14px; border: 1px solid #3d2f44; border-radius: 10px; background: #1a1420; }
+        .lgu-skm-sum-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; padding-bottom: 7px; border-bottom: 1px dashed #3d2f44; }
+        .lgu-skm-sum-head > b { color: #ffcf6a; font-size: 14px; }
+        .lgu-skm-sum-head > span { color: #9c8fa8; font-size: 11.5px; }
+        .lgu-skm-stats { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 5px 12px; }
+        .lgu-skm-stats li { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 4px 8px; border-left: 3px solid var(--bc, #5cc8ff); border-radius: 4px; background: rgba(0, 0, 0, .22); font-size: 12px; }
+        .lgu-skm-stats li > span { color: #c9d2c3; }
+        .lgu-skm-stats li > b { color: #7ee08a; white-space: nowrap; }
+        .lgu-skm-note { margin: 6px 0 0; color: #8b7f96; font-size: 12px; }
+        .lgu-skm-error { padding: 18px; color: #ffb3a0; font-size: 13px; text-align: center; }
+
+        /* Вкладка «Экипировка». */
+        .lgu-skm-gear { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+        .lgu-skm-gear-col { min-width: 0; padding: 12px; border: 1px solid #3d2f44; border-radius: 10px; background: #1a1420; overflow-x: auto; }
+        .lgu-skm-gear-col h3 { margin: 0 0 8px; color: #ffcf6a; font-size: 14px; }
+
+        /* На узких экранах карта и инспектор — в колонку. */
+        @media (max-width: 900px) {
+            .lgu-skm-stage { grid-template-columns: minmax(0, 1fr); }
+            .lgu-skm-inspector { max-height: none; }
         }
 
 
@@ -4258,128 +4538,98 @@
 
     // ===== src/modules/build-sim.js =====
     // ============================================================
-    // 4. МОДУЛЬ: ПЛАНИРОВЩИК БИЛДОВ
+    // 4. МОДУЛЬ: ПЛАНИРОВЩИК БИЛДОВ — РАДИАЛЬНОЕ СОЗВЕЗДИЕ
+    //
+    // Новая система навыков игры (reference/LegionFrontSRC/site/skillmap.js):
+    //   GET /api/skills        -> classes[].map = { P, E } — геометрия созвездия;
+    //                             classes[].branches[].nodes[] — метаданные узлов;
+    //   GET /api/skmap?cls=ID  -> состояние игрока (st.n/a/eq/s), лимиты
+    //                             (step, classOpen), способности Арены (ab.br[]).
+    //
+    // ВАЖНО (античит/CSP): это ПЕСОЧНИЦА. POST /api/skmap/act не отправляется,
+    // window.fetch/LGMine.open/LGMine.onEvent не патчатся. Действия меняют
+    // только локальный объект sandbox — очки и жетоны игрока не тратятся.
     // ============================================================
     const BuildSim = {
-        skillsCache: null,
-        simulatedSkills: {},
-        savedBuilds: {}, // { [clsId]: [{ name, skills }] } — сохранённые в localStorage билды по классам
-        _currentBuildName: '', // имя последнего сохранённого/загруженного билда (для будущих фич UI)
-        _currentBuildNames: {}, // { [clsId]: name } — активный билд каждого класса (нужен для кнопки «Удалить»)
-        _autoLoadClass: null, // класс, чей билд пришёл ссылкой #build=… (вкладку открываем после создания табов)
-        _tooltipTimer: null, // setTimeout hover-тултипа узла (500 мс, ТЗ 11.6.1e)
-        _tooltipState: null, // { clsId, nodeId, mode: 'hover'|'click' } — что сейчас показано
-        // v11.6.3: режим навыков из hero.sk.md. 'shared' — один общий пул
-        // очков по уровню героя в игре, но планировщик его игнорирует.
-        // v11.6.5b.3: лимита по пулу героя больше нет вообще — полей
-        // availablePoints / pointsLimit / heroLevel в объекте не осталось,
-        // чтобы ограничение нельзя было случайно вернуть. maxPts() === 50.
-        // 'class' (и старый 'hero') — прежняя модель, тот же лимит.
-        skillMode: 'class',
-        // v11.6.5b.1: вложенные ранги героя из hero.sk.t ({ [clsId]: { [nodeId]: rank } }).
-        // Нужны кнопке «От вложенного» (режим keep).
-        nativeSkills: {},
-        ownerClass: '', // класс, в чьё дерево уже вложены общие очки (только зелёная метка ✓)
-        _nativeSkillsWarm: null, // промис прогрева ленивого LGSkills (не блокирует UI)
-
-        statNames: { hp: 'Макс. HP', atk: 'Физ. урон', mag: 'Магия', def: 'Броня', crit: 'Крит %', critDmg: 'Сила крита', dodge: 'Уклонение', pierce: 'Пробивание', healPow: 'Сила лечения', luck: 'Удача', resist: 'Сопротивление' },
-        fxNames: { melee: 'Физ. урон %', magic: 'Магия %', hp: 'Макс. HP %', def: 'Броня', healPow: 'Сила лечения %', healIn: 'Вх. лечение %', crit: 'Крит %', critDmg: 'Сила крита', skel: 'Урон скелетов %', skelT: 'Время скелетов', leech: 'Вампиризм %', block: 'Снижение урона %', dodge: 'Уклонение %', lead: 'Урон по боссам %', first: 'Урон 1-й ход %', dmg: 'Весь урон %', pierce: 'Пробивание %', resist: 'Сопротивление', healCrit: 'Крит лечения %', regen: 'Регенерация %', low: 'Урон при низком HP %', a_siyanie: 'Сияние +%', a_obereg: 'Оберег +%', a_dlan: 'Длань +%', a_aura: 'Аура +%', aura: 'Аура −урон %', a_svet: 'Свет +%', a_vspyshka: 'Вспышка +%', a_oznob: 'Озноб +%', a_pricel: 'Прицел +%', a_grad: 'Град +%', a_natisk: 'Натиск +%', a_stoyka: 'Стойка +%', a_vspinu: 'Вспину +%', a_yad: 'Яд +%', a_vytyanut: 'Вытянуть +%', a_podnyat: 'Поднять +%', poison: 'Отрава %', steal: 'Кража %', loot: 'Добыча %', skelN: 'Скелетов +', volley: 'Залп +%', shieldBlock: 'Щит блок %', trapDodge: 'Ловушки %', steady: 'Промах→удар %', cleave: 'Замах %', cleaveBoss: 'Замах по боссу %', penBoss: 'Бронебой по боссу %', drain: 'Вытягивание %', hex: 'Проклятие +%', holy: 'По нежити +%', poisonT: 'Время отравы',
-            // v11.6.5b: новые ключи ребаланса — проклятие и кулдауны действий.
-            a_proklyat: 'Проклятие +%',
-            cd_proklyat: 'КД Проклятия',
-            cd_natisk: 'КД Натиска',
-            cd_grad: 'КД Града',
-            cd_vspyshka: 'КД Вспышки',
-            cd_obereg: 'КД Оберега',
-            cd_siyanie: 'КД Сияния',
-            cd_oznob: 'КД Озноба',
-            cd_yad: 'КД Яда',
-            cd_vspinu: 'КД Вспину',
-            cd_podnyat: 'КД Поднять',
-            cd_vytyanut: 'КД Вытянуть',
-            cd_dlan: 'КД Длани',
-            cd_aura: 'КД Ауры' },
+        /* Имена классов (использует core/ui.js для карточки профиля). */
         classNames: { recruit: 'Новобранец', legionary: 'Легионер', archer: 'Лучник', mage: 'Маг', priest: 'Жрец', rogue: 'Разбойник', necromancer: 'Некромант', paladin: 'Паладин' },
-        /*
-         * Цвета кнопок классов — из нативного экрана игры (ТЗ 11.6.1d, скрин 4).
-         * Значение кладётся в CSS-переменную --c таба класса: неактивный таб —
-         * цветная рамка/текст на тёмной подложке, активный — заливка цветом.
-         * recruit в нативном списке не подсвечивался — нейтральный серо-золотой.
-         */
-        classColors: { recruit: '#d7d3c8', legionary: '#ff7b7b', archer: '#7bff7b', mage: '#7bbaff', priest: '#ffcf4a', rogue: '#d4aaff', necromancer: '#7c52cc', paladin: '#ffdf7b' },
 
-        /*
-         * Цвет текста НА заливке цвета класса (активный таб, ТЗ 11.6.1e).
-         * Правило контраста: светлая заливка (Жрец, Паладин, Разбойник #d4aaff) —
-         * тёмный текст #12100e; тёмная заливка (Некромант #7c52cc) — белый.
-         * Кладётся в CSS-переменную --ct (значение по умолчанию — тёмное).
-         */
+        /* Цвета кнопок классов (нативный экран игры, как раньше). */
+        classColors: { recruit: '#d7d3c8', legionary: '#ff7b7b', archer: '#7bff7b', mage: '#7bbaff', priest: '#ffcf4a', rogue: '#d4aaff', necromancer: '#7c52cc', paladin: '#ffdf7b' },
         classTextColors: { necromancer: '#fff' },
 
-        /*
-         * Словарь нативных SVG-иконок игры (viewBox 0 0 24 24, stroke=currentColor).
-         * Источник: reference/LegionFrontSRC/site/skills.js (объекты NI и BI + DIAM).
-         * Ключи иконок веток совпадают с id веток из /api/skills (blade, shield, ...)
-         * и используются как fallback, когда у навыка нет подходящей fx-иконки.
-         */
+        /* Человеческие названия статов (использует hero-planner.js). */
+        statNames: { hp: 'Макс. HP', atk: 'Физ. урон', mag: 'Магия', def: 'Броня', crit: 'Крит %', critDmg: 'Сила крита', dodge: 'Уклонение', pierce: 'Пробивание', healPow: 'Сила лечения', luck: 'Удача', resist: 'Сопротивление' },
+
+        /* fx-ключи -> подписи в сводке «Что дают открытые навыки». */
+        fxNames: { melee: 'Физ. урон %', magic: 'Магия %', hp: 'Макс. HP %', def: 'Броня', healPow: 'Сила лечения %', healIn: 'Вх. лечение %', crit: 'Крит %', critDmg: 'Сила крита', skel: 'Урон скелетов %', skelT: 'Время скелетов', leech: 'Вампиризм %', block: 'Снижение урона %', dodge: 'Уклонение %', lead: 'Урон по боссам %', first: 'Урон 1-й ход %', dmg: 'Весь урон %', pierce: 'Пробивание %', resist: 'Сопротивление', healCrit: 'Крит лечения %', regen: 'Регенерация %', low: 'Урон при низком HP %', ranged: 'Урон луком %', poison: 'Отрава %', steal: 'Кража %', loot: 'Добыча %', skelN: 'Скелетов +', volley: 'Залп +%', shieldBlock: 'Щит блок %', trapDodge: 'Ловушки %', steady: 'Промах→удар %', cleave: 'Замах %', cleaveBoss: 'Замах по боссу %', penBoss: 'Бронебой по боссу %', drain: 'Вытягивание %', hex: 'Проклятие +%', holy: 'По нежити +%', poisonT: 'Время отравы' },
+
+        /* Категории прокачки способностей Арены (как в /api/skmap: ab.br[].next). */
+        ARENA_KINDS: [['lv', 'Ступень'], ['pow', 'Мощь'], ['eff', 'Эффект'], ['dur', 'Длительность']],
+        ARENA_KIND_DEFAULT_MAX: { lv: 5, pow: 3, eff: 3, dur: 3 },
+        /* Фолбэк-шкала цены шага (когда сервер не прислал next для этой ступени). */
+        ARENA_COST: { lv: [1, 3, 7, 15, 25], pow: [2, 5, 10], eff: [2, 5, 10], dur: [2, 5, 10] },
+
+        /* Ключи хранилища пресетов. */
+        BUILD_KEY: 'lgu_saved_builds_v2',
+        LEGACY_BUILD_KEY: 'LEGION_SAVED_BUILDS',
+
+        /* Палитра веток (bi % 3) — как в skillmap.css (--bc-0..2). */
+        BRANCH_COLORS: ['#5cc8ff', '#ff9466', '#c4a0ff'],
+
+        /* ------------------------------------------------------------
+         * Состояние модуля (память страницы)
+         * ---------------------------------------------------------- */
+        skillsCache: null,   // ответ GET /api/skills
+        skmapCache: {},      // clsId -> ответ GET /api/skmap?cls=…
+        sandbox: {},         // clsId -> { nodes, abilities, eq, up }
+        savedBuilds: {},     // clsId -> [{ name, at, data }]
+        hero: null,          // последний /api/me.hero (имя, уровень, статы)
+
+        _skmapPending: {},   // clsId -> Promise (дедупликация запросов)
+        _root: null,         // контейнер HeroPlanner (#hp-buildsim-container)
+        _els: {},            // кэш элементов оболочки
+        _cls: '',            // активный класс
+        _tab: 'map',         // 'map' | 'gear'
+        _sel: null,          // выбранный узел/ромб/'hub'
+        _hover: null,        // узел под курсором
+        _view: { s: 1, x: 0, y: 0 },
+        _pan: null,
+        _hashCode: '',       // код из ссылки #build=…
+        _savedLoaded: false,
+        _needLegacyMigration: false,
+        _buildIndex: null,   // выбранный пресет в списке
+        _buildName: '',
+        /* ------------------------------------------------------------
+         * Иконки (собственный компактный набор, viewBox 0 0 24 24).
+         * ---------------------------------------------------------- */
         SKILL_ICONS: {
-            // --- Иконки навыков (NI) ---
             sword: '<path d="M19.5 4.5 20 4l-.5 4.5L9.5 18.5l-4-4zM7.5 16.5l-3 3M4 15l5 5"/>',
             shield: '<path d="M12 3.5l7 2.8v5.1c0 4.6-3 7.8-7 9.6-4-1.8-7-5-7-9.6V6.3z"/>',
             bow: '<path d="M6 3c6 3 9 9 6 18M6 3l12 18M14 5h5v5M19 5 9 15"/>',
-            spark: '<path d="M12 2.5l1.8 6.2 6.2 1.8-6.2 1.8L12 18.5l-1.8-6.2L4 10.5l6.2-1.8z"/><path d="M19 17l.8 2.2 2.2.8-2.2.8L19 23"/>',
+            spark: '<path d="M12 2.5l1.8 6.2 6.2 1.8-6.2 1.8L12 18.5l-1.8-6.2L4 10.5l6.2-1.8z"/>',
             fire: '<path d="M12 21c-4 0-6.5-2.6-6.5-6 0-3.6 3-5.8 3.6-9.5 2 1.5 3 3.4 3.2 5.3 1-1 1.6-2.4 1.6-3.8 2.7 2.2 4.6 5 4.6 8 0 3.4-2.5 6-6 6z"/>',
             frost: '<path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9M9.5 4.5 12 7l2.5-2.5M9.5 19.5 12 17l2.5 2.5"/>',
             heart: '<path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/>',
             cross: '<path d="M9.5 3.5h5v6h6v5h-6v6h-5v-6h-6v-5h6z"/>',
-            skull: '<path d="M12 3.5a7.5 7.5 0 0 0-4.5 13.5v3h9v-3A7.5 7.5 0 0 0 12 3.5z"/><circle cx="9.3" cy="11.5" r="1.6"/><circle cx="14.7" cy="11.5" r="1.6"/><path d="M10.5 20.5v-2M13.5 20.5v-2"/>',
+            skull: '<path d="M12 3.5a7.5 7.5 0 0 0-4.5 13.5v3h9v-3A7.5 7.5 0 0 0 12 3.5z"/><circle cx="9.3" cy="11.5" r="1.6"/><circle cx="14.7" cy="11.5" r="1.6"/>',
             star: '<path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7z"/>',
             bolt: '<path d="M13.5 2.5 5.5 13.5h6l-1.5 8 8-11h-6z"/>',
             crown: '<path d="M3.5 18.5h17M4.5 18.5 3.5 7l5 4 3.5-6 3.5 6 5-4-1 11.5z"/>',
             wind: '<path d="M3 8.5h11a3 3 0 1 0-3-3M3 12.5h15a3 3 0 1 1-3 3M3 16.5h8"/>',
             eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
-            dagger: '<path d="M14.5 3.5 16 5l-7.5 9-2-2zM6.5 12l-2.5 2.5 2 2 2.5-2.5M5 15.5l-1.5 1.5 3 3L8 18.5"/><path d="M15 13.5l5 5"/>',
+            dagger: '<path d="M14.5 3.5 16 5l-7.5 9-2-2zM6.5 12l-2.5 2.5 2 2 2.5-2.5M5 15.5l-1.5 1.5 3 3L8 18.5M15 13.5l5 5"/>',
             vial: '<path d="M9.5 3.5h5M10.5 3.5v5L6 17a2.6 2.6 0 0 0 2.3 3.5h7.4A2.6 2.6 0 0 0 18 17l-4.5-8.5v-5M8 14.5h8"/>',
             sun: '<circle cx="12" cy="12" r="3.8"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>',
             drop: '<path d="M12 3.5s-6 6.6-6 10.6a6 6 0 0 0 12 0c0-4-6-10.6-6-10.6z"/>',
             coin: '<circle cx="12" cy="12" r="8"/><path d="M14.5 9.5c-.6-.9-1.5-1.3-2.5-1.3-1.5 0-2.5.8-2.5 1.9 0 2.7 5.2 1.3 5.2 4 0 1.1-1.1 1.9-2.7 1.9-1.1 0-2.1-.5-2.6-1.4M12 6.5v1.7M12 15.8v1.7"/>',
-            // v11.6.3: иконки из обновлённого skills.js (CHECK подтверждения,
-            // «часы» для cd_*, геометрические заглушки и точки/столбики).
-            check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
-            clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2.5"/>',
-            leaf: '<path d="M5 19c0-8 5-13.5 14-14 .5 9-5 14-13 14z"/><path d="M5 19l8-8"/>',
-            ring: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2"/>',
-            hex: '<path d="M12 3l7.8 4.5v9L12 21l-7.8-4.5v-9z"/>',
-            tri: '<path d="M12 4l8.5 15h-17z"/>',
-            sq: '<rect x="5" y="5" width="14" height="14" rx="2.5"/>',
-            dots: '<circle cx="8" cy="8" r="2.6"/><circle cx="16" cy="8" r="2.6"/><circle cx="12" cy="16" r="2.6"/>',
-            bars: '<path d="M6 19V11M12 19V6M18 19v-5"/>',
-            // --- Иконки веток (BI): ключ = id ветки из /api/skills ---
-            blade: '<path d="M19.5 4.5 20 4l-.5 4.5L9.5 18.5l-4-4zM7.5 16.5l-3 3M4 15l5 5"/>',
-            veteran: '<path d="M8 3h8l-1.5 6h-5zM12 9v3"/><circle cx="12" cy="16.5" r="4.2"/><path d="M12 14.6l.7 1.4 1.5.2-1.1 1 .3 1.5-1.4-.7-1.4.7.3-1.5-1.1-1 1.5-.2z"/>',
-            aim: '<circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="3.5"/><path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4"/>',
-            hunt: '<path d="M5 19 19 5M15 5h4v4M5 15l4 4M7 13l4 4"/><path d="M6 6c5-2 10 3 12 12"/>',
-            shade: '<path d="M4 10.5c3-1.5 5.5-1.5 8 0s5 1.5 8 0M4 14.5c3-1.5 5.5-1.5 8 0s5 1.5 8 0M7 6.5c2-1 3.5-1 5 0s3 1 5 0"/>',
-            lore: '<path d="M5 4.5h10.5a2 2 0 0 1 2 2V19.5H7a2 2 0 0 1-2-2zM5 17.5a2 2 0 0 1 2-2h10.5M9 8.5h5M9 11.5h4"/>',
-            mercy: '<path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="9"/>',
-            faith: '<circle cx="12" cy="12" r="3.8"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>',
-            wrath: '<path d="M13.5 2.5 5.5 13.5h6l-1.5 8 8-11h-6z"/>',
-            blades: '<path d="M14.5 3.5 16 5l-7.5 9-2-2zM6.5 12l-2.5 2.5 2 2 2.5-2.5M5 15.5l-1.5 1.5 3 3L8 18.5"/><path d="M15 13.5l5 5"/>',
-            venom: '<path d="M9.5 3.5h5M10.5 3.5v5L6 17a2.6 2.6 0 0 0 2.3 3.5h7.4A2.6 2.6 0 0 0 18 17l-4.5-8.5v-5M8 14.5h8"/>',
-            shadow: '<path d="M15.5 4.5A8 8 0 1 0 19.5 16 6.5 6.5 0 0 1 15.5 4.5z"/>',
-            bones: '<path d="M12 3.5a7.5 7.5 0 0 0-4.5 13.5v3h9v-3A7.5 7.5 0 0 0 12 3.5z"/><circle cx="9.3" cy="11.5" r="1.6"/><circle cx="14.7" cy="11.5" r="1.6"/>',
-            life: '<path d="M12 3.5s-6 6.6-6 10.6a6 6 0 0 0 12 0c0-4-6-10.6-6-10.6z"/>',
-            dark: '<path d="M9 21h6M10 21V11h4v10M12 11V8"/><path d="M12 8c-1.6-1.2-1.6-3 0-4.5 1.6 1.5 1.6 3.3 0 4.5z"/>',
-            light: '<circle cx="12" cy="12" r="3.8"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>',
-            grace: '<path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="9"/>',
-            bulwark: '<path d="M12 3.5l7 2.8v5.1c0 4.6-3 7.8-7 9.6-4-1.8-7-5-7-9.6V6.3z"/><path d="M12 7v10M8 11h8"/>',
-            // Ромб-заглушка (DIAM) для неизвестных веток и классов.
+            leaf: '<path d="M4 20c8 0 16-4 16-16C10 4 4 10 4 20zM8 16c2-4 5-6 9-8"/>',
+            hex: '<path d="M12 3l7.5 4.5v9L12 21l-7.5-4.5v-9z"/>',
+            tri: '<path d="M12 4l8 16H4z"/>',
+            clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/>',
             diam: '<path d="M12 3.5l8.5 8.5-8.5 8.5L3.5 12z"/>'
         },
-        // Иконки, которые в игре заливаются полупрозрачно (нативный класс .so).
-        // v11.6.3: список синхронизирован с SOLID из skills.js.
-        SOLID_ICONS: ['sword', 'shield', 'heart', 'cross', 'star', 'bolt', 'crown', 'fire', 'spark', 'leaf', 'hex', 'tri', 'diam', 'sq', 'drop'],
-        // fx-ключ -> иконка; порядок важен: срабатывает первое совпадение (FXI из skills.js).
+        SOLID_ICONS: ['sword', 'shield', 'heart', 'cross', 'star', 'bolt', 'crown', 'fire', 'spark', 'leaf', 'hex', 'tri', 'diam', 'drop'],
         FX_ICONS: [
             [/^(melee|dmg|cleave|first|a_natisk|cd_natisk)$/, 'sword'],
             [/^(def|block|shieldBlock|resist|a_stoyka)$/, 'shield'],
@@ -4400,1193 +4650,1811 @@
             [/^(holy|a_svet)$/, 'sun'],
             [/^(aura|a_dlan|cd_dlan|cd_aura)$/, 'cross']
         ],
-        // Иконка класса для табов (CLI из skills.js); «Экипировка» — щит.
-        CLASS_ICONS: { legionary: 'sword', archer: 'bow', mage: 'spark', priest: 'cross', rogue: 'dagger', necromancer: 'skull', paladin: 'sun', gear: 'shield' },
-        // Горизонтальные позиции узлов внутри яруса (XS из skills.js).
-        TIER_X: { 1: [50], 2: [28, 72], 3: [18, 50, 82], 4: [14, 38, 62, 86] },
-        // SVG из словаря: solid-иконки заливаются полупрозрачно (нативный класс .so).
+        CLASS_ICONS: { legionary: 'sword', archer: 'bow', mage: 'spark', priest: 'cross', rogue: 'dagger', necromancer: 'skull', paladin: 'sun', gear: 'shield', recruit: 'diam' },
+        /* Сопоставление id ветки и иконки (фолбэк, если у узла нет fx). */
+        BRANCH_ICONS: { blade: 'sword', shield: 'shield', bow: 'bow', arcane: 'spark', fire: 'fire', frost: 'frost', holy: 'sun', light: 'sun', shadow: 'skull', dark: 'skull', blood: 'drop', life: 'heart', nature: 'leaf', poison: 'vial', wind: 'wind', might: 'crown', grace: 'cross' },
+
+        /* Экранирование HTML/SVG-текста. */
+        esc(v) { return Utils.escapeHtml(String(v == null ? '' : v)); },
+
+        _iconPaths(key) { return this.SKILL_ICONS[key] || this.SKILL_ICONS.diam; },
+
+        /* Иконка как самостоятельный <svg> (сайдбар, инспектор). */
         _svg(key) {
             const known = this.SKILL_ICONS[key] ? key : 'diam';
-            const solid = this.SOLID_ICONS.includes(known) ? ' so' : '';
-            return `<svg class="sim-svg${solid}" viewBox="0 0 24 24" aria-hidden="true">${this.SKILL_ICONS[known]}</svg>`;
+            const solid = this.SOLID_ICONS.indexOf(known) >= 0 ? ' so' : '';
+            return `<svg class="lgu-skm-i${solid}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${this._iconPaths(known)}</svg>`;
         },
 
-        // Ключ иконки навыка: kind -> первый fx -> иконка ветки (iconOf из skills.js).
+        /* Иконка как вложенный <svg> внутри группы созвездия. */
+        _iconMarkup(key, size) {
+            const s = size || 26;
+            const known = this.SKILL_ICONS[key] ? key : 'diam';
+            return `<svg x="${-s / 2}" y="${-s / 2}" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${this._iconPaths(known)}</svg>`;
+        },
+
         iconKeyOf(node, branch) {
             if (!node) return 'diam';
-            // v11.6.5b: нативное правило iconOf — навык с кулдауном (cd_*)
-            // рисуется «часами» раньше любых проверок kind, даже если у него
-            // есть другой fx-ключ или он является капом ветки.
-            const hasCd = Object.keys(node.fx || {}).some(k => k.startsWith('cd_'));
-            if (hasCd) return 'clock';
+            const fxKeys = Object.keys(node.fx || {});
+            if (fxKeys.some(k => k.indexOf('cd_') === 0)) return 'clock';
             if (node.kind === 'cap') return 'crown';
             if (node.kind === 'act') return 'bolt';
             if (node.kind === 'ctl') return 'star';
-            for (const k of Object.keys(node.fx || {})) {
+            for (const k of fxKeys) {
                 for (const [re, icon] of this.FX_ICONS) if (re.test(k)) return icon;
             }
             const bid = branch && branch.id;
-            return (bid && this.SKILL_ICONS[bid]) ? bid : 'diam';
+            if (bid && this.BRANCH_ICONS[bid]) return this.BRANCH_ICONS[bid];
+            if (node.icon && this.SKILL_ICONS[node.icon]) return node.icon;
+            return 'diam';
         },
-
         getNodeSvg(node, branch) { return this._svg(this.iconKeyOf(node, branch)); },
-        getBranchSvg(branch) {
-            const bid = branch && branch.id;
-            return this._svg((bid && this.SKILL_ICONS[bid]) ? bid : 'diam');
-        },
         getClassSvg(clsId) { return this._svg(this.CLASS_ICONS[clsId] || 'diam'); },
 
-        // Горизонталь узла в ярусе: нативные XS для 1-4 узлов, иначе равномерно.
-        xFor(count, index) {
-            const xs = this.TIER_X[count];
-            if (xs && xs[index] !== undefined) return xs[index];
-            return Math.round((100 * (index + 1)) / (count + 1));
-        },
-        isSkipFx(key) { return SKIP_FX_PREFIXES.some(p => key.startsWith(p)); },
+        isSkipFx(key) { return SKIP_FX_PREFIXES.some(p => key.indexOf(p) === 0); },
 
-        // Текст навыка с подстановкой значений из node.fx (там прибавка за 1 ранг).
-        // Для неизученного навыка (rank 0) показываем значения 1-го ранга.
-        //
-        // v11.6.5b: игра ввела макросы ребаланса {cleaveBoss}, {penBoss}, {critX},
-        // которых нет в node.fx — сервер их не присылает, значения считаются на
-        // лету при отрисовке текста (см. kv() в reference/LegionFrontSRC/site/skills.js).
+        /**
+         * Текст навыка с подстановкой значений fx за текущий ранг.
+         * Макросы cleaveBoss/penBoss/critX считаются на лету — их нет в fx
+         * (см. kv() в reference/LegionFrontSRC/site/skills.js).
+         */
         formatNodeText(node, rank) {
-            if (!node.text) return '';
-            const r = Math.max(1, rank); // Если ранг 0, показываем значение для 1-го ранга
+            if (!node || !node.text) return '';
+            const r = Math.max(1, +rank || 1);
             const fx = node.fx || {};
-            // Красивое форматирование: 1.2 -> "1.2", 3.0 -> "3"
-            const fmt = (val) => Number.isInteger(val) ? val.toString() : val.toFixed(1).replace('.0', '');
-            return node.text.replace(/\{(\w+)\}/g, (match, key) => {
-                /*
-                 * Вычисляемые макросы ребаланса (в fx их нет, поэтому проверяются
-                 * ДО стандартной подстановки fx[key] * r):
-                 *   cleaveBoss — 40% от «Замаха» за ранг: урон по боссу;
-                 *   penBoss    — «Пробивание» / 20 за ранг: бронебой по боссу;
-                 *   critX      — множитель крита: база ×2 + Сила крита / 100 за ранг.
-                 */
+            const fmt = (val) => Number.isInteger(val) ? String(val) : val.toFixed(1).replace(/\.0$/, '').replace('.', ',');
+            return String(node.text).replace(/\{(\w+)\}/g, (match, key) => {
                 if (key === 'cleaveBoss') return fmt((fx.cleave || 0) * r * 0.4);
                 if (key === 'penBoss') return fmt((fx.pierce || 0) * r / 20);
                 if (key === 'critX') return fmt(2 + (fx.critDmg || 0) * r / 100);
-                if (fx[key] !== undefined) {
-                    return fmt(fx[key] * r);
-                }
-                return match; // Если ключа нет в fx, оставляем как есть (или можно '?')
+                if (fx[key] !== undefined) return fmt(fx[key] * r);
+                return match;
             });
         },
 
-        init() {
-            // Кнопка теперь принадлежит HeroPlanner — см. src/modules/hero-planner.js.
-            // BuildSim остаётся как модуль и открывается из таба «Билды».
-            // Клик вне узла/тултипа закрывает тултип навыка (ТЗ 11.6.1d).
-            document.addEventListener('click', (e) => {
-                // Клики внутри тултипа (кнопки +/−, крестик) и по узлу обрабатывают
-                // свои слушатели — здесь их не трогаем, иначе тултип закроется раньше.
-                const t = e.target;
-                if (t && t.closest && (t.closest('.sim-tooltip') || t.closest('.sim-node'))) return;
-                // Старые карточки .sim-card (до v11.6.1d) могли остаться в DOM — чистим.
-                document.querySelectorAll('.sim-card').forEach(c => c.remove());
-                this.hideTooltip();
-            });
+        /** Кнопка BuildSim больше не нужна (её ведёт HeroPlanner), но init
+         *  остаётся точкой входа из main.js. */
+        init() { /* ничего не регистрируем: песочница монтируется в HeroPlanner */ },
+
+        /* ------------------------------------------------------------
+         * Данные класса / графа
+         * ---------------------------------------------------------- */
+        classList() {
+            const list = (this.skillsCache && Array.isArray(this.skillsCache.classes)) ? this.skillsCache.classes : [];
+            return list.filter(c => c && c.id && c.map && c.map.P);
         },
 
-        async open() {
-            // sim-modal: отдельный класс модалки — в styles.js ему поднята max-height
-            // до 95vh, чтобы дерево навыков влезало целиком без внутреннего скролла.
-            const modal = UI.showModal(`<h2>🧮 Планировщик билдов <button class="custom-close" id="custom-close-btn">✖</button></h2><div id="buildsim-modal-body" style="display:flex; flex-direction:column; flex:1; min-height:0;"></div>`, { customClass: 'sim-modal' });
-            const body = modal.querySelector('#buildsim-modal-body');
-            if (body) await this.mount(body);
+        clsData(cls) {
+            const id = cls || this._cls;
+            return this.classList().find(c => c.id === id) || null;
         },
 
-        // ------------------------------------------------------------
-        // v11.6.3: ленивый LGSkills и режим общих очков (sk.md).
-        // ------------------------------------------------------------
+        mapP() {
+            const C = this.clsData();
+            return (C && C.map && C.map.P) || {};
+        },
 
-        /**
-         * Прогрев нативного дерева навыков.
-         *
-         * В новом клиенте skills.js грузится лениво (`lazy('skills')` из
-         * app.js) и до открытия вкладки «Навыки» window.LGSkills === undefined.
-         * Свой каталог мы всё равно берём из /api/skills, поэтому прогрев —
-         * необязательный фон: он нужен лишь затем, чтобы нативная вкладка
-         * героя не оставалась пустой после открытия аддона.
-         *
-         * ВАЖНО: lazy() в app.js — локальная функция IIFE и наружу не
-         * экспортируется. Сначала проверяем G.lazy (на случай, если клиент
-         * её всё-таки отдаст), а при отсутствии молчим: данные уже пришли
-         * через Utils.fetchApi('/api/skills').
-         */
-        warmNativeSkills() {
-            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
-            try {
-                if (pageWin.LGSkills) return Promise.resolve(true);
-                if (this._nativeSkillsWarm) return this._nativeSkillsWarm;
-                if (typeof pageWin.lazy === 'function') {
-                    this._nativeSkillsWarm = Promise.resolve(pageWin.lazy('skills'))
-                        .catch(() => false)
-                        .finally(() => { this._nativeSkillsWarm = null; });
-                    return this._nativeSkillsWarm;
+        mapE() {
+            const C = this.clsData();
+            return (C && C.map && Array.isArray(C.map.E)) ? C.map.E : [];
+        },
+
+        /** Координаты узла: 'hub' — всегда центр (0,0). */
+        pointOf(id) {
+            if (id === 'hub') return { x: 0, y: 0 };
+            const p = this.mapP()[id];
+            return (p && isFinite(+p.x) && isFinite(+p.y)) ? { x: +p.x, y: +p.y } : null;
+        },
+
+        branchOf(id, cls) {
+            const C = this.clsData(cls);
+            if (!C) return null;
+            for (const B of (C.branches || [])) {
+                for (const n of (B.nodes || [])) if (n.id === id) return B;
+            }
+            return null;
+        },
+
+        nodeOf(id, cls) {
+            const C = this.clsData(cls);
+            if (!C) return null;
+            for (const B of (C.branches || [])) {
+                for (const n of (B.nodes || [])) if (n.id === id) return n;
+            }
+            return null;
+        },
+
+        /** Метаданные способности Арены: ключ «ветка:ab» / «ветка:ult». */
+        abOf(key, cls) {
+            const parts = String(key || '').split(':');
+            if (parts.length !== 2) return null;
+            const bid = parts[0], kind = parts[1];
+            if (kind !== 'ab' && kind !== 'ult') return null;
+            const V = this.skmapCache[cls || this._cls];
+            const list = (V && V.ab && Array.isArray(V.ab.br)) ? V.ab.br : [];
+            const br = list.find(x => x && x.id === bid);
+            if (br && br[kind]) return br[kind];
+            const C = this.clsData(cls);
+            const B = C && (C.branches || []).find(b => b && b.id === bid);
+            return (B && B[kind]) ? B[kind] : null;
+        },
+
+        branchIndex(bid) {
+            const C = this.clsData();
+            return C ? (C.branches || []).findIndex(b => b && b.id === bid) : -1;
+        },
+
+        branchColor(bi) {
+            const i = Math.abs((+bi || 0) % 3);
+            return this.BRANCH_COLORS[i];
+        },
+
+        /* ------------------------------------------------------------
+         * Правила графа (повторяют skillmap.js)
+         * ---------------------------------------------------------- */
+
+        /** Соседи по рёбрам созвездия; рёбра 'q' (молнии похода) не считаются. */
+        nbrs(id) {
+            const out = [];
+            for (const e of this.mapE()) {
+                if (!e || e.length < 2 || e[3] === 'q') continue;
+                if (e[0] === id) out.push(e[1]);
+                else if (e[1] === id) out.push(e[0]);
+            }
+            return out;
+        },
+
+        _isOpen(st, id) {
+            if (id === 'hub') return true;
+            const s = st || this.state();
+            return (+((s.nodes || {})[id]) > 0) || !!((s.abilities || {})[id]);
+        },
+
+        /** Все открытые узлы (для проверки связности/счётчиков). */
+        _openedIds(st, skipId) {
+            const out = [];
+            for (const [id, r] of Object.entries((st && st.nodes) || {})) {
+                if (+r > 0 && id !== skipId) out.push(id);
+            }
+            for (const [key, v] of Object.entries((st && st.abilities) || {})) {
+                if (v && key !== skipId) out.push(key);
+            }
+            return out;
+        },
+
+        _reachable(allowed) {
+            const seen = new Set(['hub']);
+            const queue = ['hub'];
+            while (queue.length) {
+                const u = queue.pop();
+                for (const v of this.nbrs(u)) {
+                    if (allowed.has(v) && !seen.has(v)) { seen.add(v); queue.push(v); }
                 }
-            } catch (e) {
-                dbg('[BUILD SIM] прогрев LGSkills не удался:', e);
             }
-            return Promise.resolve(false);
+            return seen;
         },
 
         /**
-         * Режим очков навыков из /api/me -> hero.sk.
-         *
-         * Игра в shared-режиме разрешает вложение только в одно дерево, но
-         * ПЛАНИРОВЩИК — песочница: он не зависит от текущих вложений игры.
-         * v11.6.5b.3: из метода убраны пул очков героя (availablePoints) и
-         * лимит (pointsLimit) — планирование всегда до maxPts() === 50,
-         * в том числе для класса-владельца (ownerClass).
-         * ownerClass остаётся только ради зелёной метки ✓ в сайдбаре.
+         * Проверка ПКМ/«−»: узел можно закрыть, только если ни один из
+         * оставшихся открытых узлов не потеряет связь с центром ('hub').
          */
-        readSkillMode(hero) {
-            const sk = (hero && hero.sk) || {};
-            this.skillMode = sk.md || 'class';
-            this.ownerClass = '';
-            this.nativeSkills = (sk.t && typeof sk.t === 'object' && !Array.isArray(sk.t)) ? sk.t : {};
-            if (this.skillMode === 'shared') this.ownerClass = this.ownerOf(sk);
-            return { mode: this.skillMode, limit: this.maxPts(), owner: this.ownerClass };
+        _canRemove(st, id) {
+            const before = this._reachable(new Set(['hub'].concat(this._openedIds(st))));
+            const after = this._reachable(new Set(['hub'].concat(this._openedIds(st, id))));
+            for (const other of this._openedIds(st, id)) {
+                if (before.has(other) && !after.has(other)) return false;
+            }
+            return true;
+        },
+
+        canOpen(st, id) {
+            if (this._isOpen(st, id)) return false;
+            return this.nbrs(id).some(nb => this._isOpen(st, nb));
+        },
+
+        openedCount(st) {
+            const s = st || this.state();
+            let n = 0;
+            for (const r of Object.values(s.nodes || {})) if (+r > 0) n++;
+            for (const v of Object.values(s.abilities || {})) if (v) n++;
+            return n;
+        },
+
+        /** Молния похода активна, если открыт её узел-хозяин (p.host) либо
+         *  смежный узел по ребру 'q'. */
+        questActive(st, id) {
+            const P = this.mapP();
+            const key = String(id).indexOf('q:') === 0 ? String(id) : 'q:' + id;
+            const p = P[key];
+            if (p && p.host && this._isOpen(st, p.host)) return true;
+            for (const e of this.mapE()) {
+                if (!e || e[3] !== 'q') continue;
+                if (e[0] === key && this._isOpen(st, e[1])) return true;
+                if (e[1] === key && this._isOpen(st, e[0])) return true;
+            }
+            return false;
+        },
+
+        /* ------------------------------------------------------------
+         * Песочница: состояние класса
+         * ---------------------------------------------------------- */
+        _blankState() {
+            return { nodes: {}, abilities: {}, eq: { ab: '', ult: '' }, up: {} };
+        },
+
+        state(cls) {
+            const id = cls || this._cls;
+            if (!this.sandbox[id]) this.sandbox[id] = this._blankState();
+            return this.sandbox[id];
+        },
+
+        _snapshot(st) {
+            return {
+                nodes: Object.assign({}, st.nodes || {}),
+                abilities: Object.assign({}, st.abilities || {}),
+                eq: { ab: (st.eq && st.eq.ab) || '', ult: (st.eq && st.eq.ult) || '' },
+                up: JSON.parse(JSON.stringify(st.up || {}))
+            };
+        },
+
+        /* ------------------------------------------------------------
+         * Стоимость и балансы
+         * ---------------------------------------------------------- */
+        /** Цена следующей ступени пассивного узла (жетоны ⟡). */
+        stepCost(rank) {
+            const V = this.skmapCache[this._cls];
+            const arr = (V && Array.isArray(V.step) && V.step.length) ? V.step : [3, 4, 5, 6];
+            const i = Math.min(arr.length - 1, Math.max(0, (+rank || 1) - 1));
+            return +arr[i] || (+rank || 1) + 2;
         },
 
         /**
-         * v11.6.5b.3: лимит очков плана (maxPts из ТЗ).
-         *
-         * Всегда MAX_POINTS (50) — в любом режиме и для любого класса,
-         * включая класс-владельца общих очков (ownerClass). Симулятор не
-         * зависит от того, сколько очков уже вложено в игре. Ползунка в UI
-         * нет: очки вкладываются только кнопками «+» / «−».
+         * Лимит очков плана — максимум уровня игры (skillsCache.maxLevel,
+         * фолбэк 50 SP). Это НЕ текущий запас героя (skmap.pts): песочница
+         * позволяет спланировать билд на весь максимум, а запас героя
+         * показывается рядом как справочный ориентир.
          */
-        maxPts() {
-            return MAX_POINTS;
+        spLimit() {
+            const max = +((this.skillsCache && this.skillsCache.maxLevel) || 0);
+            return (isFinite(max) && max > 0) ? max : MAX_POINTS;
         },
 
-        // Класс, в чьё дерево уже вложены общие очки (ownerOf из skills.js):
-        // первый класс sk.t, у которого есть ранг > 0.
-        ownerOf(sk) {
-            if (!sk || sk.md !== 'shared' || !sk.t) return '';
-            for (const [cls, ranks] of Object.entries(sk.t)) {
-                if (ranks && Object.values(ranks).some(r => +r > 0)) return cls;
+        spentSP(st) {
+            const s = st || this.state();
+            let n = 0;
+            for (const r of Object.values(s.nodes || {})) if (+r > 0) n++;
+            for (const v of Object.values(s.abilities || {})) if (v) n++;
+            return n;
+        },
+
+        spFree(st) { return Math.max(0, this.spLimit() - this.spentSP(st)); },
+
+        tokenBalance() {
+            const V = this.skmapCache[this._cls];
+            if (V && isFinite(+V.n)) return Math.max(0, +V.n);
+            const ab = this.hero && this.hero.sk && this.hero.sk.ab;
+            return ab ? Math.max(0, +ab.n || 0) : 0;
+        },
+
+        /** Потрачено жетонов планом: ступени узлов (rank >= 2) + прокачка Арены. */
+        tokensSpent(st) {
+            const s = st || this.state();
+            let sum = 0;
+            // Открытие узла — 1 SP; каждая ступень с 1 на 2, с 2 на 3… стоит
+            // stepCost(текущий ранг) — ровно как в skillmap.js (plus()).
+            for (const [, r] of Object.entries(s.nodes || {})) {
+                for (let k = 1; k < (+r || 0); k++) sum += this.stepCost(k);
             }
-            return '';
+            for (const [key, up] of Object.entries(s.up || {})) {
+                if (!s.abilities[key]) continue;
+                for (const [kind] of this.ARENA_KINDS) {
+                    const base = kind === 'lv' ? 1 : 0;
+                    sum += this._upPathCost(key, kind, base, +((up || {})[kind]) || 0);
+                }
+            }
+            return sum;
         },
 
+        abMax(kind) {
+            const V = this.skmapCache[this._cls];
+            const m = V && V.ab && V.ab.max;
+            const v = m ? +m[kind] : 0;
+            return (isFinite(v) && v > 0) ? v : (this.ARENA_KIND_DEFAULT_MAX[kind] || 1);
+        },
+
+        _normUp(up) {
+            const src = up || {};
+            return {
+                lv: Math.max(1, +src.lv || 0),
+                pow: Math.max(0, +src.pow || 0),
+                eff: Math.max(0, +src.eff || 0),
+                dur: Math.max(0, +src.dur || 0)
+            };
+        },
+
+        /** Цена одного шага прокачки: next из /api/skmap у текущего уровня игры,
+         *  иначе — фолбэк-шкала ARENA_COST. */
+        _stepUpCost(key, kind, from) {
+            const meta = this.abOf(key);
+            const game = (meta && meta.up) ? (+meta.up[kind] || 0) : 0;
+            if (meta && meta.next && +meta.next[kind] > 0 && (+from || 0) === game) return +meta.next[kind];
+            const table = this.ARENA_COST[kind] || [];
+            return +table[+from || 0] || (+from || 0) + 2;
+        },
+
+        _upPathCost(key, kind, from, to) {
+            let sum = 0;
+            for (let v = +from || 0; v < (+to || 0); v++) sum += this._stepUpCost(key, kind, v);
+            return sum;
+        },
+
+        /* ------------------------------------------------------------
+         * Сеть: кэш /api/skills и /api/skmap
+         * ---------------------------------------------------------- */
+        async ensureSkills(force) {
+            if (this.skillsCache && !force) return this.skillsCache;
+            const res = await Utils.fetchApi('/api/skills');
+            const d = (res && Array.isArray(res.classes)) ? res : (res && res.body) || null;
+            if (!d || d.ok === false || !Array.isArray(d.classes)) {
+                throw new Error((d && d.error) || (res && res.error) || 'нет данных о навыках');
+            }
+            this.skillsCache = d;
+            return d;
+        },
+
+        async ensureSkmap(cls, force) {
+            const id = cls || this._cls;
+            if (!id) return null;
+            if (this.skmapCache[id] && !force) return this.skmapCache[id];
+            if (this._skmapPending[id] && !force) return this._skmapPending[id];
+            const p = Utils.fetchApi('/api/skmap?cls=' + encodeURIComponent(id)).then((res) => {
+                const d = (res && res.cls && res.st) ? res : (res && res.body && res.body.cls ? res.body : null);
+                if (!d) throw new Error((res && res.error) || (res && res.body && res.body.error) || 'карта навыков не загрузилась');
+                this.skmapCache[id] = d;
+                return d;
+            }).catch((err) => {
+                dbg('[BUILD SIM] skmap:', err);
+                throw err;
+            }).finally(() => { delete this._skmapPending[id]; });
+            this._skmapPending[id] = p;
+            return p;
+        },
+
+        /* ------------------------------------------------------------
+         * Монтирование в HeroPlanner (#hp-buildsim-container)
+         * ---------------------------------------------------------- */
         async mount(container) {
             if (!container) return;
-            // Ссылка вида …#build=<код> — обмен билдами без сервера. Код читаем
-            // сразу, а ПРИМЕНЯЕМ ниже, после сброса simulatedSkills: иначе
-            // импортированные навыки затёрлись бы пустым объектом.
-            // Посторонний хэш (не от билда) игнорируем — иначе показывали бы
-            // ложное «неверный формат кода».
-            const hash = window.location.hash || '';
-            const hashBuildCode = hash.includes('#build=') ? this._extractBuildCode(hash) : '';
-            // Сохранённые билды поднимаем до парсинга /api/me и /api/skills,
-            // чтобы UI успел отрисовать список «Мои билды» при первом renderTree.
+            this._root = container;
+            this._sel = null;
+            this._hover = null;
+            this._tab = 'map';
+            this._buildIndex = null;
+            this._buildName = '';
+            this._view = { s: 1, x: 0, y: 0 };
             this.loadSavedBuilds();
-            // v11.6.3: нативное дерево грузится лениво. Прогрев — фоном,
-            // результат не ждём: каталог навыков берём из /api/skills.
-            this.warmNativeSkills();
-            // Тултип узла от прошлой сессии не должен «воскресать» при повторном
-            // открытии модалки (state хранится на объекте BuildSim).
-            this.hideTooltip();
-            // Очки при каждом открытии начинаются с нуля (this.simulatedSkills = {}),
-            // поэтому и «активного» билда нет: кнопка «Удалить» до выбора/загрузки
-            // честно попросит выбрать билд.
-            this._currentBuildNames = {};
-            this._currentBuildName = '';
-            container.innerHTML = `<div class="loader">Загрузка данных...</div>`;
+            const hash = window.location.hash || '';
+            this._hashCode = hash.indexOf('#build=') >= 0 ? this._extractBuildCode(hash) : '';
+            container.innerHTML = '<div class="loader">Загрузка созвездия навыков…</div>';
             try {
-                const me = await Utils.fetchApi('/api/me');
-                if (!me || !me.ok || !me.hero) throw new Error('Нет героя');
-                // v11.6.3: режим очков читаем ДО decodeBuild — импорт из
-                // ссылки ограничен тем же лимитом, что и ручное вложение.
-                this.readSkillMode(me.hero);
-                if (!this.skillsCache) this.skillsCache = await Utils.fetchApi('/api/skills');
-                if (!this.skillsCache || !this.skillsCache.classes) throw new Error('Нет данных о навыках');
+                await this.ensureSkills();
+                if (!this.hero) {
+                    const me = await Utils.fetchApi('/api/me');
+                    if (me && me.ok && me.hero) this.hero = me.hero;
+                }
+                if (this._needLegacyMigration) {
+                    this._migrateLegacyBuilds();
+                    this._needLegacyMigration = false;
+                }
+                const list = this.classList();
+                if (!list.length) throw new Error('карта навыков недоступна (нет map.P)');
 
-                this.simulatedSkills = {};
-                // Билд из ссылки применяем поверх пустой симуляции (код прочитан
-                // в начале mount — до сброса применять было нельзя).
-                if (hashBuildCode) {
-                    this._autoLoadClass = this.decodeBuild(hashBuildCode);
-                    if (this._autoLoadClass) UI.showToast('📥 Билд загружен из ссылки!');
+                let initial = '';
+                if (this._hashCode) {
+                    initial = this.decodeBuild(this._hashCode);
+                    if (initial) UI.showToast('📥 Билд загружен из ссылки!');
                     else UI.showToast('❌ Неверный формат кода билда', true);
-                    // Хэш убираем: иначе перезагрузка страницы снова перезапишет
-                    // текущую симуляцию тем же билдом.
-                    try { history.replaceState(null, '', window.location.pathname + window.location.search); } catch (e) {}
+                    try { history.replaceState(null, '', window.location.pathname + window.location.search); } catch (e) { /* noop */ }
                 }
-                const h = me.hero;
-                const equipped = h.items.filter(x => x.on);
-                const bag = h.items.filter(x => !x.on && x.wearable);
-                const allClasses = (this.skillsCache.classes || []).filter(c => c.branches && c.branches.length > 0);
+                const h = this.hero || {};
+                const heroCls = h.role || h.class || h.c || (h.sk && h.sk.c) || '';
+                const start = initial || (heroCls && list.some(c => c.id === heroCls) ? heroCls : list[0].id);
 
-                // Табы классов: slim-сайдбар слева (v11.6.3b). Кнопки остаются
-                // .modal-tab.sim-tab[data-tab] — обработчики кликов ниже и
-                // автозагрузка билда из ссылки (_autoLoadClass) ищут по классу
-                // и потому подхватывают новую разметку без изменений.
-                let tabsHtml = `<button class="modal-tab sim-tab active" data-tab="gear">${this.getClassSvg('gear')}Экипировка</button>`;
-                // Разделитель между системной вкладкой «Экипировка» и классами.
-                tabsHtml += `<div class="sim-sidebar-sep"></div>`;
-                allClasses.forEach(c => {
-                    // --c: цвет класса из classColors (стили таба — в styles.js);
-                    // --ct: цвет текста на заливке (classTextColors, ТЗ 11.6.1e).
-                    const color = this.classColors[c.id] || '#caa55c';
-                    const textColor = this.classTextColors[c.id] || '#12100e';
-                    // v11.6.5b.2: замки с классов сняты — все деревья
-                    // кликабельны всегда. Осталась только метка ✓ у класса,
-                    // в который уже вложены общие очки (аналог .skc-ow).
-                    const owned = this.skillMode === 'shared' && this.ownerClass === c.id;
-                    const tabBadge = owned
-                        ? '<span class="sim-tab-own" title="Очки навыков вложены в этот класс">✓</span>'
-                        : '';
-                    tabsHtml += `<button class="modal-tab sim-tab" data-tab="${c.id}" style="--c:${color};--ct:${textColor}">${this.getClassSvg(c.id)}${this.classNames[c.id] || c.name || c.id}${tabBadge}</button>`;
-                });
-
-                let contentHtml = `
-                    <div class="tab-content active" id="tab-gear">
-                        <div style="flex:1;">
-                            <h3>Текущие статы</h3>
-                            <table><tr><th>Параметр</th><th>Значение</th></tr>`;
-                for (const [k, v] of Object.entries(h.stats)) {
-                    contentHtml += `<tr><td>${this.statNames[k] || k}</td><td>${v}</td></tr>`;
-                }
-                contentHtml += `</table></div><div style="flex:2;">
-                        <h3>Сравнение с сумкой (что будет, если надеть)</h3>
-                        <table><tr><th>Вещь (слот)</th><th>Изменение статов</th></tr>`;
-                bag.forEach(item => {
-                    const cur = equipped.find(x => x.slot === item.slot);
-                    let changes = [];
-                    const keys = new Set([...Object.keys(item.stats || {}), ...Object.keys(cur ? cur.stats || {} : {})]);
-                    keys.forEach(k => {
-                        const nv = (item.stats && item.stats[k]) || 0;
-                        const ov = (cur && cur.stats && cur.stats[k]) || 0;
-                        const d = nv - ov;
-                        if (d !== 0) {
-                            changes.push(`<span class="${d > 0 ? 'stat-up' : 'stat-down'}">${d > 0 ? '+' : ''}${d} ${this.statNames[k] || k}</span>`);
-                        }
-                    });
-                    if (!changes.length) changes.push('<span class="stat-eq">Без изменений</span>');
-                    contentHtml += `<tr><td><b>${item.name}</b> <br><small style="color:#888">(${item.slot})</small></td><td>${changes.join('<br>')}</td></tr>`;
-                });
-                contentHtml += `</table></div></div>`;
-
-                allClasses.forEach(c => {
-                    contentHtml += `
-                        <div class="tab-content" id="tab-${c.id}">
-                            <div class="sim-tree-wrap">
-                                <div class="sim-tree-inner">
-                                    <!-- Верхняя панель: одна строка 38px (очки / билды / обмен). -->
-                                    <div class="sim-top-bar">
-                                        <div class="sim-free-pts">Свободно: <b id="free-${c.id}">0</b> / ${this.maxPts()}</div>
-                                        <div class="sim-bar-sep"></div>
-                                        <button class="sim-save-btn" data-save="${c.id}" title="Сохранить билд">Сохранить</button>
-                                        <button class="sim-share-btn" data-share="${c.id}" title="Поделиться билдом">Поделиться</button>
-                                        <button class="sim-import-btn" data-import="${c.id}" title="Импортировать билд">Импорт</button>
-                                        <button class="sim-keep-btn" data-keep="${c.id}" title="От того, что уже вложено: взять очки, вложенные в игре, и планировать остальные до ${this.maxPts()}">⟲ Вложено</button>
-                                        <div class="sim-bar-sep"></div>
-                                        <select id="load-select-${c.id}" class="sim-load-select" title="Мои билды">
-                                            <option value="">— Мои билды —</option>
-                                        </select>
-                                        <button class="sim-del-btn" data-del="${c.id}" title="Удалить выбранный билд">🗑️</button>
-                                        <button class="sim-reset-btn" data-reset="${c.id}" title="Сбросить все навыки">Сбросить всё</button>
-                                    </div>
-                                    <div class="sim-branches" id="tree-${c.id}"></div>
-                                </div>
-                            </div>
-                            <div class="build-right stats-panel">
-                                <h3>Итоговые статы симуляции</h3>
-                                <div id="stats-${c.id}"></div>
-                            </div>
-                        </div>`;
-                });
-
-                // v11.6.3b: двухоконный лейкаут — сайдбар классов слева, дерево
-                // и панель статов справа. Кнопки остались .modal-tab.sim-tab
-                // с data-tab, поэтому обработчики ниже и автозагрузка билда из
-                // ссылки (.modal-tab[data-tab=…]) находят их внутри <aside>.
-                container.innerHTML = `
-                    <div class="sim-layout">
-                        <aside class="sim-sidebar">
-                            ${tabsHtml}
-                        </aside>
-                        <main class="sim-main-content">
-                            ${contentHtml}
-                        </main>
-                    </div>
-                `;
-
-                container.querySelectorAll('.modal-tab').forEach(tab => {
-                    tab.addEventListener('click', () => {
-                        // Тултип узла относится к дереву текущей вкладки — прячем его
-                        // при переключении класса (ТЗ 11.6.1d).
-                        this.hideTooltip();
-                        container.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
-                        container.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                        tab.classList.add('active');
-                        const target = container.querySelector(`#tab-${tab.dataset.tab}`);
-                        if (target) target.classList.add('active');
-                        if (tab.dataset.tab !== 'gear') this.renderTree(tab.dataset.tab);
-                    });
-                });
-
-                container.querySelectorAll('[data-reset]').forEach(btn => {
-                    btn.addEventListener('click', () => this.resetBuild(btn.dataset.reset));
-                });
-
-                // Билд из ссылки: программно открываем вкладку его класса, чтобы
-                // симуляция сразу отрисовалась (клик по табу зовёт renderTree).
-                if (this._autoLoadClass) {
-                    const autoTab = container.querySelector(`.modal-tab[data-tab="${this._autoLoadClass}"]`);
-                    this._autoLoadClass = null;
-                    if (autoTab) autoTab.click();
-                }
+                this._renderShell();
+                this._wire();
+                await this.selectClass(start);
             } catch (err) {
-                dbg('[BUILD SIM] Ошибка монтирования:', err);
-                container.innerHTML = `<div style="color:#ff5a7a; text-align:center; padding:20px;">Ошибка: ${err.message}</div>`;
+                dbg('[BUILD SIM] mount:', err);
+                container.innerHTML = `<div class="lgu-skm-error">⚠ ${this.esc(err.message || 'не удалось загрузить карту навыков')}</div>`;
             }
         },
 
-        resetBuild(clsId) {
-            this.simulatedSkills[clsId] = {};
-            // ТЗ 11.6.1d, п. 2.1: «Сбросить всё» НЕ должно подставлять последний
-            // сохранённый билд. Забываем активный билд класса — тогда renderTree()
-            // вернёт <select> к плейсхолдеру «— Мои билды —», а не к старой записи.
-            this._setCurrentBuild(clsId, '');
-            this.hideTooltip();
-            this.renderTree(clsId);
-            document.querySelectorAll('.sim-card').forEach(c => c.remove());
+        _renderShell() {
+            const root = this._root;
+            if (!root) return;
+            root.innerHTML = `
+                <div class="sim-layout lgu-skm-layout">
+                    <div class="sim-sidebar" id="lgu-skm-side"></div>
+                    <div class="sim-main-content" id="lgu-skm-main">
+                        <div class="sim-top-bar lgu-skm-bar" id="lgu-skm-bar">
+                            <div class="lgu-skm-res" title="Очки навыков плана">
+                                <em>Очки навыков (SP):</em> <b id="lgu-skm-sp">0</b>
+                                <small id="lgu-skm-sp-note"></small>
+                            </div>
+                            <div class="lgu-skm-res" title="Жетоны навыков, потраченные планом (⟡)">
+                                <em>Жетоны (⟡):</em> <b id="lgu-skm-tok">0</b>
+                                <small id="lgu-skm-tok-note"></small>
+                            </div>
+                            <span class="sim-bar-sep"></span>
+                            <select id="lgu-skm-build-list" class="lgu-skm-build-list" data-build="select" aria-label="Сохранённые билды"></select>
+                            <input id="lgu-skm-build-name" class="sim-save-name" type="text" maxlength="40" placeholder="Название билда" aria-label="Название билда">
+                            <button type="button" class="sim-save-btn" data-act="save" title="Сохранить билд">💾</button>
+                            <button type="button" class="sim-del-btn" data-act="delete" title="Удалить выбранный билд">🗑️</button>
+                            <button type="button" class="sim-share-btn" data-act="share" title="Скопировать ссылку на билд">📤</button>
+                            <button type="button" class="sim-import-btn" data-act="import" title="Импорт кода/ссылки">📥</button>
+                            <button type="button" class="sim-keep-btn" data-act="reset" title="Сбросить план к состоянию игры">⟲</button>
+                        </div>
+                        <div class="lgu-skm-hero" id="lgu-skm-hero"></div>
+                        <div class="lgu-skm-stage" id="lgu-skm-stage">
+                            <div class="lgu-skm-map" id="lgu-skm-map">
+                                <svg class="lgu-skm-svg" id="lgu-skm-svg" viewBox="-600 -600 1200 1200" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Созвездие навыков">
+                                    <rect class="lgu-skm-bg" x="-600" y="-600" width="1200" height="1200"></rect>
+                                    <g id="lgu-skm-world"></g>
+                                </svg>
+                                <div class="lgu-skm-zoom">
+                                    <button type="button" data-act="zoom-in" aria-label="Приблизить">＋</button>
+                                    <button type="button" data-act="zoom-out" aria-label="Отдалить">－</button>
+                                    <button type="button" data-act="zoom-reset" aria-label="Сбросить вид">⌂</button>
+                                </div>
+                            </div>
+                            <aside class="lgu-skm-inspector" id="lgu-skm-insp"></aside>
+                        </div>
+                        <div class="lgu-skm-arena" id="lgu-skm-arena"></div>
+                        <div class="lgu-skm-summary" id="lgu-skm-summary"></div>
+                        <div class="lgu-skm-gear" id="lgu-skm-gear" hidden></div>
+                    </div>
+                </div>`;
+            const q = (s) => root.querySelector(s);
+            this._els = {
+                side: q('#lgu-skm-side'), main: q('#lgu-skm-main'), bar: q('#lgu-skm-bar'),
+                sp: q('#lgu-skm-sp'), spNote: q('#lgu-skm-sp-note'),
+                tok: q('#lgu-skm-tok'), tokNote: q('#lgu-skm-tok-note'),
+                buildList: q('#lgu-skm-build-list'), name: q('#lgu-skm-build-name'),
+                hero: q('#lgu-skm-hero'), stage: q('#lgu-skm-stage'), map: q('#lgu-skm-map'),
+                svg: q('#lgu-skm-svg'), world: q('#lgu-skm-world'),
+                insp: q('#lgu-skm-insp'), arena: q('#lgu-skm-arena'),
+                summary: q('#lgu-skm-summary'), gear: q('#lgu-skm-gear')
+            };
+            this._wireMap();
+        },
+
+        /* ------------------------------------------------------------
+         * Выбор класса
+         * ---------------------------------------------------------- */
+        async selectClass(cls) {
+            const list = this.classList();
+            if (!cls || !list.some(c => c.id === cls)) return;
+            const needGame = !this.sandbox[cls];
+            this._cls = cls;
+            this._tab = 'map';
+            this._sel = null;
+            this._hover = null;
+            this._view = { s: 1, x: 0, y: 0 };
+            this.renderSidebar();
+            this.renderHero();
+            if (this._els.world) this._els.world.innerHTML = '<text class="lgu-skm-wait" x="0" y="0" text-anchor="middle">Загрузка карты класса…</text>';
+            try {
+                await this.ensureSkmap(cls);
+            } catch (err) {
+                if (this._els.world) {
+                    this._els.world.innerHTML = `<text class="lgu-skm-wait bad" x="0" y="0" text-anchor="middle">⚠ ${this.esc(err.message || 'карта не загрузилась')}</text>`;
+                }
+            }
+            if (this._cls !== cls) return;
+            if (needGame || !this.sandbox[cls]) this.loadFromGame(null, true);
+            this._buildIndex = null;
+            this._buildName = '';
+            this.renderAll();
+        },
+
+        /* ------------------------------------------------------------
+         * Состояние игры -> песочница
+         * ---------------------------------------------------------- */
+        loadFromGame(index, silent) {
+            const cls = this._cls;
+            const V = this.skmapCache[cls];
+            if (!V) {
+                if (!silent) UI.showToast('Состояние игры ещё не загружено', true);
+                return false;
+            }
+            if (!this.sandbox[cls]) this.sandbox[cls] = this._blankState();
+            const st = this.sandbox[cls];
+
+            if (index !== null && index !== undefined) {
+                const set = (V.st && Array.isArray(V.st.s)) ? V.st.s[+index] : null;
+                if (!set) {
+                    if (!silent) UI.showToast('Этот набор пуст', true);
+                    return false;
+                }
+                st.eq = { ab: (set.eq && set.eq.ab) || '', ult: (set.eq && set.eq.ult) || '' };
+                const P = this.mapP();
+                for (const kind of ['ab', 'ult']) {
+                    const key = st.eq[kind];
+                    if (key && P[key] && P[key].ab && key.slice(-(kind.length + 1)) === ':' + kind) st.abilities[key] = 1;
+                    else st.eq[kind] = '';
+                }
+                if (!silent) UI.showToast(`📥 Загружен «${set.nm || 'набор'}»`);
+            } else {
+                const fresh = this._blankState();
+                const srcN = (V.st && V.st.n) || {};
+                for (const [id, r] of Object.entries(srcN)) {
+                    const node = this.nodeOf(id, cls);
+                    if (!node || !(+r > 0)) continue;
+                    fresh.nodes[id] = Math.max(1, Math.min(+r, +node.max || 1));
+                }
+                const srcA = (V.st && V.st.a) || {};
+                const P = this.clsData(cls).map.P;
+                for (const key of Object.keys(srcA)) {
+                    if (srcA[key] && P[key] && P[key].ab) fresh.abilities[key] = 1;
+                }
+                fresh.eq = { ab: (V.st && V.st.eq && V.st.eq.ab) || '', ult: (V.st && V.st.eq && V.st.eq.ult) || '' };
+                for (const kind of ['ab', 'ult']) {
+                    const key = fresh.eq[kind];
+                    if (!key || !P[key] || !fresh.abilities[key]) fresh.eq[kind] = '';
+                }
+                for (const br of ((V.ab && V.ab.br) || [])) {
+                    if (!br || !br.id) continue;
+                    if (br.ab) fresh.up[br.id + ':ab'] = this._normUp(br.ab.up);
+                    if (br.ult) fresh.up[br.id + ':ult'] = this._normUp(br.ult.up);
+                }
+                this.sandbox[cls] = fresh;
+                if (!silent) UI.showToast('📥 Загружено текущее состояние героя');
+            }
+            this._buildIndex = null;
+            this._buildName = '';
+            this._sel = null;
+            this.renderAll();
+            return true;
+        },
+
+        /** Санитизация внешнего билда: неизвестные узлы/ранги/слоты отбрасываем,
+         *  «висящие» острова (без связи с hub) удаляем. */
+        _sanitizeBuild(cls, data) {
+            const st = this._blankState();
+            const C = this.clsData(cls);
+            if (!C) return st;
+            const P = (C.map && C.map.P) || {};
+            const src = data || {};
+            for (const [id, r] of Object.entries(src.nodes || {})) {
+                const o = P[id];
+                const node = this.nodeOf(id, cls);
+                if (!o || o.ab || o.q || !node) continue;
+                const rank = Math.max(1, Math.min(Math.floor(+r) || 0, +node.max || 1));
+                if (rank > 0) st.nodes[id] = rank;
+            }
+            for (const key of Object.keys(src.abilities || {})) {
+                const o = P[key];
+                if (o && o.ab && src.abilities[key]) st.abilities[key] = 1;
+            }
+            const eq = src.eq || {};
+            for (const kind of ['ab', 'ult']) {
+                const key = String(eq[kind] || '');
+                if (key && st.abilities[key] && key.slice(-(kind.length + 1)) === ':' + kind) st.eq[kind] = key;
+            }
+            for (const [key, up] of Object.entries(src.up || {})) {
+                if (!st.abilities[key]) continue;
+                const kind = key.split(':')[1];
+                const max = this._abMaxFor(kind, cls);
+                const u = this._normUp(up);
+                st.up[key] = {
+                    lv: Math.min(max, Math.max(1, u.lv)),
+                    pow: Math.min(max, u.pow),
+                    eff: Math.min(max, u.eff),
+                    dur: Math.min(max, u.dur)
+                };
+            }
+            const prevCls = this._cls;
+            this._cls = cls;
+            this._fixState(cls, st);
+            this._cls = prevCls;
+            return st;
+        },
+
+        /** Лимит категории прокачки для конкретного класса (до загрузки skmap). */
+        _abMaxFor(kind, cls) {
+            const V = this.skmapCache[cls || this._cls];
+            const m = V && V.ab && V.ab.max;
+            const v = m ? +m[kind] : 0;
+            return (isFinite(v) && v > 0) ? v : (this.ARENA_KIND_DEFAULT_MAX[kind] || 1);
+        },
+
+        /** Удаляет открытые узлы, потерявшие связь с 'hub', и чистит слоты. */
+        _fixState(cls, st) {
+            const reach = this._reachable(new Set(['hub'].concat(this._openedIds(st))));
+            for (const [id, r] of Object.entries(st.nodes || {})) {
+                if (+r > 0 && !reach.has(id)) delete st.nodes[id];
+            }
+            for (const key of Object.keys(st.abilities || {})) {
+                if (st.abilities[key] && !reach.has(key)) delete st.abilities[key];
+            }
+            for (const kind of ['ab', 'ult']) {
+                const key = st.eq[kind];
+                if (key && (!st.abilities[key] || key.slice(-(kind.length + 1)) !== ':' + kind)) st.eq[kind] = '';
+            }
+        },
+
+        /* ------------------------------------------------------------
+         * Общая перерисовка
+         * ---------------------------------------------------------- */
+        renderAll() {
+            if (!this._root || !this._els.world) return;
+            this.renderSidebar();
+            this.renderHero();
+            this.renderBar();
+            this.renderMap();
+            this.renderInspector();
+            this.renderArena();
+            this.renderSummary();
+            this.renderGear();
+            this._updateVisibility();
+        },
+
+        _updateVisibility() {
+            const gear = this._tab === 'gear';
+            const set = (el, hide) => { if (el) el.hidden = hide; };
+            set(this._els.bar, gear);
+            set(this._els.hero, gear);
+            set(this._els.stage, gear);
+            set(this._els.arena, gear);
+            set(this._els.summary, gear);
+            set(this._els.gear, !gear);
+        },
+
+        renderSidebar() {
+            const el = this._els.side;
+            if (!el) return;
+            const list = this.classList();
+            let html = `<button type="button" class="modal-tab sim-tab${this._tab === 'gear' ? ' active' : ''}" data-tab="gear">${this.getClassSvg('gear')}Экипировка</button>`;
+            html += '<div class="sim-sidebar-sep"></div>';
+            for (const c of list) {
+                const color = this.classColors[c.id] || '#caa55c';
+                const text = this.classTextColors[c.id] || '#12100e';
+                const active = this._tab !== 'gear' && c.id === this._cls;
+                html += `<button type="button" class="modal-tab sim-tab${active ? ' active' : ''}" data-class="${this.esc(c.id)}" style="--c:${color};--ct:${text}">${this.getClassSvg(c.id)}${this.esc(this.classNames[c.id] || c.name || c.id)}</button>`;
+            }
+            el.innerHTML = html;
+        },
+
+        renderHero() {
+            const el = this._els.hero;
+            if (!el) return;
+            const C = this.clsData();
+            const V = this.skmapCache[this._cls] || {};
+            const h = this.hero || {};
+            const name = h.name || (G.ME && G.ME.user && (G.ME.user.name || G.ME.user.login)) || 'Игрок';
+            const lvl = h.lvl || h.level || h.l || (V.lvl || 1);
+            const clsName = this.classNames[this._cls] || (C && C.name) || this._cls;
+            const opened = this.openedCount();
+            const classOpen = +(V.classOpen || 0);
+            // classOpen — ПОРОГ открытия умения класса, а не лимит очков:
+            // пока порог не взят, показываем прогресс; после — строго
+            // «открыто», без дроби (7/3): перебора здесь быть не может.
+            const hubOn = classOpen > 0 && opened >= classOpen;
+            const hubPill = hubOn
+                ? `<span class="lgu-skm-pill hub-on status" title="Порог ${classOpen} открытых узлов класса пройден">✦ Умение класса открыто</span>`
+                : `<span class="lgu-skm-pill status" title="Нужно открыть узлов класса: ${classOpen || '—'}">До умения класса: ${opened} / ${classOpen || '—'}</span>`;
+            el.innerHTML = `
+                <span class="lgu-skm-avat" style="--c:${(C && C.color) || this.classColors[this._cls] || '#ffd24a'}">${this.getClassSvg(this._cls)}</span>
+                <span class="lgu-skm-who"><b>${this.esc(name)}</b><small>${this.esc(clsName)} · ${this.esc(lvl)} ур.</small></span>
+                ${hubPill}`;
+        },
+
+        renderBar() {
+            const E = this._els;
+            if (!E.sp || !this._els.world) return;
+            const st = this.state();
+            const V = this.skmapCache[this._cls] || {};
+            const sp = this.spentSP(st);
+            const limit = this.spLimit();
+            E.sp.textContent = String(sp);
+            // Перелимит — только выход за максимум уровня игры. Запас героя
+            // (skmap.pts) ниже этого максимума — норма, а не ошибка билда.
+            E.sp.classList.toggle('over', sp > limit);
+            const heroPts = +(V.pts || (this.hero && this.hero.pts) || 0);
+            E.spNote.textContent = `/ ${limit}${heroPts > 0 ? ` · у героя: ${heroPts}` : ''}`;
+            E.sp.title = `План: ${sp} из ${limit} SP (максимум уровня игры)`
+                + (heroPts > 0 ? ` · у героя сейчас ${heroPts} SP` : '');
+
+            // Жёсткого лимита жетонов в планировщике НЕТ: остаток героя
+            // (skmap.n) показываем рядом как справочный ориентир — точно так же,
+            // как «у героя: N» у очков навыков. Поэтому .over здесь не ставим:
+            // план дороже текущего запаса — не ошибка, а «докупить жетоны».
+            const tok = this.tokensSpent(st);
+            const heroTok = this.tokenBalance();
+            E.tok.textContent = String(tok);
+            E.tok.classList.remove('over');
+            E.tokNote.textContent = `· у героя: ${heroTok}`;
+            E.tok.title = 'Потрачено жетонов планом: ступени пассивных узлов + прокачка способностей Арены'
+                + (heroTok > 0 ? ` · у героя сейчас ${heroTok} ⟡` : '');
+
+            const list = this.savedBuilds[this._cls] || [];
+            if (E.buildList) {
+                E.buildList.innerHTML = '<option value="">— сохранённые билды —</option>'
+                    + list.map((b, i) => `<option value="${i}">${this.esc(b.name)}</option>`).join('');
+                E.buildList.value = (this._buildIndex !== null && list[this._buildIndex]) ? String(this._buildIndex) : '';
+            }
+            if (E.name && document.activeElement !== E.name) E.name.value = this._buildName || '';
+        },
+
+        /* ------------------------------------------------------------
+         * SVG-карта созвездия
+         * ---------------------------------------------------------- */
+        /** Рёбра: открытая связь — яркая, доступная — пунктир, прочая — тусклая. */
+        _mapEdges(st, C) {
+            const P = C.map.P;
+            const pt = (id) => id === 'hub' ? { x: 0, y: 0 } : P[id];
+            let out = '';
+            for (const e of (Array.isArray(C.map.E) ? C.map.E : [])) {
+                if (!e || e.length < 2) continue;
+                const a = e[0], b = e[1], bi = +e[2] || 0, q = e[3] === 'q';
+                const A = pt(a), B = pt(b);
+                if (!A || !B) continue;
+                let state = '';
+                if (q) state = this.questActive(st, b) ? ' on' : '';
+                else if (this._isOpen(st, a) && this._isOpen(st, b)) state = ' on';
+                else if ((this._isOpen(st, a) && this.canOpen(st, b)) || (this._isOpen(st, b) && this.canOpen(st, a))) state = ' avail';
+                out += `<line class="lgu-skm-edge${state}${q ? ' q' : ''}" x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}" style="--bc:${this.branchColor(bi)}"></line>`;
+            }
+            return out;
+        },
+
+        /** Центр: подсвечен, когда открыто >= classOpen узлов класса.
+         *  classOpen — порог (а не лимит очков), поэтому после порога
+         *  вместо дроби «5/3» рисуем «✦»: перебора здесь быть не может. */
+        _mapHub(st, C, V) {
+            const classOpen = +(V.classOpen || 0);
+            const opened = this.openedCount(st);
+            const on = classOpen > 0 && opened >= classOpen;
+            const label = on ? '✦' : `${opened}/${classOpen || '—'}`;
+            return `<g class="lgu-skm-hub${on ? ' on' : ''}${this._sel === 'hub' ? ' sel' : ''}" data-hub="1" style="--c:${this.esc(C.color || '#ffd24a')}">
+                    <circle r="36"></circle>
+                    ${this._iconMarkup(this.CLASS_ICONS[this._cls] || 'diam', 40)}
+                    <text class="lgu-skm-hubcnt" y="60" text-anchor="middle">${label}</text>
+                </g>`;
+        },
+
+        /** Узлы: круги пассивов, ромбы способностей, капсулы молний. */
+        _mapNodes(st, C) {
+            const P = C.map.P;
+            let out = '';
+            for (const [id, o] of Object.entries(P)) {
+                if (!o) continue;
+                const x = +o.x, y = +o.y;
+                if (!isFinite(x) || !isFinite(y)) continue;
+                const bc = this.esc(this.branchColor(+o.bi || 0));
+
+                if (o.q) {
+                    const on = this.questActive(st, id);
+                    const qid = String(o.q || id).replace(/^q:/, '');
+                    const act = ((C.actions || []).find(a => a && a.id === qid)) || null;
+                    out += `<g class="lgu-skm-q${on ? ' on' : ''}" data-q="${this.esc(qid)}" transform="translate(${x},${y})">
+                        <title>${this.esc(act ? `⚡ ${act.name || act.word || qid}: ${act.text || ''}` : '⚡ Умение похода')}</title>
+                        <rect x="-16" y="-14" width="32" height="28" rx="14"></rect>
+                        <text y="6" text-anchor="middle">⚡</text>
+                    </g>`;
+                    continue;
+                }
+
+                if (o.ab) {
+                    const key = id;
+                    const meta = this.abOf(key) || {};
+                    const opened = !!st.abilities[key];
+                    const equipped = st.eq.ab === key || st.eq.ult === key;
+                    const can = this.canOpen(st, key);
+                    const kind = key.split(':')[1];
+                    const lv = opened ? ((st.up[key] && st.up[key].lv) || 1) : 0;
+                    out += `<g class="lgu-skm-ab${opened ? ' has' : ''}${equipped ? ' eq' : ''}${can ? ' can' : ''}${this._sel === key ? ' sel' : ''}" data-ab="${this.esc(key)}" transform="translate(${x},${y})" style="--bc:${bc}">
+                        <title>${this.esc(`${meta.name || key} · ${kind === 'ab' ? 'способность (3-й ход)' : 'ульта (5-й ход)'}`)}</title>
+                        <rect class="shape" x="-21" y="-21" width="42" height="42" rx="7" transform="rotate(45)"></rect>
+                        <text class="glyph" y="7" text-anchor="middle">${this.esc(meta.icon || (kind === 'ult' ? '★' : '◆'))}</text>
+                        ${opened ? `<text class="badge" y="38" text-anchor="middle">${lv}</text>` : ''}
+                    </g>`;
+                    continue;
+                }
+
+                const node = this.nodeOf(id);
+                if (!node) continue;
+                const max = Math.max(1, +node.max || 1);
+                const rank = Math.min(max, +st.nodes[id] || 0);
+                const can = !rank && this.canOpen(st, id);
+                const branch = this.branchOf(id);
+                const cap = node.kind === 'cap';
+                const rr = cap ? 28 : 24;
+                out += `<g class="lgu-skm-node${rank ? ' has' : ''}${can ? ' can' : ''}${cap ? ' cap' : ''}${this._sel === id ? ' sel' : ''}" data-node="${this.esc(id)}" transform="translate(${x},${y})" style="--bc:${bc}">
+                    <title>${this.esc(`${node.name}${rank ? ` · ${rank}/${max}` : ''}`)}</title>
+                    <circle r="${rr}"></circle>
+                    ${this._iconMarkup(this.iconKeyOf(node, branch), cap ? 28 : 24)}
+                    <text class="rank" y="${rr + 15}" text-anchor="middle">${rank}/${max}</text>
+                </g>`;
+            }
+            return out;
+        },
+
+        /** Подписи веток на радиусе R = 450, углы [-90, 30, 150]. */
+        _mapLabels(st, C) {
+            const ANG = [-90, 30, 150];
+            let out = '';
+            (C.branches || []).slice(0, 3).forEach((B, bi) => {
+                const a = ANG[bi] * Math.PI / 180;
+                const x = Math.round(Math.cos(a) * 450);
+                const y = Math.round(Math.sin(a) * 450 + (Math.sin(a) < 0 ? -62 : 62));
+                const total = (B.nodes || []).length;
+                const done = (B.nodes || []).filter(n => this._isOpen(st, n.id)).length;
+                out += `<g class="lgu-skm-blab" transform="translate(${x},${y})" style="--bc:${this.esc(this.branchColor(bi))}">
+                    <text text-anchor="middle"><tspan class="nm">${this.esc(B.name || B.id)}</tspan><tspan class="cnt" x="0" dy="18">${done}/${total}</tspan></text>
+                </g>`;
+            });
+            return out;
+        },
+
+        renderMap() {
+            const world = this._els.world;
+            if (!world) return;
+            const C = this.clsData();
+            if (!C || !C.map || !C.map.P) {
+                world.innerHTML = '<text class="lgu-skm-wait bad" x="0" y="0" text-anchor="middle">Карта этого класса пока не готова</text>';
+                return;
+            }
+            const st = this.state();
+            const V = this.skmapCache[this._cls] || {};
+            world.innerHTML = this._mapEdges(st, C)
+                + this._mapHub(st, C, V)
+                + this._mapNodes(st, C)
+                + this._mapLabels(st, C);
+            this._applyView();
+        },
+
+        /* ------------------------------------------------------------
+         * Зум/пан карты
+         * ---------------------------------------------------------- */
+        _applyView() {
+            const world = this._els.world;
+            if (!world) return;
+            const v = this._view;
+            world.setAttribute('transform', `translate(${v.x.toFixed(2)} ${v.y.toFixed(2)}) scale(${v.s.toFixed(4)})`);
+        },
+
+        resetView() {
+            this._view = { s: 1, x: 0, y: 0 };
+            this._applyView();
+        },
+
+        /** Координаты курсора -> система viewBox (с учётом текущего transform). */
+        _toWorld(clientX, clientY) {
+            const svg = this._els.svg;
+            if (!svg || typeof svg.createSVGPoint !== 'function') return { x: 0, y: 0 };
+            const pt = svg.createSVGPoint();
+            pt.x = clientX;
+            pt.y = clientY;
+            const m = svg.getScreenCTM();
+            if (!m) return { x: 0, y: 0 };
+            const p = pt.matrixTransform(m.inverse());
+            return { x: (p.x - this._view.x) / this._view.s, y: (p.y - this._view.y) / this._view.s };
+        },
+
+        zoomAt(factor, clientX, clientY) {
+            const svg = this._els.svg;
+            if (!svg) return;
+            let cx = clientX, cy = clientY;
+            if (cx == null || cy == null) {
+                const r = svg.getBoundingClientRect();
+                cx = r.left + r.width / 2;
+                cy = r.top + r.height / 2;
+            }
+            const p = this._toWorld(cx, cy);
+            const s0 = this._view.s;
+            const s1 = Math.min(3, Math.max(0.35, s0 * factor));
+            this._view.x += p.x * (s0 - s1);
+            this._view.y += p.y * (s0 - s1);
+            this._view.s = s1;
+            this._applyView();
+        },
+
+        _wireMap() {
+            const map = this._els.map;
+            if (!map || map.__lguSkmWired) return;
+            map.__lguSkmWired = true;
+
+            map.addEventListener('wheel', (e) => {
+                // Зум колесом — ТОЛЬКО над самой картой созвездия. Над кнопками
+                // масштаба и вне SVG колесо не перехватываем: там оно должно
+                // прокручивать вкладку к «Навыкам Арены» и сводке статов.
+                if (!e.deltaY) return;
+                if (e.target.closest && e.target.closest('.lgu-skm-zoom')) return;
+                const svg = this._els.svg;
+                if (!svg || (e.target !== svg && !(e.target.closest && e.target.closest('#lgu-skm-svg')))) return;
+                e.preventDefault();
+                this.zoomAt(e.deltaY < 0 ? 1.12 : 0.89, e.clientX, e.clientY);
+            }, { passive: false });
+
+            map.addEventListener('pointerdown', (e) => {
+                if (e.button !== 0) return;
+                if (e.target.closest && e.target.closest('[data-node],[data-ab],[data-hub],button')) return;
+                const r = this._els.svg.getBoundingClientRect();
+                this._pan = {
+                    id: e.pointerId, x: e.clientX, y: e.clientY,
+                    vx: this._view.x, vy: this._view.y, s: this._view.s,
+                    k: (Math.min(r.width, r.height) / 1200) || 1
+                };
+                map.classList.add('dragging');
+                try { map.setPointerCapture(e.pointerId); } catch (err) { /* noop */ }
+            });
+
+            map.addEventListener('pointermove', (e) => {
+                const p = this._pan;
+                if (!p || p.id !== e.pointerId) return;
+                this._view.x = p.vx + (e.clientX - p.x) / (p.k * p.s);
+                this._view.y = p.vy + (e.clientY - p.y) / (p.k * p.s);
+                this._applyView();
+            });
+
+            const stopPan = (e) => {
+                if (!this._pan || this._pan.id !== e.pointerId) return;
+                this._pan = null;
+                map.classList.remove('dragging');
+                try { map.releasePointerCapture(e.pointerId); } catch (err) { /* noop */ }
+            };
+            map.addEventListener('pointerup', stopPan);
+            map.addEventListener('pointercancel', stopPan);
+        },
+
+        /* ------------------------------------------------------------
+         * Делегирование событий внутри оболочки
+         * ---------------------------------------------------------- */
+        _wire() {
+            const root = this._root;
+            if (!root || root.__lguSkmWired) return;
+            root.__lguSkmWired = true;
+
+            root.addEventListener('click', (e) => {
+                const t = e.target;
+                if (!t || !t.closest) return;
+
+                const clsBtn = t.closest('[data-class]');
+                if (clsBtn) { this.selectClass(clsBtn.dataset.class); return; }
+                if (t.closest('[data-tab="gear"]')) {
+                    this._tab = 'gear';
+                    this.renderSidebar();
+                    this._updateVisibility();
+                    this.renderGear();
+                    return;
+                }
+
+                const act = t.closest('[data-act]');
+                if (act) { this._onAction(act.dataset.act, act.dataset); return; }
+                if (t.closest('.lgu-skm-inspector')) return;
+
+                const ab = t.closest('[data-ab]');
+                if (ab) { this._onAbilityClick(ab.dataset.ab); return; }
+                const nd = t.closest('[data-node]');
+                if (nd) { this._onNodeClick(nd.dataset.node); return; }
+                if (t.closest('[data-hub]')) {
+                    this._sel = this._sel === 'hub' ? null : 'hub';
+                    this.renderMap();
+                    this.renderInspector();
+                    return;
+                }
+                if (t.closest('.lgu-skm-map')) {
+                    this._sel = null;
+                    this.renderMap();
+                    this.renderInspector();
+                }
+            });
+
+            root.addEventListener('contextmenu', (e) => {
+                const t = e.target;
+                const unit = t && t.closest && t.closest('[data-ab],[data-node]');
+                if (!unit) return;
+                e.preventDefault();
+                this._closeUnit(unit.dataset.ab || unit.dataset.node);
+            });
+
+            root.addEventListener('change', (e) => {
+                const t = e.target;
+                if (!t || !t.dataset) return;
+                if (t.dataset.build === 'select') { this.loadBuild(+t.value); return; }
+                if (t.dataset.eqSlot) {
+                    const slot = t.dataset.eqSlot;
+                    const st = this.state();
+                    const key = t.value || '';
+                    st.eq[slot] = (key && st.abilities[key]) ? key : '';
+                    this.renderMap();
+                    this.renderArena();
+                    this.renderInspector();
+                }
+            });
+
+            root.addEventListener('input', (e) => {
+                const t = e.target;
+                if (t && t.id === 'lgu-skm-build-name') this._buildName = t.value;
+            });
+
+            root.addEventListener('mouseover', (e) => {
+                const t = e.target;
+                if (!t || !t.closest || t.closest('.lgu-skm-inspector')) return;
+                const u = t.closest('[data-node],[data-ab],[data-hub]');
+                if (!u) return;
+                const id = u.dataset.node || u.dataset.ab || (u.dataset.hub ? 'hub' : '');
+                if (!id || this._hover === id) return;
+                this._hover = id;
+                this.renderInspector();
+            });
+
+            root.addEventListener('mouseout', (e) => {
+                const t = e.target;
+                if (!t || !t.closest) return;
+                const u = t.closest('[data-node],[data-ab],[data-hub]');
+                if (!u) return;
+                if (e.relatedTarget && u.contains(e.relatedTarget)) return;
+                const id = u.dataset.node || u.dataset.ab || (u.dataset.hub ? 'hub' : '');
+                if (this._hover === id) {
+                    this._hover = null;
+                    this.renderInspector();
+                }
+            });
+        },
+
+        _onAction(act, ds) {
+            switch (act) {
+                case 'zoom-in': this.zoomAt(1.2); break;
+                case 'zoom-out': this.zoomAt(1 / 1.2); break;
+                case 'zoom-reset': this.resetView(); break;
+                case 'plus': this._openOrStep(ds.id); break;
+                case 'minus': this._closeUnit(ds.id); break;
+                case 'equip': this._equip(ds.id); break;
+                case 'sel-clear': this._sel = null; this.renderMap(); this.renderInspector(); break;
+                case 'save': this.saveCurrentBuild(this._cls, this._buildName); break;
+                case 'delete': this.deleteSelectedBuild(); break;
+                case 'share': this.shareBuild(this._cls); break;
+                case 'import': this.importBuild(); break;
+                case 'reset': this.resetSandbox(); break;
+                case 'load-game': this.loadFromGame(null); break;
+                case 'load-set': this.loadFromGame(+ds.i); break;
+                case 'up-plus': this._bumpUp(ds.key, ds.kind, 1); break;
+                case 'up-minus': this._bumpUp(ds.key, ds.kind, -1); break;
+                default: break;
+            }
+        },
+
+        _onNodeClick(id) {
+            const o = this.mapP()[id];
+            if (!o || o.q) return;
+            this._sel = id;
+            this._openOrStep(id);
+        },
+
+        _onAbilityClick(key) {
+            const st = this.state();
+            this._sel = key;
+            if (!this._isOpen(st, key)) this._openAbility(key);
+            else this._equip(key);
+        },
+
+        /** ЛКМ по узлу: закрытый — открыть (1 SP), открытый — ступень (+1 ⟡). */
+        _openOrStep(id) {
+            const st = this.state();
+            const o = this.mapP()[id];
+            if (!o || o.q) return;
+            if (o.ab) { this._openAbility(id); return; }
+            const node = this.nodeOf(id);
+            if (!node) return;
+            const max = Math.max(1, +node.max || 1);
+            const rank = +st.nodes[id] || 0;
+
+            if (rank <= 0) {
+                if (this.spFree(st) <= 0) {
+                    UI.showToast('Свободных очков навыков нет', true);
+                    this.renderInspector();
+                    return;
+                }
+                if (!this.nbrs(id).some(nb => this._isOpen(st, nb))) {
+                    UI.showToast('Узел не соединён с открытым — начните с соседнего', true);
+                    this.renderInspector();
+                    return;
+                }
+                st.nodes[id] = 1;
+            } else if (rank < max) {
+                const cost = this.stepCost(rank);
+                if (this.tokensSpent(st) + cost > this.tokenBalance()) {
+                    UI.showToast(`План превышает баланс жетонов: +${cost} ⟡`, true);
+                }
+                st.nodes[id] = rank + 1;
+            } else {
+                UI.showToast('Узел уже на максимуме');
+                this.renderInspector();
+                return;
+            }
+            this.renderAll();
+        },
+
+        /** Открытие ромба способности Арены (1 SP) + автогнездо. */
+        _openAbility(key) {
+            const st = this.state();
+            if (this._isOpen(st, key)) return;
+            if (this.spFree(st) <= 0) {
+                UI.showToast('Свободных очков навыков нет', true);
+                this.renderInspector();
+                return;
+            }
+            if (!this.nbrs(key).some(nb => this._isOpen(st, nb))) {
+                UI.showToast('Способность не соединена с открытым узлом', true);
+                this.renderInspector();
+                return;
+            }
+            st.abilities[key] = 1;
+            const kind = String(key).split(':')[1];
+            const meta = this.abOf(key);
+            if ((kind === 'ab' || kind === 'ult') && !st.eq[kind]) st.eq[kind] = key;
+            if (!st.up[key]) st.up[key] = this._normUp(meta && meta.up);
+            this.renderAll();
+        },
+
+        _equip(key) {
+            const st = this.state();
+            if (!st.abilities[key]) return;
+            const kind = String(key).split(':')[1];
+            if (kind !== 'ab' && kind !== 'ult') return;
+            st.eq[kind] = st.eq[kind] === key ? '' : key;
+            this.renderMap();
+            this.renderArena();
+            this.renderInspector();
+        },
+
+        /** ПКМ / «−»: ступень вниз, а с rank 1 — закрытие с проверкой связности. */
+        _closeUnit(id) {
+            const st = this.state();
+            const o = this.mapP()[id];
+            if (!o || o.q) return;
+            if (o.ab) {
+                if (!st.abilities[id]) return;
+                if (!this._canRemove(st, id)) {
+                    UI.showToast('Нельзя закрыть: останутся узлы без связи с центром', true);
+                    return;
+                }
+                delete st.abilities[id];
+                if (st.eq.ab === id) st.eq.ab = '';
+                if (st.eq.ult === id) st.eq.ult = '';
+                this.renderAll();
+                return;
+            }
+            const rank = +st.nodes[id] || 0;
+            if (!rank) return;
+            if (rank > 1) { st.nodes[id] = rank - 1; this.renderAll(); return; }
+            if (!this._canRemove(st, id)) {
+                UI.showToast('Нельзя закрыть: останутся узлы без связи с центром', true);
+                return;
+            }
+            delete st.nodes[id];
+            this.renderAll();
+        },
+
+        _bumpUp(key, kind, delta) {
+            const st = this.state();
+            if (!st.abilities[key] || !kind) return;
+            const max = this.abMax(kind);
+            const meta = this.abOf(key);
+            const u = st.up[key] || (st.up[key] = this._normUp(meta && meta.up));
+            const cur = +u[kind] || 0;
+            const floor = kind === 'lv' ? 1 : 0;
+            const next = Math.max(floor, Math.min(max, cur + delta));
+            if (next === cur) return;
+            if (delta > 0) {
+                const cost = this._stepUpCost(key, kind, cur);
+                UI.showToast(`⟡ ${cost} — шаг плана (жетоны не тратятся)`);
+            }
+            u[kind] = next;
+            this.renderArena();
+            this.renderBar();
+            this.renderSummary();
+        },
+
+        resetSandbox() {
+            const cls = this._cls;
+            if (!cls) return;
+            this.sandbox[cls] = this._blankState();
+            if (this.skmapCache[cls]) this.loadFromGame(null, true);
+            this._sel = null;
+            this._buildIndex = null;
+            this._buildName = '';
+            this.renderAll();
+            UI.showToast('⟲ План сброшен к состоянию игры');
+        },
+
+        /* ------------------------------------------------------------
+         * Инспектор узла/способности/центра
+         * ---------------------------------------------------------- */
+        renderInspector() {
+            const el = this._els.insp;
+            if (!el) return;
+            const id = this._sel || this._hover;
+            const C = this.clsData();
+            const st = this.state();
+            const V = this.skmapCache[this._cls] || {};
+            const head = (title, sub) => `<div class="lgu-skm-ins-head"><b>${this.esc(title)}</b><small>${this.esc(sub || '')}</small>${this._sel ? '<button type="button" class="lgu-skm-ins-x" data-act="sel-clear" aria-label="Закрыть">✕</button>' : ''}</div>`;
+
+            if (!id) {
+                el.innerHTML = `<div class="lgu-skm-hint">
+                    <b>Как читать созвездие</b>
+                    <p><i class="dot"></i>Круг — пассивный навык: работает и в походе, и на Арене.</p>
+                    <p><i class="diamond"></i>Ромб — способность Арены (3-й или 5-й ход).</p>
+                    <p><i class="bolt">⚡</i>Молния — умение похода у узла-хозяина.</p>
+                    <p>ЛКМ — открыть/усилить, ПКМ — ступень вниз или закрыть.</p>
+                    <p class="muted">Изменения в игру не отправляются.</p>
+                </div>`;
+                return;
+            }
+
+            if (id === 'hub') {
+                const act = ((C && C.actions) || []).find(a => a && a.unlock && a.unlock.mastery != null) || null;
+                const need = +(V.classOpen || 0);
+                const opened = this.openedCount(st);
+                const on = need > 0 && opened >= need;
+                // classOpen — порог открытия, лимита очков в игре нет, поэтому
+                // после порога показываем «открыто», а не дробь «5/3».
+                const progress = on
+                    ? `Порог ${need} пройден · открыто узлов: <b>${opened}</b>`
+                    : `Прогресс: <b>${opened}</b> / ${need || '—'}`;
+                el.innerHTML = `<div class="lgu-skm-ins hub">
+                    ${head(this.classNames[this._cls] || (C && C.name) || this._cls, 'Центральное умение класса')}
+                    <div class="lgu-skm-ins-kind">${on ? '✅ умение открыто' : `🔒 нужно открытых узлов: ${need || '—'}`}</div>
+                    <div class="lgu-skm-ins-rank">${progress}</div>
+                    <p class="lgu-skm-ins-fx">${this.esc(act ? (act.text || '') : 'Умение класса открывается по мере изучения созвездия.')}</p>
+                    ${(act && need > 0) ? `<div class="lgu-skm-ins-cost">Стоимость: <b>бесплатно</b> после ${need} узлов</div>` : ''}
+                </div>`;
+                return;
+            }
+
+            const o = this.mapP()[id];
+            if (!o) {
+                el.innerHTML = `<div class="lgu-skm-ins">${head('Узел не найден', 'Карта класса обновилась')}</div>`;
+                return;
+            }
+
+            if (o.q) {
+                const qid = String(o.q || id).replace(/^q:/, '');
+                const act = ((C && C.actions) || []).find(a => a && a.id === qid) || null;
+                const on = this.questActive(st, id);
+                const host = (this.mapP()[id] || {}).host;
+                const hostNode = host ? this.nodeOf(host) : null;
+                el.innerHTML = `<div class="lgu-skm-ins q">
+                    ${head(act ? `⚡ ${act.name || act.word || qid}` : `⚡ ${qid}`, 'Умение похода')}
+                    <div class="lgu-skm-ins-kind">${on ? 'Активно' : 'Не активно'}${hostNode ? ` · хозяин: ${this.esc(hostNode.name)}` : ''}</div>
+                    <p class="lgu-skm-ins-fx">${this.esc(act ? (act.text || '') : 'Дополнительное действие героя в походе.')}</p>
+                    <p class="lgu-skm-ins-next">Молния загорается автоматически, когда открыт узел-хозяин.</p>
+                </div>`;
+                return;
+            }
+
+            if (o.ab) {
+                const kind = String(id).split(':')[1];
+                const meta = this.abOf(id) || {};
+                const bi = this.branchIndex(String(id).split(':')[0]);
+                const bc = this.branchColor(bi);
+                const opened = !!st.abilities[id];
+                const equipped = st.eq[kind] === id;
+                const can = this.canOpen(st, id);
+                const up = st.up[id] || this._normUp(meta.up);
+                const max = this.abMax('lv');
+                const lvl = Math.min(max, +up.lv || 1);
+                const costNext = opened && lvl < max ? this._stepUpCost(id, 'lv', lvl) : 0;
+                const need = kind === 'ult' ? +(V.ab && V.ab.ultLvl) : +(V.ab && V.ab.abLvl);
+                const heroLvl = +(V.lvl || 0);
+                const nodeList = (meta.nodes && typeof meta.nodes === 'object')
+                    ? `<ul class="lgu-skm-ins-nodes">${this.ARENA_KINDS.map(([k, label]) => `<li><span>${label}</span><b>${this.esc(meta.nodes[k] || '—')}</b></li>`).join('')}</ul>`
+                    : '';
+                el.innerHTML = `<div class="lgu-skm-ins ab" style="--bc:${bc}">
+                    ${head(meta.name || id, kind === 'ab' ? 'Способность · 3-й ход' : 'Ульта · 5-й ход')}
+                    <div class="lgu-skm-ins-kind">Ромб · ${opened ? `ступень ${lvl}` : 'не открыта'}${equipped ? ' · в гнезде' : ''}</div>
+                    <p class="lgu-skm-ins-fx">${this.esc(meta.text || 'Способность Арены.')}</p>
+                    ${need && heroLvl && heroLvl < need ? `<p class="lgu-skm-ins-next warn">В бою сработает с ${need} уровня героя (сейчас ${heroLvl}).</p>` : ''}
+                    ${nodeList}
+                    <div class="lgu-skm-ins-cost">${opened ? (costNext ? `Ступень ${lvl + 1}: <b>${costNext} ⟡</b>` : 'Прокачка на максимуме') : 'Открыть: <b>1 SP</b>'}</div>
+                    <div class="lgu-skm-ins-btns">
+                        <button type="button" class="lgu-skm-btn main" data-act="plus" data-id="${this.esc(id)}"${(!opened && !can) ? ' disabled' : ''}>${opened ? '+' : 'Открыть'}</button>
+                        <button type="button" class="lgu-skm-btn" data-act="equip" data-id="${this.esc(id)}"${opened ? '' : ' disabled'}>${equipped ? 'Убрать из гнезда' : 'В слот Арены'}</button>
+                        <button type="button" class="lgu-skm-btn danger" data-act="minus" data-id="${this.esc(id)}"${opened ? '' : ' disabled'}>${opened ? '−' : 'Закрыть'}</button>
+                    </div>
+                    ${(!opened && !can) ? '<p class="lgu-skm-ins-next">Сначала откройте соседний узел, соединённый линией.</p>' : ''}
+                </div>`;
+                return;
+            }
+
+            const node = this.nodeOf(id);
+            if (!node) {
+                el.innerHTML = `<div class="lgu-skm-ins">${head('Узел не найден', 'Карта класса обновилась')}</div>`;
+                return;
+            }
+            const branch = this.branchOf(id);
+            const bi = branch ? (C.branches || []).indexOf(branch) : 0;
+            const bc = this.branchColor(bi);
+            const max = Math.max(1, +node.max || 1);
+            const rank = Math.min(max, +st.nodes[id] || 0);
+            const can = !rank && this.canOpen(st, id);
+            const curText = this.formatNodeText(node, Math.max(1, rank));
+            const nextText = rank < max ? this.formatNodeText(node, rank + 1) : '';
+            const noSp = !rank && this.spFree(st) <= 0;
+            el.innerHTML = `<div class="lgu-skm-ins nd" style="--bc:${bc}">
+                ${head(node.name || id, branch ? branch.name : 'Ветка')}
+                <div class="lgu-skm-ins-kind">Круг · пассивный навык${node.kind === 'cap' ? ' · вершина ветки' : ''}</div>
+                <div class="lgu-skm-ins-rank">Ступень <b>${rank}</b> из ${max}</div>
+                <p class="lgu-skm-ins-fx">${this.esc(curText || 'Постоянный бонус героя.')}</p>
+                ${(nextText && nextText !== curText) ? `<p class="lgu-skm-ins-next">Следующая ступень: ${this.esc(nextText)}</p>` : ''}
+                <div class="lgu-skm-ins-cost">${rank ? (rank < max ? `Ступень ${rank + 1}: <b>${this.stepCost(rank)} ⟡</b>` : 'Максимальная ступень') : 'Открыть: <b>1 SP</b>'}</div>
+                <div class="lgu-skm-ins-btns">
+                    <button type="button" class="lgu-skm-btn main" data-act="plus" data-id="${this.esc(id)}"${(!rank && (!can || noSp)) || rank >= max ? ' disabled' : ''}>${rank ? '+' : 'Открыть'}</button>
+                    <button type="button" class="lgu-skm-btn danger" data-act="minus" data-id="${this.esc(id)}"${rank ? '' : ' disabled'}>${rank > 1 ? '−' : 'Закрыть'}</button>
+                </div>
+                ${(!rank && !can) ? '<p class="lgu-skm-ins-next">Сначала откройте соседний узел, соединённый линией.</p>' : ''}
+                ${noSp ? '<p class="lgu-skm-ins-next warn">Свободных очков навыков нет.</p>' : ''}
+            </div>`;
+        },
+
+        /* ------------------------------------------------------------
+         * Блок «Навыки Арены»: два гнезда + прокачка параметров
+         * ---------------------------------------------------------- */
+        renderArena() {
+            const el = this._els.arena;
+            if (!el) return;
+            const st = this.state();
+            const V = this.skmapCache[this._cls] || {};
+            const keys = Object.keys(st.abilities || {}).filter(k => st.abilities[k]);
+            const byKind = (kind) => keys.filter(k => k.slice(-(kind.length + 1)) === ':' + kind);
+
+            const options = (kind) => '<option value="">— пусто —</option>' + byKind(kind).map((k) => {
+                const m = this.abOf(k) || {};
+                return `<option value="${this.esc(k)}"${st.eq[kind] === k ? ' selected' : ''}>${this.esc(m.name || k)}</option>`;
+            }).join('');
+
+            const slot = (kind) => {
+                const key = st.eq[kind] || '';
+                const meta = key ? (this.abOf(key) || {}) : null;
+                const up = key ? (st.up[key] || this._normUp(meta && meta.up)) : null;
+                const bc = key ? this.branchColor(this.branchIndex(key.split(':')[0])) : '#6b6478';
+                return `<div class="lgu-skm-slot${key ? '' : ' empty'}" style="--bc:${bc}">
+                    <span class="lgu-skm-slot-k">${kind === 'ab' ? 'Способность (3-й ход)' : 'Ульта (5-й ход)'}</span>
+                    <select data-eq-slot="${kind}" aria-label="${kind === 'ab' ? 'Способность 3-го хода' : 'Ульта 5-го хода'}">${options(kind)}</select>
+                    <div class="lgu-skm-slot-meta">${key
+                        ? `<b>${this.esc(meta.name || key)}</b>${up ? `<em>Ступень ${up.lv} · Мощь ${up.pow} · Эффект ${up.eff} · Длит. ${up.dur}</em>` : ''}`
+                        : '<small>Гнездо пусто — откройте ромб на карте.</small>'}</div>
+                </div>`;
+            };
+
+            let ups = '';
+            for (const key of keys) {
+                const meta = this.abOf(key) || {};
+                if (!st.up[key]) st.up[key] = this._normUp(meta.up);
+                const u = st.up[key];
+                const kind = key.split(':')[1];
+                const rows = this.ARENA_KINDS.map(([k, label]) => {
+                    const max = this.abMax(k);
+                    const val = +u[k] || 0;
+                    const cost = val < max ? this._stepUpCost(key, k, val) : 0;
+                    const floor = k === 'lv' ? 1 : 0;
+                    return `<div class="lgu-skm-up-row">
+                        <span>${label}</span>
+                        <button type="button" class="lgu-skm-mini" data-act="up-minus" data-key="${this.esc(key)}" data-kind="${k}"${val <= floor ? ' disabled' : ''} aria-label="Уменьшить ${label}">−</button>
+                        <b>${val}</b><small>/ ${max}</small>
+                        <button type="button" class="lgu-skm-mini" data-act="up-plus" data-key="${this.esc(key)}" data-kind="${k}"${val >= max ? ' disabled' : ''} aria-label="Увеличить ${label}">+</button>
+                        <em>${cost ? cost + ' ⟡' : '—'}</em>
+                    </div>`;
+                }).join('');
+                ups += `<details class="lgu-skm-up"${(st.eq.ab === key || st.eq.ult === key) ? ' open' : ''}>
+                    <summary>${this.esc(meta.name || key)} <small>${kind === 'ab' ? '3-й ход' : '5-й ход'}</small></summary>
+                    <div class="lgu-skm-up-rows">${rows}</div>
+                </details>`;
+            }
+
+            const sets = (V.st && Array.isArray(V.st.s)) ? V.st.s : [];
+            const setBtns = sets.slice(0, 3).map((s, i) => {
+                const nm = (s && s.nm) || ('Набор ' + (i + 1));
+                const eq = (s && s.eq) || {};
+                const tip = [eq.ab ? (this.abOf(eq.ab) || {}).name : '', eq.ult ? (this.abOf(eq.ult) || {}).name : '']
+                    .filter(Boolean).join(' + ') || 'набор пуст';
+                return `<button type="button" class="lgu-skm-loadbtn" data-act="load-set" data-i="${i}" title="${this.esc(tip)}">${this.esc(nm)}</button>`;
+            }).join('');
+
+            const tok = this.tokensSpent(st);
+            el.innerHTML = `<div class="lgu-skm-arena-head">
+                    <b>Навыки Арены</b>
+                    <span>Потрачено жетонов: <b>${tok}</b> ⟡</span>
+                </div>
+                <div class="lgu-skm-slots">${slot('ab')}${slot('ult')}</div>
+                <div class="lgu-skm-ups">${ups || '<p class="lgu-skm-note">Открытых способностей Арены нет — откройте ромб на карте.</p>'}</div>
+                <div class="lgu-skm-loads">
+                    <button type="button" class="lgu-skm-loadbtn game" data-act="load-game">Из игры</button>
+                    ${setBtns || '<small class="lgu-skm-note">Наборы игры недоступны</small>'}
+                </div>`;
+        },
+
+        /* ------------------------------------------------------------
+         * Сводка «Что дают открытые навыки» (аналог statList() из skillmap.js)
+         * ---------------------------------------------------------- */
+        statList() {
+            const C = this.clsData();
+            if (!C) return [];
+            const st = this.state();
+            const map = new Map();
+            const out = [];
+            (C.branches || []).forEach((B, bi) => {
+                (B.nodes || []).forEach((n) => {
+                    const r = Math.min(Math.max(1, +n.max || 1), +st.nodes[n.id] || 0);
+                    if (!r) return;
+                    const t = this.formatNodeText(n, r);
+                    // «Физ. урон +15%» -> { label, sign, suf, v }
+                    const m = /^([А-Яа-яЁё. ]{3,26}?) ?([+−-])(\d+(?:[.,]\d+)?)(%?)$/.exec(t);
+                    if (m) {
+                        const key = m[1].trim() + m[2] + m[4];
+                        const v = parseFloat(m[3].replace(',', '.'));
+                        const hit = map.get(key);
+                        if (hit) { hit.v += v; hit.names.push(n.name); }
+                        else {
+                            const item = { label: m[1].trim(), sign: m[2] === '−' ? '−' : m[2], suf: m[4], v, color: this.branchColor(bi), names: [n.name] };
+                            map.set(key, item);
+                            out.push(item);
+                        }
+                        return;
+                    }
+                    // Фолбэк: структурированные fx узла (текст не распознан).
+                    for (const [fk, fv] of Object.entries(n.fx || {})) {
+                        if (this.isSkipFx(fk) || !isFinite(+fv)) continue;
+                        const pct = ['critDmg', 'skelN', 'skelT', 'def', 'resist', 'pierce'].indexOf(fk) < 0;
+                        const key = 'fx:' + fk;
+                        const hit = map.get(key);
+                        if (hit) { hit.v += (+fv) * r; hit.names.push(n.name); }
+                        else {
+                            const item = { label: this.fxNames[fk] || fk, sign: '+', suf: pct ? '%' : '', v: (+fv) * r, color: this.branchColor(bi), names: [n.name] };
+                            map.set(key, item);
+                            out.push(item);
+                        }
+                    }
+                });
+            });
+            return out;
+        },
+
+        renderSummary() {
+            const el = this._els.summary;
+            if (!el) return;
+            const list = this.statList();
+            const V = this.skmapCache[this._cls] || {};
+            const opened = this.openedCount();
+            const need = +(V.classOpen || 0);
+            const hubOn = need > 0 && opened >= need;
+            const fmt = (v) => String(Math.round(v * 10) / 10).replace('.', ',');
+            const body = list.length
+                ? `<ul class="lgu-skm-stats">${list.map(x => `<li style="--bc:${x.color}" title="${this.esc(x.names.join(', '))}"><span>${this.esc(x.label)}</span><b>${x.sign}${fmt(x.v)}${x.suf}</b></li>`).join('')}</ul>`
+                : '<p class="lgu-skm-note">Пока ничего не открыто.</p>';
+            el.innerHTML = `<div class="lgu-skm-sum-head">
+                    <b>Что дают открытые навыки</b>
+                    <span>${hubOn ? '✅ умение класса открыто' : `до умения класса: ${Math.max(0, need - opened)} узл.`}</span>
+                </div>${body}`;
+        },
+
+        /* ------------------------------------------------------------
+         * Вкладка «Экипировка» (статы героя + сравнение с сумкой)
+         * ---------------------------------------------------------- */
+        renderGear() {
+            const el = this._els.gear;
+            if (!el || this._tab !== 'gear') return;
+            const h = this.hero;
+            if (!h) { el.innerHTML = '<p class="lgu-skm-note">Данные героя не загружены.</p>'; return; }
+            const items = Array.isArray(h.items) ? h.items : [];
+            const equipped = items.filter(x => x && x.on && x.slot);
+            const bag = items.filter(x => x && !x.on && x.slot);
+            const statRows = Object.entries(h.stats || {}).map(([k, v]) => `<tr><td>${this.esc(this.statNames[k] || k)}</td><td>${this.esc(v)}</td></tr>`).join('');
+            const bagRows = bag.map((item) => {
+                const cur = equipped.find(x => x.slot === item.slot);
+                const keys = new Set([].concat(Object.keys(item.stats || {}), Object.keys((cur && cur.stats) || {})));
+                const changes = [];
+                keys.forEach((k) => {
+                    const nv = (item.stats && item.stats[k]) || 0;
+                    const ov = (cur && cur.stats && cur.stats[k]) || 0;
+                    if (nv === ov) return;
+                    changes.push(`<div class="stat-line"><span>${this.esc(this.statNames[k] || k)}</span><b>${nv > ov ? '+' : ''}${nv - ov}</b></div>`);
+                });
+                return `<tr><td><b>${this.esc(item.name || '—')}</b><br><small>${this.esc(item.slot)}</small></td><td>${changes.join('') || '<span class="stat-eq">без изменений</span>'}</td></tr>`;
+            }).join('');
+            el.innerHTML = `<div class="lgu-skm-gear-col">
+                    <h3>Текущие статы</h3>
+                    <table><thead><tr><th>Параметр</th><th>Значение</th></tr></thead><tbody>${statRows || '<tr><td colspan="2">—</td></tr>'}</tbody></table>
+                </div>
+                <div class="lgu-skm-gear-col">
+                    <h3>Сравнение с сумкой</h3>
+                    <table><thead><tr><th>Вещь (слот)</th><th>Изменение статов</th></tr></thead><tbody>${bagRows || '<tr><td colspan="2">Сумка пуста</td></tr>'}</tbody></table>
+                </div>`;
+        },
+
+        /* ------------------------------------------------------------
+         * Пресеты билдов: GM_setValue / GM_getValue + мягкая миграция
+         * со старого localStorage-ключа LEGION_SAVED_BUILDS.
+         * ---------------------------------------------------------- */
+        loadSavedBuilds() {
+            if (this._savedLoaded) return;
+            this._savedLoaded = true;
+            let raw = null;
+            try {
+                raw = (typeof GM_getValue === 'function') ? GM_getValue(this.BUILD_KEY, '') : localStorage.getItem(this.BUILD_KEY);
+            } catch (err) { dbg('[BUILD SIM] GM_getValue:', err); }
+            if (!raw) {
+                try { raw = localStorage.getItem(this.BUILD_KEY); } catch (err) { /* noop */ }
+            }
+            if (raw) {
+                try {
+                    const d = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                    const builds = (d && d.builds) ? d.builds : d;
+                    if (builds && typeof builds === 'object' && !Array.isArray(builds)) this.savedBuilds = builds;
+                } catch (err) { dbg('[BUILD SIM] разбор пресетов:', err); }
+            } else {
+                this._needLegacyMigration = true;
+            }
+        },
+
+        _persistBuilds() {
+            const payload = JSON.stringify({ v: 2, builds: this.savedBuilds });
+            try {
+                if (typeof GM_setValue === 'function') GM_setValue(this.BUILD_KEY, payload);
+                else localStorage.setItem(this.BUILD_KEY, payload);
+            } catch (err) {
+                dbg('[BUILD SIM] сохранение пресетов:', err);
+                try { localStorage.setItem(this.BUILD_KEY, payload); } catch (e) { /* noop */ }
+            }
         },
 
         /**
-         * v11.6.5b.1: кнопка «⟲ Вложено» (режим keep, «от того, что уже вложено»).
-         *
-         * Берёт ранги, которые УЖЕ вложены в игре (hero.sk.t[clsId]), кладёт
-         * их в симуляцию и оставляет свободными остальные очки до целевого
-         * лимита плана (maxPts, до 50) — их план и добирает кнопками +.
-         * Правила зависимостей/тиров проверять не нужно: ранги пришли из
-         * валидного состояния игры.
+         * Однократный перенос старых билдов { cls: [{ name, skills }] } из
+         * localStorage в новый формат. Совпавшие nodeId переносятся, остальные
+         * (старое дерево) отбрасываются; если не совпало ничего — тост.
          */
-        keepNativeBuild(clsId) {
-            const ranks = (this.nativeSkills && this.nativeSkills[clsId]) || {};
-            const clean = {};
-            let total = 0;
-            Object.entries(ranks).forEach(([nodeId, rank]) => {
-                const r = Math.floor(Number(rank));
-                if (!Number.isFinite(r) || r <= 0) return;
-                clean[nodeId] = r;
-                total += r;
-            });
-            if (!total) {
-                UI.showToast('В этом дереве нет вложенных очков — начинаем с чистого плана', true);
-                return;
+        _migrateLegacyBuilds() {
+            let old = null;
+            try { old = JSON.parse(localStorage.getItem(this.LEGACY_BUILD_KEY) || 'null'); } catch (err) { old = null; }
+            if (!old || typeof old !== 'object' || Array.isArray(old)) return;
+            let migrated = 0;
+            let skipped = 0;
+            for (const [cls, list] of Object.entries(old)) {
+                if (!Array.isArray(list) || !this.clsData(cls)) continue;
+                if (!this.savedBuilds[cls]) this.savedBuilds[cls] = [];
+                for (const b of list) {
+                    if (!b || !b.skills || typeof b.skills !== 'object') continue;
+                    const nodes = {};
+                    for (const [id, r] of Object.entries(b.skills)) {
+                        const node = this.nodeOf(id, cls);
+                        if (!node) continue;
+                        const rank = Math.max(1, Math.min(Math.floor(+r) || 0, +node.max || 1));
+                        if (rank > 0) nodes[id] = rank;
+                    }
+                    if (!Object.keys(nodes).length) { skipped++; continue; }
+                    this.savedBuilds[cls].push({
+                        name: b.name || 'Старый билд',
+                        at: Date.now(),
+                        legacy: true,
+                        data: { nodes, abilities: {}, eq: { ab: '', ult: '' }, up: {} }
+                    });
+                    migrated++;
+                }
             }
-            this.simulatedSkills[clsId] = clean;
-            // Это не сохранённый билд: «🗑️» не должен целиться в localStorage.
-            this._setCurrentBuild(clsId, '');
-            this.hideTooltip();
-            this.renderTree(clsId);
-            UI.showToast(`⟲ Взято из игры: ${total} ${this._pointsWord(total)} · свободно до ${this.maxPts()}`);
-        },
-
-        // ------------------------------------------------------------
-        // Сохранённые билды (localStorage, ключ LEGION_SAVED_BUILDS).
-        // Формат: { [clsId]: [{ name, skills }] }, skills — { [nodeId]: rank }.
-        // Ключ общий для всех классов, поэтому запись идёт целиком объектом.
-        // ------------------------------------------------------------
-        // Активный билд запоминаем и общим полем (по ТЗ), и по классам:
-        // иначе после переключения вкладки «Удалить» целилось бы в билд
-        // другого класса с тем же именем.
-        _setCurrentBuild(clsId, name) {
-            this._currentBuildName = name || '';
-            if (!this._currentBuildNames) this._currentBuildNames = {};
-            if (name) this._currentBuildNames[clsId] = name;
-            else delete this._currentBuildNames[clsId];
-        },
-
-        loadSavedBuilds() {
-            try {
-                const raw = localStorage.getItem('LEGION_SAVED_BUILDS');
-                if (raw) this.savedBuilds = JSON.parse(raw) || {};
-            } catch (e) {
-                // Битый JSON / приватный режим — начинаем с чистого списка.
-                this.savedBuilds = {};
-            }
+            this._persistBuilds();
+            if (migrated) UI.showToast(`📦 Перенесено старых билдов: ${migrated}`);
+            else if (skipped) UI.showToast('⚠ Старые билды несовместимы с новым деревом', true);
         },
 
         saveCurrentBuild(clsId, name) {
-            if (!name) return false;
-            if (!this.savedBuilds[clsId]) this.savedBuilds[clsId] = [];
-
-            const currentSkills = this.simulatedSkills[clsId] || {};
-            // Проверяем, нет ли уже билда с таким именем
-            const existing = this.savedBuilds[clsId].findIndex(b => b.name === name);
-            const entry = { name: name, skills: { ...currentSkills } };
-
-            if (existing >= 0) this.savedBuilds[clsId][existing] = entry;
-            else this.savedBuilds[clsId].push(entry);
-
-            this._setCurrentBuild(clsId, name);
-            try {
-                localStorage.setItem('LEGION_SAVED_BUILDS', JSON.stringify(this.savedBuilds));
-            } catch (e) {}
-            return true;
-        },
-
-        loadBuild(clsId, index) {
-            if (!this.savedBuilds[clsId] || !this.savedBuilds[clsId][index]) return;
-            const build = this.savedBuilds[clsId][index];
-            this.simulatedSkills[clsId] = { ...build.skills };
-            this._setCurrentBuild(clsId, build.name);
-            this.renderTree(clsId);
-            UI.showToast(`📥 Билд «${build.name}» загружен`);
-        },
-
-        deleteBuild(clsId, index) {
-            if (!this.savedBuilds[clsId] || !this.savedBuilds[clsId][index]) return;
-            const name = this.savedBuilds[clsId][index].name;
-            this.savedBuilds[clsId].splice(index, 1);
-            // Удалили активный билд — забываем его имя, чтобы «Удалить»
-            // не целилась в уже исчезнувшую запись.
-            if (this._currentBuildNames && this._currentBuildNames[clsId] === name) {
-                this._setCurrentBuild(clsId, '');
-            }
-            try {
-                localStorage.setItem('LEGION_SAVED_BUILDS', JSON.stringify(this.savedBuilds));
-            } catch (e) {}
-            this.renderTree(clsId);
-            UI.showToast(`🗑️ Билд «${name}» удален`);
-        },
-
-        // Удаление по имени активного билда: кнопка «🗑️» вызывает именно это.
-        // Возвращает true, если запись найдена и удалена.
-        deleteCurrentBuild(clsId) {
-            const name = this._currentBuildNames ? this._currentBuildNames[clsId] : '';
-            const list = this.savedBuilds[clsId] || [];
-            const idx = name ? list.findIndex(b => b.name === name) : -1;
-            if (idx < 0) {
-                UI.showToast('Сначала загрузите или выберите билд', true);
+            const cls = clsId || this._cls;
+            const nm = String(name == null ? '' : name).trim();
+            if (!cls) return false;
+            if (!nm) {
+                UI.showToast('Введите название билда', true);
                 return false;
             }
-            this.deleteBuild(clsId, idx);
+            const list = this.savedBuilds[cls] || (this.savedBuilds[cls] = []);
+            const entry = { name: nm, at: Date.now(), data: this._snapshot(this.state(cls)) };
+            const i = list.findIndex(b => b && b.name === nm);
+            if (i >= 0) list[i] = entry;
+            else list.push(entry);
+            this._buildIndex = i >= 0 ? i : list.length - 1;
+            this._buildName = nm;
+            this._persistBuilds();
+            this.renderBar();
+            UI.showToast('💾 Билд сохранён');
             return true;
         },
 
-        // ------------------------------------------------------------
-        // Инлайн-имя билда (патч 11.6.2a).
-        // Панель .sim-top-bar — одна строка 38px, поэтому вместо window.prompt()
-        // на месте кнопки «Сохранить» появляется пара «input + OK»
-        // (CSS .sim-top-bar .sim-save-name: высота 28px, шрифт 12px).
-        // Кнопку не удаляем, а прячем: её обработчик привязывается в renderTree()
-        // (.onclick идемпотентно), а Enter / Esc / клик вне панели возвращают
-        // разметку в исходное состояние.
-        // ------------------------------------------------------------
-        showSaveInline(clsId) {
-            const saveBtn = document.querySelector(`.sim-save-btn[data-save="${clsId}"]`);
-            if (!saveBtn) return;
-            const bar = saveBtn.parentElement;
-            // Повторный клик по «Сохранить» не должен плодить вторую пару.
-            const existing = bar ? bar.querySelector('.sim-save-name') : null;
-            if (existing) { existing.focus(); return; }
-
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.className = 'sim-save-name';
-            input.placeholder = 'Название билда';
-            input.maxLength = 40;
-            input.value = (this._currentBuildNames && this._currentBuildNames[clsId]) || 'Мой билд';
-
-            const okBtn = document.createElement('button');
-            okBtn.type = 'button';
-            okBtn.className = 'sim-save-ok';
-            okBtn.textContent = 'OK';
-            okBtn.title = 'Сохранить билд';
-
-            saveBtn.style.display = 'none';
-            // Порядок: «Сохранить» (скрыта) → input → OK.
-            saveBtn.insertAdjacentElement('afterend', okBtn);
-            saveBtn.insertAdjacentElement('afterend', input);
-
-            const close = () => {
-                document.removeEventListener('pointerdown', onOutside, true);
-                input.remove();
-                okBtn.remove();
-                saveBtn.style.display = '';
-            };
-
-            const commit = () => {
-                const name = (input.value || '').trim();
-                if (!name) {
-                    UI.showToast('Введите имя билда', true);
-                    input.focus();
-                    return;
-                }
-                // Сначала убираем пару, потом рендерим: renderTree() перерисовывает
-                // дерево и список «Мои билды», панель должна быть как обычно.
-                close();
-                if (this.saveCurrentBuild(clsId, name)) {
-                    UI.showToast('💾 Билд сохранен');
-                    this.renderTree(clsId);
-                }
-            };
-
-            const onOutside = (e) => {
-                if (bar && !bar.contains(e.target)) close();
-            };
-
-            okBtn.onclick = commit;
-            input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    commit();
-                } else if (e.key === 'Escape') {
-                    e.preventDefault();
-                    close();
-                }
-            });
-            // pointerdown, а не click: иначе клик по узлу дерева успел бы
-            // отработать (очки/тултип) раньше, чем закроется панель.
-            document.addEventListener('pointerdown', onOutside, true);
-
-            input.focus();
-            input.select();
+        loadBuild(index) {
+            const list = this.savedBuilds[this._cls] || [];
+            const item = list[+index];
+            if (!item) return false;
+            this.sandbox[this._cls] = this._sanitizeBuild(this._cls, item.data);
+            this._buildIndex = +index;
+            this._buildName = item.name || '';
+            this._sel = null;
+            this.renderAll();
+            UI.showToast(`📥 Билд «${item.name}» загружен`);
+            return true;
         },
 
-        // ------------------------------------------------------------
-        // Обмен билдами без сервера: код в Base64 + ссылка #build=<код>.
-        // Формат: { cls: '<класс>', sk: { <nodeId>: <ранг> } } → JSON →
-        // encodeURIComponent (гарантирует ASCII, иначе btoa бросит исключение)
-        // → Base64 → URL-safe: '+' → '-', '/' → '_', паддинг '=' срезан.
-        // ------------------------------------------------------------
+        deleteSelectedBuild() {
+            const list = this.savedBuilds[this._cls] || [];
+            if (this._buildIndex === null || !list[this._buildIndex]) {
+                UI.showToast('Сначала выберите билд в списке', true);
+                return;
+            }
+            const name = list[this._buildIndex].name;
+            list.splice(this._buildIndex, 1);
+            this._buildIndex = null;
+            this._persistBuilds();
+            this.renderBar();
+            UI.showToast(`🗑️ Билд «${name}» удалён`);
+        },
+
+        /* ------------------------------------------------------------
+         * Коды билдов: B2:<url-safe base64>
+         * ---------------------------------------------------------- */
+        _extractBuildCode(input) {
+            const s = String(input == null ? '' : input).trim();
+            const marker = '#build=';
+            const i = s.indexOf(marker);
+            const raw = i >= 0 ? s.slice(i + marker.length) : s;
+            return raw.split('&')[0].trim();
+        },
+
+        _channel() {
+            const m = String(API_BASE || '').match(/^\/c\/([^/]+)/);
+            if (m) return m[1];
+            const p = String(location.pathname || '').match(/^\/c\/([^/]+)/);
+            if (p) return p[1];
+            const u = G.ME && G.ME.user;
+            return (u && (u.login || u.name)) || '';
+        },
+
         encodeBuild(clsId) {
-            const skills = this.simulatedSkills[clsId] || {};
+            const cls = clsId || this._cls;
+            const st = this.state(cls);
             try {
-                const json = JSON.stringify({ cls: clsId, sk: skills });
-                return btoa(encodeURIComponent(json)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-            } catch (e) {
-                dbg('[BUILD SIM] Ошибка кодирования билда:', e);
+                const payload = {
+                    v: 2,
+                    c: cls,
+                    n: st.nodes || {},
+                    a: st.abilities || {},
+                    eq: { ab: (st.eq && st.eq.ab) || '', ult: (st.eq && st.eq.ult) || '' },
+                    up: st.up || {}
+                };
+                const json = JSON.stringify(payload);
+                return 'B2:' + btoa(encodeURIComponent(json)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            } catch (err) {
+                dbg('[BUILD SIM] encodeBuild:', err);
                 return '';
             }
         },
 
-        // Код приходит извне (ссылка от другого игрока), поэтому декодируем
-        // с проверками: известный класс, целые ранги в пределах node.max,
-        // сумма очков не больше целевого лимита плана (maxPts, до 50).
-        // Возвращает id класса, к которому относится билд, либо null.
+        _decodePayload(b64) {
+            const s = String(b64 || '').replace(/-/g, '+').replace(/_/g, '/');
+            const pad = s.length % 4 ? '='.repeat(4 - (s.length % 4)) : '';
+            const text = atob(s + pad);
+            let json = text;
+            try { json = decodeURIComponent(text); } catch (err) { /* старый формат без %-кодирования */ }
+            return JSON.parse(json);
+        },
+
+        /**
+         * Разбор кода билда:
+         *   B2:<base64> — новый формат { v:2, c, n, a, eq, up };
+         *   <base64>    — старый формат { cls, sk } (мягкая совместимость).
+         * Возвращает id класса, в который применён билд, либо ''.
+         */
         decodeBuild(code) {
-            if (!code || typeof code !== 'string') return null;
+            const raw = this._extractBuildCode(code);
+            if (!raw) return '';
+            let payload = null;
+            let legacy = false;
             try {
-                let b64 = code.trim().replace(/-/g, '+').replace(/_/g, '/').replace(/\s+/g, '');
-                // В ссылке паддинг срезан, а atob в части окружений требует
-                // длину, кратную 4 — восстанавливаем.
-                const pad = b64.length % 4;
-                if (pad) b64 += '='.repeat(4 - pad);
-
-                const data = JSON.parse(decodeURIComponent(atob(b64)));
-                if (!data || typeof data !== 'object') return null;
-                const cls = data.cls;
-                const sk = data.sk;
-                if (typeof cls !== 'string' || !sk || typeof sk !== 'object' || Array.isArray(sk)) return null;
-
-                // Класс обязан быть в /api/skills — чужой код не подсунет произвольный clsId.
-                const classes = (this.skillsCache && Array.isArray(this.skillsCache.classes)) ? this.skillsCache.classes : [];
-                const clsData = classes.find(c => c.id === cls);
-                if (!clsData) return null;
-
-                // Допустимые узлы и максимумы рангов — из дерева этого класса.
-                const nodeMax = new Map();
-                (clsData.branches || []).forEach(b => (b.nodes || []).forEach(n => nodeMax.set(n.id, n.max || 1)));
-
-                const clean = {};
-                let total = 0;
-                Object.entries(sk).forEach(([nodeId, rank]) => {
-                    const max = nodeMax.get(nodeId);
-                    if (!max) return;                  // узел не из этого дерева — пропускаем
-                    const r = Math.floor(Number(rank));
-                    if (!Number.isFinite(r) || r <= 0) return;
-                    clean[nodeId] = Math.min(r, max);
-                    total += clean[nodeId];
-                });
-
-                // «Перекачанный» билд (больше очков, чем даёт игра) не принимаем.
-                // v11.6.3: лимит зависит от режима.
-                // v11.6.5b.1: в shared план считается до MAX_POINTS (maxPts),
-                // а не до уровня героя — иначе импорт плана на 50 не проходил.
-                if (total > this.maxPts()) return null;
-
-                this.simulatedSkills[cls] = clean;
-                // Импорт — не сохранённый билд: «🗑️» не должен целиться
-                // в запись из localStorage с тем же именем.
-                this._setCurrentBuild(cls, '');
-                return cls;
-            } catch (e) {
-                return null;
+                if (raw.slice(0, 3) === 'B2:') {
+                    payload = this._decodePayload(raw.slice(3));
+                } else {
+                    const d = this._decodePayload(raw);
+                    if (d && d.sk && typeof d.sk === 'object') {
+                        legacy = true;
+                        payload = { v: 1, c: d.cls || d.c || '', sk: d.sk };
+                    }
+                }
+            } catch (err) {
+                dbg('[BUILD SIM] decodeBuild:', err);
+                payload = null;
             }
+            if (!payload || typeof payload !== 'object') return '';
+
+            const cls = String(payload.c || this._cls || '');
+            if (!this.clsData(cls)) {
+                UI.showToast('Код от неизвестного класса', true);
+                return '';
+            }
+
+            let data;
+            if (legacy) {
+                const nodes = {};
+                const all = Object.keys(payload.sk || {});
+                let matched = 0;
+                for (const id of all) {
+                    const node = this.nodeOf(id, cls);
+                    if (!node) continue;
+                    nodes[id] = Math.max(1, Math.min(Math.floor(+payload.sk[id]) || 0, +node.max || 1));
+                    matched++;
+                }
+                if (!matched) {
+                    UI.showToast('Код от старого дерева несовместим с созвездием', true);
+                    return '';
+                }
+                data = { nodes, abilities: {}, eq: { ab: '', ult: '' }, up: {} };
+                if (matched < all.length) UI.showToast(`⚠ Перенесено узлов: ${matched} из ${all.length}`);
+            } else {
+                if (+payload.v !== 2) {
+                    UI.showToast('Неподдерживаемая версия кода билда', true);
+                    return '';
+                }
+                data = { nodes: payload.n, abilities: payload.a, eq: payload.eq, up: payload.up };
+            }
+
+            this.sandbox[cls] = this._sanitizeBuild(cls, data);
+            this._cls = cls;
+            this._buildIndex = null;
+            this._buildName = '';
+            this._sel = null;
+            return cls;
         },
 
-        // Достаём код из ссылки (#build=…), «голого» кода или текста с ссылкой.
-        _extractBuildCode(input) {
-            const raw = String(input || '').trim();
-            const marker = '#build=';
-            const idx = raw.indexOf(marker);
-            // После кода в хэше могут идти другие параметры: #build=<код>&a=b
-            return idx >= 0 ? raw.slice(idx + marker.length).split(/[&#\s]/)[0] : raw;
-        },
-
-        // «📤 Поделиться»: собираем ссылку с кодом билда и копируем в буфер.
         shareBuild(clsId) {
-            const skills = this.simulatedSkills[clsId] || {};
-            if (!Object.keys(skills).length) {
-                UI.showToast('Сначала распределите очки навыков', true);
-                return;
-            }
             const code = this.encodeBuild(clsId);
-            if (!code) { UI.showToast('Не удалось создать код билда', true); return; }
+            if (!code) {
+                UI.showToast('Не удалось собрать код билда', true);
+                return '';
+            }
+            const ch = this._channel();
+            const url = `https://legiongame.gg/c/${ch}#build=${code}`;
+            this._copy(url);
+            return url;
+        },
 
-            // Код кладём в хэш: такой адрес не уходит на сервер игры и не
-            // ломает SPA-роутинг (в отличие от query-параметра).
-            const url = `${location.origin}${location.pathname}#build=${code}`;
-            // clipboard.writeText доступен только в secure context и может быть
-            // запрещён настройками браузера — тогда показываем окно для копирования.
-            const fallback = () => window.prompt('Скопируйте ссылку на билд:', url);
+        _copy(text) {
+            const value = String(text == null ? '' : text);
+            const manual = () => window.prompt('Скопируйте ссылку на билд:', value);
+            try {
+                if (typeof GM_setClipboard === 'function') {
+                    GM_setClipboard(value);
+                    UI.showToast('📋 Ссылка на билд скопирована');
+                    return;
+                }
+            } catch (err) { dbg('[BUILD SIM] GM_setClipboard:', err); }
             try {
                 if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-                    navigator.clipboard.writeText(url)
-                        .then(() => UI.showToast('📋 Ссылка на билд скопирована в буфер'))
-                        .catch(fallback);
-                } else {
-                    fallback();
+                    navigator.clipboard.writeText(value)
+                        .then(() => UI.showToast('📋 Ссылка на билд скопирована'), manual);
+                    return;
                 }
-            } catch (e) {
-                fallback();
+            } catch (err) { dbg('[BUILD SIM] clipboard:', err); }
+            manual();
+        },
+
+        importBuild() {
+            const code = window.prompt('Вставьте код билда (B2:…) или ссылку с #build=…', '');
+            if (!code) return false;
+            const cls = this.decodeBuild(code);
+            if (!cls) {
+                UI.showToast('❌ Неверный код билда', true);
+                return false;
             }
-        },
-
-        // «📥 Импорт»: принимаем и ссылку целиком, и «голый» код.
-        importBuild(clsId) {
-            const input = window.prompt('Вставьте ссылку или код билда:');
-            if (!input) return;
-
-            const loadedCls = this.decodeBuild(this._extractBuildCode(input));
-            if (!loadedCls) { UI.showToast('❌ Неверный формат кода билда', true); return; }
-
-            UI.showToast('📥 Билд успешно импортирован!');
-            if (loadedCls !== clsId) {
-                // Билд другого класса — открываем его вкладку (клик сам зовёт
-                // renderTree). Ищем внутри модалки планировщика: .modal-tab
-                // используется и другими окнами аддона (аукцион, симулятор).
-                const root = document.getElementById('buildsim-modal-body') || document;
-                const tab = root.querySelector(`.modal-tab[data-tab="${loadedCls}"]`);
-                if (tab) tab.click();
-                else this.renderTree(loadedCls);
-            } else {
-                this.renderTree(clsId);
-            }
-        },
-
-        yFor(req) {
-            if (Y_MAP[req] !== undefined) return Y_MAP[req];
-            // Произвольный req: линейно между нижним (0) и верхним (30) ярусом.
-            return BH - BOT - Math.round(((req || 0) / 30) * 4 * TH);
-        },
-
-        // Русская форма слова «очко» для плашки гейта яруса (патч 11.6.2a):
-        // 1 очко / 2 очка / 5 очков / 11 очков / 21 очко.
-        _pointsWord(n) {
-            const abs = Math.abs(n || 0);
-            const tail100 = abs % 100;
-            const tail10 = abs % 10;
-            if (tail100 >= 11 && tail100 <= 14) return 'очков';
-            if (tail10 === 1) return 'очко';
-            if (tail10 >= 2 && tail10 <= 4) return 'очка';
-            return 'очков';
-        },
-
-        changeSkill(clsId, nodeId, delta, maxRank, preNode, branchReq, branchIds, event) {
-            if (event) event.stopPropagation();
-            if (!this.simulatedSkills[clsId]) this.simulatedSkills[clsId] = {};
-            const simTree = this.simulatedSkills[clsId];
-            const current = simTree[nodeId] || 0;
-            if (delta > 0) {
-                // v11.6.5b.2: блокировка чужих деревьев в shared снята —
-                // планировщик симулирует план на любой класс.
-                // v11.6.5b.3: ни availablePoints, ни ownerClass здесь не
-                // участвуют — лимит строго maxPts() (50) для любого класса.
-                if (current >= maxRank) return;
-                if (preNode && !(simTree[preNode] > 0)) return;
-                if (branchIds && branchReq > 0) {
-                    let branchPts = 0;
-                    Object.entries(simTree).forEach(([id, v]) => {
-                        if (branchIds.has(id)) branchPts += v;
-                    });
-                    if (branchPts < branchReq) return;
-                }
-                let spent = 0; Object.values(simTree).forEach(v => spent += v);
-                // Считаем только очки ТЕКУЩЕГО ПЛАНА (simTree), а не вложения игры.
-                if (spent >= this.maxPts()) return;
-            }
-            if (delta < 0) {
-                // Полная симуляция снятия: строим дерево «как будто очко уже снято»
-                // и проверяем, что всё оставшееся валидно по ДВУМ правилам игры:
-                //   1) прямой prerequisite (node.pre) должен остаться изученным;
-                //   2) в ветке должно остаться не меньше очков, чем требует тир (node.req).
-                const clsData = (this.skillsCache && Array.isArray(this.skillsCache.classes))
-                    ? this.skillsCache.classes.find(c => c.id === clsId)
-                    : null;
-                const branches = (clsData && Array.isArray(clsData.branches)) ? clsData.branches : [];
-
-                if (branches.length) {
-                    const allNodes = branches.flatMap(b => (b && b.nodes) || []);
-
-                    // Копия дерева, а не мутация: откатывать simTree при отказе не нужно.
-                    const testTree = { ...simTree };
-                    testTree[nodeId] = Math.max(0, current + delta);
-                    if (testTree[nodeId] === 0) delete testTree[nodeId];
-
-                    let invalid = false;
-                    for (const [id, rank] of Object.entries(testTree)) {
-                        if (rank <= 0) continue;
-                        const node = allNodes.find(n => n.id === id);
-                        if (!node) continue;
-
-                        // 1. Прямая зависимость.
-                        if (node.pre && !(testTree[node.pre] > 0)) {
-                            invalid = true;
-                            break;
-                        }
-
-                        // 2. Требование по очкам в ветке. Считаем сумму по ветке
-                        //    именно в симулированном дереве: снятие могло опустить
-                        //    очки ветки ниже req у оставшихся узлов.
-                        if (node.req > 0) {
-                            const branch = branches.find(b => b && b.nodes && b.nodes.some(n => n.id === id));
-                            if (branch) {
-                                const bIds = new Set((branch.nodes || []).map(n => n.id));
-                                let bp = 0;
-                                Object.entries(testTree).forEach(([cid, cv]) => {
-                                    if (bIds.has(cid)) bp += cv;
-                                });
-                                if (bp < node.req) {
-                                    invalid = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    if (invalid) {
-                        UI.showToast('Сначала снимите зависимые навыки', true);
-                        return;
-                    }
-                }
-            }
-            simTree[nodeId] = Math.max(0, current + delta);
-            if (simTree[nodeId] === 0) delete simTree[nodeId];
-            // renderTree() пересоздаёт узлы и прячет тултип, поэтому запоминаем его
-            // состояние до перерисовки и восстанавливаем после (ТЗ 11.6.1d).
-            const tipState = this._tooltipState ? { ...this._tooltipState } : null;
-            this.renderTree(clsId);
-            if (tipState && tipState.clsId === clsId && tipState.nodeId === nodeId) {
-                this.showNodeTooltip(clsId, nodeId, tipState.mode === 'click');
-            }
-        },
-
-        renderTree(clsId) {
-            const clsData = this.skillsCache.classes.find(c => c.id === clsId);
-            if (!clsData) return;
-            // v11.6.3: перед рендером дерева убеждаемся, что нативный LGSkills
-            // не остался в ленивом состоянии. Прогрев идемпотентен и нашу
-            // отрисовку не блокирует (данные уже есть из /api/skills).
-            this.warmNativeSkills();
-            const container = document.getElementById(`tree-${clsId}`);
-            if (!container) return;
-            // Число колонок-веток как в нативном дереве (--nb), обычно 3.
-            container.style.setProperty('--nb', String((clsData.branches || []).length || 3));
-
-            if (!this.simulatedSkills[clsId]) this.simulatedSkills[clsId] = {};
-            const simTree = this.simulatedSkills[clsId];
-            let spent = 0; Object.values(simTree).forEach(v => spent += v);
-            const freeEl = document.getElementById(`free-${clsId}`);
-            // v11.6.5b.3: «Свободно: X / 50» = 50 минус сумма ВСЕХ очков
-            // текущего плана. Вложения игры (hero.sk.t) и ownerClass в расчёт
-            // не входят — полоска одинаково считается для любого класса.
-            if (freeEl) freeEl.textContent = this.maxPts() - spent;
-
-            let html = '';
-            const simStats = {};
-
-            clsData.branches.forEach(branch => {
-                const nodes = branch.nodes || [];
-                let branchPoints = 0;
-                nodes.forEach(n => { branchPoints += (simTree[n.id] || 0); });
-
-                // Раскладка ярусов: узлы одного req стоят на одной горизонтали (XS из игры).
-                const tiers = new Map();
-                nodes.forEach(n => {
-                    if (!tiers.has(n.req)) tiers.set(n.req, []);
-                    tiers.get(n.req).push(n);
-                });
-                const xMap = new Map();
-                tiers.forEach(list => list.forEach((n, i) => xMap.set(n.id, this.xFor(list.length, i))));
-
-                const topY = this.yFor(30);      // верхний ярус (req 30)
-                const rootY = this.yFor(0) + 40; // ствол начинается под нижним узлом
-                // Открытый ярус: максимальный req, набранный в ветке (req 0 открыт всегда).
-                const openReq = [30, 20, 10, 5, 0].reduce((acc, req) => (req > acc && branchPoints >= req ? req : acc), 0);
-
-                // Ствол: тёмная основа, пройденная часть цветом ветки, закрытая — пунктиром.
-                let lines = `<path class="tk-bg" d="M50 ${rootY} V${topY}"/>`
-                    + `<path class="tk-on" d="M50 ${rootY} V${this.yFor(openReq)}"/>`
-                    + (openReq < 30 ? `<path class="tk-off" d="M50 ${this.yFor(openReq)} V${topY}"/>` : '');
-
-                // Замочки ярусов (патч 11.6.2a, отступ пересчитан в 11.6.2a.1) —
-                // аналог .skg нативного дерева. Плашка висит на стволе между ярусами,
-                // показываем её только для ЗАКРЫТЫХ ярусов и пишем ОСТАТОК.
-                // Геометрия при TH = 135 и кружке 54px (48 + 2×3):
-                //   низ верхнего узла  ≈ y + 73  (кружок 54 + ранги 11 + подпись 2×14)
-                //   верх кружка ниже   = y + TH − 27 = y + 108
-                // центр свободной полосы ≈ y + 91…92 = y + (48 + TH) / 2 — та же
-                // нативная формула, при TH = 135 она даёт 92px.
-                // Плашка ~21px высотой целиком ложится в полосу 81…103 и не наезжает
-                // ни на подпись навыка, ни на кружок следующего яруса.
-                let gates = '';
-                [...tiers.keys()].filter(req => req > 0).sort((a, b) => b - a).forEach(req => {
-                    if (branchPoints >= req) return; // ярус уже открыт — замок не нужен
-                    const gy = this.yFor(req) + Math.round((48 + TH) / 2);
-                    const need = req - branchPoints;
-                    const tip = `Откроется при ${req} ${this._pointsWord(req)} в ветке «${Utils.escapeHtml(branch.name)}» (сейчас ${branchPoints})`;
-                    gates += `<div class="sim-gate" data-req="${req}" style="top:${gy}px" title="${tip}">🔒 <span>${need} ${this._pointsWord(need)}</span></div>`;
-                });
-
-                // Отводы к боковым узлам — кривые Безье; prereq — прямые линии.
-                nodes.forEach(node => {
-                    const rank = simTree[node.id] || 0;
-                    const x = xMap.get(node.id);
-                    const y = this.yFor(node.req);
-                    const shut = branchPoints < node.req || (node.pre && !(simTree[node.pre] > 0));
-
-                    if (x !== 50) {
-                        const tw = rank > 0 ? 'tw on' : (shut ? 'tw' : 'tw op');
-                        lines += `<path class="${tw}" d="M50 ${y + 40} Q50 ${y} ${x} ${y}"/>`;
-                    }
-                    if (node.pre) {
-                        const parent = nodes.find(n => n.id === node.pre);
-                        if (parent) {
-                            const px = xMap.get(parent.id);
-                            const cls = rank > 0 ? 'pre on' : ((simTree[parent.id] || 0) > 0 ? 'pre op' : 'pre');
-                            lines += `<path class="${cls}" d="M${px} ${this.yFor(parent.req)} L${x} ${y}"/>`;
-                        }
-                    }
-                });
-
-                html += `<div class="sim-branch">
-                    <div class="sim-branch-header">${this.getBranchSvg(branch)}<div class="sim-branch-title">${branch.name}</div><div class="sim-branch-pts" title="Очков в ветке">${branchPoints}</div></div>
-                    <div class="sim-in" style="height:${BH}px">
-                        <svg class="sim-lines" viewBox="0 0 100 ${BH}" preserveAspectRatio="none" aria-hidden="true">${lines}</svg>${gates}`;
-
-                nodes.forEach(node => {
-                    const rank = simTree[node.id] || 0;
-                    const locked = branchPoints < node.req || (node.pre && !(simTree[node.pre] > 0));
-                    const maxed = rank >= node.max;
-
-                    if (rank > 0 && node.fx) {
-                        for (const [k, v] of Object.entries(node.fx)) {
-                            if (this.isSkipFx(k)) continue;
-                            simStats[k] = (simStats[k] || 0) + (v * rank);
-                        }
-                    }
-
-                    let ranksHtml = '';
-                    for (let i = 0; i < node.max; i++) ranksHtml += `<i class="${i < rank ? 'filled' : ''}"></i>`;
-
-                    // Состояния как в нативном дереве: lock / has / max / can (available).
-                    const state = (locked ? ' locked' : '')
-                        + (rank > 0 ? ' has' : '')
-                        + (maxed ? ' maxed' : '')
-                        + (!locked && !maxed ? ' available' : '');
-                    const x = xMap.get(node.id);
-                    const y = this.yFor(node.req);
-
-                    html += `<div class="sim-node${state}"
-                        data-cls="${clsId}" data-node="${node.id}"
-                        style="left:${x}%;top:${y}px">
-                        <div class="sim-node-icon">${this.getNodeSvg(node, branch)}</div>
-                        <div class="sim-node-ranks">${ranksHtml}</div>
-                        <div class="sim-node-name">${node.name}</div>
-                    </div>`;
-                });
-                html += `</div></div>`;
-            });
-
-            container.innerHTML = html;
-
-            container.querySelectorAll('.sim-node').forEach(el => {
-                const nodeCls = el.dataset.cls;
-                const nodeId = el.dataset.node;
-
-                // Наведение: через 500 мс показываем тултип ТОЛЬКО с текстом.
-                el.addEventListener('mouseenter', () => {
-                    this._clearTooltipTimer();
-                    this._tooltipTimer = setTimeout(() => {
-                        this._tooltipTimer = null;
-                        this.showNodeTooltip(nodeCls, nodeId, false);
-                    }, 500);
-                });
-
-                // Мышь ушла раньше таймера — отменяем; висящий hover-тултип прячем.
-                el.addEventListener('mouseleave', () => {
-                    this._clearTooltipTimer();
-                    if (this._tooltipState && this._tooltipState.mode === 'hover') this.hideTooltip();
-                });
-
-                // Клик: тултип с кнопками +/−; повторный клик по тому же узлу закрывает.
-                el.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const st = this._tooltipState;
-                    if (st && st.mode === 'click' && st.clsId === nodeCls && st.nodeId === nodeId) {
-                        this.hideTooltip();
-                        return;
-                    }
-                    this._clearTooltipTimer();
-                    this.showNodeTooltip(nodeCls, nodeId, true);
-                });
-            });
-
-            let statsHtml = '';
-            if (!Object.keys(simStats).length) {
-                statsHtml = `<div style="color:#888;font-style:italic;">Навыки не изучены</div>`;
-            } else {
-                for (const [k, v] of Object.entries(simStats)) {
-                    if (v > 0) {
-                        const isPct = !['critDmg', 'skelN', 'skelT', 'def'].includes(k);
-                        statsHtml += `<div class="stat-line"><span>${this.fxNames[k] || k}</span><b>+${v.toFixed(1)}${isPct ? '%' : ''}</b></div>`;
-                    }
-                }
-            }
-            const statsEl = document.getElementById(`stats-${clsId}`);
-            if (statsEl) statsEl.innerHTML = statsHtml;
-
-            // --- Сохранённые билды: список + обработчики ---
-            // Верхняя панель (.sim-top-bar) живёт вне #tree-${clsId}, поэтому
-            // перерисовка дерева её не убивает — можно просто переназначать
-            // .onclick (idempotent) вместо addEventListener в каждом рендере.
-            const sel = document.getElementById(`load-select-${clsId}`);
-            const delBtn = document.querySelector(`.sim-del-btn[data-del="${clsId}"]`);
-            const saveBtn = document.querySelector(`.sim-save-btn[data-save="${clsId}"]`);
-
-            if (sel && saveBtn && delBtn) {
-                const builds = this.savedBuilds[clsId] || [];
-                // Имя билда вводит пользователь → экранируем перед вставкой в innerHTML.
-                sel.innerHTML = `<option value="">— Мои билды (${builds.length}) —</option>` +
-                    builds.map((b, i) => `<option value="${i}">${Utils.escapeHtml(b.name)}</option>`).join('');
-
-                // Преселект активного билда: видно, что именно удалит «🗑️».
-                const currentName = this._currentBuildNames ? (this._currentBuildNames[clsId] || '') : '';
-                const currentIdx = currentName ? builds.findIndex(b => b.name === currentName) : -1;
-                if (currentIdx >= 0) sel.value = String(currentIdx);
-                delBtn.title = currentIdx >= 0
-                    ? `Удалить билд «${currentName}»`
-                    : 'Удалить выбранный билд';
-
-                // Патч 11.6.2a: вместо window.prompt() — инлайн-поле имени прямо
-                // в верхней панели (см. BuildSim.showSaveInline выше).
-                saveBtn.onclick = () => this.showSaveInline(clsId);
-
-                sel.onchange = () => {
-                    // Плейсхолдер «— Мои билды —» = пустое дерево (ТЗ 11.6.1d, п. 2.2):
-                    // раньше выбор дефолтного пункта ничего не делал и билд оставался.
-                    if (sel.value === '') {
-                        this.resetBuild(clsId);
-                        return;
-                    }
-                    // Выбор в списке сразу загружает билд и делает его активным;
-                    // sel.value после renderTree выставит преселект выше.
-                    this.loadBuild(clsId, +sel.value);
-                };
-
-                delBtn.onclick = () => {
-                    // Целимся в активный билд (this._currentBuildNames), а не в sel.value:
-                    // после перерисовки select сбрасывается на «— Мои билды —»,
-                    // из-за чего индекс из sel.value терялся.
-                    const targetName = this._currentBuildNames ? (this._currentBuildNames[clsId] || '') : '';
-                    if (!targetName) { UI.showToast('Сначала загрузите или выберите билд', true); return; }
-                    if (window.confirm(`Удалить билд «${targetName}»?`)) {
-                        this.deleteCurrentBuild(clsId);
-                    }
-                };
-            }
-
-            // --- Обмен билдами: «📤 Поделиться» / «📥 Импорт» ---
-            // Кнопки статичны в .sim-top-bar (вне #tree-…), поэтому .onclick
-            // переназначаем идемпотентно — как у кнопок сохранения выше.
-            const shareBtn = document.querySelector(`.sim-share-btn[data-share="${clsId}"]`);
-            if (shareBtn) shareBtn.onclick = () => this.shareBuild(clsId);
-
-            const importBtn = document.querySelector(`.sim-import-btn[data-import="${clsId}"]`);
-            if (importBtn) importBtn.onclick = () => this.importBuild(clsId);
-
-            // v11.6.5b.1: «⟲ От вложенного» — план от текущих очков героя.
-            const keepBtn = document.querySelector(`.sim-keep-btn[data-keep="${clsId}"]`);
-            if (keepBtn) keepBtn.onclick = () => this.keepNativeBuild(clsId);
-
-            // Перерисовка пересоздала узлы — старый тултип невалиден (позиция
-            // устарела). changeSkill() при необходимости покажет его заново.
-            this.hideTooltip();
-        },
-
-        // ------------------------------------------------------------
-        // Тултип узла навыка (ТЗ 11.6.1d).
-        // Один общий DOM-элемент .sim-tooltip на окно планировщика:
-        //   • наведение 500 мс → только текст (без кнопок);
-        //   • клик по узлу      → текст + кнопки «− Убрать» / «+ Вложить»;
-        //   • повторный клик по тому же узлу / клик вне дерева → закрыть.
-        // Элемент — прямой ребёнок .custom-modal (НЕ внутри .sim-tree-wrap),
-        // поэтому overflow дерева его не обрезает. position: absolute, а не fixed:
-        // модалка таскается и теряет transform, absolute же всегда считается
-        // от её padding-box (модалка position: fixed), т.е. координаты стабильны.
-        // ------------------------------------------------------------
-        _clearTooltipTimer() {
-            if (this._tooltipTimer) {
-                clearTimeout(this._tooltipTimer);
-                this._tooltipTimer = null;
-            }
-        },
-
-        _getTooltip() {
-            const body = document.getElementById('buildsim-modal-body');
-            const host = (body && body.closest('.custom-modal')) || document.body;
-            let tip = host.querySelector('.sim-tooltip');
-            // Элемент должен быть один: остатки от прошлых модалок удаляем.
-            document.querySelectorAll('.sim-tooltip').forEach(t => { if (t !== tip) t.remove(); });
-            if (!tip) {
-                tip = document.createElement('div');
-                tip.className = 'sim-tooltip';
-                host.appendChild(tip);
-            }
-            return tip;
-        },
-
-        hideTooltip() {
-            this._clearTooltipTimer();
-            this._tooltipState = null;
-            document.querySelectorAll('.sim-tooltip').forEach(tip => {
-                tip.classList.remove('on');
-                tip.innerHTML = '';
-            });
-            document.querySelectorAll('.sim-node.sim-node-active').forEach(n => n.classList.remove('sim-node-active'));
-        },
-
-        // Ставим тултип рядом с узлом: справа, если влезает, иначе слева;
-        // по вертикали — от верхней кромки узла, с прижатием к краям экрана.
-        _positionTooltip(tip, nodeEl) {
-            const host = tip.parentElement || document.body;
-            const nRect = nodeEl.getBoundingClientRect();
-            const vw = window.innerWidth || 1280;
-            const vh = window.innerHeight || 720;
-            const gap = 12, edge = 8;
-            const w = tip.offsetWidth || 280;
-            const h = tip.offsetHeight || 160;
-
-            let x = nRect.right + gap;
-            if (x + w > vw - edge) x = nRect.left - w - gap; // справа не влезает — слева
-            x = Math.max(edge, Math.min(x, vw - w - edge));
-
-            let y = nRect.top - 10;
-            y = Math.max(edge, Math.min(y, vh - h - edge));
-
-            // Пересчёт из системы окна в систему родителя.
-            // v11.6.2a.3: в реальном UI планировщик живёт в #hp-buildsim-container
-            // (HeroPlanner), #buildsim-modal-body отсутствует — тултип крепится
-            // к document.body (см. _getTooltip), поэтому base = 0 и прокрутка
-            // дерева его координаты не смещает.
-            // Компенсация scrollLeft/scrollTop остаётся страховкой на случай,
-            // если host окажется скроллящимся контейнером.
-            const hRect = host.getBoundingClientRect();
-            const inBody = host === document.body;
-            const baseX = inBody ? 0 : hRect.left + host.clientLeft - (host.scrollLeft || 0);
-            const baseY = inBody ? 0 : hRect.top + host.clientTop - (host.scrollTop || 0);
-
-            tip.style.left = Math.round(x - baseX) + 'px';
-            tip.style.top = Math.round(y - baseY) + 'px';
-        },
-
-        showNodeTooltip(clsId, nodeId, withControls) {
-            const classes = (this.skillsCache && Array.isArray(this.skillsCache.classes)) ? this.skillsCache.classes : [];
-            const clsData = classes.find(c => c.id === clsId);
-            if (!clsData) return;
-            const branch = (clsData.branches || []).find(b => (b.nodes || []).some(n => n.id === nodeId));
-            if (!branch) return;
-            const node = branch.nodes.find(n => n.id === nodeId);
-            if (!node) return;
-
-            // renderTree() пересоздаёт узлы — позиционируемся от актуального элемента.
-            const treeEl = document.getElementById(`tree-${clsId}`);
-            const nodeEl = treeEl ? Array.from(treeEl.querySelectorAll('.sim-node'))
-                .find(el => el.dataset.node === nodeId) : null;
-            if (!nodeEl) return; // вкладка закрыта — привязываться не к чему
-
-            if (!this.simulatedSkills[clsId]) this.simulatedSkills[clsId] = {};
-            const simTree = this.simulatedSkills[clsId];
-            const rank = simTree[nodeId] || 0;
-
-            const branchIds = new Set((branch.nodes || []).map(n => n.id));
-            let branchPoints = 0;
-            branch.nodes.forEach(n => branchPoints += (simTree[n.id] || 0));
-            const locked = branchPoints < node.req || (node.pre && !(simTree[node.pre] > 0));
-            const maxed = rank >= node.max;
-
-            let reqText = '';
-            if (branchPoints < node.req) reqText = `Требуется очков в ветке: ${node.req}`;
-            if (node.pre && !(simTree[node.pre] > 0)) reqText = `Сначала изучите предыдущий навык.`;
-
-            const tip = this._getTooltip();
-            tip.dataset.cls = clsId;
-            tip.dataset.node = nodeId;
-            tip.classList.add('on');
-            tip.innerHTML = `
-                ${withControls ? '<div class="sim-tooltip-close" title="Закрыть">✖</div>' : ''}
-                <h4>${Utils.escapeHtml(node.name)} <span>${rank}/${node.max}</span></h4>
-                <div class="desc">${this.formatNodeText(node, rank)}</div>
-                ${reqText ? `<div class="req">${reqText}</div>` : ''}
-                ${withControls ? `<div class="controls">
-                    <button type="button" data-action="minus" ${rank === 0 ? 'disabled' : ''}>− Убрать</button>
-                    <button type="button" data-action="plus" ${maxed || locked ? 'disabled' : ''}>+ Вложить</button>
-                </div>` : ''}`;
-
-            // Позиция — после вставки контента: нужны реальные offsetWidth/Height.
-            this._positionTooltip(tip, nodeEl);
-
-            document.querySelectorAll('.sim-node.sim-node-active').forEach(n => n.classList.remove('sim-node-active'));
-            nodeEl.classList.add('sim-node-active');
-
-            const closeBtn = tip.querySelector('.sim-tooltip-close');
-            if (closeBtn) {
-                closeBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.hideTooltip();
-                });
-            }
-
-            // stopPropagation обязателен: иначе клик по кнопке всплывёт до document
-            // и тултип закроется раньше, чем отработает changeSkill().
-            tip.querySelectorAll('button[data-action]').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const delta = btn.dataset.action === 'plus' ? 1 : -1;
-                    this.changeSkill(clsId, node.id, delta, node.max, node.pre || null, node.req || 0, branchIds, e);
-                });
-            });
-
-            this._tooltipState = { clsId, nodeId, mode: withControls ? 'click' : 'hover' };
-        },
-
-        // Алиас для старых вызовов: карточка .sim-card заменена общим тултипом
-        // (ТЗ 11.6.1d). Поведение как у клика по узлу — с кнопками +/−.
-        showNodeCard(clsId, nodeId, event) {
-            if (event) { event.stopPropagation(); event.preventDefault(); }
-            this._clearTooltipTimer();
-            this.showNodeTooltip(clsId, nodeId, true);
+            this._tab = 'map';
+            this.selectClass(cls);
+            UI.showToast('📥 Билд импортирован');
+            return true;
         }
     };
 
@@ -5937,622 +6805,18 @@
                 ?.addEventListener('click', () => this.open());
         },
 
-        /* ---------------------------------------------------------- */
-        /* 11.6.5c: СПОСОБНОСТИ АРЕНЫ (GET /api/abtokens)             */
-        /* ---------------------------------------------------------- */
-
-        // Категории прокачки ветки — ровно те же ключи, что в up/next/nodes
-        // ответа /api/abtokens (см. docs/API.md).
-        ARENA_KINDS: [
-            ['lv', 'Ступень'],
-            ['pow', 'Мощь'],
-            ['eff', 'Мастерство'],
-            ['dur', 'Размах']
-        ],
-        // 11.6.5c.2: прогрессивная цена прокачки (шкала из отчёта Antigravity).
-        // Индекс = текущий уровень: ARENA_COST[kind][v] — цена ШАГА с v на v+1.
-        // lv: 1/3/7/15/25 за 1..5-ю ступень; pow/eff/dur: 2/5/10 за 1..3-й узел
-        // (в up они начинаются с нуля, поэтому индекс совпадает с up[kind]).
-        ARENA_COST: {
-            lv: [1, 3, 7, 15, 25],
-            pow: [2, 5, 10],
-            eff: [2, 5, 10],
-            dur: [2, 5, 10]
-        },
-        // 11.6.5c.7: все классы игры (id + русское имя из lib/game-data.js).
-        // id — те же, что hero.role и параметр ?cls= у /api/abtokens.
-        ARENA_CLASSES: [
-            ['legionary', 'Легионер'],
-            ['archer', 'Лучник'],
-            ['mage', 'Маг'],
-            ['priest', 'Жрец'],
-            ['rogue', 'Разбойник'],
-            ['necromancer', 'Некромант'],
-            ['paladin', 'Паладин']
-        ],
-        // arenaData — последний ответ /api/abtokens (null = ещё не грузили).
-        // arenaSim — ЛОКАЛЬНЫЙ план прокачки (11.6.5c.3): АБСОЛЮТНЫЕ уровни
-        // каждой категории по слоту, 0 = «пусто», arenaMax(kind) = потолок.
-        // В отличие от старой дельты план не зависит от купленного в игре:
-        // его можно поставить и ниже текущего состояния (разницу показывает
-        // подпись «в игре: N»). Жетоны не тратятся — расходует только игра.
-        arenaData: null,
-        arenaSim: null,
-        arenaCls: '',
-        arenaBusy: false,
-        arenaLoading: false,
-        arenaError: '',
-
-        /** Пустой план: все абсолютные уровни = 0 (загрузка данных и кнопка «Очистить»). */
-        emptyArenaSim() {
-            return { ab: { lv: 0, pow: 0, eff: 0, dur: 0 }, ult: { lv: 0, pow: 0, eff: 0, dur: 0 } };
-        },
-
         /**
-         * 11.6.5c.7: кнопки выбора класса для вкладки «Арена».
-         * Активный класс подсвечен (класс .active), класс героя помечен ★ —
-         * чтобы после экспериментов было видно, куда вернуться. Сами клики
-         * вешает bindArenaClassTabs().
+         * Открытие планировщика. initialTab — необязательный id вкладки:
+         * 'build' | 'ench'. Устаревший 'arena' перенаправляется на «Билды»
+         * (вкладка способностей Арены переехала в созвездие BuildSim).
          */
-        arenaClassTabsHtml() {
-            const cur = this.arenaCls || '';
-            const own = (G.ME && G.ME.hero && (G.ME.hero.role || G.ME.hero.class)) || '';
-            const btns = this.ARENA_CLASSES.map(([id, name]) => {
-                const act = id === cur;
-                const mine = !!own && id === own;
-                return `<button type="button" class="arena-class-btn${act ? ' active' : ''}"`
-                    + ` data-cls="${Utils.escapeHtml(id)}"`
-                    + ` title="${mine ? 'Класс твоего героя' : 'Посмотреть способности класса'}"`
-                    + `${this.arenaLoading ? ' disabled' : ''}>`
-                    + `${Utils.escapeHtml(name)}${mine ? ' ★' : ''}</button>`;
-            }).join('');
-            return `<div class="arena-class-tabs">${btns}</div>`;
-        },
-
-        /**
-         * Клик по классу: грузим его дерево заново (GET /api/abtokens?cls=…).
-         * План сбрасывается внутри loadArenaData: у классов разные ветки/up.
-         */
-        bindArenaClassTabs(box) {
-            box.querySelectorAll('[data-cls]').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const cls = btn.dataset.cls;
-                    if (!cls || cls === this.arenaCls || this.arenaLoading) return;
-                    this.loadArenaData(cls);
-                });
-            });
-        },
-
-        /**
-         * id выбранной ветки. Сервер отдаёт активную ветку в поле br; если
-         * его нет (или ветка исчезла из списка) — берём первую ветку класса.
-         */
-        arenaBranchId() {
-            const d = this.arenaData;
-            if (!d || !Array.isArray(d.branches) || !d.branches.length) return '';
-            const cur = d.br || d.sel || '';
-            return d.branches.some(b => b.id === cur) ? cur : d.branches[0].id;
-        },
-
-        arenaBranch() {
-            const id = this.arenaBranchId();
-            return (this.arenaData?.branches || []).find(b => b.id === id) || null;
-        },
-
-        /** Серверное значение категории у слота 'ab' | 'ult'. */
-        arenaUp(slot, kind) {
-            const s = this.arenaBranch()?.[slot];
-            return s && s.up ? (+s.up[kind] || 0) : 0;
-        },
-
-        /** Потолок категории из arenaData.max; 0 — сервер лимит не сообщил. */
-        arenaMax(kind) {
-            const m = this.arenaData && this.arenaData.max;
-            const v = m ? +m[kind] : NaN;
-            return Number.isFinite(v) && v > 0 ? v : 0;
-        },
-
-        /** Абсолютный уровень из плана, но не выше потолка ступени. */
-        arenaSimValue(slot, kind) {
-            const val = (this.arenaSim?.[slot]?.[kind]) | 0;
-            const cap = this.arenaMax(kind);
-            return cap > 0 ? Math.min(val, cap) : val;
-        },
-
-        /**
-         * Сумма абсолютных уровней плана (не жетонов!). 0 — пустой план;
-         * нужно для доступности кнопки «Очистить»; деньги считает getPlanCost().
-         */
-        arenaSimTotal() {
-            let sum = 0;
-            for (const slot of ['ab', 'ult']) {
-                for (const [kind] of this.ARENA_KINDS) {
-                    sum += (this.arenaSim?.[slot]?.[kind]) | 0;
-                }
-            }
-            return sum;
-        },
-
-        /** Цена одного шага с уровня v на v+1 (0 — дальше качать нельзя). */
-        arenaStepCost(kind, v) {
-            const prices = this.ARENA_COST[kind] || [];
-            return prices[v] || 0;
-        },
-
-        /**
-         * Полная стоимость плана в жетонах по шкале ARENA_COST: путь
-         * «0 → arenaSim[kind]». slot не задан — сумма по обоим слотам.
-         *
-         * План абсолютный, поэтому уже купленные в игре уровни сюда тоже
-         * попадают (это стоимость «с нуля»), а вложенное в игре вычитается
-         * отдельно в сводке через s.paid — иначе двойного счёта не избежать.
-         *   arenaSim.lv = 2 -> цена 1-й и 2-й ступени = 1 + 3 = 4.
-         */
-        getPlanCost(slot) {
-            const slots = slot ? [slot] : ['ab', 'ult'];
-            let total = 0;
-            for (const sl of slots) {
-                for (const [kind] of this.ARENA_KINDS) {
-                    const cap = this.arenaMax(kind);
-                    const raw = (this.arenaSim?.[sl]?.[kind]) | 0;
-                    const to = cap > 0 ? Math.min(raw, cap) : raw;
-                    for (let v = 0; v < to; v++) {
-                        total += this.arenaStepCost(kind, v);
-                    }
-                }
-            }
-            return total;
-        },
-
-        /** Сколько жетонов уже вложено в игре по активной ветке (ab + ult). */
-        arenaPaidTotal() {
-            const b = this.arenaBranch();
-            if (!b) return 0;
-            return (+b.ab?.paid || 0) + (+b.ult?.paid || 0);
-        },
-
-        /**
-         * «Как у меня сейчас»: план = текущие уровни персонажа (s.up), то есть
-         * «ничего не докупаем». Копируем в emptyArenaSim(), чтобы не потерять
-         * ключи категорий, если сервер добавит новые.
-         */
-        takeArenaFromGame() {
-            const b = this.arenaBranch();
-            const sim = this.emptyArenaSim();
-            if (b) {
-                for (const slot of ['ab', 'ult']) {
-                    for (const [kind] of this.ARENA_KINDS) {
-                        sim[slot][kind] = Math.max(0, (+b[slot]?.up?.[kind] || 0));
-                    }
-                }
-            }
-            this.arenaSim = sim;
-        },
-
-        /**
-         * Загрузка дерева способностей арены для класса cls.
-         * cls приходит из селектора классов (11.6.5c.7) или из open();
-         * без аргумента берём текущий класс вкладки, затем класс героя.
-         * Ответ кладём в this.arenaData, план обнуляем: у веток разные up/next,
-         * поэтому старые абсолютные уровни к новой ветке не подходят.
-         */
-        async loadArenaData(cls) {
-            if (this.arenaLoading) return;
-            const target = cls || this.arenaCls || (G.ME && G.ME.hero && G.ME.hero.role) || '';
-            const box = document.getElementById('tab-hero-arena');
-
-            if (!target) {
-                this.arenaData = null;
-                this.arenaError = 'Класс героя неизвестен';
-                this.renderArenaTab();
-                return;
-            }
-
-            this.arenaCls = target;
-            this.arenaLoading = true;
-            this.arenaError = '';
-            if (box) box.innerHTML = '<div class="hp-arena-loading">Загрузка способностей арены…</div>';
-
-            try {
-                const res = await Utils.fetchApi('/api/abtokens?cls=' + encodeURIComponent(target));
-                // fetchApi кладёт ответ и в body, и в корень результата —
-                // берём тот вариант, где реально лежит список веток.
-                const d = (res && Array.isArray(res.branches)) ? res : (res && res.body) || null;
-                if (!d || d.ok === false || !Array.isArray(d.branches) || !d.branches.length) {
-                    throw new Error((d && d.error) || (res && res.error) || 'способности арены не загрузились');
-                }
-                this.arenaData = d;
-                if (d.cls) this.arenaCls = d.cls;
-                this.arenaSim = this.emptyArenaSim();
-            } catch (err) {
-                dbg('[HERO PLANNER] abtokens:', err);
-                this.arenaData = null;
-                this.arenaSim = null;
-                this.arenaError = err.message || 'не загрузилось';
-            } finally {
-                this.arenaLoading = false;
-            }
-
-            this.renderArenaTab();
-        },
-
-        /**
-         * Полная перерисовка вкладки «Арена»: шапка, ветки, два слота,
-         * панель плана и подвал. Вызывается после загрузки данных, кликов
-         * «+»/«−», кнопок «Как у меня сейчас»/«Очистить», импорта и выбора ветки.
-         */
-        renderArenaTab() {
-            const box = document.getElementById('tab-hero-arena');
-            if (!box) return; // вкладка ещё не смонтирована — рисовать некуда
-
-            if (!this.arenaData) {
-                if (this.arenaError) {
-                    // Селектор классов оставляем и в ошибке: если один класс
-                    // не загрузился, можно сразу переключиться на другой.
-                    box.innerHTML = this.arenaClassTabsHtml()
-                        + `<div class="hp-arena-empty">⚠ ${Utils.escapeHtml(this.arenaError)}`
-                        + '<button type="button" class="hp-arena-btn" data-arena="reload">↻ Повторить</button></div>';
-                    box.querySelector('[data-arena="reload"]')?.addEventListener('click', () => {
-                        this.loadArenaData(this.arenaCls);
-                    });
-                    this.bindArenaClassTabs(box);
-                } else {
-                    box.innerHTML = '<div class="hp-arena-loading">Загрузка…</div>';
-                }
-                return;
-            }
-
-            const d = this.arenaData;
-            const n = +d.n || 0;
-            const week = +d.week || 0;
-            const cap = +d.cap || 0;
-            const wkPct = cap > 0 ? Math.max(0, Math.min(100, week / cap * 100)) : 0;
-            const branch = this.arenaBranch();
-            const simTotal = this.arenaSimTotal();  // сумма уровней плана (для «Очистить»)
-            const planCost = this.getPlanCost();    // стоимость плана в жетонах
-
-            // ── Шапка: баланс жетонов навыков + прогресс недели ──
-            const headerHtml = `
-                <div class="hp-arena-header">
-                    <span class="hp-token-badge" title="Жетоны навыков (skillToken)">
-                        🎫 <b>${n}</b> <small>жетонов</small>
-                    </span>
-                    <span class="hp-arena-week">
-                        <small>За неделю: ${week} / ${cap}</small>
-                        <span class="hp-week-bar"><i style="width:${wkPct.toFixed(1)}%"></i></span>
-                    </span>
-                    ${+d.spent > 0 ? `<span class="hp-arena-spent">Вложено в класс: <b>${+d.spent}</b></span>` : ''}
-                    ${+d.lvl > 0 ? `<span class="hp-arena-spent">Уровень героя: <b>${+d.lvl}</b></span>` : ''}
-                </div>`;
-
-            // ── Ветки класса: активная подсвечена, клик делает ветку активной ──
-            const line = (s, turn) => `<span class="hp-branch-line"><small>${turn}</small>`
-                + `${Utils.escapeHtml(s.name || '—')}${+s.up?.lv > 1 ? ` <i>ст. ${+s.up.lv}</i>` : ''}</span>`;
-            const branchesHtml = (d.branches || []).map(b => {
-                const act = b.id === this.arenaBranchId();
-                return `
-                    <button type="button" class="hp-arena-branch-card${act ? ' active' : ''}"
-                        data-branch="${Utils.escapeHtml(b.id)}"${this.arenaBusy ? ' disabled' : ''}>
-                        <span class="hp-branch-ic">${Utils.escapeHtml(b.ab?.icon || '⚔')}</span>
-                        <span class="hp-branch-lines">
-                            ${line(b.ab || {}, '3-й ход')}
-                            ${line(b.ult || {}, '5-й ход')}
-                        </span>
-                        ${act ? '<em class="hp-branch-active">активная</em>' : ''}
-                    </button>`;
-            }).join('');
-
-            // ── Слот способности (ab, 3-й ход) и ульты (ult, 5-й ход) ──
-            const slotHtml = (slot) => {
-                const s = branch ? branch[slot] : null;
-                if (!s) return '';
-                const isUlt = slot === 'ult';
-                // 11.6.5c.4: бонусы способности — массив строк s.lines
-                // (напр. «Урон: 140%», «Кровотечение: 25%»), см. клиент игры
-                // site/skills.js: `S.lines.join(', ')`. Формул масштабирования
-                // API не отдаёт, поэтому показываем базовые цифры как есть.
-                const bonusLines = (Array.isArray(s.lines) ? s.lines : [])
-                    .map(x => String(x == null ? '' : x).trim())
-                    .filter(Boolean);
-                const bonusesHtml = bonusLines.length
-                    ? `<div class="hp-ab-bonuses">${bonusLines
-                        .map(x => `<span class="hp-ab-bonus">${Utils.escapeHtml(x)}</span>`)
-                        .join('')}</div>`
-                    : '';
-                const rowsHtml = this.ARENA_KINDS.map(([kind, label]) => {
-                    // plan — абсолютный уровень плана (arenaSim), base — куплено
-                    // в игре (s.up), cur — план с обрезкой по потолку ступени.
-                    const base = this.arenaUp(slot, kind);
-                    const plan = (this.arenaSim?.[slot]?.[kind]) | 0;
-                    const cur = this.arenaSimValue(slot, kind);
-                    const capK = this.arenaMax(kind);
-                    const nextPrice = s.next ? s.next[kind] : undefined;
-                    // next[kind] === null — сервер сообщает, что ступень максимальная.
-                    const topByServer = !!s.next && (kind in s.next) && nextPrice == null;
-                    // Песочница (11.6.5c.6): единственное ограничение «+» — кап
-                    // ступени. Закрытую способность тоже можно планировать:
-                    // визуальной блокировки (класс shut и плашка «Откроется на
-                    // N уровне») больше нет, обе карточки выглядят одинаково.
-                    // Кошелёк (arenaData.n) кнопку НЕ блокирует: дефицит жетонов
-                    // показываем отдельной сводкой плана.
-                    const full = capK > 0 ? cur >= capK : (topByServer && cur >= base);
-                    const plusDisabled = this.arenaBusy || full;
-                    // «−» уменьшает абсолютный уровень плана вплоть до нуля:
-                    // план может быть и ниже текущего состояния персонажа.
-                    const minusDisabled = this.arenaBusy || cur <= 0;
-                    // Пипсы (11.6.5c.8): золотые — уровни плана (arenaSim),
-                    // синие — то, что уже куплено в игре (s.up), остальные пустые.
-                    const pips = capK > 0
-                        ? `<span class="hp-ab-pips">${Array.from({ length: capK }, (_, i) => {
-                            const cls = i < plan ? 'on' : (i < base ? 'sim' : '');
-                            return `<i${cls ? ` class="${cls}"` : ''}></i>`;
-                        }).join('')}</span>`
-                        : '<span class="hp-ab-pips"></span>';
-                    const hint = topByServer ? 'максимум'
-                        : (nextPrice != null ? `след. уровень: ${nextPrice} 🎫` : '');
-                    // 11.6.5c.8: в блоке счёта показываем отличие плана от
-                    // текущего состояния. Никакого парсинга текста/процентов —
-                    // только цифры уровней из arenaSim и s.up.
-                    const delta = plan - base;
-                    const valNote = delta > 0
-                        ? ` <small>(в игре: ${base}, +${delta} в плане)</small>`
-                        : (delta < 0 ? ` <small>(в игре: ${base}, ${delta})</small>` : '');
-                    // Описание категории выводим как есть, без вычислений.
-                    const desc = s.nodes?.[kind] || '';
-                    return `
-                        <div class="hp-ab-row">
-                            <span class="hp-ab-name">${label}</span>
-                            ${pips}
-                            <span class="hp-ab-val"><b>${cur}</b>${capK > 0 ? `/${capK}` : ''}${valNote}</span>
-                            <button type="button" class="hp-ab-btn minus" data-slot="${slot}" data-kind="${kind}" data-dir="minus"
-                                title="Убрать ступень из плана"${minusDisabled ? ' disabled' : ''}>−</button>
-                            <button type="button" class="hp-ab-btn" data-slot="${slot}" data-kind="${kind}" data-dir="plus"
-                                title="${Utils.escapeHtml(hint)}"${plusDisabled ? ' disabled' : ''}>+</button>
-                            <span class="hp-ab-desc">в игре: ${base}</span>
-                            ${desc ? `<span class="hp-ab-desc">${Utils.escapeHtml(desc)}</span>` : ''}
-                        </div>`;
-                }).join('');
-
-                // Подвал карточки: только стоимость плана этого слота.
-                // Проценты и знаменатель s.total убраны (11.6.5c.5): полная
-                // картина и так в нижней панели вкладки.
-                const slotCost = this.getPlanCost(slot);
-
-                return `
-                    <div class="hp-arena-card${isUlt ? ' ult' : ''}">
-                        <div class="hp-arena-card-head">
-                            <span class="hp-arena-card-ic">${Utils.escapeHtml(s.icon || (isUlt ? '★' : '◆'))}</span>
-                            <span class="hp-arena-card-title">
-                                <b>${Utils.escapeHtml(s.name || '—')}</b>
-                                <small>${isUlt ? 'Ульта · каждый 5-й ход' : 'Способность · каждый 3-й ход'}</small>
-                            </span>
-                        </div>
-                        <p class="hp-slot-text">${Utils.escapeHtml(s.text || '')}</p>
-                        ${bonusesHtml}
-                        <div class="hp-ab-rows">${rowsHtml}</div>
-                        <div class="hp-card-foot">В плане: <b>${slotCost}</b> жетонов</div>
-                    </div>`;
-            };
-
-            const slotsHtml = branch
-                ? `<div class="hp-arena-slots">${slotHtml('ab')}${slotHtml('ult')}</div>`
-                : '<div class="hp-arena-empty">Ветки способностей недоступны.</div>';
-
-            // 11.6.5c.4: нижняя панель — ровно четыре цифры и дефицит.
-            //   planCost  — X, полная стоимость плана от нуля (getPlanCost),
-            //   paidTotal — Y, уже вложено в игре (s.paid по ab + ult),
-            //   need      — Z = max(0, X − Y), сколько жетонов ещё нужно,
-            //   missing   — Z − n, сколько не хватает из кошелька.
-            // Дефицит НЕ блокирует кнопки (песочница): это подсказка «сколько фармить».
-            const paidTotal = this.arenaPaidTotal();
-            const need = Math.max(0, planCost - paidTotal);
-            const missing = need - n;
-            const summaryHtml = `
-                <div class="arena-plan-summary">
-                    <span>В наличии: <b>${n}</b> жетонов</span>
-                    <span>В плане (всего): <b>${planCost}</b> жетонов</span>
-                    <span>Уже вложено в игре: <b>${paidTotal}</b></span>
-                    <span>Доплатить: <b>${need}</b></span>
-                    ${need > n
-                        ? `<span class="arena-deficit">Не хватает <b>${missing}</b> жетонов</span>`
-                        : '<span class="arena-ready">Хватает жетонов!</span>'}
-                </div>`;
-
-            const actionHtml = `
-                <div class="hp-arena-sim-bar">
-                    <button type="button" class="hp-arena-btn" data-arena="take"${this.arenaBusy ? ' disabled' : ''}>Как у меня сейчас</button>
-                    <button type="button" class="hp-arena-btn" data-arena="clear"${(simTotal > 0 && !this.arenaBusy) ? '' : ' disabled'}>✕ Очистить</button>
-                    <button type="button" class="hp-arena-btn" data-arena="export"${this.arenaBusy ? ' disabled' : ''}>📤 Поделиться</button>
-                    <button type="button" class="hp-arena-btn" data-arena="import"${this.arenaBusy ? ' disabled' : ''}>📥 Импорт</button>
-                    ${this.arenaBusy ? '<span class="hp-arena-spent">⏳ выполняется…</span>' : ''}
-                </div>
-                ${summaryHtml}`;
-
-            // Источники жетонов — те же цифры, что показывает сама игра (src/dayCap).
-            const src = d.src || {};
-            const dayCap = d.dayCap || {};
-            const footHtml = '<div class="hp-card-foot">Откуда жетоны: задания дня '
-                + `<b>+${+src.dailyAll || 0}</b>, задание эфира <b>+${+src.dailyAir || 0}</b>, `
-                + `бой похода <b>+${+src.quest || 0}</b> (босс <b>+${+src.questBoss || 0}</b>`
-                + `${dayCap.quest ? `, за день до ${+dayCap.quest}` : ''}), вылазка гильдии `
-                + `<b>+${+src.guildrun || 0}</b>${dayCap.guildrun ? ` (за день до ${+dayCap.guildrun})` : ''}, `
-                + `рейд гильдии <b>+${+src.raid || 0}</b>. За неделю — не больше <b>${cap}</b>.</div>`;
-
-            box.innerHTML = `
-                <div class="hp-arena-wrap">
-                    ${headerHtml}
-                    ${this.arenaClassTabsHtml()}
-                    <div class="hp-arena-branches">${branchesHtml}</div>
-                    ${slotsHtml}
-                    ${actionHtml}
-                    ${footHtml}
-                </div>`;
-
-            // 11.6.5c.7: выбор класса — перезагрузка дерева через ?cls=.
-            this.bindArenaClassTabs(box);
-
-            // Выбор ветки: чисто локальный переключатель (сеть не дёргаем).
-            box.querySelectorAll('[data-branch]').forEach(btn => {
-                btn.addEventListener('click', () => this.pickArenaBranch(btn.dataset.branch));
-            });
-
-            // «+» / «−» — локальная песочница с АБСОЛЮТНЫМИ уровнями плана:
-            // кошелёк кнопки не блокирует, «+» ограничен только капом ступени,
-            // «−» опускает план вплоть до нуля.
-            box.querySelectorAll('.hp-ab-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const slot = btn.dataset.slot;
-                    const kind = btn.dataset.kind;
-                    if (!this.arenaSim || !this.arenaSim[slot]) return;
-                    const cur = this.arenaSimValue(slot, kind);
-                    if (btn.dataset.dir === 'minus') {
-                        if (cur <= 0) return;
-                        this.arenaSim[slot][kind] = cur - 1;
-                    } else {
-                        const capK = this.arenaMax(kind);
-                        if (capK > 0 && cur >= capK) return;
-                        this.arenaSim[slot][kind] = cur + 1;
-                    }
-                    this.renderArenaTab();
-                });
-            });
-
-            // «Как у меня сейчас»: план = текущие уровни персонажа (s.up).
-            box.querySelector('[data-arena="take"]')?.addEventListener('click', () => {
-                this.takeArenaFromGame();
-                this.renderArenaTab();
-            });
-
-            // «✕ Очистить»: пустой план (все уровни = 0).
-            box.querySelector('[data-arena="clear"]')?.addEventListener('click', () => {
-                this.arenaSim = this.emptyArenaSim();
-                this.renderArenaTab();
-            });
-
-            box.querySelector('[data-arena="export"]')?.addEventListener('click', () => this.exportArenaBuild());
-            box.querySelector('[data-arena="import"]')?.addEventListener('click', () => {
-                const code = window.prompt('Вставьте код билда арены (LGA1:…):', '');
-                if (code) this.importArenaBuild(code);
-            });
-        },
-
-        /**
-         * Выбор активной ветки — чисто локальный переключатель (11.6.5c.3).
-         * Сетевой POST /api/abtokens/act убран: планировщик не должен дёргать
-         * игру ради предпросмотра. Все ветки класса уже пришли в одном ответе
-         * /api/abtokens, поэтому достаточно поправить br; план обнуляем —
-         * у веток разные up/next, старые абсолютные уровни к ним не подходят.
-         */
-        pickArenaBranch(br) {
-            const d = this.arenaData;
-            if (!d || !br || br === this.arenaBranchId()) return;
-            d.br = br;
-            this.arenaSim = this.emptyArenaSim();
-            this.renderArenaTab();
-        },
-
-        /**
-         * «📤 Поделиться»: собирает код плана
-         *   LGA1:<cls>:<br>:<ab.lv,pow,eff,dur>:<ult.lv,pow,eff,dur>
-         * Числа — АБСОЛЮТНЫЕ уровни плана (arenaSim, 0 = «пусто»), поэтому
-         * получатель видит ровно собранный план, а не дельту от своего героя.
-         */
-        exportArenaBuild() {
-            const d = this.arenaData;
-            if (!d) { UI.showToast('Арена ещё не загружена', true); return ''; }
-            const br = this.arenaBranchId();
-            if (!br) { UI.showToast('Ветки способностей недоступны', true); return ''; }
-            const pack = (slot) => this.ARENA_KINDS.map(([kind]) => this.arenaSimValue(slot, kind)).join(',');
-            const code = `LGA1:${d.cls || this.arenaCls}:${br}:${pack('ab')}:${pack('ult')}`;
-            this.copyArenaCode(code);
-            return code;
-        },
-
-        /**
-         * Копирование кода плана: GM_setClipboard -> Clipboard API -> prompt.
-         * GM_setClipboard синхронный и не требует secure context, поэтому он
-         * первый; остальные пути — запасные для других менеджеров/браузеров.
-         */
-        copyArenaCode(code) {
-            const value = String(code || '');
-            const manual = () => window.prompt('Скопируйте код билда арены:', value);
-            try {
-                if (typeof GM_setClipboard === 'function') {
-                    GM_setClipboard(value);
-                    UI.showToast('📋 Код билда скопирован в буфер');
-                    return;
-                }
-            } catch (err) { dbg('[HERO PLANNER] GM_setClipboard:', err); }
-            try {
-                if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-                    navigator.clipboard.writeText(value)
-                        .then(() => UI.showToast('📋 Код билда скопирован в буфер'), manual);
-                    return;
-                }
-            } catch (err) { dbg('[HERO PLANNER] clipboard:', err); }
-            manual();
-        },
-
-        /**
-         * «📥 Импорт»: разбирает LGA1-код и раскладывает АБСОЛЮТНЫЕ уровни
-         * прямо в arenaSim (0 = «пусто»). Потолок ступени применяем, чтобы
-         * план не показывал недостижимые значения: выше сервер не пустит.
-         */
-        importArenaBuild(code) {
-            const d = this.arenaData;
-            if (!d) { UI.showToast('Арена ещё не загружена', true); return false; }
-
-            const raw = String(code == null ? '' : code).trim();
-            const m = /^LGA1:([A-Za-z0-9_]+):([A-Za-z0-9_-]+):((?:\d+,){3}\d+):((?:\d+,){3}\d+)$/.exec(raw);
-            if (!m) { UI.showToast('❌ Неверный формат кода билда', true); return false; }
-
-            const cls = m[1], br = m[2];
-            const own = d.cls || this.arenaCls;
-            if (own && cls !== own) {
-                UI.showToast(`Код для класса «${cls}», а у героя «${own}»`, true);
-                return false;
-            }
-            // Ветку не навязываем: категории у всех веток одинаковые, поэтому
-            // план можно примерить и к другой — но спросим, чтобы не удивить.
-            if (br !== this.arenaBranchId()
-                && !window.confirm(`Код собран для ветки «${br}», активна «${this.arenaBranchId()}». Применить к активной?`)) {
-                return false;
-            }
-
-            const want = { ab: m[3].split(',').map(Number), ult: m[4].split(',').map(Number) };
-            const sim = this.emptyArenaSim();
-            for (const slot of ['ab', 'ult']) {
-                this.ARENA_KINDS.forEach(([kind], i) => {
-                    const cap = this.arenaMax(kind);
-                    // Цель ограничиваем потолком ступени: сервер выше не пустит.
-                    const rawVal = Math.max(0, want[slot][i] | 0);
-                    sim[slot][kind] = cap > 0 ? Math.min(rawVal, cap) : rawVal;
-                });
-            }
-            this.arenaSim = sim;
-            this.renderArenaTab();
-
-            // Стоимость плана — полная, от нуля до абсолютных уровней плана.
-            const need = this.getPlanCost();
-            UI.showToast(need > 0
-                ? `📥 Билд импортирован: в плане ${need} жетонов`
-                : '📥 Билд импортирован: план пустой');
-            return true;
-        },
-
-        async open() {
+        async open(initialTab) {
+            const wanted = (initialTab === 'arena') ? 'build' : String(initialTab || 'build');
             UI.showModal(`<h2>⚙️ Планировщик Героя <button class="custom-close" id="custom-close-btn">✖</button></h2><div class="loader">Загрузка данных...</div>`);
             try {
                 const me = await Utils.fetchApi('/api/me');
                 if (!me || !me.ok || !me.hero) throw new Error('Нет героя');
                 const h = me.hero;
-
-                // 11.6.5c: состояние вкладки «Арена» сбрасываем на каждое открытие
-                // окна — класс/ветка могли смениться, а запрос ещё не сделан.
-                this.arenaCls = h.role || h.class || h.c || h.sk?.c || this.arenaCls || '';
-                this.arenaData = null;
-                this.arenaSim = null;
-                this.arenaError = '';
 
                 // Предметы для заточки. uid сервер отдаёт не всегда: без него все
                 // карточки получили бы одинаковый ключ, поэтому отсутствующий uid
@@ -6581,7 +6845,6 @@
                 const tabsHtml = `
                     <button class="modal-tab active" data-tab="hero-build">🛡️ Билды</button>
                     <button class="modal-tab" data-tab="hero-ench">⚒️ Заточка</button>
-                    <button class="modal-tab" data-tab="hero-arena">⚔️ Арена</button>
                 `;
 
                 // .tab-content.active — это display:flex (строка), поэтому обеим
@@ -6627,9 +6890,6 @@
                             <div style="color:#888; text-align:center; padding:20px;">Выберите предмет.</div>
                         </div>
                     </div>
-                    <!-- 11.6.5c: «Способности Арены». Контейнер пустой: содержимое
-                         рисует HeroPlanner.renderArenaTab() при клике на таб. -->
-                    <div class="tab-content" id="tab-hero-arena" style="flex-direction:column; gap:12px; overflow-y:auto; padding-right:4px;"></div>
                 `;
 
                 const modal = UI.showModal(`
@@ -6647,6 +6907,10 @@
                 // звёзды/сферы с аукциона. Реальная реализация — ниже, после
                 // renderTable (ей нужно перерисовать таблицу).
                 let onEnchTabOpen = () => {};
+                const activateTab = (id) => {
+                    const btn = ownTabs?.querySelector(`.modal-tab[data-tab="${id}"]`);
+                    if (btn) btn.click();
+                };
                 ownTabs?.querySelectorAll('.modal-tab').forEach(tab => {
                     tab.addEventListener('click', () => {
                         ownTabs.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
@@ -6655,13 +6919,10 @@
                         const target = document.getElementById(`tab-${tab.dataset.tab}`);
                         if (target) target.classList.add('active');
                         if (tab.dataset.tab === 'hero-ench') onEnchTabOpen();
-                        // 11.6.5c: данные арены грузим лениво — только при первом
-                        // открытии вкладки (GET /api/abtokens не нужен заранее).
-                        if (tab.dataset.tab === 'hero-arena' && !this.arenaData && !this.arenaLoading) {
-                            this.loadArenaData(this.arenaCls || (G.ME && G.ME.hero && G.ME.hero.role) || '');
-                        }
                     });
                 });
+                // initialTab из open() применяем ниже — после того как назначен
+                // onEnchTabOpen (иначе первый вход на «Заточку» не подтянет цены).
 
                 // Инициализация встроенного планировщика билдов
                 const buildCont = document.getElementById('hp-buildsim-container');
@@ -6979,6 +7240,10 @@
                         renderTable();
                     });
                 };
+
+                // initialTab: 'build' (по умолчанию) | 'ench'; 'arena' уже
+                // нормализован в 'build'. «Билды» активны в разметке изначально.
+                if (wanted === 'ench' || wanted === 'hero-ench') activateTab('hero-ench');
 
                 // Рендер плитки предметов
                 const renderGrid = () => {
