@@ -399,6 +399,30 @@
         .chat-msg.mention-msg { border-left: 3px solid #f7768e; background: rgba(247, 118, 142, 0.12); }
         .chat-text { color: #f7eadf !important; word-break: break-word; }
         .chat-author { font-weight: bold; color: #f7eadf !important; margin-right: 5px; }
+
+        /* v11.7: контекстное меню по нику в вынесенном (PiP) чате.
+           Модуль modules/chat/chat-pip.js: showNickMenu(); пункт «👤 Профиль»
+           появляется только если в page-context есть LGProfile.open. */
+        .lgu-nick-menu {
+            display: flex; flex-direction: column; gap: 2px;
+            min-width: 168px; padding: 4px; z-index: 99999;
+            background: #1d1620; border: 1px solid #caa55c; border-radius: 8px;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, .55);
+            font: 12px/1.25 system-ui, -apple-system, 'Segoe UI', sans-serif;
+            color: #f7eadf;
+        }
+        .lgu-nick-menu-item {
+            display: block; width: 100%; text-align: left;
+            padding: 6px 9px; border: 0; border-radius: 6px;
+            background: transparent; color: #f7eadf;
+            font: inherit; cursor: pointer;
+        }
+        .lgu-nick-menu-item:hover,
+        .lgu-nick-menu-item:focus-visible {
+            background: rgba(202, 165, 92, .22);
+            color: #ffcf6a;
+            outline: none;
+        }
         .chat-input-area { display: flex; padding: 10px; background: #111; border-top: 1px solid #333; gap: 5px; flex-shrink: 0; }
         .chat-input { flex: 1; background: #222; border: 1px solid #444; color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 13px; outline: none; }
         .chat-input:focus { border-color: #caa55c; }
@@ -1242,6 +1266,58 @@
             box-shadow: 0 0 0 1.5px #86efac;
         }
 
+        /* v11.7: тултип снаряжения соперника (modules/arena.js).
+           Появляется по наведению (250 мс) или клику на фигурку бойца на
+           мини-сцене карточки (.av-scene .av-mh) и в окне боя (.av-fwin
+           .av-hero). Палитра — нативная светлая карточка арены (arena2.css:
+           --gw-card/--gw-line/--gw-bt/--gw-mute), поэтому не спорит с игрой. */
+        .lgu-arena-gear-tip {
+            position: fixed; z-index: 100000; pointer-events: none;
+            width: min(300px, 92vw); padding: 9px 11px 10px;
+            border: 2px solid var(--gw-line, #2b1d18);
+            border-radius: calc(var(--gw-rc, 12px) * .9);
+            background: var(--gw-card, #fffaf2);
+            color: var(--gw-ink, #2b1d18);
+            box-shadow: 0 10px 26px rgba(43, 29, 24, .22);
+            font: 12px/1.35 var(--gw-tx, system-ui, sans-serif);
+        }
+        .lgu-agit-head { display: flex; flex-direction: column; gap: 1px; margin-bottom: 6px; }
+        .lgu-agit-head > b {
+            font: 700 13.5px var(--gw-bt, 'Russo One', sans-serif);
+            color: var(--gw-title, #5a3458);
+        }
+        .lgu-agit-head > span,
+        .lgu-agit-head > div > span { font-size: 11.5px; color: var(--gw-mute, #6b5148); }
+        .lgu-agit-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+        .lgu-agit-items > li {
+            display: grid;
+            grid-template-columns: 82px minmax(0, 1fr);
+            grid-template-areas: 'slot name' 'slot stat';
+            column-gap: 7px; align-items: baseline;
+            padding: 3px 5px; border-radius: 6px;
+            background: var(--gw-soft, rgba(43, 29, 24, .05));
+            border-left: 3px solid var(--gw-sep, rgba(43, 29, 24, .2));
+        }
+        .lgu-agit-items > li.empty { opacity: .62; }
+        .lgu-agit-items > li[data-r="uncommon"] { border-left-color: #3f9e46; }
+        .lgu-agit-items > li[data-r="rare"] { border-left-color: #3a7fd0; }
+        .lgu-agit-items > li[data-r="epic"] { border-left-color: #8a4fd0; }
+        .lgu-agit-items > li[data-r="legendary"] { border-left-color: #d9921f; }
+        .lgu-agit-slot { grid-area: slot; font-size: 11px; color: var(--gw-mute, #6b5148); white-space: nowrap; }
+        .lgu-agit-name {
+            grid-area: name; min-width: 0;
+            font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .lgu-agit-name > b { color: #b07b16; }
+        .lgu-agit-items > li > small { grid-area: stat; font-size: 10.5px; color: var(--gw-mute, #6b5148); }
+        .lgu-agit-abs { display: flex; flex-direction: column; gap: 2px; margin-top: 7px; font-size: 11px; }
+        .lgu-agit-abs > span { display: flex; gap: 4px; align-items: baseline; }
+        .lgu-agit-abs > span > i { font-style: normal; }
+        .lgu-agit-abs > span.off { opacity: .6; }
+        .lgu-agit-abs > span > b { color: var(--gw-title, #5a3458); }
+        .lgu-agit-abs em { font-style: normal; font-size: 10.5px; opacity: .85; }
+
+
         /* ============================================================
            «СТАТИСТИКА ГИЛЬДИИ» (modules/guild-summary.js)
            Четвёртая вкладка в НАТИВНОМ окне гильдии (.gl-modal ->
@@ -1406,6 +1482,98 @@
 
         .lgu-gl-note { margin: 6px 0 0; font-size: 12.5px; color: var(--gw-mute, #6b5148); }
         .lgu-gl-foot { margin-top: 10px; text-align: right; }
+
+        /* v11.7: кликабельные строки участников (инспектор героя). */
+        .lgu-gl-hero-row { cursor: pointer; }
+        .lgu-gl-hero-row:hover,
+        .lgu-gl-hero-row:focus-visible {
+            border-color: var(--gw-sel, #5a3458);
+            background: var(--gw-chip, rgba(43, 29, 24, .12));
+            outline: none;
+        }
+        .lgu-gl-hero-row:focus-visible { box-shadow: 0 0 0 2px var(--gw-acc, #ffcf4a); }
+        .lgu-gl-hero-row > .lgu-gl-who > b { text-decoration: underline dotted transparent; }
+        .lgu-gl-hero-row:hover > .lgu-gl-who > b { text-decoration-color: currentColor; }
+
+        /* v11.7: оверлей-карточка героя участника (GET /api/guilds/hero).
+           Палитра — переменные guilds2.css, чтобы карточка совпадала с
+           нативной сводкой в любом скине. */
+        .lgu-gl-hero {
+            position: fixed; inset: 0; z-index: 9998;
+            display: flex; align-items: center; justify-content: center;
+            padding: 18px;
+            background: rgba(20, 13, 10, .42);
+        }
+        .lgu-gl-hero-box {
+            box-sizing: border-box;
+            width: min(420px, 96vw); max-height: min(78vh, 720px); overflow: auto;
+            padding: 12px 14px 14px;
+            border: 2px solid var(--gw-line, #2b1d18);
+            border-radius: calc(var(--gw-rc, 12px) * 1.1);
+            background: var(--gw-card, #fffaf2);
+            color: var(--gw-ink, #2b1d18);
+            box-shadow: 0 16px 40px rgba(20, 13, 10, .38);
+            font-family: var(--gw-tx, system-ui, sans-serif);
+        }
+        .lgu-gl-hero-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+        .lgu-gl-hero-head > div { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+        .lgu-gl-hero-head b {
+            font: 700 15px var(--gw-bt, 'Russo One', sans-serif);
+            color: var(--gw-title, #5a3458);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .lgu-gl-hero-head span { font-size: 11.5px; color: var(--gw-mute, #6b5148); }
+        .lgu-gl-hero-x {
+            flex: none; width: 26px; height: 26px; padding: 0;
+            border-radius: 8px; cursor: pointer;
+            border: 2px solid var(--gw-line, #2b1d18);
+            background: var(--gw-soft, rgba(43, 29, 24, .05));
+            color: var(--gw-hot, #b2442c);
+            font-size: 13px; line-height: 1;
+        }
+        .lgu-gl-hero-x:hover { background: var(--gw-hi, rgba(255, 207, 74, .2)); }
+        .lgu-gl-hero-meta {
+            margin-bottom: 6px; font-size: 12px; color: var(--gw-mute, #6b5148);
+        }
+        .lgu-gl-hero-stats {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+            gap: 4px; margin-bottom: 8px;
+        }
+        .lgu-gl-hero-stats > span {
+            display: flex; flex-direction: column; gap: 1px;
+            padding: 4px 6px; border-radius: 7px;
+            background: var(--gw-soft, rgba(43, 29, 24, .05));
+            border: 1px solid var(--gw-sep, rgba(43, 29, 24, .2));
+        }
+        .lgu-gl-hero-stats small { font-size: 10.5px; color: var(--gw-mute, #6b5148); }
+        .lgu-gl-hero-stats b { font: 700 13px var(--gw-bt, 'Russo One', sans-serif); }
+        .lgu-gl-hero-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+        .lgu-gl-hero-items > li {
+            display: grid; grid-template-columns: 82px minmax(0, 1fr);
+            grid-template-areas: 'slot name' 'slot stat';
+            column-gap: 7px; align-items: baseline;
+            padding: 4px 6px; border-radius: 7px;
+            background: var(--gw-soft, rgba(43, 29, 24, .05));
+            border-left: 3px solid var(--gw-sep, rgba(43, 29, 24, .2));
+        }
+        .lgu-gl-hero-items > li.empty { opacity: .62; }
+        .lgu-gl-hero-items > li[data-r="uncommon"] { border-left-color: #3f9e46; }
+        .lgu-gl-hero-items > li[data-r="rare"] { border-left-color: #3a7fd0; }
+        .lgu-gl-hero-items > li[data-r="epic"] { border-left-color: #8a4fd0; }
+        .lgu-gl-hero-items > li[data-r="legendary"] { border-left-color: #d9921f; }
+        .lgu-gl-hero-slot { grid-area: slot; font-size: 11px; color: var(--gw-mute, #6b5148); white-space: nowrap; }
+        .lgu-gl-hero-name {
+            grid-area: name; min-width: 0; font-weight: 600;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .lgu-gl-hero-name > b { color: #b07b16; }
+        .lgu-gl-hero-items > li > small { grid-area: stat; font-size: 10.5px; color: var(--gw-mute, #6b5148); }
+        .lgu-gl-hero-abs { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; font-size: 11.5px; }
+        .lgu-gl-hero-abs > span { display: flex; gap: 5px; align-items: baseline; }
+        .lgu-gl-hero-abs > span > i { font-style: normal; }
+        .lgu-gl-hero-abs > span.off { opacity: .6; }
+        .lgu-gl-hero-abs > span > b { color: var(--gw-title, #5a3458); }
+        .lgu-gl-hero-abs em { font-style: normal; font-size: 10.5px; opacity: .85; }
 
         @media (max-width: 560px) {
             .lgu-gl-grid { grid-template-columns: minmax(0, 1fr); }

@@ -29,6 +29,9 @@
         _pipDoc: null,
         cooldownUntil: 0,
         _toastTimer: null,
+        // v11.7: контекстное меню ника в PiP-чате (см. showNickMenu).
+        _nickMenu: null,
+        _nickMenuBound: null,
 
         // Корень чата: всегда берём актуальный DOM из документа PiP-окна.
         // this.widget может ссылаться на отсоединённый (detached) узел, поэтому
@@ -323,6 +326,9 @@
         },
 
         close() {
+            // v11.7: контекстное меню живёт в документе PiP — снимаем до
+            // закрытия окна, иначе останутся ссылки на мёртвый DOM.
+            this.closeNickMenu();
             if (this._popoutWin) {
                 try { this._popoutWin.close(); } catch(e) {}
             }
@@ -498,6 +504,7 @@
                 //    возвращать его в основную страницу больше не нужно.
                 const cleanupPip = () => {
                     if (!this._popoutWin) return;
+                    this.closeNickMenu();
                     this._popoutWin = null;
                     this._pipDoc = null;
                     this.widget = null;
@@ -541,6 +548,126 @@
             const pos = start + mention.length;
             try { inp.setSelectionRange(pos, pos); } catch (e) {}
             inp.focus();
+        },
+
+        // ------------------------------------------------------------
+        // v11.7: контекстное меню по нику в вынесенном (PiP) чате
+        //
+        // ЛКМ по нику по-прежнему вставляет «@Ник » в поле ввода, ПКМ
+        // открывает меню: упомянуть, написать в ЛС и «👤 Профиль» — если в
+        // page-context есть LGProfile.open (client b62dcb896a:
+        // reference/LegionFrontSRC/site/app.js). Свой DOM игры не патчим,
+        // профиль открывает нативный модуль.
+        // ------------------------------------------------------------
+
+        /** Доступен ли нативный профиль (LGProfile.open из app.js). */
+        profileAvailable() {
+            const page = (typeof G !== 'undefined' && G) ? G : null;
+            const P = page && page.LGProfile;
+            if (!P || typeof P.open !== 'function') return false;
+            try {
+                if (typeof P.on === 'function' && P.on() === false) return false;
+            } catch (e) { /* on() может бросить — считаем профиль доступным */ }
+            return true;
+        },
+
+        /** Закрыть контекстное меню ника и снять его слушатели. */
+        closeNickMenu() {
+            const menu = this._nickMenu;
+            this._nickMenu = null;
+            if (menu && menu.parentNode) menu.parentNode.removeChild(menu);
+            const bound = this._nickMenuBound;
+            this._nickMenuBound = null;
+            if (bound) {
+                try { bound.doc.removeEventListener('pointerdown', bound.outside, true); } catch (e) {}
+                try { bound.doc.removeEventListener('keydown', bound.esc, true); } catch (e) {}
+            }
+        },
+
+        /**
+         * Показать контекстное меню для ника.
+         *
+         * @param {string} nick ник автора сообщения
+         * @param {number} x координата клика (clientX)
+         * @param {number} y координата клика (clientY)
+         */
+        showNickMenu(nick, x, y) {
+            if (!nick) return;
+            const root = this._pipRoot();
+            if (!root) return;
+            const doc = root.ownerDocument || document;
+
+            this.closeNickMenu();
+
+            const menu = doc.createElement('div');
+            menu.className = 'lgu-nick-menu';
+            menu.setAttribute('role', 'menu');
+
+            const add = (label, fn) => {
+                const btn = doc.createElement('button');
+                btn.type = 'button';
+                btn.className = 'lgu-nick-menu-item';
+                btn.setAttribute('role', 'menuitem');
+                btn.textContent = label;
+                // Инлайн-стили — страховка: PiP мог открыться до того, как в
+                // него скопировались правила core/styles.js.
+                btn.style.cssText = 'display:block;width:100%;text-align:left;padding:6px 9px;'
+                    + 'border:0;border-radius:6px;background:transparent;color:#f7eadf;'
+                    + 'font:inherit;cursor:pointer;';
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.closeNickMenu();
+                    try { fn(); } catch (err) { dbg('nick menu action failed:', err); }
+                });
+                menu.appendChild(btn);
+            };
+
+            add('💬 Упомянуть', () => this.insertMention(nick));
+            add('✉️ Написать в ЛС', () => { this.openDM(nick); });
+
+            if (this.profileAvailable()) {
+                add('👤 Профиль', () => {
+                    const page = (typeof G !== 'undefined' && G) ? G : null;
+                    if (!page || !page.LGProfile || typeof page.LGProfile.open !== 'function') return;
+                    // LGProfile.open(login) сам ходит на GET /api/profile/<login>
+                    // и рисует нативное окно профиля.
+                    Promise.resolve(page.LGProfile.open(nick)).catch(() => {});
+                });
+            }
+
+            // Позиция: фиксированная, с зажимом по границам окна PiP.
+            menu.style.cssText = 'position:fixed;display:flex;flex-direction:column;gap:2px;'
+                + 'min-width:168px;padding:4px;z-index:99999;visibility:hidden;'
+                + 'background:#1d1620;border:1px solid #caa55c;border-radius:8px;'
+                + 'box-shadow:0 6px 18px rgba(0,0,0,.55);color:#f7eadf;'
+                + "font:12px/1.25 system-ui,-apple-system,'Segoe UI',sans-serif;";
+            doc.body.appendChild(menu);
+
+            const vw = doc.defaultView ? doc.defaultView.innerWidth : (window.innerWidth || 0);
+            const vh = doc.defaultView ? doc.defaultView.innerHeight : (window.innerHeight || 0);
+            const mr = menu.getBoundingClientRect();
+            const left = Math.max(4, Math.min((vw || 0) - mr.width - 4, x));
+            const top = Math.max(4, Math.min((vh || 0) - mr.height - 4, y));
+            menu.style.left = Math.round(left) + 'px';
+            menu.style.top = Math.round(top) + 'px';
+            menu.style.visibility = 'visible';
+
+            this._nickMenu = menu;
+
+            // Клик мимо меню или Escape — закрываем. Capture на документе PiP:
+            // лента перерисовывается целиком, поэтому слушатели живут только
+            // пока меню открыто.
+            const outside = (ev) => {
+                if (menu.contains(ev.target)) return;
+                this.closeNickMenu();
+            };
+            const esc = (ev) => {
+                if (ev.key === 'Escape') this.closeNickMenu();
+            };
+            doc.addEventListener('pointerdown', outside, true);
+            doc.addEventListener('keydown', esc, true);
+            this._nickMenuBound = { doc, outside, esc };
         },
 
         // Все диалоги ЛС: ключи LEGION_DM_HISTORY_* в localStorage
@@ -818,10 +945,21 @@
                 }
                 const nickEl = div.querySelector('.nick-clickable');
                 if (nickEl) {
+                    // title подсказывает оба жеста: ЛКМ — упоминание, ПКМ — меню.
+                    nickEl.setAttribute('title', 'Кликните, чтобы упомянуть; правая кнопка — меню (профиль, ЛС)');
+
                     nickEl.addEventListener('click', (e) => {
                         e.preventDefault();
                         e.stopPropagation();
                         this.insertMention(nickEl.getAttribute('data-nick'));
+                    });
+
+                    // v11.7: контекстное меню. Своё нативное меню браузера
+                    // гасим только на нике, остальной чат не трогаем.
+                    nickEl.addEventListener('contextmenu', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        this.showNickMenu(nickEl.getAttribute('data-nick'), e.clientX, e.clientY);
                     });
                 }
                 box.appendChild(div);

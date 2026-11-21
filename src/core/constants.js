@@ -117,17 +117,39 @@
         ENCHANT_PRICE_MIN: 0,
 
         // Расширенные характеристики (xstats) из game-data.js.
-        // Заточка для них применяется с множителем enchK = 0.25 (÷4).
+        // Заточка для них применяется с множителем enchK = 0.25 (÷4),
+        // поэтому первичные статы (hp/atk/mag/def) и вторичные (crit, critDmg,
+        // dodge, pierce, healPow, luck, resist) считаются по одной формуле,
+        // но с разным эффективным процентом — см. HeroPlanner.enchantStat().
         XSTAT_KEYS: new Set(['crit', 'critDmg', 'dodge', 'pierce', 'healPow', 'luck', 'resist']),
         ENCHANT_K: 0.25,
 
         /*
-         * v11.6.3: правила снаряжения из lib/game-data.js.
+         * v11.7 (клиент b62dcb896a): слоты, которые точит кузнец.
+         *
+         * Живая таблица игры (LG_GAME_DATA.enchant.slots) официально содержит
+         * пять слотов, включая амулет: ['weapon','shield','armor','helmet',
+         * 'trinket']. Этот список — фолбэк на случай, когда таблица ещё не
+         * пришла (run-at document-start); приоритет живой таблицы отдаёт
+         * liveEnchantSlots() ниже.
+         */
+        ENCHANT_SLOTS: ['weapon', 'shield', 'armor', 'helmet', 'trinket'],
+
+        /*
+         * v11.6.3 (актуализировано в v11.7): правила снаряжения из
+         * lib/game-data.js.
          *
          * CLASS_GEAR — тип брони класса (classGear), CLASS_SHIELD — право
-         * носить тяжёлый щит (shieldOk). Для мага/жреца/некроманта щит
-         * запрещён, но тканевый «щит» — это магический фокус (isFocusItem),
-         * поэтому проверяется по cloth-ветке, а не по shieldOk().
+         * носить тяжёлый защитный щит (shieldOk). Для мага/жреца/некроманта
+         * щит запрещён, но тканевый «щит» — это магический фокус
+         * (isFocusItem), а предмет с флагом role — оффхенд-оружие
+         * (isOffhandItem). Оба проверяются отдельными ветками, а не по
+         * shieldOk().
+         *
+         * Новые классы обновления b62dcb896a:
+         *   paladin     — тяжёлая броня, носит защитные щиты (shield: true);
+         *   rogue       — лёгкая броня, тяжёлых щитов нет, оффхенд-оружие;
+         *   necromancer — ткань, магические фокусы.
          *
          * GEAR_PEN — штраф к основному стату за чужой слот (armor/helmet/
          * shield), GEAR_PEN_CAP — потолок суммарного штрафа.
@@ -137,6 +159,22 @@
         GEAR_PEN: { armor: 25, helmet: 10, shield: 15 },
         GEAR_PEN_CAP: 50,
         GEAR_NAMES: { heavy: 'тяжёлое', light: 'лёгкое', cloth: 'ткань', any: 'для всех' },
+
+        /*
+         * v11.7: русские названия классов (game-data.js: classes[].name).
+         * Единый словарь для чата, сводки гильдии и инспектора героя —
+         * сервер обычно отдаёт hero.roleName готовым, это фолбэк.
+         */
+        CLASS_NAMES: {
+            recruit: 'Новобранец',
+            legionary: 'Легионер',
+            archer: 'Лучник',
+            mage: 'Маг',
+            priest: 'Жрец',
+            rogue: 'Разбойник',
+            necromancer: 'Некромант',
+            paladin: 'Паладин'
+        },
 
         /*
          * v11.6.5b: максимальная цена лота на аукционе, медь.
@@ -199,6 +237,17 @@
         return Number.isFinite(v) ? v : GAME_DATA.ENCHANT_PRICE_MIN;
     };
 
+    // v11.7: слоты заточки из живой таблицы игры (enchant.slots). В клиенте
+    // b62dcb896a их пять, включая 'trinket' (амулет). Если таблицы ещё нет
+    // или она сменила формат — берём фолбэк GAME_DATA.ENCHANT_SLOTS.
+    const liveEnchantSlots = () => {
+        const live = liveEnchant();
+        const list = live && Array.isArray(live.slots)
+            ? live.slots.filter((s) => typeof s === 'string' && s)
+            : null;
+        return (list && list.length) ? list : GAME_DATA.ENCHANT_SLOTS;
+    };
+
     /*
      * ------------------------------------------------------------
      * v11.6.3: ПРИВЯЗКА ПРЕДМЕТОВ (новое правило игры).
@@ -215,11 +264,25 @@
     const BOUND_LINE = 'Привязана: не передаётся';
 
     /*
-     * v11.6.3: магический фокус (isFocus в game-data.js) — предмет
-     * в слоте shield с gear === 'cloth'. Для магов/жрецов он заменяет
-     * щит: штраф за «чужой» shield не начисляется, проверка идёт по cloth.
+     * v11.6.3 (актуализировано в v11.7): вторая рука из lib/game-data.js.
+     *
+     * Слот 'shield' в игре — это «вторая рука» и три разных типа предметов:
+     *   isFocusItem   — магический фокус (gear === 'cloth'): маг/жрец/некромант
+     *                   носит вместо щита, штрафа за «чужой» слот нет;
+     *   isOffhandItem — оффхенд-оружие (есть role и gear !== 'cloth'):
+     *                   разрешено только классу из it.role;
+     *   isShieldItem  — защитный щит: разрешён лишь классам с shieldOk()
+     *                   (legionary, paladin).
+     * holdsShield(items) — есть ли в наборе надетый защитный щит; фокусы и
+     * оффхенд-оружие щитом не считаются.
      */
     const isFocusItem = (it) => !!(it && it.slot === 'shield' && it.gear === 'cloth');
+    const isOffhandItem = (it) => !!(it && it.slot === 'shield' && it.role && it.gear !== 'cloth');
+    const isShieldItem = (it) => !!(it && it.slot === 'shield' && !isFocusItem(it) && !isOffhandItem(it));
+    // on !== false: в ответах /api/guilds/hero и /api/arena/hero список items[]
+    // уже содержит только надетые вещи, поля on там может не быть.
+    const holdsShield = (items) => (Array.isArray(items) ? items : [])
+        .some((x) => x && x.on !== false && isShieldItem(x));
 
     // Единый объект утилит: наполняется модулями utils-* сразу после
     // объявления, поэтому к вызову кода из main.js он содержит всё нужное.

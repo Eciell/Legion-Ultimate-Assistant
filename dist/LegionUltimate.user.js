@@ -147,17 +147,39 @@
         ENCHANT_PRICE_MIN: 0,
 
         // Расширенные характеристики (xstats) из game-data.js.
-        // Заточка для них применяется с множителем enchK = 0.25 (÷4).
+        // Заточка для них применяется с множителем enchK = 0.25 (÷4),
+        // поэтому первичные статы (hp/atk/mag/def) и вторичные (crit, critDmg,
+        // dodge, pierce, healPow, luck, resist) считаются по одной формуле,
+        // но с разным эффективным процентом — см. HeroPlanner.enchantStat().
         XSTAT_KEYS: new Set(['crit', 'critDmg', 'dodge', 'pierce', 'healPow', 'luck', 'resist']),
         ENCHANT_K: 0.25,
 
         /*
-         * v11.6.3: правила снаряжения из lib/game-data.js.
+         * v11.7 (клиент b62dcb896a): слоты, которые точит кузнец.
+         *
+         * Живая таблица игры (LG_GAME_DATA.enchant.slots) официально содержит
+         * пять слотов, включая амулет: ['weapon','shield','armor','helmet',
+         * 'trinket']. Этот список — фолбэк на случай, когда таблица ещё не
+         * пришла (run-at document-start); приоритет живой таблицы отдаёт
+         * liveEnchantSlots() ниже.
+         */
+        ENCHANT_SLOTS: ['weapon', 'shield', 'armor', 'helmet', 'trinket'],
+
+        /*
+         * v11.6.3 (актуализировано в v11.7): правила снаряжения из
+         * lib/game-data.js.
          *
          * CLASS_GEAR — тип брони класса (classGear), CLASS_SHIELD — право
-         * носить тяжёлый щит (shieldOk). Для мага/жреца/некроманта щит
-         * запрещён, но тканевый «щит» — это магический фокус (isFocusItem),
-         * поэтому проверяется по cloth-ветке, а не по shieldOk().
+         * носить тяжёлый защитный щит (shieldOk). Для мага/жреца/некроманта
+         * щит запрещён, но тканевый «щит» — это магический фокус
+         * (isFocusItem), а предмет с флагом role — оффхенд-оружие
+         * (isOffhandItem). Оба проверяются отдельными ветками, а не по
+         * shieldOk().
+         *
+         * Новые классы обновления b62dcb896a:
+         *   paladin     — тяжёлая броня, носит защитные щиты (shield: true);
+         *   rogue       — лёгкая броня, тяжёлых щитов нет, оффхенд-оружие;
+         *   necromancer — ткань, магические фокусы.
          *
          * GEAR_PEN — штраф к основному стату за чужой слот (armor/helmet/
          * shield), GEAR_PEN_CAP — потолок суммарного штрафа.
@@ -167,6 +189,22 @@
         GEAR_PEN: { armor: 25, helmet: 10, shield: 15 },
         GEAR_PEN_CAP: 50,
         GEAR_NAMES: { heavy: 'тяжёлое', light: 'лёгкое', cloth: 'ткань', any: 'для всех' },
+
+        /*
+         * v11.7: русские названия классов (game-data.js: classes[].name).
+         * Единый словарь для чата, сводки гильдии и инспектора героя —
+         * сервер обычно отдаёт hero.roleName готовым, это фолбэк.
+         */
+        CLASS_NAMES: {
+            recruit: 'Новобранец',
+            legionary: 'Легионер',
+            archer: 'Лучник',
+            mage: 'Маг',
+            priest: 'Жрец',
+            rogue: 'Разбойник',
+            necromancer: 'Некромант',
+            paladin: 'Паладин'
+        },
 
         /*
          * v11.6.5b: максимальная цена лота на аукционе, медь.
@@ -229,6 +267,17 @@
         return Number.isFinite(v) ? v : GAME_DATA.ENCHANT_PRICE_MIN;
     };
 
+    // v11.7: слоты заточки из живой таблицы игры (enchant.slots). В клиенте
+    // b62dcb896a их пять, включая 'trinket' (амулет). Если таблицы ещё нет
+    // или она сменила формат — берём фолбэк GAME_DATA.ENCHANT_SLOTS.
+    const liveEnchantSlots = () => {
+        const live = liveEnchant();
+        const list = live && Array.isArray(live.slots)
+            ? live.slots.filter((s) => typeof s === 'string' && s)
+            : null;
+        return (list && list.length) ? list : GAME_DATA.ENCHANT_SLOTS;
+    };
+
     /*
      * ------------------------------------------------------------
      * v11.6.3: ПРИВЯЗКА ПРЕДМЕТОВ (новое правило игры).
@@ -245,11 +294,25 @@
     const BOUND_LINE = 'Привязана: не передаётся';
 
     /*
-     * v11.6.3: магический фокус (isFocus в game-data.js) — предмет
-     * в слоте shield с gear === 'cloth'. Для магов/жрецов он заменяет
-     * щит: штраф за «чужой» shield не начисляется, проверка идёт по cloth.
+     * v11.6.3 (актуализировано в v11.7): вторая рука из lib/game-data.js.
+     *
+     * Слот 'shield' в игре — это «вторая рука» и три разных типа предметов:
+     *   isFocusItem   — магический фокус (gear === 'cloth'): маг/жрец/некромант
+     *                   носит вместо щита, штрафа за «чужой» слот нет;
+     *   isOffhandItem — оффхенд-оружие (есть role и gear !== 'cloth'):
+     *                   разрешено только классу из it.role;
+     *   isShieldItem  — защитный щит: разрешён лишь классам с shieldOk()
+     *                   (legionary, paladin).
+     * holdsShield(items) — есть ли в наборе надетый защитный щит; фокусы и
+     * оффхенд-оружие щитом не считаются.
      */
     const isFocusItem = (it) => !!(it && it.slot === 'shield' && it.gear === 'cloth');
+    const isOffhandItem = (it) => !!(it && it.slot === 'shield' && it.role && it.gear !== 'cloth');
+    const isShieldItem = (it) => !!(it && it.slot === 'shield' && !isFocusItem(it) && !isOffhandItem(it));
+    // on !== false: в ответах /api/guilds/hero и /api/arena/hero список items[]
+    // уже содержит только надетые вещи, поля on там может не быть.
+    const holdsShield = (items) => (Array.isArray(items) ? items : [])
+        .some((x) => x && x.on !== false && isShieldItem(x));
 
     // Единый объект утилит: наполняется модулями utils-* сразу после
     // объявления, поэтому к вызову кода из main.js он содержит всё нужное.
@@ -1587,6 +1650,30 @@
         .chat-msg.mention-msg { border-left: 3px solid #f7768e; background: rgba(247, 118, 142, 0.12); }
         .chat-text { color: #f7eadf !important; word-break: break-word; }
         .chat-author { font-weight: bold; color: #f7eadf !important; margin-right: 5px; }
+
+        /* v11.7: контекстное меню по нику в вынесенном (PiP) чате.
+           Модуль modules/chat/chat-pip.js: showNickMenu(); пункт «👤 Профиль»
+           появляется только если в page-context есть LGProfile.open. */
+        .lgu-nick-menu {
+            display: flex; flex-direction: column; gap: 2px;
+            min-width: 168px; padding: 4px; z-index: 99999;
+            background: #1d1620; border: 1px solid #caa55c; border-radius: 8px;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, .55);
+            font: 12px/1.25 system-ui, -apple-system, 'Segoe UI', sans-serif;
+            color: #f7eadf;
+        }
+        .lgu-nick-menu-item {
+            display: block; width: 100%; text-align: left;
+            padding: 6px 9px; border: 0; border-radius: 6px;
+            background: transparent; color: #f7eadf;
+            font: inherit; cursor: pointer;
+        }
+        .lgu-nick-menu-item:hover,
+        .lgu-nick-menu-item:focus-visible {
+            background: rgba(202, 165, 92, .22);
+            color: #ffcf6a;
+            outline: none;
+        }
         .chat-input-area { display: flex; padding: 10px; background: #111; border-top: 1px solid #333; gap: 5px; flex-shrink: 0; }
         .chat-input { flex: 1; background: #222; border: 1px solid #444; color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 13px; outline: none; }
         .chat-input:focus { border-color: #caa55c; }
@@ -2430,6 +2517,58 @@
             box-shadow: 0 0 0 1.5px #86efac;
         }
 
+        /* v11.7: тултип снаряжения соперника (modules/arena.js).
+           Появляется по наведению (250 мс) или клику на фигурку бойца на
+           мини-сцене карточки (.av-scene .av-mh) и в окне боя (.av-fwin
+           .av-hero). Палитра — нативная светлая карточка арены (arena2.css:
+           --gw-card/--gw-line/--gw-bt/--gw-mute), поэтому не спорит с игрой. */
+        .lgu-arena-gear-tip {
+            position: fixed; z-index: 100000; pointer-events: none;
+            width: min(300px, 92vw); padding: 9px 11px 10px;
+            border: 2px solid var(--gw-line, #2b1d18);
+            border-radius: calc(var(--gw-rc, 12px) * .9);
+            background: var(--gw-card, #fffaf2);
+            color: var(--gw-ink, #2b1d18);
+            box-shadow: 0 10px 26px rgba(43, 29, 24, .22);
+            font: 12px/1.35 var(--gw-tx, system-ui, sans-serif);
+        }
+        .lgu-agit-head { display: flex; flex-direction: column; gap: 1px; margin-bottom: 6px; }
+        .lgu-agit-head > b {
+            font: 700 13.5px var(--gw-bt, 'Russo One', sans-serif);
+            color: var(--gw-title, #5a3458);
+        }
+        .lgu-agit-head > span,
+        .lgu-agit-head > div > span { font-size: 11.5px; color: var(--gw-mute, #6b5148); }
+        .lgu-agit-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+        .lgu-agit-items > li {
+            display: grid;
+            grid-template-columns: 82px minmax(0, 1fr);
+            grid-template-areas: 'slot name' 'slot stat';
+            column-gap: 7px; align-items: baseline;
+            padding: 3px 5px; border-radius: 6px;
+            background: var(--gw-soft, rgba(43, 29, 24, .05));
+            border-left: 3px solid var(--gw-sep, rgba(43, 29, 24, .2));
+        }
+        .lgu-agit-items > li.empty { opacity: .62; }
+        .lgu-agit-items > li[data-r="uncommon"] { border-left-color: #3f9e46; }
+        .lgu-agit-items > li[data-r="rare"] { border-left-color: #3a7fd0; }
+        .lgu-agit-items > li[data-r="epic"] { border-left-color: #8a4fd0; }
+        .lgu-agit-items > li[data-r="legendary"] { border-left-color: #d9921f; }
+        .lgu-agit-slot { grid-area: slot; font-size: 11px; color: var(--gw-mute, #6b5148); white-space: nowrap; }
+        .lgu-agit-name {
+            grid-area: name; min-width: 0;
+            font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .lgu-agit-name > b { color: #b07b16; }
+        .lgu-agit-items > li > small { grid-area: stat; font-size: 10.5px; color: var(--gw-mute, #6b5148); }
+        .lgu-agit-abs { display: flex; flex-direction: column; gap: 2px; margin-top: 7px; font-size: 11px; }
+        .lgu-agit-abs > span { display: flex; gap: 4px; align-items: baseline; }
+        .lgu-agit-abs > span > i { font-style: normal; }
+        .lgu-agit-abs > span.off { opacity: .6; }
+        .lgu-agit-abs > span > b { color: var(--gw-title, #5a3458); }
+        .lgu-agit-abs em { font-style: normal; font-size: 10.5px; opacity: .85; }
+
+
         /* ============================================================
            «СТАТИСТИКА ГИЛЬДИИ» (modules/guild-summary.js)
            Четвёртая вкладка в НАТИВНОМ окне гильдии (.gl-modal ->
@@ -2594,6 +2733,98 @@
 
         .lgu-gl-note { margin: 6px 0 0; font-size: 12.5px; color: var(--gw-mute, #6b5148); }
         .lgu-gl-foot { margin-top: 10px; text-align: right; }
+
+        /* v11.7: кликабельные строки участников (инспектор героя). */
+        .lgu-gl-hero-row { cursor: pointer; }
+        .lgu-gl-hero-row:hover,
+        .lgu-gl-hero-row:focus-visible {
+            border-color: var(--gw-sel, #5a3458);
+            background: var(--gw-chip, rgba(43, 29, 24, .12));
+            outline: none;
+        }
+        .lgu-gl-hero-row:focus-visible { box-shadow: 0 0 0 2px var(--gw-acc, #ffcf4a); }
+        .lgu-gl-hero-row > .lgu-gl-who > b { text-decoration: underline dotted transparent; }
+        .lgu-gl-hero-row:hover > .lgu-gl-who > b { text-decoration-color: currentColor; }
+
+        /* v11.7: оверлей-карточка героя участника (GET /api/guilds/hero).
+           Палитра — переменные guilds2.css, чтобы карточка совпадала с
+           нативной сводкой в любом скине. */
+        .lgu-gl-hero {
+            position: fixed; inset: 0; z-index: 9998;
+            display: flex; align-items: center; justify-content: center;
+            padding: 18px;
+            background: rgba(20, 13, 10, .42);
+        }
+        .lgu-gl-hero-box {
+            box-sizing: border-box;
+            width: min(420px, 96vw); max-height: min(78vh, 720px); overflow: auto;
+            padding: 12px 14px 14px;
+            border: 2px solid var(--gw-line, #2b1d18);
+            border-radius: calc(var(--gw-rc, 12px) * 1.1);
+            background: var(--gw-card, #fffaf2);
+            color: var(--gw-ink, #2b1d18);
+            box-shadow: 0 16px 40px rgba(20, 13, 10, .38);
+            font-family: var(--gw-tx, system-ui, sans-serif);
+        }
+        .lgu-gl-hero-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+        .lgu-gl-hero-head > div { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+        .lgu-gl-hero-head b {
+            font: 700 15px var(--gw-bt, 'Russo One', sans-serif);
+            color: var(--gw-title, #5a3458);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .lgu-gl-hero-head span { font-size: 11.5px; color: var(--gw-mute, #6b5148); }
+        .lgu-gl-hero-x {
+            flex: none; width: 26px; height: 26px; padding: 0;
+            border-radius: 8px; cursor: pointer;
+            border: 2px solid var(--gw-line, #2b1d18);
+            background: var(--gw-soft, rgba(43, 29, 24, .05));
+            color: var(--gw-hot, #b2442c);
+            font-size: 13px; line-height: 1;
+        }
+        .lgu-gl-hero-x:hover { background: var(--gw-hi, rgba(255, 207, 74, .2)); }
+        .lgu-gl-hero-meta {
+            margin-bottom: 6px; font-size: 12px; color: var(--gw-mute, #6b5148);
+        }
+        .lgu-gl-hero-stats {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+            gap: 4px; margin-bottom: 8px;
+        }
+        .lgu-gl-hero-stats > span {
+            display: flex; flex-direction: column; gap: 1px;
+            padding: 4px 6px; border-radius: 7px;
+            background: var(--gw-soft, rgba(43, 29, 24, .05));
+            border: 1px solid var(--gw-sep, rgba(43, 29, 24, .2));
+        }
+        .lgu-gl-hero-stats small { font-size: 10.5px; color: var(--gw-mute, #6b5148); }
+        .lgu-gl-hero-stats b { font: 700 13px var(--gw-bt, 'Russo One', sans-serif); }
+        .lgu-gl-hero-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+        .lgu-gl-hero-items > li {
+            display: grid; grid-template-columns: 82px minmax(0, 1fr);
+            grid-template-areas: 'slot name' 'slot stat';
+            column-gap: 7px; align-items: baseline;
+            padding: 4px 6px; border-radius: 7px;
+            background: var(--gw-soft, rgba(43, 29, 24, .05));
+            border-left: 3px solid var(--gw-sep, rgba(43, 29, 24, .2));
+        }
+        .lgu-gl-hero-items > li.empty { opacity: .62; }
+        .lgu-gl-hero-items > li[data-r="uncommon"] { border-left-color: #3f9e46; }
+        .lgu-gl-hero-items > li[data-r="rare"] { border-left-color: #3a7fd0; }
+        .lgu-gl-hero-items > li[data-r="epic"] { border-left-color: #8a4fd0; }
+        .lgu-gl-hero-items > li[data-r="legendary"] { border-left-color: #d9921f; }
+        .lgu-gl-hero-slot { grid-area: slot; font-size: 11px; color: var(--gw-mute, #6b5148); white-space: nowrap; }
+        .lgu-gl-hero-name {
+            grid-area: name; min-width: 0; font-weight: 600;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .lgu-gl-hero-name > b { color: #b07b16; }
+        .lgu-gl-hero-items > li > small { grid-area: stat; font-size: 10.5px; color: var(--gw-mute, #6b5148); }
+        .lgu-gl-hero-abs { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; font-size: 11.5px; }
+        .lgu-gl-hero-abs > span { display: flex; gap: 5px; align-items: baseline; }
+        .lgu-gl-hero-abs > span > i { font-style: normal; }
+        .lgu-gl-hero-abs > span.off { opacity: .6; }
+        .lgu-gl-hero-abs > span > b { color: var(--gw-title, #5a3458); }
+        .lgu-gl-hero-abs em { font-style: normal; font-size: 10.5px; opacity: .85; }
 
         @media (max-width: 560px) {
             .lgu-gl-grid { grid-template-columns: minmax(0, 1fr); }
@@ -6475,7 +6706,25 @@
             // v11.6.5e: шансы после ребаланса (было 95/90/80/70/55/42/30/20/12/7/4/2/1/0.5/0).
             // Индекс = текущий уровень: chance[1] — шанс шага +1 -> +2.
             chance: [0, 100, 95, 90, 80, 70, 60, 50, 40, 32, 25, 20, 16, 12, 9, 6],
-            slots: ['weapon', 'shield', 'armor', 'helmet', 'trinket']
+            // v11.7 (клиент b62dcb896a): амулет (trinket) официально входит в
+            // enchant.slots и точится по общей шкале +0..+15. Список берём из
+            // core/constants.js, чтобы не дублировать его с auction.js;
+            // живая таблица игры имеет приоритет — см. enchantSlots().
+            slots: GAME_DATA.ENCHANT_SLOTS
+        },
+
+        /**
+         * v11.7: актуальный список затачиваемых слотов.
+         *
+         * Приоритет у живой таблицы игры (LG_GAME_DATA.enchant.slots — в
+         * клиенте b62dcb896a там пять слотов, включая 'trinket'). Если таблицы
+         * ещё нет (run-at document-start), отдаём фолбэк ENCH.slots.
+         *
+         * @returns {string[]} слоты, которые показывает калькулятор
+         */
+        enchantSlots() {
+            const live = liveEnchantSlots();
+            return (Array.isArray(live) && live.length) ? live : this.ENCH.slots;
         },
 
         // ── Режим «С учётом шансов» (стратегии) ──────────────────
@@ -6593,33 +6842,44 @@
         /**
          * Штраф за один предмет «не для класса».
          *
-         * Правила игры:
+         * Правила игры (lib/game-data.js: gearPenalty):
          *  - armor −25%, helmet −10%, shield −15% к основному стату;
          *  - магический фокус (slot === 'shield' && gear === 'cloth') —
-         *    вторая рука мага/жреца: проверяется по cloth-ветке, поэтому
-         *    для cloth-классов штрафа нет;
-         *  - обычный щит разрешён только legionary/paladin (shieldOk).
+         *    вторая рука мага/жреца/некроманта: проверяется по cloth-ветке,
+         *    поэтому для cloth-классов штрафа нет;
+         *  - оффхенд-оружие (slot === 'shield' && role && gear !== 'cloth') —
+         *    разрешено только своему классу: штраф, если role !== item.role;
+         *  - обычный защитный щит разрешён только legionary/paladin
+         *    (CLASS_SHIELD = shieldOk).
          *
          * @param {string} role hero.role
          * @param {object} item предмет из /api/me
-         * @returns {{pct:number, bad:boolean, focus:boolean, want:string, slot:string}}
+         * @returns {{pct:number, bad:boolean, focus:boolean, offhand:boolean, want:string, slot:string}}
          */
         gearPenaltyFor(role, item) {
-            const out = { pct: 0, bad: false, focus: false, want: '', slot: '' };
+            const out = { pct: 0, bad: false, focus: false, offhand: false, want: '', slot: '' };
             if (!role || !item) return out;
             const pen = GAME_DATA.GEAR_PEN[item.slot] || 0;
             const want = GAME_DATA.CLASS_GEAR[role] || '';
             const focus = isFocusItem(item);
+            const offhand = isOffhandItem(item);
             out.want = want;
             out.focus = focus;
+            out.offhand = offhand;
             out.slot = item.slot;
             if (!pen) return out;
 
             let bad;
             if (item.slot === 'shield') {
-                bad = focus
-                    ? (!!want && want !== 'cloth')
-                    : !GAME_DATA.CLASS_SHIELD[role];
+                if (offhand) {
+                    // Оффхенд — оружие конкретного класса, «чужой» щит тут ни
+                    // при чём: сравниваем класс предмета с классом героя.
+                    bad = String(item.role).toLowerCase() !== String(role).toLowerCase();
+                } else {
+                    bad = focus
+                        ? (!!want && want !== 'cloth')
+                        : !GAME_DATA.CLASS_SHIELD[role];
+                }
             } else {
                 const g = item.gear || 'any';
                 bad = !!want && g !== 'any' && g !== want;
@@ -6821,8 +7081,12 @@
                 // Предметы для заточки. uid сервер отдаёт не всегда: без него все
                 // карточки получили бы одинаковый ключ, поэтому отсутствующий uid
                 // заменяем синтетическим (с префиксом локации).
+                // v11.7: список слотов — из живой таблицы игры (enchant.slots,
+                // там есть 'trinket'), поэтому новый ребаланс слотов не ломает
+                // фильтр. Фолбэк — GAME_DATA.ENCHANT_SLOTS.
+                const enchSlots = this.enchantSlots();
                 const mapItems = (arr, prefix) => (arr || [])
-                    .filter(it => it && it.slot && this.ENCH.slots.includes(it.slot) && it.v > 0)
+                    .filter(it => it && it.slot && enchSlots.includes(it.slot) && it.v > 0)
                     .map((it, idx) => (it.uid != null && it.uid !== '') ? it : { ...it, uid: `${prefix}-${idx}` });
 
                 const equipped = mapItems(h.items?.filter(x => x.on), 'eq');
@@ -7092,13 +7356,20 @@
                     // v11.6.3: штраф/фокус и привязка выбранного предмета.
                     // Фокус (shield + cloth) для магов/жрецов считается по
                     // cloth-ветке — штраф за «щит» им не начисляется.
+                    // v11.7: оффхенд-оружие (shield + role) сравнивается с
+                    // классом героя напрямую.
                     const gp = this.gearPenaltyFor(h.role, item);
                     const statLabel = ['mage', 'priest', 'necromancer'].includes(h.role) ? 'маг. урона' : 'физ. урона';
+                    const offhandFor = (gp.offhand && GAME_DATA.CLASS_NAMES[item.role]) || item.role || '';
                     let gearNote = '';
                     if (gp.bad) {
-                        gearNote = `<div style="font-size:11px; color:#ffb3a0; margin-top:2px;">⚠ Не для вашего класса: −${gp.pct}% ${statLabel}${gp.focus ? ' (фокус — только для ткани)' : ''}</div>`;
+                        const why = gp.focus ? ' (фокус — только для ткани)'
+                            : (gp.offhand && offhandFor ? ` (оффхенд класса «${offhandFor}»)` : '');
+                        gearNote = `<div style="font-size:11px; color:#ffb3a0; margin-top:2px;">⚠ Не для вашего класса: −${gp.pct}% ${statLabel}${Utils.escapeHtml(why)}</div>`;
                     } else if (gp.focus) {
                         gearNote = `<div style="font-size:11px; color:#8ff2a0; margin-top:2px;">✦ Магический фокус: вторая рука, штрафа для ткани нет</div>`;
+                    } else if (gp.offhand) {
+                        gearNote = `<div style="font-size:11px; color:#8ff2a0; margin-top:2px;">⚔ Оффхенд-оружие${offhandFor ? ' класса «' + Utils.escapeHtml(offhandFor) + '»' : ''}: штрафа нет</div>`;
                     }
                     const boundNote = isBoundItem(item)
                         ? `<div style="font-size:11px; color:#ffb3a0; margin-top:2px;">🔒 ${BOUND_LINE}</div>`
@@ -7269,12 +7540,16 @@
                         const border = isSel ? '2px solid #caa55c' : '1px solid #44374a';
                         const bg = isSel ? 'rgba(202,165,92,0.15)' : '#1e1724';
                         // v11.6.3: 🔒 — легендарка привязана (не передаётся),
-                        // ✦ — магический фокус (вторая рука, shield + cloth).
+                        // ✦ — магический фокус (вторая рука, shield + cloth),
+                        // ⚔ — оффхенд-оружие (вторая рука, shield + role).
                         const bound = isBoundItem(it);
                         const focus = isFocusItem(it);
+                        const offhand = isOffhandItem(it);
+                        const offhandRole = (offhand && GAME_DATA.CLASS_NAMES[it.role]) || it.role || '';
                         const badges = (bound ? `<span title="${BOUND_LINE}" style="position:absolute; top:2px; right:2px; font-size:10px;">🔒</span>` : '')
-                            + (focus ? `<span title="Магический фокус" style="position:absolute; top:2px; left:2px; font-size:10px;">✦</span>` : '');
-                        const tip = `${it.name}${bound ? ' · ' + BOUND_LINE : ''}${focus ? ' · магический фокус' : ''}`;
+                            + (focus ? `<span title="Магический фокус" style="position:absolute; top:2px; left:2px; font-size:10px;">✦</span>` : '')
+                            + (offhand ? `<span title="Оффхенд-оружие${offhandRole ? ': ' + Utils.escapeHtml(offhandRole) : ''}" style="position:absolute; top:2px; left:2px; font-size:10px;">⚔</span>` : '');
+                        const tip = `${it.name}${bound ? ' · ' + BOUND_LINE : ''}${focus ? ' · магический фокус' : ''}${offhand ? ' · оффхенд' + (offhandRole ? ' для класса «' + offhandRole + '»' : '') : ''}`;
 
                         // 11.6.5f.1: габариты плитки (min-width/padding, 24px арт)
                         // заданы в CSS — .hp-item-grid .hp-item-card/.hp-item-art.
@@ -13302,7 +13577,12 @@ const Players = {
     //      в шапке карточки (.av-oh) и подсветка фигурок (.av-mh.av-pN на
     //      мини-сцене .av-scene, .av-hero.av-foe в окне боя);
     //   3) четвёртая вкладка «Согильдейцы» в модалке «Пригласить в отряд»
-    //      (.av-itabs / .av-ibody) с приглашением в один клик.
+    //      (.av-itabs / .av-ibody) с приглашением в один клик;
+    //   4) v11.7 — инспектор снаряжения: наведение (250 мс) или клик на
+    //      фигурку бойца на мини-сцене карточки (.av-scene .av-mh) или в окне
+    //      боя (.av-fwin .av-hero) показывает тултип с вещами (+en), их
+    //      редкостью и способностями Арены (ab / ult). Данные —
+    //      GET /api/arena/hero?login=… (кэш 60 с, пауза на 429/rate_limited).
     //
     // Античит/CSP:
     //   - window.fetch, LGMine.open и LGMine.onEvent НЕ патчим;
@@ -13331,7 +13611,20 @@ const Players = {
         // TTL кэшей. Герой меняется редко, состав гильдии — раз в минуту,
         // снимок арены перезапрашиваем не чаще 20 с (сам экран арены тоже
         // обновляет его кнопкой «Другие соперники»).
-        const HERO_TTL = 600000;
+        // v11.7: карточка героя (/api/arena/hero) живёт 60 с — так требует ТЗ
+        // на инспектор снаряжения (тултип по наведению/клику на бойца).
+        const HERO_TTL = 60000;
+        // Пауза после неудачного/ограниченного запроса карточки героя: при
+        // HTTP 429 или { error: 'rate_limited' } сервер просит не долбить API,
+        // поэтому выдерживаем 15–30 с (см. heroBackoff()).
+        const HERO_FAIL_TTL = 15000;
+        const HERO_PAUSE_MIN = 15000;
+        const HERO_PAUSE_MAX = 30000;
+        // Лимит кэша героев: длинная сессия на арене не должна растить Map.
+        const HERO_CACHE_MAX = 80;
+        // Задержка показа тултипа при наведении (ТЗ: 250 мс).
+        const HERO_TIP_DELAY = 250;
+
         const GUILD_TTL = 60000;
         const STATE_TTL = 20000;
         const STATE_FAIL_TTL = 15000;
@@ -13374,12 +13667,8 @@ const Players = {
             failAt: 0
         };
 
-        // Кэш карточек героев: ключ — логин и имя героя в нижнем регистре,
-        // значение { hero, at }. Наполняется из ответов игры на
-        // /api/arena/hero (когда игрок сам открывает карточку бойца):
-        // своих запросов на каждого бойца НЕ делаем — это лишний трафик
-        // и риск 429.
-        const heroCache = new Map();
+        // Кэш карточек героев (/api/arena/hero) объявлен ниже, в блоке
+        // «Кэш героев» — там же TTL, лимит размера и пауза на 429.
 
         // Состав нашей гильдии: два ключа на участника (login и имя),
         // значение — запись applyGuildData (см. блок «Состав гильдии»).
@@ -13455,13 +13744,42 @@ const Players = {
 
         // ------------------------------------------------------------
         // Кэш героев (/api/arena/hero)
+        //
+        // Наполняется двумя путями:
+        //   1) из ответов самой игры (хук LGArena.open -> onApiResponse),
+        //      когда игрок открывает карточку бойца в нативном окне;
+        //   2) нашим ленивым запросом для тултипа снаряжения (requestHero).
+        // Своих запросов на КАЖДОГО бойца список не делает — только по
+        // наведению/клику на конкретную фигурку, с кэшем 60 с и паузой на
+        // 429/rate_limited (server-side защита от спама).
         // ------------------------------------------------------------
+        const heroCache = new Map();
+        // Провалы по логину: не повторяем запрос раньше HERO_FAIL_TTL.
+        const heroFail = new Map();
+        // Дедупликация одновременных запросов: login -> Promise<hero|null>.
+        const heroBusy = new Map();
+        // Глобальная пауза после 429/rate_limited (общая на весь модуль).
+        let heroPauseUntil = 0;
+        let heroPauseWarned = false;
+
+        // Обрезка кэша: Map хранит порядок вставки, поэтому удаляем самый
+        // старый ключ. На каждого героя пишутся два ключа (login и имя),
+        // лишние записи не критичны — они указывают на тот же объект.
+        const trimHeroCache = () => {
+            while (heroCache.size > HERO_CACHE_MAX) {
+                const first = heroCache.keys().next();
+                if (first.done) break;
+                heroCache.delete(first.value);
+            }
+        };
+
         const cacheHero = (login, hero) => {
             if (!hero || typeof hero !== 'object') return;
             const at = Date.now();
             const record = { hero, at };
             const keys = [low(login), low(hero.name)].filter(Boolean);
             for (const key of keys) heroCache.set(key, record);
+            trimHeroCache();
         };
 
         const getHero = (fighter) => {
@@ -13476,6 +13794,92 @@ const Players = {
                 return hit.hero;
             }
             return null;
+        };
+
+        // Пауза после ответа «слишком часто»: 15–30 с (ТЗ, антиспам).
+        // Случайный разброс не даёт всем вкладкам/клиентам бить синхронно.
+        const heroBackoff = () => {
+            const ms = HERO_PAUSE_MIN + Math.round(Math.random() * (HERO_PAUSE_MAX - HERO_PAUSE_MIN));
+            heroPauseUntil = Date.now() + ms;
+            if (!heroPauseWarned) {
+                heroPauseWarned = true;
+                try {
+                    if (typeof UI !== 'undefined' && UI.showToast) {
+                        UI.showToast('Арена: сервер просит не частить с запросами — подождите немного', true);
+                    }
+                } catch (e) {}
+            }
+        };
+
+        /**
+         * v11.7: ленивая карточка героя для тултипа снаряжения.
+         *
+         * GET /api/arena/hero?login=<login> (docs/API.md, arena2.js:card) —
+         * тот же эндпоинт, что использует нативная арена. Запрос уходит только
+         * при наведении/клике на конкретного бойца (или если карточка уже
+         * есть в кэше от самой игры).
+         *
+         * Защита от спама:
+         *   - кэш в памяти (Map, TTL 60 c, лимит HERO_CACHE_MAX);
+         *   - провал по логину блокирует повтор на HERO_FAIL_TTL;
+         *   - HTTP 429 / { error: 'rate_limited' } -> общая пауза 15–30 с;
+         *   - одновременные запросы одного логина склеиваются (heroBusy).
+         *
+         * @param {string} login логин бойца
+         * @returns {Promise<object|null>} hero либо null (нет данных/пауза)
+         */
+        const requestHero = (login) => {
+            const key = low(login);
+            if (!key) return Promise.resolve(null);
+
+            const cached = getHero({ login: key });
+            if (cached) return Promise.resolve(cached);
+
+            const now = Date.now();
+            if (heroPauseUntil && now < heroPauseUntil) return Promise.resolve(null);
+            const failed = heroFail.get(key) || 0;
+            if (failed && (now - failed) < HERO_FAIL_TTL) return Promise.resolve(null);
+
+            const busy = heroBusy.get(key);
+            if (busy) return busy;
+
+            const p = (async () => {
+                let res = null;
+                try {
+                    // Utils.fetchApi сам выберет G.X.api (контекст арены) или
+                    // обычный fetch с префиксом /c/<канал>/ — window.fetch не
+                    // патчится.
+                    res = await Utils.fetchApi('/api/arena/hero?login=' + encodeURIComponent(key));
+                } catch (e) {
+                    heroFail.set(key, Date.now());
+                    return null;
+                }
+
+                const body = (res && res.body && typeof res.body === 'object') ? res.body : res;
+                const status = num(res && res.status);
+                const error = String((body && body.error) || (res && res.error) || '');
+
+                if (status === 429 || error === 'rate_limited') {
+                    heroFail.set(key, Date.now());
+                    heroBackoff();
+                    return null;
+                }
+
+                const hero = body && body.hero;
+                if (!body || body.ok === false || !hero || typeof hero !== 'object') {
+                    heroFail.set(key, Date.now());
+                    return null;
+                }
+
+                heroFail.delete(key);
+                cacheHero(key, hero);
+                return hero;
+            })().finally(() => {
+                heroBusy.delete(key);
+            });
+
+            heroBusy.set(key, p);
+            return p;
         };
 
         // ------------------------------------------------------------
@@ -13845,6 +14249,12 @@ const Players = {
                 if (slot !== 'armor' && slot !== 'helmet' && slot !== 'shield') continue;
                 // Магический фокус (cloth в слоте shield) — не чужой слот.
                 if (isFocusItem(it)) continue;
+                // v11.7: оффхенд-оружие (shield + role) — штраф только чужому
+                // классу; сам слот 'shield' здесь не играет роли.
+                if (isOffhandItem(it)) {
+                    if (role && String(it.role).toLowerCase() !== role) pen += num(penTable[slot]);
+                    continue;
+                }
                 if (classGear && it.gear && it.gear !== 'any' && it.gear !== classGear) {
                     pen += num(penTable[slot]);
                 }
@@ -14243,6 +14653,268 @@ const Players = {
         };
 
         // ------------------------------------------------------------
+        // v11.7: инспектор снаряжения на Арене (тултип)
+        //
+        // Наведение (250 мс) или клик на фигурку бойца в карточке соперника
+        // (.av-panel.av-off .av-scene .av-mh) или в окне боя (.av-fwin
+        // .av-hero) показывает компактную карточку: ник, класс/уровень,
+        // вещи с «+en» и редкостью, способности Арены (ab/ult).
+        //
+        // Данные — GET /api/arena/hero?login=… через requestHero(): кэш 60 с,
+        // пауза на 429/rate_limited. Своих запросов «на всех» не делаем.
+        // ------------------------------------------------------------
+        const TIP_CLS = 'lgu-arena-gear-tip';
+        const TIP_SLOTS = [
+            ['helmet', 'Шлем'],
+            ['weapon', 'Оружие'],
+            ['armor', 'Доспех'],
+            ['shield', 'Вторая рука'],
+            ['trinket', 'Амулет']
+        ];
+        // Расшифровка статов предмета (arena2.js: STN).
+        const TIP_STATS = {
+            hp: 'здоровье', atk: 'атака', mag: 'магия', def: 'броня',
+            crit: 'крит', critDmg: 'сила крита', dodge: 'уклонение',
+            pierce: 'пробивание', healPow: 'лечение', luck: 'удача',
+            resist: 'сопротивление'
+        };
+        const TIP_RARITY = {
+            common: 'обычное', uncommon: 'необычное', rare: 'редкое',
+            epic: 'эпическое', legendary: 'легендарное'
+        };
+
+        let tipEl = null;
+        let tipTimer = 0;
+        let tipForEl = null;
+        let tipTarget = null;
+        let onDocHover = null;
+        // Слушатель scroll/resize: позиция тултипа считается один раз, поэтому
+        // при прокрутке/изменении окна подсказку проще спрятать.
+        let onTipViewport = null;
+        const onTipViewportChange = () => {
+            if (tipTimer) { clearTimeout(tipTimer); tipTimer = 0; }
+            tipTarget = null;
+            hideGearTip();
+        };
+
+        const tipClassRu = (role) => {
+            const key = low(role);
+            return (GAME_DATA.CLASS_NAMES && GAME_DATA.CLASS_NAMES[key]) || role || '';
+        };
+
+        // Ник фигурки: arena2.js кладёт полное имя в title у span внутри .av-nm.
+        const nickOf = (el) => {
+            const span = el && el.querySelector ? el.querySelector('.av-nm span') : null;
+            return String((span && (span.getAttribute('title') || span.textContent)) || '').trim();
+        };
+
+        // Логин бойца из фигурки на мини-сцене карточки.
+        //   - своя сцена (.av-mineScene) — готовый data-mk;
+        //   - карточка соперника — логин лидера в .av-scene[data-sq] + индекс
+        //     бойца из класса .av-pN (MW в arena2.js задаёт только порядок
+        //     вывода, поэтому берём def[i], а не позицию в DOM).
+        const sceneFighterLogin = (mh) => {
+            const own = (mh.dataset && mh.dataset.mk) || '';
+            if (own) return String(own);
+
+            const scene = mh.closest ? mh.closest('.av-scene') : null;
+            const leader = (scene && scene.dataset && scene.dataset.sq) || '';
+            const offer = leader ? offerByLogin(leader) : null;
+            if (!offer) return '';
+
+            let idx = -1;
+            for (const cls of Array.from(mh.classList || [])) {
+                const m = /^av-p(\d)$/.exec(cls);
+                if (m) { idx = +m[1]; break; }
+            }
+            const squad = foeSquad(offer);
+            const fighter = idx >= 0 ? squad[idx] : null;
+            if (fighter) return String(fighter.login || fighter.name || '');
+            return nickOf(mh);
+        };
+
+        // Логин бойца из фигурки в окне боя: у врагов data-b="eN" (индекс в
+        // foeT/клине обороны), у своих — data-k с логином.
+        const fighterLogin = (el) => {
+            if (!el || !el.closest) return '';
+            const mh = el.closest('.av-mh');
+            if (mh) return sceneFighterLogin(mh);
+
+            const heroBtn = el.closest('.av-hero');
+            if (!heroBtn) return '';
+
+            const own = (heroBtn.dataset && heroBtn.dataset.k) || '';
+            if (own) return String(own);
+
+            const win = heroBtn.closest('.av-fwin') || heroBtn.closest('.av-bf') || fightWindow();
+            const nickNames = win
+                ? Array.from(win.querySelectorAll('.av-hero.av-foe .av-nm span'))
+                    .map((x) => String(x.getAttribute('title') || x.textContent || '').trim())
+                    .filter(Boolean)
+                : [];
+            const offer = pickFightOffer(nickNames);
+            const idx = +(String((heroBtn.dataset && heroBtn.dataset.b) || '').replace(/^e/, ''));
+            const squad = offer ? foeSquad(offer) : [];
+            if (Number.isFinite(idx) && squad[idx]) {
+                return String(squad[idx].login || squad[idx].name || '');
+            }
+            return nickOf(heroBtn);
+        };
+
+        // Только фигурки на сцене карточки и в окне боя (свои и вражеские).
+        const hoverTarget = (node) => {
+            if (!node || !node.closest) return null;
+            const el = node.closest('.av-mh, .av-hero');
+            if (!el) return null;
+            if (el.classList.contains('av-mh')) {
+                if (el.classList.contains('av-mhe')) return null; // пустой слот
+                return el.closest('.av-scene') ? el : null;
+            }
+            return (el.closest('.av-fwin') || el.closest('.av-bf')) ? el : null;
+        };
+
+        const tipStatsText = (it) => {
+            const stats = (it && it.stats) || {};
+            const out = [];
+            for (const [k, v] of Object.entries(stats)) {
+                if (!num(v)) continue;
+                out.push('+' + fmt(v) + ' ' + (TIP_STATS[k] || k));
+                if (out.length >= 3) break;
+            }
+            return out.join(' · ');
+        };
+
+        const tipAbility = (cap, a) => {
+            if (!a) return `<span><i>${cap}</i> нет</span>`;
+            // lock — уровень героя, с которого способность открывается:
+            // показываем и имя (как в нативном окне), и условие открытия.
+            const lock = num(a.lock);
+            const name = a.name || '—';
+            const note = lock ? ` <em>(с ${lock} ур.)</em>` : '';
+            return `<span${lock ? ' class="off"' : ''}><i>${Utils.escapeHtml(a.icon || '✦')}</i>${Utils.escapeHtml(cap)}: <b>${Utils.escapeHtml(name)}</b>${note}</span>`;
+        };
+
+        const tipHtml = (hero, nick) => {
+            const by = {};
+            for (const it of (Array.isArray(hero && hero.items) ? hero.items : [])) {
+                if (it && !by[it.slot]) by[it.slot] = it;
+            }
+
+            const role = low((hero && (hero.role || hero.class)) || '');
+            const meta = [tipClassRu(role), (num(hero && hero.level) ? fmt(hero.level) + ' ур.' : '')]
+                .filter(Boolean).join(' · ');
+
+            const items = TIP_SLOTS.map(([slot, ru]) => {
+                const it = by[slot];
+                if (!it) return `<li class="empty"><span class="lgu-agit-slot">${ru}</span><small>пусто</small></li>`;
+                const en = num(it.en);
+                const rar = TIP_RARITY[it.rarity] || '';
+                const stats = tipStatsText(it);
+                return `<li data-r="${Utils.escapeHtml(it.rarity || 'common')}">`
+                    + `<span class="lgu-agit-slot">${ru}</span>`
+                    + `<span class="lgu-agit-name">${Utils.escapeHtml(it.name || '—')}${en > 0 ? ` <b>+${en}</b>` : ''}</span>`
+                    + `<small>${Utils.escapeHtml(rar)}${stats ? ' · ' + Utils.escapeHtml(stats) : ''}</small></li>`;
+            }).join('');
+
+            const ab = (hero && hero.ab) || {};
+            return `<div class="lgu-agit-head"><b>${Utils.escapeHtml(nick || (hero && hero.name) || '')}</b>`
+                + `<span>${Utils.escapeHtml(meta)}</span></div>`
+                + `<ul class="lgu-agit-items">${items}</ul>`
+                + `<div class="lgu-agit-abs">${tipAbility('способность', ab.ab)}${tipAbility('ульта', ab.ult)}</div>`;
+        };
+
+        const hideGearTip = () => {
+            tipForEl = null;
+            if (tipEl && tipEl.parentNode) tipEl.parentNode.removeChild(tipEl);
+            tipEl = null;
+        };
+
+        const placeGearTip = (el) => {
+            if (!tipEl || !el || !el.isConnected) return;
+            const r = el.getBoundingClientRect();
+            const tr = tipEl.getBoundingClientRect();
+            const gap = 10;
+            let x = r.left + r.width / 2 - tr.width / 2;
+            x = Math.max(8, Math.min((window.innerWidth || 0) - tr.width - 8, x));
+            let y = r.top - tr.height - gap;
+            if (y < 8) y = Math.min((window.innerHeight || 0) - tr.height - 8, r.bottom + gap);
+            tipEl.style.left = Math.round(x) + 'px';
+            tipEl.style.top = Math.round(Math.max(8, y)) + 'px';
+        };
+
+        const showGearTip = (el, hero, nick, loading) => {
+            if (destroyed || !el || !el.isConnected) return;
+            if (!tipEl) {
+                tipEl = document.createElement('div');
+                tipEl.className = TIP_CLS;
+                tipEl.setAttribute('role', 'tooltip');
+                document.body.appendChild(tipEl);
+            }
+            tipEl.innerHTML = loading
+                ? `<div class="lgu-agit-head"><b>${Utils.escapeHtml(nick || 'Боец')}</b><span>Загружаем снаряжение…</span></div>`
+                : tipHtml(hero, nick);
+            tipForEl = el;
+            placeGearTip(el);
+        };
+
+        const openGearTip = async (el) => {
+            if (destroyed || !el || !el.isConnected) return;
+            const login = fighterLogin(el);
+            if (!login) return;
+            const nick = nickOf(el) || login;
+
+            let hero = getHero({ login });
+            if (!hero) {
+                showGearTip(el, null, nick, true);
+                hero = await requestHero(login);
+                // Пока ходили на сервер, курсор мог уйти — показываем только
+                // если фигурка всё ещё в DOM, а тултип всё ещё её.
+                if (destroyed || !el.isConnected || tipForEl !== el) return;
+                if (!hero) { hideGearTip(); return; }
+            }
+            showGearTip(el, hero, nick, false);
+        };
+
+        // Делегированные pointerover/pointerout/click: рисуем подсказку с
+        // задержкой 250 мс, прячем сразу при уходе курсора.
+        const onArenaHover = (e) => {
+            if (destroyed) return;
+
+            if (e.type === 'pointerout') {
+                const from = hoverTarget(e.target);
+                if (!from) return;
+                const to = hoverTarget(e.relatedTarget);
+                if (to === from) return;
+                if (tipTimer) { clearTimeout(tipTimer); tipTimer = 0; }
+                tipTarget = null;
+                hideGearTip();
+                return;
+            }
+
+            // На тач-устройствах «наведения» нет — работает клик.
+            if (e.type === 'pointerover' && e.pointerType === 'touch') return;
+
+            const el = hoverTarget(e.target);
+            if (!el) return;
+
+            if (e.type === 'click') {
+                if (tipTimer) { clearTimeout(tipTimer); tipTimer = 0; }
+                tipTarget = null;
+                openGearTip(el).catch(() => {});
+                return;
+            }
+
+            if (tipForEl === el || tipTarget === el) return;
+            if (tipTimer) clearTimeout(tipTimer);
+            tipTarget = el;
+            tipTimer = setTimeout(() => {
+                tipTimer = 0;
+                tipTarget = null;
+                openGearTip(el).catch(() => {});
+            }, HERO_TIP_DELAY);
+        };
+
+        // ------------------------------------------------------------
         // Вкладка «Согильдейцы» в модалке «Пригласить в отряд»
         // (.av-win.av-invwin -> .av-itabs / .av-ibody)
         // ------------------------------------------------------------
@@ -14532,6 +15204,10 @@ const Players = {
         // наблюдатель от лишнего прохода прямо во время нашей отрисовки.
         const injectAll = () => {
             if (destroyed) return;
+            // Тултип снаряжения привязан к конкретной фигурке: игра
+            // перерисовывает модалку целиком — если узел умер, подсказку
+            // убираем, иначе она останется висеть с устаревшими данными.
+            if (tipForEl && !tipForEl.isConnected) hideGearTip();
             injecting = true;
             try {
                 injectOfferCards();
@@ -14618,6 +15294,20 @@ const Players = {
                 document.addEventListener('click', onDocClick, true);
             }
 
+            // v11.7: тултип снаряжения — наведение (250 мс) и клик по фигурке
+            // бойца на мини-сцене карточки и в окне боя. Слушаем в capture-фазе:
+            // игра перерисовывает модалки целиком, делегирование по document
+            // переживает любые innerHTML.
+            if (!onDocHover) {
+                onDocHover = onArenaHover;
+                document.addEventListener('pointerover', onDocHover, true);
+                document.addEventListener('pointerout', onDocHover, true);
+                document.addEventListener('click', onDocHover, true);
+                onTipViewport = onTipViewportChange;
+                window.addEventListener('scroll', onTipViewport, true);
+                window.addEventListener('resize', onTipViewport, true);
+            }
+
             if (observer || typeof MutationObserver === 'undefined') {
                 schedule(true);
                 return;
@@ -14646,6 +15336,27 @@ const Players = {
                 try { document.removeEventListener('click', onDocClick, true); } catch (e) {}
                 onDocClick = null;
             }
+            if (onDocHover) {
+                try {
+                    document.removeEventListener('pointerover', onDocHover, true);
+                    document.removeEventListener('pointerout', onDocHover, true);
+                    document.removeEventListener('click', onDocHover, true);
+                } catch (e) {}
+                onDocHover = null;
+            }
+            if (onTipViewport) {
+                try {
+                    window.removeEventListener('scroll', onTipViewport, true);
+                    window.removeEventListener('resize', onTipViewport, true);
+                } catch (e) {}
+                onTipViewport = null;
+            }
+            if (tipTimer) {
+                clearTimeout(tipTimer);
+                tipTimer = 0;
+            }
+            tipTarget = null;
+            hideGearTip();
             if (deferredTimer) {
                 clearTimeout(deferredTimer);
                 deferredTimer = null;
@@ -14665,6 +15376,10 @@ const Players = {
             state.failAt = 0;
 
             heroCache.clear();
+            heroFail.clear();
+            heroBusy.clear();
+            heroPauseUntil = 0;
+            heroPauseWarned = false;
             guildCache.clear();
             guildMap = new Map();
             guildRecords = [];
@@ -14712,10 +15427,19 @@ const Players = {
     //   members[] [{ tid, login, name, role, online, seenAt, joinedAt,
     //                hero { role, roleName, level, power } }]
     //
+    // v11.7: инспектор участника. Клик по строке «Топ-5 по силе» или списка
+    // неактивных лениво запрашивает GET /api/guilds/hero?tid=…&guild=…
+    // (reference/LegionFrontSRC/site/guilds2.js: api.hero + heroWin) и
+    // показывает оверлей-карточку: ник, класс, уровень, сила, первичные и
+    // вторичные статы (st), 5 слотов экипировки (+en, редкость, статы) и
+    // способности Арены (ab.ab / ab.ult).
+    //
     // Античит / CSP:
     //   - window.fetch, LGMine.open и LGMine.onEvent НЕ патчим;
-    //   - localStorage не используем: ответ сервера лежит в памяти
-    //     (Map с TTL 60 c), при destroy() кэш чистится;
+    //   - localStorage не используем: ответы сервера лежат в памяти
+    //     (Map с TTL 60 c), при destroy() кэши чистятся;
+    //   - при HTTP 429 или { error: 'rate_limited' } запросы героев встают
+    //     на паузу 15–30 с (не долбим API);
     //   - id гильдии берём из G.ME / G.LGGuilds.index(), не чаще 30 c
     //     (index() — сетевой запрос нативного модуля).
     //
@@ -14728,6 +15452,13 @@ const Players = {
         const ROLE_OK = { leader: true, lead: true, officer: true, trusted: true };
         // Кэш ответа /api/guilds/guild: 60 c, как требует ТЗ.
         const GUILD_TTL = 60000;
+        // v11.7: карточка героя участника (GET /api/guilds/hero) — 60 c.
+        const HERO_TTL = 60000;
+        // Пауза после провала запроса героя и лимит кэша (Map, не localStorage).
+        const HERO_FAIL_TTL = 15000;
+        const HERO_PAUSE_MIN = 15000;
+        const HERO_PAUSE_MAX = 30000;
+        const HERO_CACHE_MAX = 60;
         // Пауза после неудачного запроса, чтобы не долбить сервер.
         const GUILD_FAIL_TTL = 15000;
         // LGGuilds.index() — сетевой запрос: без гильдии не чаще 30 c.
@@ -14755,6 +15486,34 @@ const Players = {
             recruit: 'Новобранец', archer: 'Лучник', mage: 'Маг',
             necromancer: 'Некромант', priest: 'Жрец'
         };
+        // v11.7: инспектор участника — словари карточки героя.
+        // Слоты в порядке нативного окна героя (guilds2.js: HSLOTS).
+        const HERO_SLOTS = [
+            ['helmet', 'Шлем'],
+            ['weapon', 'Оружие'],
+            ['shield', 'Вторая рука'],
+            ['armor', 'Доспех'],
+            ['trinket', 'Амулет']
+        ];
+        const HERO_RARITY = {
+            common: 'обычное', uncommon: 'необычное', rare: 'редкое',
+            epic: 'эпическое', legendary: 'легендарное'
+        };
+        const HERO_STATS = [
+            ['hp', 'Здоровье'],
+            ['atk', 'Атака'],
+            ['mag', 'Магия'],
+            ['def', 'Броня'],
+            ['crit', 'Крит, %'],
+            ['critDmg', 'Сила крита, %'],
+            ['dodge', 'Уклонение, %'],
+            ['pierce', 'Пробивание'],
+            ['healPow', 'Сила лечения'],
+            ['luck', 'Удача'],
+            ['resist', 'Сопротивление']
+        ];
+        const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
+
         // Ранги: officer — синоним lead, member — novice (ROLE/ORD в guilds2.js).
         const TIERS = [
             { key: 'leader', title: 'Глава', roles: ['leader'] },
@@ -14788,6 +15547,20 @@ const Players = {
         // Кэш ответов: gid -> { at, body }; провалы: gid -> timestamp.
         const cache = new Map();
         const failAt = new Map();
+
+        // v11.7: карточки героев участников (GET /api/guilds/hero).
+        // Только память: tid -> { at, hero }; heroFail — провалы по tid,
+        // heroPauseUntil — общая пауза после 429/rate_limited (15–30 с).
+        const heroCache = new Map();
+        const heroFail = new Map();
+        const heroBusy = new Map();
+        let heroPauseUntil = 0;
+        let heroPauseWarned = false;
+        // Открытая карточка героя (оверлей поверх .gl-modal).
+        let heroCard = null;
+        let heroCardTid = '';
+        let onHeroClick = null;
+        let onHeroKey = null;
 
         // ------------------------------------------------------------
         // Мелкие утилиты
@@ -14982,7 +15755,10 @@ const Players = {
                         name,
                         cls: clsName,
                         level,
-                        days: Math.max(7, Math.floor((now - seenAt) / DAY))
+                        days: Math.max(7, Math.floor((now - seenAt) / DAY)),
+                        // v11.7: для инспектора героя нужен tid участника.
+                        tid: (m.tid != null ? String(m.tid) : ''),
+                        login: low(m.login || name)
                     });
                 }
 
@@ -14993,7 +15769,15 @@ const Players = {
                 const r = String(m.role || '');
                 if (r) roleMap.set(r, (roleMap.get(r) || 0) + 1);
 
-                roster.push({ name, cls: clsName, level, power });
+                roster.push({
+                    name,
+                    cls: clsName,
+                    level,
+                    power,
+                    // v11.7: инспектор героя шлёт GET /api/guilds/hero?tid=…
+                    tid: (m.tid != null ? String(m.tid) : ''),
+                    login: low(m.login || name)
+                });
             }
 
             // Классы: по убыванию количества; bar — относительно самого
@@ -15066,6 +15850,14 @@ const Players = {
             return row(t.title, t.count + (total ? ' · ' + pct + '%' : ''));
         };
 
+        // v11.7: атрибуты кликабельной строки участника. Строка без tid
+        // (старый сервер/заявка) остаётся обычной — карточку не открыть.
+        const heroRowAttrs = (m) => {
+            if (!m || !m.tid) return '';
+            return ' data-tid="' + esc(m.tid) + '" data-name="' + esc(m.name || '') + '"'
+                + ' role="button" tabindex="0" title="Нажмите — снаряжение и характеристики"';
+        };
+
         const renderHtml = (s) => {
             const parts = [];
             parts.push('<div class="lgu-gl-grid">');
@@ -15104,10 +15896,11 @@ const Players = {
             parts.push('<section class="lgu-gl-card lgu-gl-card-wide"><h4 class="lgu-gl-h4">Классы'
                 + '<span>всего ' + s.total + '</span></h4>' + classList + '</section>');
 
-            // 5. Топ-5 по силе.
+            // 5. Топ-5 по силе. v11.7: строка кликабельна — открывает карточку
+            //    героя (GET /api/guilds/hero?tid=…&guild=…).
             const topList = s.top.length
                 ? '<ol class="lgu-gl-top">' + s.top.map((m, i) =>
-                    '<li class="lgu-gl-toprow' + (i === 0 ? ' first' : '') + '">'
+                    '<li class="lgu-gl-toprow' + (i === 0 ? ' first' : '') + (m.tid ? ' lgu-gl-hero-row' : '') + '"' + heroRowAttrs(m) + '>'
                     + '<span class="lgu-gl-rank">' + (i + 1) + '</span>'
                     + '<span class="lgu-gl-who"><b>' + esc(m.name) + '</b>'
                     + '<small>' + esc(memberMeta(m)) + '</small></span>'
@@ -15123,7 +15916,7 @@ const Players = {
                 parts.push('<section class="lgu-gl-card lgu-gl-card-wide"><h4 class="lgu-gl-h4">'
                     + 'Неактивны более 7 дней<span>' + s.idle + '</span></h4>'
                     + '<ul class="lgu-gl-idle">' + shown.map((m) =>
-                        '<li class="lgu-gl-idlerow"><span class="lgu-gl-who"><b>' + esc(m.name) + '</b>'
+                        '<li class="lgu-gl-idlerow' + (m.tid ? ' lgu-gl-hero-row' : '') + '"' + heroRowAttrs(m) + '><span class="lgu-gl-who"><b>' + esc(m.name) + '</b>'
                         + '<small>' + esc(memberMeta(m)) + '</small></span>'
                         + '<span class="lgu-gl-idledays">' + m.days + ' дн.</span></li>').join('') + '</ul>'
                     + (rest > 0 ? '<p class="lgu-gl-note">и ещё ' + rest + '…</p>' : '')
@@ -15161,6 +15954,273 @@ const Players = {
         };
 
         // ------------------------------------------------------------
+        // v11.7: инспектор участника — карточка героя
+        //
+        // Клик по строке в «Топ-5 по силе» или в списке неактивных лениво
+        // запрашивает GET /api/guilds/hero?tid=<tid>&guild=<gid>
+        // (reference/LegionFrontSRC/site/guilds2.js: api.hero + heroWin) и
+        // показывает компактный оверлей поверх окна сводки.
+        //
+        // Антиспам:
+        //   - кэш в памяти Map, TTL 60 c, лимит HERO_CACHE_MAX;
+        //   - провал по tid блокирует повтор на HERO_FAIL_TTL;
+        //   - HTTP 429 / { error: 'rate_limited' } -> общая пауза 15–30 с;
+        //   - одновременные клики по одному tid склеиваются (heroBusy).
+        // localStorage не используется.
+        // ------------------------------------------------------------
+        const trimHeroCache = () => {
+            while (heroCache.size > HERO_CACHE_MAX) {
+                const first = heroCache.keys().next();
+                if (first.done) break;
+                heroCache.delete(first.value);
+            }
+        };
+
+        const heroBackoff = () => {
+            const ms = HERO_PAUSE_MIN + Math.round(Math.random() * (HERO_PAUSE_MAX - HERO_PAUSE_MIN));
+            heroPauseUntil = Date.now() + ms;
+            if (!heroPauseWarned) {
+                heroPauseWarned = true;
+                try {
+                    if (typeof UI !== 'undefined' && UI.showToast) {
+                        UI.showToast('Сводка: сервер просит не частить с запросами — подождите немного', true);
+                    }
+                } catch (e) {}
+            }
+        };
+
+        /**
+         * Герой участника: GET /api/guilds/hero?tid=…&guild=…
+         *
+         * @param {string} tid id участника (members[].tid)
+         * @returns {Promise<object|null>} hero либо null (нет данных/пауза)
+         */
+        const fetchHero = (tid) => {
+            const key = String(tid || '');
+            if (!key) return Promise.resolve(null);
+
+            const hit = heroCache.get(key);
+            if (hit && (Date.now() - hit.at) < HERO_TTL) return Promise.resolve(hit.hero);
+
+            const now = Date.now();
+            if (heroPauseUntil && now < heroPauseUntil) return Promise.resolve(null);
+            const failed = heroFail.get(key) || 0;
+            if (failed && (now - failed) < HERO_FAIL_TTL) return Promise.resolve(null);
+
+            const busy = heroBusy.get(key);
+            if (busy) return busy;
+
+            const p = (async () => {
+                const gid = await resolveGuildId();
+                if (!gid) return null;
+
+                let res = null;
+                try {
+                    // Utils.fetchApi добавит /c/<канал>/ и не патчит window.fetch.
+                    res = await Utils.fetchApi('/api/guilds/hero?tid=' + encodeURIComponent(key)
+                        + '&guild=' + encodeURIComponent(gid));
+                } catch (e) {
+                    heroFail.set(key, Date.now());
+                    return null;
+                }
+
+                const body = (res && res.body && typeof res.body === 'object') ? res.body : res;
+                const status = num(res && res.status);
+                const error = String((body && body.error) || (res && res.error) || '');
+
+                if (status === 429 || error === 'rate_limited') {
+                    heroFail.set(key, Date.now());
+                    heroBackoff();
+                    return null;
+                }
+
+                const hero = body && body.hero;
+                if (!body || body.ok === false || !hero || typeof hero !== 'object') {
+                    heroFail.set(key, Date.now());
+                    return null;
+                }
+
+                heroFail.delete(key);
+                heroCache.set(key, { at: Date.now(), hero });
+                trimHeroCache();
+                return hero;
+            })().finally(() => {
+                heroBusy.delete(key);
+            });
+
+            heroBusy.set(key, p);
+            return p;
+        };
+        // Строка статов предмета: до трёх ключевых прибавок (hp/atk/mag/def и
+        // вторичные crit/critDmg/... — те же ключи, что в game-data.js xstats).
+        const heroItemStats = (it) => {
+            const out = [];
+            const stats = (it && it.stats) || {};
+            for (const [k, v] of Object.entries(stats)) {
+                if (!num(v)) continue;
+                const label = (GAME_DATA.XSTAT_KEYS && GAME_DATA.XSTAT_KEYS.has(k))
+                    ? ({ crit: 'крит', critDmg: 'сила крита', dodge: 'уклонение',
+                        pierce: 'пробивание', healPow: 'лечение', luck: 'удача',
+                        resist: 'сопротивление' }[k] || k)
+                    : ({ hp: 'здоровье', atk: 'атака', mag: 'магия', def: 'броня' }[k] || k);
+                out.push('+' + fmt(v) + ' ' + label);
+                if (out.length >= 3) break;
+            }
+            return out.join(' · ');
+        };
+
+        const heroAbility = (cap, a) => {
+            if (!a) return `<span><i>${cap}</i> нет</span>`;
+            // lock — уровень героя, с которого способность открывается.
+            const lock = num(a.lock);
+            const name = a.name || '—';
+            const note = lock ? ` <em>(с ${lock} ур.)</em>` : '';
+            return `<span${lock ? ' class="off"' : ''}><i>${esc(a.icon || '✦')}</i>${esc(cap)}: <b>${esc(name)}</b>${note}</span>`;
+        };
+
+        /**
+         * Разметка карточки героя. Данные — hero из /api/guilds/hero:
+         *   { power, st { hp, atk, mag, def, crit, ... }, level, role, roleName,
+         *     items[] { slot, name, rarity, en, stats }, ab { ab, ult } }
+         */
+        const heroCardHtml = (hero, name, loading, failed) => {
+            const head = `<div class="lgu-gl-hero-head"><div><b>${esc(name || 'Участник')}</b>`
+                + `<span>${loading ? 'Загружаем героя…' : (failed ? 'Данные недоступны' : '')}</span>`
+                + '</div><button type="button" class="lgu-gl-hero-x" data-hx="1" aria-label="Закрыть">✖</button></div>';
+
+            if (loading || failed || !hero) {
+                const note = failed
+                    ? 'Не удалось получить снаряжение героя. Попробуйте позже.'
+                    : 'Загружаем карточку участника…';
+                return `<div class="lgu-gl-hero-box" role="dialog" aria-label="Герой участника">${head}`
+                    + `<p class="lgu-gl-note">${esc(note)}</p></div>`;
+            }
+
+            const role = low(hero.role || hero.class || '');
+            const clsName = String(hero.roleName || ROLE_RU[role] || role || 'Неизвестно');
+            const lvl = num(hero.level);
+            const power = num(hero.power);
+            const meta = [clsName, lvl ? lvl + ' ур.' : '', power ? 'сила ' + fmt(power) : '']
+                .filter(Boolean).join(' · ');
+
+            // Характеристики: hp/atk/mag/def и вторичные (crit, critDmg,
+            // dodge, pierce, healPow, luck, resist) — только те, что пришли.
+            const st = (hero.st && typeof hero.st === 'object') ? hero.st : {};
+            const stats = HERO_STATS
+                .filter(([k]) => hasOwn(st, k) && Number.isFinite(Number(st[k])))
+                .map(([k, ru]) => `<span><small>${esc(ru)}</small><b>${fmt(st[k])}</b></span>`)
+                .join('');
+
+            const by = {};
+            for (const it of (Array.isArray(hero.items) ? hero.items : [])) {
+                if (it && !by[it.slot]) by[it.slot] = it;
+            }
+            const items = HERO_SLOTS.map(([slot, ru]) => {
+                const it = by[slot];
+                if (!it) return `<li class="empty"><span class="lgu-gl-hero-slot">${ru}</span><small>пусто</small></li>`;
+                const en = num(it.en);
+                const rar = HERO_RARITY[it.rarity] || '';
+                const statsText = heroItemStats(it);
+                return `<li data-r="${esc(it.rarity || 'common')}">`
+                    + `<span class="lgu-gl-hero-slot">${ru}</span>`
+                    + `<span class="lgu-gl-hero-name">${esc(it.name || '—')}${en > 0 ? ` <b>+${en}</b>` : ''}</span>`
+                    + `<small>${esc(rar)}${statsText ? ' · ' + esc(statsText) : ''}</small></li>`;
+            }).join('');
+
+            const ab = (hero.ab && typeof hero.ab === 'object') ? hero.ab : {};
+            return `<div class="lgu-gl-hero-box" role="dialog" aria-label="Герой участника">${head}`
+                + `<div class="lgu-gl-hero-meta">${esc(meta)}</div>`
+                + (stats ? `<div class="lgu-gl-hero-stats">${stats}</div>` : '')
+                + `<ul class="lgu-gl-hero-items">${items}</ul>`
+                + `<div class="lgu-gl-hero-abs">${heroAbility('способность', ab.ab)}${heroAbility('ульта', ab.ult)}</div>`
+                + '</div>';
+        };
+
+        const closeHeroCard = () => {
+            if (heroCard && heroCard.parentNode) heroCard.parentNode.removeChild(heroCard);
+            heroCard = null;
+            heroCardTid = '';
+        };
+
+        // Оверлей живёт в .gl-modal (игра перерисовывает только .gl-body),
+        // поэтому закрытие окна гильдии убирает карточку вместе с корнем.
+        const renderHeroCard = (root, html) => {
+            if (!heroCard || !heroCard.isConnected) {
+                heroCard = document.createElement('div');
+                heroCard.className = 'lgu-gl-hero';
+                heroCard.addEventListener('click', (ev) => {
+                    const t = ev.target;
+                    if (t === heroCard || (t && t.closest && t.closest('[data-hx]'))) {
+                        ev.preventDefault();
+                        closeHeroCard();
+                    }
+                });
+                root.appendChild(heroCard);
+            }
+            heroCard.innerHTML = html;
+        };
+
+        /**
+         * Открыть карточку героя по строке участника.
+         * Сначала показываем «загружаем», затем подменяем данными (или
+         * сообщением об ошибке). Повторный клик по тому же tid карточку не
+         * перерисовывает — она уже открыта.
+         */
+        const openHeroCard = async (root, tid, name) => {
+            if (destroyed || !root || !tid) return;
+            if (heroCardTid === tid && heroCard && heroCard.isConnected) return;
+
+            heroCardTid = tid;
+            const hit = heroCache.get(tid);
+            const fresh = !!(hit && (Date.now() - hit.at) < HERO_TTL);
+            renderHeroCard(root, heroCardHtml(fresh ? hit.hero : null, name, !fresh, false));
+            if (fresh) return;
+
+            const hero = await fetchHero(tid);
+            if (destroyed || heroCardTid !== tid) return;
+            const live = modalRoot();
+            if (!live || !heroCard || !heroCard.isConnected) return;
+            renderHeroCard(live, heroCardHtml(hero, name, false, !hero));
+        };
+
+        // Клик по строке «Топ-5»/неактивных. Слушаем на document в capture-фазе:
+        // .gl-body игра перерисовывает целиком, делегирование это переживает.
+        const onHeroRowClick = (e) => {
+            if (destroyed || !e.target || !e.target.closest) return;
+            const row = e.target.closest('.lgu-gl-hero-row[data-tid]');
+            if (!row) return;
+            if (!row.closest('.' + PANE_CLS)) return;
+            if (e.target.closest('button, a, input, select, textarea')) return;
+            const root = modalRoot();
+            if (!root) return;
+            e.preventDefault();
+            e.stopPropagation();
+            openHeroCard(root, row.dataset.tid, row.dataset.name || '').catch(() => {});
+        };
+
+        // Enter/Space на сфокусированной строке и Escape на открытой карточке.
+        const onHeroRowKey = (e) => {
+            if (destroyed) return;
+            if (e.key === 'Escape') {
+                if (heroCard) {
+                    e.preventDefault();
+                    // main.js на Escape закрывает модалки аддона — карточку
+                    // героя закрываем сами и не отдаём событие дальше.
+                    e.stopPropagation();
+                    closeHeroCard();
+                }
+                return;
+            }
+            if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+            const row = (e.target && e.target.closest) ? e.target.closest('.lgu-gl-hero-row[data-tid]') : null;
+            if (!row) return;
+            const root = modalRoot();
+            if (!root) return;
+            e.preventDefault();
+            openHeroCard(root, row.dataset.tid, row.dataset.name || '').catch(() => {});
+        };
+
+        // ------------------------------------------------------------
         // Вкладки и панель в .gl-modal
         // ------------------------------------------------------------
         const showPane = (root) => {
@@ -15174,6 +16234,9 @@ const Players = {
         };
 
         const hidePane = (root) => {
+            // v11.7: карточка героя относится к нашей вкладке — при уходе на
+            // нативную вкладку её закрываем.
+            closeHeroCard();
             const btn = root.querySelector('.gl-tabs1 [data-tab="' + TAB_KEY + '"]');
             if (btn) btn.setAttribute('aria-selected', 'false');
             root.querySelectorAll('.gl-body > .gl-pane').forEach((p) => {
@@ -15185,6 +16248,7 @@ const Players = {
         // Убираем свои вставки (роль понизили / окно показывает чужую
         // гильдию) и возвращаем нативную панель на место.
         const removeInjected = (root) => {
+            closeHeroCard();
             root.querySelectorAll('.gl-tabs1 [data-tab="' + TAB_KEY + '"]').forEach((el) => el.remove());
             root.querySelectorAll('.' + PANE_CLS).forEach((el) => el.remove());
             const native = nativePane(root);
@@ -15327,6 +16391,17 @@ const Players = {
                 document.addEventListener('click', onDocClick, true);
             }
 
+            // v11.7: инспектор участника — клик/Enter по строке «Топ-5» и
+            // неактивных, Escape закрывает карточку героя.
+            if (!onHeroClick) {
+                onHeroClick = onHeroRowClick;
+                document.addEventListener('click', onHeroClick, true);
+            }
+            if (!onHeroKey) {
+                onHeroKey = onHeroRowKey;
+                document.addEventListener('keydown', onHeroKey, true);
+            }
+
             if (observer || typeof MutationObserver === 'undefined') {
                 schedule(true);
                 return;
@@ -15358,6 +16433,17 @@ const Players = {
                 onDocClick = null;
             }
 
+            // v11.7: снимаем обработчики инспектора героя и убираем карточку.
+            if (onHeroClick) {
+                try { document.removeEventListener('click', onHeroClick, true); } catch (e) {}
+                onHeroClick = null;
+            }
+            if (onHeroKey) {
+                try { document.removeEventListener('keydown', onHeroKey, true); } catch (e) {}
+                onHeroKey = null;
+            }
+            closeHeroCard();
+
             if (deferredTimer) {
                 clearTimeout(deferredTimer);
                 deferredTimer = null;
@@ -15373,6 +16459,11 @@ const Players = {
             // Кэши живут только в памяти (localStorage не используем).
             cache.clear();
             failAt.clear();
+            heroCache.clear();
+            heroFail.clear();
+            heroBusy.clear();
+            heroPauseUntil = 0;
+            heroPauseWarned = false;
             guildId = null;
             guildIdAt = 0;
             role = '';
@@ -16729,6 +17820,9 @@ const Players = {
         _pipDoc: null,
         cooldownUntil: 0,
         _toastTimer: null,
+        // v11.7: контекстное меню ника в PiP-чате (см. showNickMenu).
+        _nickMenu: null,
+        _nickMenuBound: null,
 
         // Корень чата: всегда берём актуальный DOM из документа PiP-окна.
         // this.widget может ссылаться на отсоединённый (detached) узел, поэтому
@@ -17023,6 +18117,9 @@ const Players = {
         },
 
         close() {
+            // v11.7: контекстное меню живёт в документе PiP — снимаем до
+            // закрытия окна, иначе останутся ссылки на мёртвый DOM.
+            this.closeNickMenu();
             if (this._popoutWin) {
                 try { this._popoutWin.close(); } catch(e) {}
             }
@@ -17198,6 +18295,7 @@ const Players = {
                 //    возвращать его в основную страницу больше не нужно.
                 const cleanupPip = () => {
                     if (!this._popoutWin) return;
+                    this.closeNickMenu();
                     this._popoutWin = null;
                     this._pipDoc = null;
                     this.widget = null;
@@ -17241,6 +18339,126 @@ const Players = {
             const pos = start + mention.length;
             try { inp.setSelectionRange(pos, pos); } catch (e) {}
             inp.focus();
+        },
+
+        // ------------------------------------------------------------
+        // v11.7: контекстное меню по нику в вынесенном (PiP) чате
+        //
+        // ЛКМ по нику по-прежнему вставляет «@Ник » в поле ввода, ПКМ
+        // открывает меню: упомянуть, написать в ЛС и «👤 Профиль» — если в
+        // page-context есть LGProfile.open (client b62dcb896a:
+        // reference/LegionFrontSRC/site/app.js). Свой DOM игры не патчим,
+        // профиль открывает нативный модуль.
+        // ------------------------------------------------------------
+
+        /** Доступен ли нативный профиль (LGProfile.open из app.js). */
+        profileAvailable() {
+            const page = (typeof G !== 'undefined' && G) ? G : null;
+            const P = page && page.LGProfile;
+            if (!P || typeof P.open !== 'function') return false;
+            try {
+                if (typeof P.on === 'function' && P.on() === false) return false;
+            } catch (e) { /* on() может бросить — считаем профиль доступным */ }
+            return true;
+        },
+
+        /** Закрыть контекстное меню ника и снять его слушатели. */
+        closeNickMenu() {
+            const menu = this._nickMenu;
+            this._nickMenu = null;
+            if (menu && menu.parentNode) menu.parentNode.removeChild(menu);
+            const bound = this._nickMenuBound;
+            this._nickMenuBound = null;
+            if (bound) {
+                try { bound.doc.removeEventListener('pointerdown', bound.outside, true); } catch (e) {}
+                try { bound.doc.removeEventListener('keydown', bound.esc, true); } catch (e) {}
+            }
+        },
+
+        /**
+         * Показать контекстное меню для ника.
+         *
+         * @param {string} nick ник автора сообщения
+         * @param {number} x координата клика (clientX)
+         * @param {number} y координата клика (clientY)
+         */
+        showNickMenu(nick, x, y) {
+            if (!nick) return;
+            const root = this._pipRoot();
+            if (!root) return;
+            const doc = root.ownerDocument || document;
+
+            this.closeNickMenu();
+
+            const menu = doc.createElement('div');
+            menu.className = 'lgu-nick-menu';
+            menu.setAttribute('role', 'menu');
+
+            const add = (label, fn) => {
+                const btn = doc.createElement('button');
+                btn.type = 'button';
+                btn.className = 'lgu-nick-menu-item';
+                btn.setAttribute('role', 'menuitem');
+                btn.textContent = label;
+                // Инлайн-стили — страховка: PiP мог открыться до того, как в
+                // него скопировались правила core/styles.js.
+                btn.style.cssText = 'display:block;width:100%;text-align:left;padding:6px 9px;'
+                    + 'border:0;border-radius:6px;background:transparent;color:#f7eadf;'
+                    + 'font:inherit;cursor:pointer;';
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.closeNickMenu();
+                    try { fn(); } catch (err) { dbg('nick menu action failed:', err); }
+                });
+                menu.appendChild(btn);
+            };
+
+            add('💬 Упомянуть', () => this.insertMention(nick));
+            add('✉️ Написать в ЛС', () => { this.openDM(nick); });
+
+            if (this.profileAvailable()) {
+                add('👤 Профиль', () => {
+                    const page = (typeof G !== 'undefined' && G) ? G : null;
+                    if (!page || !page.LGProfile || typeof page.LGProfile.open !== 'function') return;
+                    // LGProfile.open(login) сам ходит на GET /api/profile/<login>
+                    // и рисует нативное окно профиля.
+                    Promise.resolve(page.LGProfile.open(nick)).catch(() => {});
+                });
+            }
+
+            // Позиция: фиксированная, с зажимом по границам окна PiP.
+            menu.style.cssText = 'position:fixed;display:flex;flex-direction:column;gap:2px;'
+                + 'min-width:168px;padding:4px;z-index:99999;visibility:hidden;'
+                + 'background:#1d1620;border:1px solid #caa55c;border-radius:8px;'
+                + 'box-shadow:0 6px 18px rgba(0,0,0,.55);color:#f7eadf;'
+                + "font:12px/1.25 system-ui,-apple-system,'Segoe UI',sans-serif;";
+            doc.body.appendChild(menu);
+
+            const vw = doc.defaultView ? doc.defaultView.innerWidth : (window.innerWidth || 0);
+            const vh = doc.defaultView ? doc.defaultView.innerHeight : (window.innerHeight || 0);
+            const mr = menu.getBoundingClientRect();
+            const left = Math.max(4, Math.min((vw || 0) - mr.width - 4, x));
+            const top = Math.max(4, Math.min((vh || 0) - mr.height - 4, y));
+            menu.style.left = Math.round(left) + 'px';
+            menu.style.top = Math.round(top) + 'px';
+            menu.style.visibility = 'visible';
+
+            this._nickMenu = menu;
+
+            // Клик мимо меню или Escape — закрываем. Capture на документе PiP:
+            // лента перерисовывается целиком, поэтому слушатели живут только
+            // пока меню открыто.
+            const outside = (ev) => {
+                if (menu.contains(ev.target)) return;
+                this.closeNickMenu();
+            };
+            const esc = (ev) => {
+                if (ev.key === 'Escape') this.closeNickMenu();
+            };
+            doc.addEventListener('pointerdown', outside, true);
+            doc.addEventListener('keydown', esc, true);
+            this._nickMenuBound = { doc, outside, esc };
         },
 
         // Все диалоги ЛС: ключи LEGION_DM_HISTORY_* в localStorage
@@ -17518,10 +18736,21 @@ const Players = {
                 }
                 const nickEl = div.querySelector('.nick-clickable');
                 if (nickEl) {
+                    // title подсказывает оба жеста: ЛКМ — упоминание, ПКМ — меню.
+                    nickEl.setAttribute('title', 'Кликните, чтобы упомянуть; правая кнопка — меню (профиль, ЛС)');
+
                     nickEl.addEventListener('click', (e) => {
                         e.preventDefault();
                         e.stopPropagation();
                         this.insertMention(nickEl.getAttribute('data-nick'));
+                    });
+
+                    // v11.7: контекстное меню. Своё нативное меню браузера
+                    // гасим только на нике, остальной чат не трогаем.
+                    nickEl.addEventListener('contextmenu', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        this.showNickMenu(nickEl.getAttribute('data-nick'), e.clientX, e.clientY);
                     });
                 }
                 box.appendChild(div);

@@ -14,7 +14,25 @@
             // v11.6.5e: шансы после ребаланса (было 95/90/80/70/55/42/30/20/12/7/4/2/1/0.5/0).
             // Индекс = текущий уровень: chance[1] — шанс шага +1 -> +2.
             chance: [0, 100, 95, 90, 80, 70, 60, 50, 40, 32, 25, 20, 16, 12, 9, 6],
-            slots: ['weapon', 'shield', 'armor', 'helmet', 'trinket']
+            // v11.7 (клиент b62dcb896a): амулет (trinket) официально входит в
+            // enchant.slots и точится по общей шкале +0..+15. Список берём из
+            // core/constants.js, чтобы не дублировать его с auction.js;
+            // живая таблица игры имеет приоритет — см. enchantSlots().
+            slots: GAME_DATA.ENCHANT_SLOTS
+        },
+
+        /**
+         * v11.7: актуальный список затачиваемых слотов.
+         *
+         * Приоритет у живой таблицы игры (LG_GAME_DATA.enchant.slots — в
+         * клиенте b62dcb896a там пять слотов, включая 'trinket'). Если таблицы
+         * ещё нет (run-at document-start), отдаём фолбэк ENCH.slots.
+         *
+         * @returns {string[]} слоты, которые показывает калькулятор
+         */
+        enchantSlots() {
+            const live = liveEnchantSlots();
+            return (Array.isArray(live) && live.length) ? live : this.ENCH.slots;
         },
 
         // ── Режим «С учётом шансов» (стратегии) ──────────────────
@@ -132,33 +150,44 @@
         /**
          * Штраф за один предмет «не для класса».
          *
-         * Правила игры:
+         * Правила игры (lib/game-data.js: gearPenalty):
          *  - armor −25%, helmet −10%, shield −15% к основному стату;
          *  - магический фокус (slot === 'shield' && gear === 'cloth') —
-         *    вторая рука мага/жреца: проверяется по cloth-ветке, поэтому
-         *    для cloth-классов штрафа нет;
-         *  - обычный щит разрешён только legionary/paladin (shieldOk).
+         *    вторая рука мага/жреца/некроманта: проверяется по cloth-ветке,
+         *    поэтому для cloth-классов штрафа нет;
+         *  - оффхенд-оружие (slot === 'shield' && role && gear !== 'cloth') —
+         *    разрешено только своему классу: штраф, если role !== item.role;
+         *  - обычный защитный щит разрешён только legionary/paladin
+         *    (CLASS_SHIELD = shieldOk).
          *
          * @param {string} role hero.role
          * @param {object} item предмет из /api/me
-         * @returns {{pct:number, bad:boolean, focus:boolean, want:string, slot:string}}
+         * @returns {{pct:number, bad:boolean, focus:boolean, offhand:boolean, want:string, slot:string}}
          */
         gearPenaltyFor(role, item) {
-            const out = { pct: 0, bad: false, focus: false, want: '', slot: '' };
+            const out = { pct: 0, bad: false, focus: false, offhand: false, want: '', slot: '' };
             if (!role || !item) return out;
             const pen = GAME_DATA.GEAR_PEN[item.slot] || 0;
             const want = GAME_DATA.CLASS_GEAR[role] || '';
             const focus = isFocusItem(item);
+            const offhand = isOffhandItem(item);
             out.want = want;
             out.focus = focus;
+            out.offhand = offhand;
             out.slot = item.slot;
             if (!pen) return out;
 
             let bad;
             if (item.slot === 'shield') {
-                bad = focus
-                    ? (!!want && want !== 'cloth')
-                    : !GAME_DATA.CLASS_SHIELD[role];
+                if (offhand) {
+                    // Оффхенд — оружие конкретного класса, «чужой» щит тут ни
+                    // при чём: сравниваем класс предмета с классом героя.
+                    bad = String(item.role).toLowerCase() !== String(role).toLowerCase();
+                } else {
+                    bad = focus
+                        ? (!!want && want !== 'cloth')
+                        : !GAME_DATA.CLASS_SHIELD[role];
+                }
             } else {
                 const g = item.gear || 'any';
                 bad = !!want && g !== 'any' && g !== want;
@@ -360,8 +389,12 @@
                 // Предметы для заточки. uid сервер отдаёт не всегда: без него все
                 // карточки получили бы одинаковый ключ, поэтому отсутствующий uid
                 // заменяем синтетическим (с префиксом локации).
+                // v11.7: список слотов — из живой таблицы игры (enchant.slots,
+                // там есть 'trinket'), поэтому новый ребаланс слотов не ломает
+                // фильтр. Фолбэк — GAME_DATA.ENCHANT_SLOTS.
+                const enchSlots = this.enchantSlots();
                 const mapItems = (arr, prefix) => (arr || [])
-                    .filter(it => it && it.slot && this.ENCH.slots.includes(it.slot) && it.v > 0)
+                    .filter(it => it && it.slot && enchSlots.includes(it.slot) && it.v > 0)
                     .map((it, idx) => (it.uid != null && it.uid !== '') ? it : { ...it, uid: `${prefix}-${idx}` });
 
                 const equipped = mapItems(h.items?.filter(x => x.on), 'eq');
@@ -631,13 +664,20 @@
                     // v11.6.3: штраф/фокус и привязка выбранного предмета.
                     // Фокус (shield + cloth) для магов/жрецов считается по
                     // cloth-ветке — штраф за «щит» им не начисляется.
+                    // v11.7: оффхенд-оружие (shield + role) сравнивается с
+                    // классом героя напрямую.
                     const gp = this.gearPenaltyFor(h.role, item);
                     const statLabel = ['mage', 'priest', 'necromancer'].includes(h.role) ? 'маг. урона' : 'физ. урона';
+                    const offhandFor = (gp.offhand && GAME_DATA.CLASS_NAMES[item.role]) || item.role || '';
                     let gearNote = '';
                     if (gp.bad) {
-                        gearNote = `<div style="font-size:11px; color:#ffb3a0; margin-top:2px;">⚠ Не для вашего класса: −${gp.pct}% ${statLabel}${gp.focus ? ' (фокус — только для ткани)' : ''}</div>`;
+                        const why = gp.focus ? ' (фокус — только для ткани)'
+                            : (gp.offhand && offhandFor ? ` (оффхенд класса «${offhandFor}»)` : '');
+                        gearNote = `<div style="font-size:11px; color:#ffb3a0; margin-top:2px;">⚠ Не для вашего класса: −${gp.pct}% ${statLabel}${Utils.escapeHtml(why)}</div>`;
                     } else if (gp.focus) {
                         gearNote = `<div style="font-size:11px; color:#8ff2a0; margin-top:2px;">✦ Магический фокус: вторая рука, штрафа для ткани нет</div>`;
+                    } else if (gp.offhand) {
+                        gearNote = `<div style="font-size:11px; color:#8ff2a0; margin-top:2px;">⚔ Оффхенд-оружие${offhandFor ? ' класса «' + Utils.escapeHtml(offhandFor) + '»' : ''}: штрафа нет</div>`;
                     }
                     const boundNote = isBoundItem(item)
                         ? `<div style="font-size:11px; color:#ffb3a0; margin-top:2px;">🔒 ${BOUND_LINE}</div>`
@@ -808,12 +848,16 @@
                         const border = isSel ? '2px solid #caa55c' : '1px solid #44374a';
                         const bg = isSel ? 'rgba(202,165,92,0.15)' : '#1e1724';
                         // v11.6.3: 🔒 — легендарка привязана (не передаётся),
-                        // ✦ — магический фокус (вторая рука, shield + cloth).
+                        // ✦ — магический фокус (вторая рука, shield + cloth),
+                        // ⚔ — оффхенд-оружие (вторая рука, shield + role).
                         const bound = isBoundItem(it);
                         const focus = isFocusItem(it);
+                        const offhand = isOffhandItem(it);
+                        const offhandRole = (offhand && GAME_DATA.CLASS_NAMES[it.role]) || it.role || '';
                         const badges = (bound ? `<span title="${BOUND_LINE}" style="position:absolute; top:2px; right:2px; font-size:10px;">🔒</span>` : '')
-                            + (focus ? `<span title="Магический фокус" style="position:absolute; top:2px; left:2px; font-size:10px;">✦</span>` : '');
-                        const tip = `${it.name}${bound ? ' · ' + BOUND_LINE : ''}${focus ? ' · магический фокус' : ''}`;
+                            + (focus ? `<span title="Магический фокус" style="position:absolute; top:2px; left:2px; font-size:10px;">✦</span>` : '')
+                            + (offhand ? `<span title="Оффхенд-оружие${offhandRole ? ': ' + Utils.escapeHtml(offhandRole) : ''}" style="position:absolute; top:2px; left:2px; font-size:10px;">⚔</span>` : '');
+                        const tip = `${it.name}${bound ? ' · ' + BOUND_LINE : ''}${focus ? ' · магический фокус' : ''}${offhand ? ' · оффхенд' + (offhandRole ? ' для класса «' + offhandRole + '»' : '') : ''}`;
 
                         // 11.6.5f.1: габариты плитки (min-width/padding, 24px арт)
                         // заданы в CSS — .hp-item-grid .hp-item-card/.hp-item-art.

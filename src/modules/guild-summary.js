@@ -16,10 +16,19 @@
     //   members[] [{ tid, login, name, role, online, seenAt, joinedAt,
     //                hero { role, roleName, level, power } }]
     //
+    // v11.7: инспектор участника. Клик по строке «Топ-5 по силе» или списка
+    // неактивных лениво запрашивает GET /api/guilds/hero?tid=…&guild=…
+    // (reference/LegionFrontSRC/site/guilds2.js: api.hero + heroWin) и
+    // показывает оверлей-карточку: ник, класс, уровень, сила, первичные и
+    // вторичные статы (st), 5 слотов экипировки (+en, редкость, статы) и
+    // способности Арены (ab.ab / ab.ult).
+    //
     // Античит / CSP:
     //   - window.fetch, LGMine.open и LGMine.onEvent НЕ патчим;
-    //   - localStorage не используем: ответ сервера лежит в памяти
-    //     (Map с TTL 60 c), при destroy() кэш чистится;
+    //   - localStorage не используем: ответы сервера лежат в памяти
+    //     (Map с TTL 60 c), при destroy() кэши чистятся;
+    //   - при HTTP 429 или { error: 'rate_limited' } запросы героев встают
+    //     на паузу 15–30 с (не долбим API);
     //   - id гильдии берём из G.ME / G.LGGuilds.index(), не чаще 30 c
     //     (index() — сетевой запрос нативного модуля).
     //
@@ -32,6 +41,13 @@
         const ROLE_OK = { leader: true, lead: true, officer: true, trusted: true };
         // Кэш ответа /api/guilds/guild: 60 c, как требует ТЗ.
         const GUILD_TTL = 60000;
+        // v11.7: карточка героя участника (GET /api/guilds/hero) — 60 c.
+        const HERO_TTL = 60000;
+        // Пауза после провала запроса героя и лимит кэша (Map, не localStorage).
+        const HERO_FAIL_TTL = 15000;
+        const HERO_PAUSE_MIN = 15000;
+        const HERO_PAUSE_MAX = 30000;
+        const HERO_CACHE_MAX = 60;
         // Пауза после неудачного запроса, чтобы не долбить сервер.
         const GUILD_FAIL_TTL = 15000;
         // LGGuilds.index() — сетевой запрос: без гильдии не чаще 30 c.
@@ -59,6 +75,34 @@
             recruit: 'Новобранец', archer: 'Лучник', mage: 'Маг',
             necromancer: 'Некромант', priest: 'Жрец'
         };
+        // v11.7: инспектор участника — словари карточки героя.
+        // Слоты в порядке нативного окна героя (guilds2.js: HSLOTS).
+        const HERO_SLOTS = [
+            ['helmet', 'Шлем'],
+            ['weapon', 'Оружие'],
+            ['shield', 'Вторая рука'],
+            ['armor', 'Доспех'],
+            ['trinket', 'Амулет']
+        ];
+        const HERO_RARITY = {
+            common: 'обычное', uncommon: 'необычное', rare: 'редкое',
+            epic: 'эпическое', legendary: 'легендарное'
+        };
+        const HERO_STATS = [
+            ['hp', 'Здоровье'],
+            ['atk', 'Атака'],
+            ['mag', 'Магия'],
+            ['def', 'Броня'],
+            ['crit', 'Крит, %'],
+            ['critDmg', 'Сила крита, %'],
+            ['dodge', 'Уклонение, %'],
+            ['pierce', 'Пробивание'],
+            ['healPow', 'Сила лечения'],
+            ['luck', 'Удача'],
+            ['resist', 'Сопротивление']
+        ];
+        const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
+
         // Ранги: officer — синоним lead, member — novice (ROLE/ORD в guilds2.js).
         const TIERS = [
             { key: 'leader', title: 'Глава', roles: ['leader'] },
@@ -92,6 +136,20 @@
         // Кэш ответов: gid -> { at, body }; провалы: gid -> timestamp.
         const cache = new Map();
         const failAt = new Map();
+
+        // v11.7: карточки героев участников (GET /api/guilds/hero).
+        // Только память: tid -> { at, hero }; heroFail — провалы по tid,
+        // heroPauseUntil — общая пауза после 429/rate_limited (15–30 с).
+        const heroCache = new Map();
+        const heroFail = new Map();
+        const heroBusy = new Map();
+        let heroPauseUntil = 0;
+        let heroPauseWarned = false;
+        // Открытая карточка героя (оверлей поверх .gl-modal).
+        let heroCard = null;
+        let heroCardTid = '';
+        let onHeroClick = null;
+        let onHeroKey = null;
 
         // ------------------------------------------------------------
         // Мелкие утилиты
@@ -286,7 +344,10 @@
                         name,
                         cls: clsName,
                         level,
-                        days: Math.max(7, Math.floor((now - seenAt) / DAY))
+                        days: Math.max(7, Math.floor((now - seenAt) / DAY)),
+                        // v11.7: для инспектора героя нужен tid участника.
+                        tid: (m.tid != null ? String(m.tid) : ''),
+                        login: low(m.login || name)
                     });
                 }
 
@@ -297,7 +358,15 @@
                 const r = String(m.role || '');
                 if (r) roleMap.set(r, (roleMap.get(r) || 0) + 1);
 
-                roster.push({ name, cls: clsName, level, power });
+                roster.push({
+                    name,
+                    cls: clsName,
+                    level,
+                    power,
+                    // v11.7: инспектор героя шлёт GET /api/guilds/hero?tid=…
+                    tid: (m.tid != null ? String(m.tid) : ''),
+                    login: low(m.login || name)
+                });
             }
 
             // Классы: по убыванию количества; bar — относительно самого
@@ -370,6 +439,14 @@
             return row(t.title, t.count + (total ? ' · ' + pct + '%' : ''));
         };
 
+        // v11.7: атрибуты кликабельной строки участника. Строка без tid
+        // (старый сервер/заявка) остаётся обычной — карточку не открыть.
+        const heroRowAttrs = (m) => {
+            if (!m || !m.tid) return '';
+            return ' data-tid="' + esc(m.tid) + '" data-name="' + esc(m.name || '') + '"'
+                + ' role="button" tabindex="0" title="Нажмите — снаряжение и характеристики"';
+        };
+
         const renderHtml = (s) => {
             const parts = [];
             parts.push('<div class="lgu-gl-grid">');
@@ -408,10 +485,11 @@
             parts.push('<section class="lgu-gl-card lgu-gl-card-wide"><h4 class="lgu-gl-h4">Классы'
                 + '<span>всего ' + s.total + '</span></h4>' + classList + '</section>');
 
-            // 5. Топ-5 по силе.
+            // 5. Топ-5 по силе. v11.7: строка кликабельна — открывает карточку
+            //    героя (GET /api/guilds/hero?tid=…&guild=…).
             const topList = s.top.length
                 ? '<ol class="lgu-gl-top">' + s.top.map((m, i) =>
-                    '<li class="lgu-gl-toprow' + (i === 0 ? ' first' : '') + '">'
+                    '<li class="lgu-gl-toprow' + (i === 0 ? ' first' : '') + (m.tid ? ' lgu-gl-hero-row' : '') + '"' + heroRowAttrs(m) + '>'
                     + '<span class="lgu-gl-rank">' + (i + 1) + '</span>'
                     + '<span class="lgu-gl-who"><b>' + esc(m.name) + '</b>'
                     + '<small>' + esc(memberMeta(m)) + '</small></span>'
@@ -427,7 +505,7 @@
                 parts.push('<section class="lgu-gl-card lgu-gl-card-wide"><h4 class="lgu-gl-h4">'
                     + 'Неактивны более 7 дней<span>' + s.idle + '</span></h4>'
                     + '<ul class="lgu-gl-idle">' + shown.map((m) =>
-                        '<li class="lgu-gl-idlerow"><span class="lgu-gl-who"><b>' + esc(m.name) + '</b>'
+                        '<li class="lgu-gl-idlerow' + (m.tid ? ' lgu-gl-hero-row' : '') + '"' + heroRowAttrs(m) + '><span class="lgu-gl-who"><b>' + esc(m.name) + '</b>'
                         + '<small>' + esc(memberMeta(m)) + '</small></span>'
                         + '<span class="lgu-gl-idledays">' + m.days + ' дн.</span></li>').join('') + '</ul>'
                     + (rest > 0 ? '<p class="lgu-gl-note">и ещё ' + rest + '…</p>' : '')
@@ -465,6 +543,273 @@
         };
 
         // ------------------------------------------------------------
+        // v11.7: инспектор участника — карточка героя
+        //
+        // Клик по строке в «Топ-5 по силе» или в списке неактивных лениво
+        // запрашивает GET /api/guilds/hero?tid=<tid>&guild=<gid>
+        // (reference/LegionFrontSRC/site/guilds2.js: api.hero + heroWin) и
+        // показывает компактный оверлей поверх окна сводки.
+        //
+        // Антиспам:
+        //   - кэш в памяти Map, TTL 60 c, лимит HERO_CACHE_MAX;
+        //   - провал по tid блокирует повтор на HERO_FAIL_TTL;
+        //   - HTTP 429 / { error: 'rate_limited' } -> общая пауза 15–30 с;
+        //   - одновременные клики по одному tid склеиваются (heroBusy).
+        // localStorage не используется.
+        // ------------------------------------------------------------
+        const trimHeroCache = () => {
+            while (heroCache.size > HERO_CACHE_MAX) {
+                const first = heroCache.keys().next();
+                if (first.done) break;
+                heroCache.delete(first.value);
+            }
+        };
+
+        const heroBackoff = () => {
+            const ms = HERO_PAUSE_MIN + Math.round(Math.random() * (HERO_PAUSE_MAX - HERO_PAUSE_MIN));
+            heroPauseUntil = Date.now() + ms;
+            if (!heroPauseWarned) {
+                heroPauseWarned = true;
+                try {
+                    if (typeof UI !== 'undefined' && UI.showToast) {
+                        UI.showToast('Сводка: сервер просит не частить с запросами — подождите немного', true);
+                    }
+                } catch (e) {}
+            }
+        };
+
+        /**
+         * Герой участника: GET /api/guilds/hero?tid=…&guild=…
+         *
+         * @param {string} tid id участника (members[].tid)
+         * @returns {Promise<object|null>} hero либо null (нет данных/пауза)
+         */
+        const fetchHero = (tid) => {
+            const key = String(tid || '');
+            if (!key) return Promise.resolve(null);
+
+            const hit = heroCache.get(key);
+            if (hit && (Date.now() - hit.at) < HERO_TTL) return Promise.resolve(hit.hero);
+
+            const now = Date.now();
+            if (heroPauseUntil && now < heroPauseUntil) return Promise.resolve(null);
+            const failed = heroFail.get(key) || 0;
+            if (failed && (now - failed) < HERO_FAIL_TTL) return Promise.resolve(null);
+
+            const busy = heroBusy.get(key);
+            if (busy) return busy;
+
+            const p = (async () => {
+                const gid = await resolveGuildId();
+                if (!gid) return null;
+
+                let res = null;
+                try {
+                    // Utils.fetchApi добавит /c/<канал>/ и не патчит window.fetch.
+                    res = await Utils.fetchApi('/api/guilds/hero?tid=' + encodeURIComponent(key)
+                        + '&guild=' + encodeURIComponent(gid));
+                } catch (e) {
+                    heroFail.set(key, Date.now());
+                    return null;
+                }
+
+                const body = (res && res.body && typeof res.body === 'object') ? res.body : res;
+                const status = num(res && res.status);
+                const error = String((body && body.error) || (res && res.error) || '');
+
+                if (status === 429 || error === 'rate_limited') {
+                    heroFail.set(key, Date.now());
+                    heroBackoff();
+                    return null;
+                }
+
+                const hero = body && body.hero;
+                if (!body || body.ok === false || !hero || typeof hero !== 'object') {
+                    heroFail.set(key, Date.now());
+                    return null;
+                }
+
+                heroFail.delete(key);
+                heroCache.set(key, { at: Date.now(), hero });
+                trimHeroCache();
+                return hero;
+            })().finally(() => {
+                heroBusy.delete(key);
+            });
+
+            heroBusy.set(key, p);
+            return p;
+        };
+        // Строка статов предмета: до трёх ключевых прибавок (hp/atk/mag/def и
+        // вторичные crit/critDmg/... — те же ключи, что в game-data.js xstats).
+        const heroItemStats = (it) => {
+            const out = [];
+            const stats = (it && it.stats) || {};
+            for (const [k, v] of Object.entries(stats)) {
+                if (!num(v)) continue;
+                const label = (GAME_DATA.XSTAT_KEYS && GAME_DATA.XSTAT_KEYS.has(k))
+                    ? ({ crit: 'крит', critDmg: 'сила крита', dodge: 'уклонение',
+                        pierce: 'пробивание', healPow: 'лечение', luck: 'удача',
+                        resist: 'сопротивление' }[k] || k)
+                    : ({ hp: 'здоровье', atk: 'атака', mag: 'магия', def: 'броня' }[k] || k);
+                out.push('+' + fmt(v) + ' ' + label);
+                if (out.length >= 3) break;
+            }
+            return out.join(' · ');
+        };
+
+        const heroAbility = (cap, a) => {
+            if (!a) return `<span><i>${cap}</i> нет</span>`;
+            // lock — уровень героя, с которого способность открывается.
+            const lock = num(a.lock);
+            const name = a.name || '—';
+            const note = lock ? ` <em>(с ${lock} ур.)</em>` : '';
+            return `<span${lock ? ' class="off"' : ''}><i>${esc(a.icon || '✦')}</i>${esc(cap)}: <b>${esc(name)}</b>${note}</span>`;
+        };
+
+        /**
+         * Разметка карточки героя. Данные — hero из /api/guilds/hero:
+         *   { power, st { hp, atk, mag, def, crit, ... }, level, role, roleName,
+         *     items[] { slot, name, rarity, en, stats }, ab { ab, ult } }
+         */
+        const heroCardHtml = (hero, name, loading, failed) => {
+            const head = `<div class="lgu-gl-hero-head"><div><b>${esc(name || 'Участник')}</b>`
+                + `<span>${loading ? 'Загружаем героя…' : (failed ? 'Данные недоступны' : '')}</span>`
+                + '</div><button type="button" class="lgu-gl-hero-x" data-hx="1" aria-label="Закрыть">✖</button></div>';
+
+            if (loading || failed || !hero) {
+                const note = failed
+                    ? 'Не удалось получить снаряжение героя. Попробуйте позже.'
+                    : 'Загружаем карточку участника…';
+                return `<div class="lgu-gl-hero-box" role="dialog" aria-label="Герой участника">${head}`
+                    + `<p class="lgu-gl-note">${esc(note)}</p></div>`;
+            }
+
+            const role = low(hero.role || hero.class || '');
+            const clsName = String(hero.roleName || ROLE_RU[role] || role || 'Неизвестно');
+            const lvl = num(hero.level);
+            const power = num(hero.power);
+            const meta = [clsName, lvl ? lvl + ' ур.' : '', power ? 'сила ' + fmt(power) : '']
+                .filter(Boolean).join(' · ');
+
+            // Характеристики: hp/atk/mag/def и вторичные (crit, critDmg,
+            // dodge, pierce, healPow, luck, resist) — только те, что пришли.
+            const st = (hero.st && typeof hero.st === 'object') ? hero.st : {};
+            const stats = HERO_STATS
+                .filter(([k]) => hasOwn(st, k) && Number.isFinite(Number(st[k])))
+                .map(([k, ru]) => `<span><small>${esc(ru)}</small><b>${fmt(st[k])}</b></span>`)
+                .join('');
+
+            const by = {};
+            for (const it of (Array.isArray(hero.items) ? hero.items : [])) {
+                if (it && !by[it.slot]) by[it.slot] = it;
+            }
+            const items = HERO_SLOTS.map(([slot, ru]) => {
+                const it = by[slot];
+                if (!it) return `<li class="empty"><span class="lgu-gl-hero-slot">${ru}</span><small>пусто</small></li>`;
+                const en = num(it.en);
+                const rar = HERO_RARITY[it.rarity] || '';
+                const statsText = heroItemStats(it);
+                return `<li data-r="${esc(it.rarity || 'common')}">`
+                    + `<span class="lgu-gl-hero-slot">${ru}</span>`
+                    + `<span class="lgu-gl-hero-name">${esc(it.name || '—')}${en > 0 ? ` <b>+${en}</b>` : ''}</span>`
+                    + `<small>${esc(rar)}${statsText ? ' · ' + esc(statsText) : ''}</small></li>`;
+            }).join('');
+
+            const ab = (hero.ab && typeof hero.ab === 'object') ? hero.ab : {};
+            return `<div class="lgu-gl-hero-box" role="dialog" aria-label="Герой участника">${head}`
+                + `<div class="lgu-gl-hero-meta">${esc(meta)}</div>`
+                + (stats ? `<div class="lgu-gl-hero-stats">${stats}</div>` : '')
+                + `<ul class="lgu-gl-hero-items">${items}</ul>`
+                + `<div class="lgu-gl-hero-abs">${heroAbility('способность', ab.ab)}${heroAbility('ульта', ab.ult)}</div>`
+                + '</div>';
+        };
+
+        const closeHeroCard = () => {
+            if (heroCard && heroCard.parentNode) heroCard.parentNode.removeChild(heroCard);
+            heroCard = null;
+            heroCardTid = '';
+        };
+
+        // Оверлей живёт в .gl-modal (игра перерисовывает только .gl-body),
+        // поэтому закрытие окна гильдии убирает карточку вместе с корнем.
+        const renderHeroCard = (root, html) => {
+            if (!heroCard || !heroCard.isConnected) {
+                heroCard = document.createElement('div');
+                heroCard.className = 'lgu-gl-hero';
+                heroCard.addEventListener('click', (ev) => {
+                    const t = ev.target;
+                    if (t === heroCard || (t && t.closest && t.closest('[data-hx]'))) {
+                        ev.preventDefault();
+                        closeHeroCard();
+                    }
+                });
+                root.appendChild(heroCard);
+            }
+            heroCard.innerHTML = html;
+        };
+
+        /**
+         * Открыть карточку героя по строке участника.
+         * Сначала показываем «загружаем», затем подменяем данными (или
+         * сообщением об ошибке). Повторный клик по тому же tid карточку не
+         * перерисовывает — она уже открыта.
+         */
+        const openHeroCard = async (root, tid, name) => {
+            if (destroyed || !root || !tid) return;
+            if (heroCardTid === tid && heroCard && heroCard.isConnected) return;
+
+            heroCardTid = tid;
+            const hit = heroCache.get(tid);
+            const fresh = !!(hit && (Date.now() - hit.at) < HERO_TTL);
+            renderHeroCard(root, heroCardHtml(fresh ? hit.hero : null, name, !fresh, false));
+            if (fresh) return;
+
+            const hero = await fetchHero(tid);
+            if (destroyed || heroCardTid !== tid) return;
+            const live = modalRoot();
+            if (!live || !heroCard || !heroCard.isConnected) return;
+            renderHeroCard(live, heroCardHtml(hero, name, false, !hero));
+        };
+
+        // Клик по строке «Топ-5»/неактивных. Слушаем на document в capture-фазе:
+        // .gl-body игра перерисовывает целиком, делегирование это переживает.
+        const onHeroRowClick = (e) => {
+            if (destroyed || !e.target || !e.target.closest) return;
+            const row = e.target.closest('.lgu-gl-hero-row[data-tid]');
+            if (!row) return;
+            if (!row.closest('.' + PANE_CLS)) return;
+            if (e.target.closest('button, a, input, select, textarea')) return;
+            const root = modalRoot();
+            if (!root) return;
+            e.preventDefault();
+            e.stopPropagation();
+            openHeroCard(root, row.dataset.tid, row.dataset.name || '').catch(() => {});
+        };
+
+        // Enter/Space на сфокусированной строке и Escape на открытой карточке.
+        const onHeroRowKey = (e) => {
+            if (destroyed) return;
+            if (e.key === 'Escape') {
+                if (heroCard) {
+                    e.preventDefault();
+                    // main.js на Escape закрывает модалки аддона — карточку
+                    // героя закрываем сами и не отдаём событие дальше.
+                    e.stopPropagation();
+                    closeHeroCard();
+                }
+                return;
+            }
+            if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+            const row = (e.target && e.target.closest) ? e.target.closest('.lgu-gl-hero-row[data-tid]') : null;
+            if (!row) return;
+            const root = modalRoot();
+            if (!root) return;
+            e.preventDefault();
+            openHeroCard(root, row.dataset.tid, row.dataset.name || '').catch(() => {});
+        };
+
+        // ------------------------------------------------------------
         // Вкладки и панель в .gl-modal
         // ------------------------------------------------------------
         const showPane = (root) => {
@@ -478,6 +823,9 @@
         };
 
         const hidePane = (root) => {
+            // v11.7: карточка героя относится к нашей вкладке — при уходе на
+            // нативную вкладку её закрываем.
+            closeHeroCard();
             const btn = root.querySelector('.gl-tabs1 [data-tab="' + TAB_KEY + '"]');
             if (btn) btn.setAttribute('aria-selected', 'false');
             root.querySelectorAll('.gl-body > .gl-pane').forEach((p) => {
@@ -489,6 +837,7 @@
         // Убираем свои вставки (роль понизили / окно показывает чужую
         // гильдию) и возвращаем нативную панель на место.
         const removeInjected = (root) => {
+            closeHeroCard();
             root.querySelectorAll('.gl-tabs1 [data-tab="' + TAB_KEY + '"]').forEach((el) => el.remove());
             root.querySelectorAll('.' + PANE_CLS).forEach((el) => el.remove());
             const native = nativePane(root);
@@ -631,6 +980,17 @@
                 document.addEventListener('click', onDocClick, true);
             }
 
+            // v11.7: инспектор участника — клик/Enter по строке «Топ-5» и
+            // неактивных, Escape закрывает карточку героя.
+            if (!onHeroClick) {
+                onHeroClick = onHeroRowClick;
+                document.addEventListener('click', onHeroClick, true);
+            }
+            if (!onHeroKey) {
+                onHeroKey = onHeroRowKey;
+                document.addEventListener('keydown', onHeroKey, true);
+            }
+
             if (observer || typeof MutationObserver === 'undefined') {
                 schedule(true);
                 return;
@@ -662,6 +1022,17 @@
                 onDocClick = null;
             }
 
+            // v11.7: снимаем обработчики инспектора героя и убираем карточку.
+            if (onHeroClick) {
+                try { document.removeEventListener('click', onHeroClick, true); } catch (e) {}
+                onHeroClick = null;
+            }
+            if (onHeroKey) {
+                try { document.removeEventListener('keydown', onHeroKey, true); } catch (e) {}
+                onHeroKey = null;
+            }
+            closeHeroCard();
+
             if (deferredTimer) {
                 clearTimeout(deferredTimer);
                 deferredTimer = null;
@@ -677,6 +1048,11 @@
             // Кэши живут только в памяти (localStorage не используем).
             cache.clear();
             failAt.clear();
+            heroCache.clear();
+            heroFail.clear();
+            heroBusy.clear();
+            heroPauseUntil = 0;
+            heroPauseWarned = false;
             guildId = null;
             guildIdAt = 0;
             role = '';
