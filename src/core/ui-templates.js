@@ -22,7 +22,7 @@
         fabMenu(version, ids) {
             // Фолбэк версии — текущая версия сборки (релиз 11.6.0 будет
             // после завершения всех этапов рефакторинга).
-            const v = version || '11.5.3';
+            const v = version || '11.7.0';
             const d = ids || DOM_IDS;
             return `
             <div class="${d.fabMenu}" id="${d.fabMenu}" style="max-height: calc(100vh - 100px); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #caa55c transparent;">
@@ -49,7 +49,6 @@
                     <div class="fab-section-body">
                         <button class="fab-menu-item" id="${d.btnPlayers}">👥 Игроки (Разведка)</button>
                         <button class="fab-menu-item" id="${d.btnParty}">🎉 Пати</button>
-                        <button class="fab-menu-item" id="${d.btnPopout}">📺 Вынести чат <span class="${d.chatBadge}" id="${d.chatBadge}">0</span></button>
                     </div>
                 </div>
 
@@ -72,7 +71,6 @@
             </div>
             <div class="${d.fabBtn}" id="${d.fabBtn}" title="Меню Legion">
                 <span id="${d.fabIcon}">🐱</span>
-                <span class="${d.chatBadge}" id="${d.fabChatBadge}">0</span>
             </div>
         `;
         },
@@ -81,35 +79,17 @@
          * Модалка служебных настроек аддона (открывается из FAB-меню).
          * Обработчики кнопок навешивает UI.openSettings().
          *
-         * @param {boolean} chatDisabled    перехват чата отключён
-         * @param {boolean} addonHighlight  подсветка ников Legion включена (11.6.0g-4)
+         * 11.7.0: настройки чата (7TV, перехват ленты, подсветка ников)
+         * удалены вместе с подсистемой чата — параметров у шаблона больше нет.
          */
-        settingsModal(chatDisabled, addonHighlight = true) {
+        settingsModal() {
             return `
                 <h2>⚙️ Настройки аддона <button class="custom-close" id="custom-close-btn">✖</button></h2>
                 <div style="display:flex; flex-direction:column; gap:15px; padding:10px;">
-                    <button id="modal-7tv-btn" style="width:100%; padding:10px; background:#2a2030; border:1px solid #caa55c; color:#ffcf6a; border-radius:6px; cursor:pointer; text-align:left;">🎭 Настройки канала 7TV</button>
-                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer;">
-                        <span>🚫 Отключить перехват чата</span>
-                        <input type="checkbox" class="lg-toggle" id="modal-chk-chat" ${chatDisabled ? 'checked' : ''}>
-                    </label>
-                    <!-- 11.6.4e: тумблер отображения 7TV-смайлов. Состояние ставит
-                         и сохраняет UI.openSettings() (localStorage
-                         'LEGION_7TV_DISABLED'), читают рендер сообщений и загрузчик
-                         набора (modules/chat/chat-emotes.js). -->
-                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
-                        <span>🎭 Отображать смайлы 7TV</span>
-                        <input type="checkbox" class="lg-toggle" id="modal-chk-7tv">
-                    </label>
-                    <!-- v11.6.0g-4: подсветка ников пользователей аддона в чате -->
-                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
-                        <span>⚡ Подсветка ников Legion</span>
-                        <input type="checkbox" class="lg-toggle" id="modal-chk-addon-hl" ${addonHighlight ? 'checked' : ''}>
-                    </label>
                     <!-- v11.6.1g: тумблер уведомлений о новых версиях.
                          Состояние ставит и сохраняет UI.openSettings() (localStorage
-                         'LEGION_UPDATE_NOTIFY'), сама проверка версии в chat-net.js
-                         продолжает работать — просто молча. -->
+                         'LEGION_UPDATE_NOTIFY'); проверка версии при выключенном
+                         тумблере работает молча. -->
                     <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
                         <span>🔔 Уведомлять о новых версиях</span>
                         <input type="checkbox" class="lg-toggle" id="modal-chk-update-notify">

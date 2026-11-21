@@ -1490,8 +1490,7 @@
             // ME живёт в page-context: в песочнице Tampermonkey только через G.
             const me = G.ME || null;
             const hero = me?.hero || me?.me || null;
-            const login = me?.user?.login || hero?.login
-                || (typeof Chat !== 'undefined' ? Chat.myNick : '') || '';
+            const login = me?.user?.login || hero?.login || '';
             return { hero, login: String(login || '') };
         },
 

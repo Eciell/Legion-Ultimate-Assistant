@@ -4,7 +4,7 @@
     // Подключается ПЕРВЫМ (см. CORE_ORDER в build.js): здесь объявляются
     // G, DEBUG/dbg, RAND_ID, DOM_IDS, API_BASE, общие константы, глобальные
     // кэши и пустой объект Utils. Методы в него добавляют utils-format /
-    // utils-api / utils-art / utils-chat через Object.assign — порядок
+    // utils-api / utils-art / utils через Object.assign — порядок
     // подключения критичен для TDZ (const/let).
     // ============================================================
     const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
@@ -39,8 +39,6 @@
         btnBuildSim: `${RAND_ID}-btn-build-sim`,
         btnAuctionScan: `${RAND_ID}-btn-auction-scan`,
         btnPlayers: `${RAND_ID}-btn-players`,
-        btnChatToggle: `${RAND_ID}-btn-chat-toggle`,
-        btnPopout: `${RAND_ID}-btn-popout`,
         btnPocketCity: `${RAND_ID}-btn-pocket-city`,
         // v11.6.0: «Пати» (modules/party.js) — кнопка в блоке «Социальное».
         btnParty: `${RAND_ID}-btn-party`,
@@ -54,10 +52,6 @@
         arenaFoeWarn: `${RAND_ID}-arena-foe-warn`,
         arenaGuildList: `${RAND_ID}-arena-guild-list`,
         arenaGuildTab: `${RAND_ID}-arena-guild-tab`,
-        chkChatDisable: `${RAND_ID}-chk-chat-disable`,
-        chatBadge: `${RAND_ID}-chat-badge`,
-        fabChatBadge: `${RAND_ID}-fab-chat-badge`,
-        chatWidget: `${RAND_ID}-chat-widget`,
         playerHud: `${RAND_ID}-player-hud`,
         customModal: `${RAND_ID}-modal`
     };
@@ -72,7 +66,6 @@
      * ------------------------------------------------------------
      */
     const API_BASE = window.LG_BASE || (location.pathname.match(/^\/c\/[^/]+/)?.[0] || '');
-    const CHAT_DEDUP_TTL = 8000;
     const MAX_POINTS = 50;
     /*
      * v11.6.1: сетка дерева навыков сжата под 1920x1080 без скролла.

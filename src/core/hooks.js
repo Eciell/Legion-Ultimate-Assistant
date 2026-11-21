@@ -24,8 +24,7 @@
 
             // 11.6.4b: подмена LGCity.open тоже снята (любая подмена open на
             // игровых объектах — детект). Контекст города берём из G.X/LGCity
-            // по месту вызова, см. core/utils-api.js, modules/players.js,
-            // modules/chat/chat-pip.js.
+            // по месту вызова, см. core/utils-api.js, modules/players.js.
 
             // Перехват городского SSE (кто зашел в город / вышел)
             if (typeof val.onEvent === 'function' && !val.__onEventHooked) {

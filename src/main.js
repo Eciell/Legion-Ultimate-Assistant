@@ -7,7 +7,7 @@
     //   core/utils-format.js -> Utils.calculateMedian / formatMoney / parseCoinsText / formatCoinsHtml / formatTimeLeft
     //   core/utils-api.js    -> Utils.apiPath / fetchApi
     //   core/utils-art.js    -> Utils.getItemArtSvg / getItemArtHtml / getItemName / getItemIcon + декор UI
-    //   core/utils-chat.js   -> Utils.chatHash / extractChatFields / extractChatDeep / updateOnlinePlayers / processIncomingDMs
+    //   core/utils.js        -> Utils.copyText / insertToQuestChat / updateOnlinePlayers
     //   core/styles.js -> STYLES
     //   core/hooks.js  -> перехватчики LGCity / LGAuction / LGQuest
     //                     (LGMine снят в 11.6.4b — античит шахты)
@@ -15,7 +15,8 @@
     //   core/ui.js     -> UI
     //   modules/*      -> BuildSim, HeroPlanner, Auction, Players,
     //                     PocketCity, CombatAssistant, Party, Arena,
-    //                     Miner (заглушка), Chat
+    //                     Miner (заглушка)
+    // 11.7.0: подсистема чата (modules/chat/*, core/utils-chat.js) удалена.
     // ============================================================
 
     // 5.3. Защита от повторного запуска (single-instance guard)
@@ -24,6 +25,69 @@
     const LG_ROOT = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
     if (LG_ROOT.__LEGION__?._booted) {
         try { LG_ROOT.__LEGION__.shutdown?.(); } catch (e) {}
+    }
+
+    // ============================================================
+    // 5.4. Проверка обновлений аддона
+    //
+    // До 11.7.0 жила в modules/chat/chat-net.js и удалилась вместе с чатом.
+    // GET /latest-version нашего сервера открытый (без X-Legion-Key), поэтому
+    // хватает GM_xmlhttpRequest. Тумблер «🔔 Уведомлять о новых версиях»
+    // (localStorage LEGION_UPDATE_NOTIFY) уважается: при 'false' не шлём даже
+    // запрос. Сравнение версий — по числовым сегментам (11.7.0 > 11.6.10).
+    // ============================================================
+    function checkAddonUpdate() {
+        try {
+            if (localStorage.getItem('LEGION_UPDATE_NOTIFY') === 'false') return;
+        } catch (e) { return; }
+        if (typeof GM_xmlhttpRequest !== 'function') return;
+
+        const current = (typeof GM_info !== 'undefined' && GM_info.script) ? String(GM_info.script.version || '') : '';
+        if (!current) return;
+
+        let base = 'https://legion.ctrlfree.host';
+        try {
+            if (Party && typeof Party.getBaseUrl === 'function') base = Party.getBaseUrl();
+        } catch (e) {}
+
+        const cmp = (a, b) => {
+            const A = String(a).split('.').map(Number);
+            const B = String(b).split('.').map(Number);
+            for (let i = 0; i < Math.max(A.length, B.length); i++) {
+                const x = A[i] || 0, y = B[i] || 0;
+                if (x !== y) return x - y;
+            }
+            return 0;
+        };
+
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: String(base).replace(/\/+$/, '') + '/latest-version',
+            timeout: 10000,
+            onload(res) {
+                if (!res || res.status !== 200) return;
+                let data = null;
+                try { data = JSON.parse(res.responseText); } catch (e) { return; }
+                const latest = String((data && data.version) || '');
+                if (!latest || cmp(latest, current) <= 0) return;
+
+                const go = () => {
+                    try {
+                        if (typeof GM_openInTab === 'function') GM_openInTab(data.url || '', { active: true });
+                    } catch (e) {}
+                };
+                if (typeof GM_notification === 'function') {
+                    GM_notification({
+                        title: 'Legion Ultimate Assistant',
+                        text: `Доступна версия ${latest} (у вас ${current})`,
+                        timeout: 15000,
+                        onclick: go
+                    });
+                } else if (typeof UI !== 'undefined' && UI.showToast) {
+                    UI.showToast(`🔔 Доступна версия ${latest}`, false, go);
+                }
+            }
+        });
     }
 
     // ============================================================
@@ -65,7 +129,7 @@
         fabWrap.id = DOM_IDS.fabWrap;
         // Вся разметка FAB-меню и круглой кнопки — в core/ui-templates.js
         // (v11.6.0, этап 3): main.js только подставляет id и версию скрипта.
-        fabWrap.innerHTML = UITemplates.fabMenu(typeof GM_info !== 'undefined' && GM_info.script ? GM_info.script.version : '11.5.3', DOM_IDS);
+        fabWrap.innerHTML = UITemplates.fabMenu(typeof GM_info !== 'undefined' && GM_info.script ? GM_info.script.version : '11.7.0', DOM_IDS);
         document.body.appendChild(fabWrap);
 
         // Восстановление позиции FAB из localStorage (§ Задача 2)
@@ -137,14 +201,10 @@
         (document.getElementById(DOM_IDS.btnPocketCity) || document.getElementById('btn-pocket-city'))?.addEventListener('click', () => PocketCity.open());
         (document.getElementById(DOM_IDS.btnProfile) || document.getElementById('btn-profile'))?.addEventListener('click', () => UI.togglePlayerHud());
 
-        // ⚙️ Настройки (7TV, перехват чата) вынесены в отдельную модалку:
-        // FAB-меню стало короче, а служебные переключатели больше не мешают кнопкам.
-        // Кнопку «Вынести чат» (PiP) привязывает Chat.init(): второй слушатель
-        // здесь давал двойной вызов popoutChat() и мигающее окно.
+        // ⚙️ Настройки (уведомления, боевой ассистент, вход в меню) вынесены
+        // в отдельную модалку: FAB-меню стало короче, а служебные
+        // переключатели больше не мешают кнопкам.
         document.getElementById('btn-fab-settings')?.addEventListener('click', () => UI.openSettings());
-
-        // Чекбокс «Отключить перехват чата» переехал в UI.openSettings()
-        // (модалка), поэтому старая привязка к DOM_IDS.chkChatDisable удалена.
 
         Miner.init();
         BuildSim.init();        // без кнопки — регистрирует только глобальный клик для .sim-card
@@ -166,20 +226,10 @@
         //    (leader/lead/officer/trusted); данные — /api/guilds/guild
         //    с кэшем в памяти, window.fetch не патчится.
         GuildSummary.init();
-        Chat.init();
 
-        Chat.interceptEventSource();
-        Chat.interceptWebSocket();
-        // 11.6.4b: подмена window.fetch удалена (античит шахты палит её по
-        // отсутствию [native code]). Вместо хука — пассивный PerformanceObserver:
-        // ловит запросы игры к /api/me и к городу/шахте и обновляет данные
-        // своими запросами, ничего не перезаписывая.
-        Chat.startNetworkObserver();
-        // Фоновые задачи чата: хуки нативной ленты + Keep-Alive watch (ПАТЧ 11.6.4f).
-        // Идемпотентно; своего EventSource на /api/live больше нет.
-        if (!Chat.disabled) {
-            Chat.startBackgroundLiveListener();
-        }
+        // 🔔 Проверка обновлений: через 8 с после старта, чтобы не мешать
+        // загрузке страницы и первому рендеру аддона.
+        setTimeout(checkAddonUpdate, 8000);
 
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape') UI.closeModals(); });
 
@@ -198,7 +248,6 @@
             Arena,
             GuildSummary,
             Party,
-            Chat,
             DOM_IDS,
             RAND_ID,
             _booted: true,
@@ -227,11 +276,8 @@
                 UI._navMode = '';
                 UI._navRetries = 0;
                 document.querySelectorAll('.lgu-nav-btn').forEach(el => el.remove());
-                if (Chat._popoutWin) {
-                    try { Chat._popoutWin.close(); } catch(e) {}
-                    Chat._popoutWin = null;
-                }
-                Chat.stopBackgroundLiveListener();
+                // 11.7.0: подсистемы чата больше нет — её окно PiP, лента и
+                // фоновые интервалы удалены вместе с модулем, гасить нечего.
                 // 11.6.2b: гасим интервал боевого ассистента и убираем его контейнер,
                 // иначе после перезапуска скрипта тикали бы два таймера.
                 CombatAssistant.destroy();
@@ -241,15 +287,11 @@
                 // Статистика гильдии: снимаем наблюдатель и capture-клик,
                 // чистим кэш состава и убираем вкладку/панель из .gl-modal.
                 try { GuildSummary.destroy?.(); } catch (e) {}
-                // ТЗ 11.6.0g-3: гасим поллинг /heartbeat + /users и
-                // MutationObserver нативной ленты (иначе после перезапуска
-                // скрипта остались бы два интервала).
-                Chat.destroy();
                 // 11.6.3c: гасим PerformanceObserver и HP-интервал Пати — иначе
                 // старый инстанс продолжал бы слушать запросы игры (/api/me,
                 // /api/qact) и слать state на наш сервер после перезапуска.
                 Party.destroy();
-                document.querySelectorAll('.' + DOM_IDS.customModal + ', .sim-card, .' + DOM_IDS.chatWidget + ', .float-btns, .' + DOM_IDS.fabWrap + ', #' + DOM_IDS.playerHud + ', .custom-modal, .chat-widget, .legion-fab-wrap, #legion-player-hud').forEach(el => el.remove());
+                document.querySelectorAll('.' + DOM_IDS.customModal + ', .sim-card, .float-btns, .' + DOM_IDS.fabWrap + ', #' + DOM_IDS.playerHud + ', .custom-modal, .legion-fab-wrap, #legion-player-hud').forEach(el => el.remove());
                 legionApi._booted = false;
             }
         };

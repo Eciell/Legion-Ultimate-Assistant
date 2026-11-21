@@ -22,14 +22,12 @@ const Players = {
             const num = Math.max(0, Number(count) || 0);
             if (num > 0) this.unreadDMs[key] = num;
             else delete this.unreadDMs[key];
-            this.refreshUnreadDMViews();
         },
 
         addUnreadDM(nick) {
             if (!nick) return 0;
             const key = String(nick).trim().toLowerCase();
             this.unreadDMs[key] = (this.unreadDMs[key] || 0) + 1;
-            this.refreshUnreadDMViews();
             return this.unreadDMs[key];
         },
 
@@ -38,17 +36,6 @@ const Players = {
             const key = String(nick).trim().toLowerCase();
             if (!(key in this.unreadDMs)) return;
             delete this.unreadDMs[key];
-            this.refreshUnreadDMViews();
-        },
-
-        refreshUnreadDMViews() {
-            // Перерисовываем вкладку «✉️ ЛС», если она активна.
-            // (Список «Друзья» удалён в 11.5.4: в игре появились нативные друзья.)
-            try {
-                if (typeof Chat !== 'undefined' && Chat.activeTab === 'dm' && typeof Chat.renderMessages === 'function') {
-                    Chat.renderMessages();
-                }
-            } catch (e) {}
         },
 
         init() {
@@ -58,9 +45,8 @@ const Players = {
         getMyNick() {
             // ME живёт в page-context: в песочнице Tampermonkey (@grant) обычный
             // window его не видит, поэтому читаем через G (= unsafeWindow).
-            return (G.ME && (G.ME.user?.name || G.ME.hero?.n || G.ME.hero?.name)) ||
-                   (typeof Chat !== 'undefined' && Chat.myNick) ||
-                   '';
+            // 11.7.0: фолбэк на Chat.myNick убран вместе с подсистемой чата.
+            return (G.ME && (G.ME.user?.name || G.ME.hero?.n || G.ME.hero?.name)) || '';
         },
 
         getCityPlayers() {
@@ -238,11 +224,8 @@ const Players = {
                     }
                 });
             } catch (e) {}
-            if (typeof Chat !== 'undefined' && Array.isArray(Chat.messages)) {
-                Chat.messages.slice(-50).forEach(m => {
-                    if (m && m.author && !m.isSystem) this.addPlayer(m.author, '💬 Чат');
-                });
-            }
+            // 11.7.0: сбор ников из Chat.messages удалён вместе с подсистемой
+            // чата — остаются DOM-источники (.cy-chat-*) и карта онлайна.
 
             // Пересчёт лотов по снимку аукциона (без повторного запроса)
             const applyLots = (lots) => {
@@ -444,15 +427,16 @@ const Players = {
                 this.clearUnreadDM(peerNick);
                 this.renderDMMessages(peerNick);
             } else if (!isSelf && saved) {
-                // Счётчик непрочитанных + кликабельный тост
+                // Счётчик непрочитанных + кликабельный тост: открываем окно
+                // «Разведка» сразу на диалоге с этим игроком. v11.7.0: раньше
+                // тост дёргал Chat.openDM() из удалённой подсистемы чата.
                 this.addUnreadDM(peerNick);
                 UI.showToast(
                     `✉️ ЛС от ${peerNick}: ${text.length > 25 ? text.slice(0, 25) + '...' : text}`,
                     false,
-                    () => {
-                        if (typeof Chat !== 'undefined' && typeof Chat.openDM === 'function') {
-                            Chat.openDM(peerNick);
-                        }
+                    async () => {
+                        await this.open();
+                        this.openDossier(peerNick, 'players', true);
                     }
                 );
             }
@@ -491,38 +475,6 @@ const Players = {
             }).join('');
 
             historyBox.scrollTop = historyBox.scrollHeight;
-        },
-
-        /**
-         * Открыть ЛС с игроком (ПАТЧ 11.6.4f).
-         *
-         * Раньше здесь кликали по нативным узлам .cy-chat (data-dm + вкладка
-         * «Личные»), но нативный чат теперь скрыт CSS-ом и живёт в DOM только
-         * ради LGChatOne.place()/dock(). Идём через собственный Chat.openDM():
-         * он открывает PiP и переключает вкладку «✉️ ЛС».
-         *
-         * text — необязательный черновик. openDM() асинхронный (может создать
-         * PiP-окно), поэтому поле ввода ищем после его завершения.
-         */
-        async openWhisperWith(nick, text = '') {
-            if (!nick) return;
-            if (typeof Chat === 'undefined' || typeof Chat.openDM !== 'function') return;
-
-            try {
-                await Chat.openDM(nick);
-
-                if (!text) return;
-                const pipDoc = Chat._pipDoc;
-                const inp = pipDoc && typeof pipDoc.getElementById === 'function'
-                    ? pipDoc.getElementById('chat-input')
-                    : null;
-                if (inp) {
-                    inp.value = text;
-                    inp.focus();
-                }
-            } catch (e) {
-                dbg('openWhisperWith failed:', e);
-            }
         },
 
         async open() {

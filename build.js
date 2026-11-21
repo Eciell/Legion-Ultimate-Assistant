@@ -34,21 +34,10 @@ const HEADER_ULTIMATE = 'header-ultimate.js';
 
 const MAIN_FILE = 'main.js';
 
-/**
- * Слои чата (v11.6.0: modules/chat.js разложен на 5 файлов).
- *
- * Порядок критичен: эмоуты -> история -> сеть -> PiP -> фасад.
- * chat/chat.js объявляет Chat и подмешивает остальные слои через
- * Object.assign(Chat, ChatHistory/ChatNet/ChatPip), поэтому обязан идти
- * последним; ChatEmotes.SevenTV нужен фасаду уже на этапе создания объекта.
- */
-const CHAT_MODULES = [
-    'modules/chat/chat-emotes.js',
-    'modules/chat/chat-history.js',
-    'modules/chat/chat-net.js',
-    'modules/chat/chat-pip.js',
-    'modules/chat/chat.js'
-];
+// 11.7.0: подсистема чата вырезана целиком (src/modules/chat/* и
+// core/utils-chat.js удалены). Нужные другим модулям хелперы
+// (copyText / insertToQuestChat) перенесены в core/utils.js, а сетевой
+// трекер онлайна — туда же (updateOnlinePlayers).
 
 // 11.6.4b: modules/miner.js удалён из репозитория (перехват LGMineBiome.paint /
 // LGMine.open и подмена window.fetch палились античитом шахты). В обеих сборках
@@ -70,7 +59,9 @@ const CORE_ORDER = [
     'core/utils-format.js',
     'core/utils-api.js',
     'core/utils-art.js',
-    'core/utils-chat.js',
+    // 11.7.0: core/utils-chat.js удалён вместе с чатом. Общие хелперы
+    // (copyText / insertToQuestChat / updateOnlinePlayers) — в core/utils.js.
+    'core/utils.js',
     'core/styles.js',
     'core/hooks.js',
     // v11.6.0: HTML-шаблоны (FAB-меню, модалки, HUD) вынесены из ui.js и
@@ -94,9 +85,7 @@ const SHARED_MODULES = [
     'modules/combat-assistant.js',
     // v11.6.0: «Пати» (modules/party.js) — клиент собственного сервера через
     // GM_xmlhttpRequest. Нужны только Utils/DOM_IDS/UI из core (уже объявлены),
-    // других модулей не касается; main.js вызывает Party.init() последним,
-    // поэтому место внутри списка модулей не критично. Держим до CHAT_MODULES:
-    // фасад chat.js по контракту обязан склеиваться последним.
+    // других модулей не касается; main.js вызывает Party.init() последним.
     'modules/party.js',
     // «Арена» (modules/arena.js) — оценка шанса победы, детект согильдейцев
     // в отряде противника и вкладка «Согильдейцы» в модалке приглашения.
@@ -111,10 +100,7 @@ const SHARED_MODULES = [
     // состав — GET /api/guilds/guild с кэшем в Map (TTL 60 c). window.fetch,
     // LGMine.open/onEvent не патчатся, localStorage не используется.
     // main.js вызывает init() в boot(), destroy() — в shutdown().
-    'modules/guild-summary.js',
-    // Чат — отдельным блоком в конце (см. CHAT_MODULES): фасад chat.js
-    // обязан склеиться последним, чтобы main.js увидел готовый Chat.
-    ...CHAT_MODULES
+    'modules/guild-summary.js'
 ];
 
 /**
@@ -191,29 +177,29 @@ function assemble(target) {
         chunks.push(banner(relPath), readSource(relPath), '');
     }
 
-    // 4. Модули строго по списку сборки. readSource() падает, если файла нет:
+    // 4. Заглушка вместо удалённого miner.js: main.js всё ещё зовёт
+    //    Miner.init()/stopMining(), поэтому стаб вставляется в обе сборки
+    //    строго перед первым игровым модулем (11.7.0: якорь — build-sim.js,
+    //    раньше им был первый слой удалённого чата).
+    chunks.push(banner('modules/miner.js', '(удалён в 11.6.4b: античит, используется заглушка)'), MINER_STUB, '');
+
+    // 5. Модули строго по списку сборки. readSource() падает, если файла нет:
     //    для Ultimate это фатальная ошибка, никаких «мягких» пропусков.
     for (const relPath of target.modules) {
-        // 11.6.4b: miner.js удалён из репозитория, но boot()/shutdown() из
-        // main.js всё ещё обращаются к Miner — на его месте всегда заглушка.
-        // Якорь — первый слой чата (раньше здесь и стоял modules/chat.js).
-        if (relPath === CHAT_MODULES[0]) {
-            chunks.push(banner('modules/miner.js', '(удалён в 11.6.4b: античит, используется заглушка)'), MINER_STUB, '');
-        }
         chunks.push(banner(relPath), readSource(relPath), '');
     }
 
-    // 5. Личные необязательные модули (только Personal): подключаются, если файл создан.
+    // 6. Личные необязательные модули (только Personal): подключаются, если файл создан.
     //    Для Ultimate список optionalModules пуст, existsSync здесь не вызывается.
     for (const relPath of target.optionalModules) {
         if (!fs.existsSync(path.join(SRC_DIR, relPath))) continue;
         chunks.push(banner(relPath), readSource(relPath), '');
     }
 
-    // 6. Точка входа.
+    // 7. Точка входа.
     chunks.push(banner(MAIN_FILE), readSource(MAIN_FILE), '');
 
-    // 7. Закрытие обёртки.
+    // 8. Закрытие обёртки.
     chunks.push('})();', '');
 
     return chunks.join('\n');

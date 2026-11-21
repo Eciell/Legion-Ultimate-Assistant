@@ -212,60 +212,18 @@
 
             return modal;
         },
-        // ⚙️ Служебные настройки аддона: канал 7TV и перехват чата.
-        // Вынесены из FAB-меню в модалку, чтобы меню не разрасталось.
+        // ⚙️ Служебные настройки аддона: уведомления о версиях, боевой
+        // ассистент и место входа в меню. Настройки чата (7TV, перехват
+        // ленты, подсветка ников) удалены в 11.7.0 вместе с подсистемой чата.
         openSettings() {
-            const chatDisabled = (typeof Chat !== 'undefined') ? !!Chat.disabled : false;
-            // 11.6.0g-4: состояние тумблера подсветки ников (дефолт — включено).
-            const addonHighlight = (typeof Chat !== 'undefined') ? Chat.addonHighlight !== false : true;
-
             // Разметка модалки — в core/ui-templates.js (UITemplates.settingsModal).
-            const modal = this.showModal(UITemplates.settingsModal(chatDisabled, addonHighlight), { compact: true });
+            const modal = this.showModal(UITemplates.settingsModal(), { compact: true });
 
             if (!modal) return;
 
-            modal.querySelector('#modal-7tv-btn')?.addEventListener('click', () => {
-                this.closeModals();
-                if (typeof Chat !== 'undefined' && typeof Chat.open7tvSettings === 'function') {
-                    Chat.open7tvSettings();
-                }
-            });
-
-            modal.querySelector('#modal-chk-chat')?.addEventListener('change', (e) => {
-                if (typeof Chat !== 'undefined' && typeof Chat.setDisabled === 'function') {
-                    Chat.setDisabled(e.target.checked);
-                }
-            });
-
-            // 11.6.4e: тумблер «🎭 Отображать смайлы 7TV». Дефолт — включено
-            // (ключа в localStorage ещё нет). Флаг читают
-            // SevenTV.replaceEmotes / decorate / load() в
-            // modules/chat/chat-emotes.js, поэтому и замена смайлов, и запросы
-            // к 7TV прекращаются сразу, без перезагрузки страницы.
-            const tvChk = modal.querySelector('#modal-chk-7tv');
-            if (tvChk) {
-                tvChk.checked = localStorage.getItem('LEGION_7TV_DISABLED') !== 'true';
-                tvChk.addEventListener('change', (e) => {
-                    localStorage.setItem('LEGION_7TV_DISABLED', String(!e.target.checked));
-                    // Chat.setSevenTVEnabled() догрузит набор (если аддон
-                    // стартовал с выключенным тумблером) и перерисует
-                    // открытый чат.
-                    if (typeof Chat !== 'undefined' && typeof Chat.setSevenTVEnabled === 'function') {
-                        Chat.setSevenTVEnabled(e.target.checked);
-                    }
-                });
-            }
-
-            // 11.6.0g-4: подсветка ников Legion — сохраняем и перерисовываем чат.
-            modal.querySelector('#modal-chk-addon-hl')?.addEventListener('change', (e) => {
-                if (typeof Chat !== 'undefined' && typeof Chat.setAddonHighlight === 'function') {
-                    Chat.setAddonHighlight(e.target.checked);
-                }
-            });
-
             // 11.6.1g: тумблер уведомлений о новых версиях.
             // Дефолт — включено (ключа в localStorage ещё нет). Значение читает
-            // Chat.checkForUpdates() перед GM_notification.
+            // checkAddonUpdate() из main.js перед GM_notification.
             const notifyOn = localStorage.getItem('LEGION_UPDATE_NOTIFY') !== 'false';
             const notifyChk = modal.querySelector('#modal-chk-update-notify');
             if (notifyChk) notifyChk.checked = notifyOn;
@@ -683,8 +641,7 @@
             const inMine = !!document.querySelector('.mn-world') ||
                            !!document.querySelector('.mn-screen') ||
                            location.search.includes('sid=') ||
-                           location.pathname.includes('/mine') ||
-                           (typeof Chat !== 'undefined' && Chat.isInMine && Chat.isInMine());
+                           location.pathname.includes('/mine');
             if (inMine) return { text: '⛏️ Шахта', color: '#4cc95a' };
 
             let inQuest = false;

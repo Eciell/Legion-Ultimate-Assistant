@@ -1,11 +1,8 @@
 // ==UserScript==
-// @name         Legion: Ultimate Assistant (Chat, Auction, Pocket City)
+// @name         Legion: Ultimate Assistant (Auction, Pocket City, Party)
 // @namespace    http://tampermonkey.net/
-// @version      11.6.9
-// @description  QoL-аддон для Легиона: Умный чат, Сканер аукциона, Разведка, Планировщик, Карманный город. Без авто-копания.
-// @connect      7tv.io
-// @connect      cdn.7tv.app
-// @connect      api.ivr.fi
+// @version      11.7.0
+// @description  QoL-аддон для Легиона: Сканер аукциона, Разведка, Планировщик, Карманный город, Пати, Поход. Без авто-копания.
 // @connect      localhost
 // @connect      127.0.0.1
 // @connect      legion.ctrlfree.host
@@ -34,7 +31,7 @@
     // Подключается ПЕРВЫМ (см. CORE_ORDER в build.js): здесь объявляются
     // G, DEBUG/dbg, RAND_ID, DOM_IDS, API_BASE, общие константы, глобальные
     // кэши и пустой объект Utils. Методы в него добавляют utils-format /
-    // utils-api / utils-art / utils-chat через Object.assign — порядок
+    // utils-api / utils-art / utils через Object.assign — порядок
     // подключения критичен для TDZ (const/let).
     // ============================================================
     const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
@@ -69,8 +66,6 @@
         btnBuildSim: `${RAND_ID}-btn-build-sim`,
         btnAuctionScan: `${RAND_ID}-btn-auction-scan`,
         btnPlayers: `${RAND_ID}-btn-players`,
-        btnChatToggle: `${RAND_ID}-btn-chat-toggle`,
-        btnPopout: `${RAND_ID}-btn-popout`,
         btnPocketCity: `${RAND_ID}-btn-pocket-city`,
         // v11.6.0: «Пати» (modules/party.js) — кнопка в блоке «Социальное».
         btnParty: `${RAND_ID}-btn-party`,
@@ -84,10 +79,6 @@
         arenaFoeWarn: `${RAND_ID}-arena-foe-warn`,
         arenaGuildList: `${RAND_ID}-arena-guild-list`,
         arenaGuildTab: `${RAND_ID}-arena-guild-tab`,
-        chkChatDisable: `${RAND_ID}-chk-chat-disable`,
-        chatBadge: `${RAND_ID}-chat-badge`,
-        fabChatBadge: `${RAND_ID}-fab-chat-badge`,
-        chatWidget: `${RAND_ID}-chat-widget`,
         playerHud: `${RAND_ID}-player-hud`,
         customModal: `${RAND_ID}-modal`
     };
@@ -102,7 +93,6 @@
      * ------------------------------------------------------------
      */
     const API_BASE = window.LG_BASE || (location.pathname.match(/^\/c\/[^/]+/)?.[0] || '');
-    const CHAT_DEDUP_TTL = 8000;
     const MAX_POINTS = 50;
     /*
      * v11.6.1: сетка дерева навыков сжата под 1920x1080 без скролла.
@@ -838,236 +828,114 @@
     // шахты и ловит (M.open !== open). Контекст шахты теперь берётся из
     // G.X внутри ctxs (см. getItemArtSvg выше), обёртка не нужна.
 
-    // ===== src/core/utils-chat.js =====
+    // ===== src/core/utils.js =====
     // ============================================================
-    // 0.5. РАЗБОР ЧАТА И СЕТЕВЫХ ДАННЫХ (core/utils-chat.js)
-    // Извлечение сообщений из ответов API/SSE, дедуп, кэш онлайна
-    // и обработка входящих ЛС.
+    // 0.4. ОБЩИЕ ХЕЛПЕРЫ АДДОНА (core/utils.js)
+    //
+    // v11.7.0: файл заменил core/utils-chat.js — подсистема чата полностью
+    // вырезана из проекта. Здесь остались только те хелперы, которые нужны
+    // другим модулям:
+    //   copyText()          — копирование текста в буфер обмена;
+    //   insertToQuestChat() — вставка команды в поле чата похода (#qSayIn).
+    //
+    // Потребители: modules/combat-assistant.js (кликабельный бейдж команды и
+    // кнопка «Вставить») и modules/party.js (кнопка «❤» — лечение союзника).
+    // Подключается после utils-api.js: Utils уже объявлен в constants.js.
     // ============================================================
-    const UtilsChat = {
-        chatHash(author, text) {
-            const s = `${(author || '').trim().toLowerCase()}|${(text || '').trim()}`;
-            let h = 5381;
-            for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-            return h;
-        },
-        extractChatFields(m) {
-            if (!m || typeof m !== 'object') return { author: null, text: null, k: null, to: null, rank: null };
+    const UtilsCommon = {
+        /**
+         * Копирование текста в буфер обмена.
+         *
+         * Порядок: Clipboard API (нужен secure context и разрешение браузера),
+         * затем фолбэк через скрытую textarea + document.execCommand('copy').
+         *
+         * @param {string} text текст для копирования
+         * @returns {Promise<boolean>} true — текст попал в буфер
+         */
+        copyText(text) {
+            const value = String(text == null ? '' : text);
 
-            const author = m.l || m.n || m.author || m.nick || m.name || m.login || m.from;
-            const text = m.t || m.text || m.msg || m.m || m.message;
-            const role = m.c || m.role || null;
-            // Статус модератора сервер присылает отдельно от класса:
-            // r: "mod" (щиток), c: "legionary" (иконка класса).
-            const rawRank = m.r || m.rank || null;
-            const rank = rawRank ? String(rawRank).toLowerCase() : null;
-
-            // Определяем, системное ли это сообщение (§2.7, SDK §7)
-            const isSystem = author === 'Летопись' || author === 'Система'
-                || (author && author.toLowerCase().includes('летопись'))
-                || m.ev === 1;
-
-            const aw = Array.isArray(m.aw) ? m.aw : null;
-            const channel = m.channel || m.room || m.ch || null;
-            const k = m.k || m.kind || (channel === 'dm' ? 'dm' : null);
-            const to = m.to || m.target || null;
-
-            return { author, text, id: m.id, seq: m.s, role, rank, isSystem, aw, channel, k, to };
-        },
-        // Служебные ветки payload'а, в которые extractChatDeep не должен
-        // спускаться: там лежат награды/титулы/предметы (у них бывают поля
-        // t/l/n), и они не должны превращаться в «сообщения» чата.
-        NON_CHAT_KEYS: new Set([
-            'aw', 'awards', 'award', 'items', 'item', 'hero', 'me', 'stats',
-            'st', 'inv', 'inventory', 'sk', 'skills', 'ign', 'top', 'players',
-            'title', 'titles', 'ach', 'achievements', 'achievement', 'reward', 'rewards'
-        ]),
-        looksLikeChat(o) {
-            if (!o || typeof o !== 'object' || Array.isArray(o)) return false;
-
-            // 1. Отсекаем объекты наград/титулов/предметов по характерным служебным полям
-            if (o.i !== undefined || o.d !== undefined || o.en !== undefined || o.price !== undefined) return false;
-            if (o.id && o.t && o.id === o.t) return false; // id совпадает с типом награды (pioneer === pioneer)
-
-            // 2. В настоящем сообщении ВСЕГДА есть логин/автор (строка от 2 символов).
-            // Поле 'n' (name) НЕ используется как автор, так как у наград n — это название.
-            const author = o.author ?? o.from ?? o.login ?? o.l ?? (typeof o.nick === 'string' ? o.nick : null);
-            if (typeof author !== 'string' || author.trim().length < 2) return false;
-
-            // 3. Текст сообщения: поля text/msg/message либо t (только при наличии валидного автора)
-            const text = o.text ?? o.message ?? o.msg ?? o.t ?? (typeof o.m === 'string' ? o.m : null);
-            return typeof text === 'string' && text.trim().length > 0;
-        },
-        extractChatDeep(m, depth = 0) {
-            if (!m || depth > 4) return [];
-            const result = [];
-
-            // 1. Упакованный массив row: [id, s, l, n, t, at, ...]
-            if (Array.isArray(m)) {
-                // Если сам m — кортеж сообщения со строковым логином row[2] и текстом row[4]
-                if (m.length >= 5 && typeof m[2] === 'string' && typeof m[4] === 'string' && m[4].trim()) {
-                    return [{ id: m[0], s: m[1], l: m[2], n: m[3] || m[2], t: m[4], at: m[5], c: m[6], r: m[7] || null, aw: Array.isArray(m[8]) ? m[8] : null }];
-                }
-
-                // Или это массив сообщений/строк
-                for (const item of m) {
-                    if (Array.isArray(item)) {
-                        if (item.length >= 5 && typeof item[2] === 'string' && typeof item[4] === 'string' && item[4].trim()) {
-                            result.push({ id: item[0], s: item[1], l: item[2], n: item[3] || item[2], t: item[4], at: item[5], c: item[6], r: item[7] || null, aw: Array.isArray(item[8]) ? item[8] : null });
-                        } else {
-                            result.push(...this.extractChatDeep(item, depth + 1));
-                        }
-                    } else if (item && typeof item === 'object') {
-                        // Отсекаем награды/титулы в массивах (у них есть i или d, и нет l/author)
-                        if (item.i !== undefined || item.d !== undefined) continue;
-                        if (this.looksLikeChat(item)) {
-                            result.push(item);
-                        } else {
-                            result.push(...this.extractChatDeep(item, depth + 1));
-                        }
-                    }
-                }
-                if (result.length) return result;
-            }
-
-            // 2. Объект с чатом: {"chat": [...], "chatRoom": "mine"} или {"m": [...]}
-            if (m && typeof m === 'object') {
-                const roomChannel = m.chatRoom || (m.c === 'mine' ? 'mine' : null);
-
-                // Чат шахты: {"chat": [{"id":..., "t":..., "l":..., "c":..., "cn":...}], "chatRoom": "mine"}
-                if (Array.isArray(m.chat)) {
-                    for (const item of m.chat) {
-                        if (this.looksLikeChat(item)) {
-                            result.push({
-                                id: item.id || null,
-                                s: item.s || null,
-                                l: item.l || item.author || null,
-                                n: item.n || item.name || item.l || null,
-                                t: item.t || item.text || item.msg || '',
-                                at: item.at || item.time || Date.now(),
-                                c: item.c || item.role || null,
-                                cn: item.cn || null,
-                                r: item.r || item.rank || null,
-                                aw: Array.isArray(item.aw) ? item.aw : null,
-                                channel: roomChannel || item.channel || item.room || null,
-                                k: item.k || item.kind || null,
-                                to: item.to || item.target || null
-                            });
-                        } else if (Array.isArray(item)) {
-                            if (item.length >= 5 && typeof item[2] === 'string' && typeof item[4] === 'string' && item[4].trim()) {
-                                result.push({
-                                    id: item[0], s: item[1], l: item[2], n: item[3] || item[2],
-                                    t: item[4], at: item[5], c: item[6],
-                                    r: item[7] || null, aw: Array.isArray(item[8]) ? item[8] : null,
-                                    channel: roomChannel || null
-                                });
-                            }
-                        }
-                    }
-                    if (result.length) return result;
-                }
-
-                if (Array.isArray(m.m)) {
-                    for (const row of m.m) {
-                        // Строгая проверка: только строковый автор и текст, числа (координаты) отсекаются
-                        if (Array.isArray(row) && row.length >= 5 && typeof row[2] === 'string' && typeof row[4] === 'string' && row[4].trim()) {
-                            result.push({
-                                id: row[0], s: row[1], l: row[2], n: row[3] || row[2],
-                                t: row[4], at: row[5], c: row[6],
-                                r: row[7] || null, aw: Array.isArray(row[8]) ? row[8] : null,
-                                channel: roomChannel || null
-                            });
-                        }
-                    }
-                    if (result.length) return result;
-                }
-
-                if (this.looksLikeChat(m)) {
-                    return [m];
-                }
-
-                // Рекурсивный обход свойств объекта (до 4 уровней глубины).
-                // Служебные ветки (награды, предметы, герой, статы) не трогаем:
-                // оттуда и приходят фейковые «сообщения» вроде pioneer.
-                for (const k of Object.keys(m)) {
-                    if (this.NON_CHAT_KEYS.has(k)) continue;
-                    const v = m[k];
-                    if (!v) continue;
-                    if (this.looksLikeChat(v)) {
-                        result.push(v);
-                    } else if (typeof v === 'object') {
-                        result.push(...this.extractChatDeep(v, depth + 1));
-                    }
-                }
-            }
-
-            // Дедупликация в пределах возвращаемого списка
-            const seen = new Set();
-            const unique = [];
-            for (const item of result) {
-                const key = item.id || `${item.l || item.author || ''}-${item.t || item.text || ''}-${item.at || item.s || ''}`;
-                if (!seen.has(key)) {
-                    seen.add(key);
-                    unique.push(item);
-                }
-            }
-            return unique;
-        },
-        extractMessages(data) {
-            if (!data) return [];
-            let result = [];
-
-            const parse = (node) => {
-                if (!node) return;
-                if (Array.isArray(node)) {
-                    // Распознаем упакованный массив сообщения: [id, seq, login, name, text, time]
-                    if (node.length >= 5 && typeof node[0] === 'string' && typeof node[2] === 'string' && typeof node[4] === 'string') {
-                        result.push({ id: node[0], s: node[1], l: node[2], n: node[3], t: node[4], at: node[5] });
-                    } else {
-                        node.forEach(parse);
-                    }
-                } else if (typeof node === 'object') {
-                    if (node.m && Array.isArray(node.m)) {
-                        node.m.forEach(parse);
-                    } else if (node.chat && Array.isArray(node.chat)) {
-                        node.chat.forEach(parse);
-                    } else if (node.t || node.text || node.msg) {
-                        result.push(node);
-                    }
+            // Фолбэк для браузеров/контекстов без navigator.clipboard.
+            const legacyCopy = () => {
+                try {
+                    const ta = document.createElement('textarea');
+                    ta.value = value;
+                    ta.setAttribute('readonly', '');
+                    ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    ta.setSelectionRange(0, value.length);
+                    let ok = false;
+                    try { ok = document.execCommand('copy'); } catch (e) {}
+                    ta.remove();
+                    return ok;
+                } catch (e) {
+                    return false;
                 }
             };
 
-            parse(data);
-
-            // Дедупликация
-            const unique = [];
-            const seen = new Set();
-            for (const m of result) {
-                const key = m.id || (m.l + m.t + m.s) || Math.random();
-                if (!seen.has(key)) {
-                    seen.add(key);
-                    unique.push(m);
-                }
-            }
-            return unique;
-        },
-        processIncomingDMs(raw) {
-            if (!raw) return;
             try {
-                if (typeof Players === 'undefined' || !Players.handleIncomingDM) return;
-                const chats = this.extractChatDeep(raw);
-                if (!chats || !chats.length) return;
-                chats.forEach(m => {
-                    const parsed = this.extractChatFields(m);
-                    const isDM = parsed.k === 'dm' || parsed.channel === 'dm' || m.k === 'dm' || m.kind === 'dm' || m.channel === 'dm';
-                    if (isDM && parsed.text) {
-                        Players.handleIncomingDM(parsed.author, parsed.text, parsed.to);
-                    }
-                });
-            } catch (err) {
-                dbg('Error processing incoming DMs:', err);
-            }
+                if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                    return navigator.clipboard.writeText(value).then(() => true, legacyCopy);
+                }
+            } catch (e) {}
+
+            return Promise.resolve(legacyCopy());
         },
+
+        /**
+         * Вставка текста в поле команды похода (#qSayIn, см. site/quest.js).
+         *
+         * Игра блокирует вставку: noPaste на paste/drop + beforeinput
+         * insertFromPaste. Поэтому значение пишем нативным сеттером из
+         * цепочки прототипов самого элемента (realm-safe: не зависит от
+         * песочницы Tampermonkey) и вручную шлём input/change.
+         * Автоотправки нет: команду отправляет игрок по Enter.
+         *
+         * @param {string} text команда, например «удар» или «лечить @ник»
+         * @returns {boolean} true — вставлено в поле; false — поля нет
+         */
+        insertToQuestChat(text) {
+            const value = String(text == null ? '' : text);
+            const input = document.querySelector('#qSayIn, .q-sayi, .q-say input');
+            if (!input) return false;
+
+            try {
+                input.focus();
+                let proto = Object.getPrototypeOf(input);
+                let desc = null;
+                while (proto && !desc) {
+                    desc = Object.getOwnPropertyDescriptor(proto, 'value');
+                    proto = Object.getPrototypeOf(proto);
+                }
+                if (desc && desc.set) desc.set.call(input, value);
+                else input.value = value;
+
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                if (typeof input.setSelectionRange === 'function') {
+                    input.setSelectionRange(value.length, value.length);
+                }
+            } catch (e) {
+                try { input.value = value; } catch (e2) { return false; }
+            }
+
+            return true;
+        },
+
+        /**
+         * Трекер онлайна игроков (город/шахта).
+         *
+         * Раньше жил в core/utils-chat.js. Наполняет window.__lgOnlinePlayers
+         * записями { loc, ts, firstSeen, src }; читают modules/players.js
+         * («Разведка») и modules/arena.js (свежесть состава). Никаких
+         * сообщений чата здесь нет — только логины из ответов игры.
+         *
+         * @param {*} raw              ответ API/SSE (объект, массив или список)
+         * @param {string|null} defaultLoc 'city' | 'mine' | null
+         * @param {string} src         источник ('sse' | 'api')
+         * @returns {boolean} true — карта изменилась
+         */
         updateOnlinePlayers(raw, defaultLoc = null, src = 'sse') {
             if (!raw) return false;
             let updated = false;
@@ -1158,95 +1026,9 @@
             }
 
             return updated;
-        },
-
-        /**
-         * Вставка текста в поле команды похода (#qSayIn, см. site/quest.js).
-         *
-         * Игра блокирует вставку: noPaste на paste/drop + beforeinput
-         * insertFromPaste. Поэтому значение пишем нативным сеттером из
-         * цепочки прототипов самого элемента (realm-safe: не зависит от
-         * песочницы Tampermonkey) и вручную шлём input/change.
-         * inputType = 'insertText' под запрет вставки не попадает, а
-         * saySend() читает inp.value напрямую — команда уйдёт по Enter.
-         *
-         * Если поля нет (не в походе / чат похода скрыт) — копируем текст в
-         * буфер: GM_setClipboard (если выдан @grant), затем Clipboard API,
-         * затем execCommand-фолбэк на временном textarea.
-         *
-         * @param {string} text команда, например «лечить @ник» или «удар»
-         * @returns {boolean} true — вставлено в поле; false — скопировано в буфер
-         */
-        insertToQuestChat(text) {
-            const value = String(text == null ? '' : text);
-            const input = document.querySelector('#qSayIn, .q-say input, #tab-quest input[type="text"], .q-say textarea');
-
-            if (input) {
-                input.focus();
-                try {
-                    let proto = Object.getPrototypeOf(input);
-                    let desc = null;
-                    while (proto && !desc) {
-                        desc = Object.getOwnPropertyDescriptor(proto, 'value');
-                        proto = Object.getPrototypeOf(proto);
-                    }
-                    if (desc && desc.set) desc.set.call(input, value);
-                    else input.value = value;
-
-                    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: value, inputType: 'insertText' }));
-                    input.dispatchEvent(new Event('change', { bubbles: true }));
-                } catch (e) {
-                    input.value = value;
-                }
-                return true;
-            }
-
-            const toast = (msg, isError) => {
-                if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, !!isError);
-            };
-            const okMsg = 'Поле чата не найдено, текст скопирован';
-
-            // Самый старый путь: скрытый textarea + execCommand('copy').
-            const legacyCopy = () => {
-                let ok = false;
-                try {
-                    const ta = document.createElement('textarea');
-                    ta.value = value;
-                    ta.setAttribute('readonly', '');
-                    ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
-                    document.body.appendChild(ta);
-                    ta.select();
-                    try { ok = document.execCommand('copy'); } catch (e2) {}
-                    ta.remove();
-                } catch (e3) {}
-                toast(ok ? okMsg : `Не удалось скопировать. Текст: ${value}`, !ok);
-                return ok;
-            };
-
-            // 1. GM_setClipboard — синхронный; доступен только если выдан @grant.
-            try {
-                if (typeof GM_setClipboard === 'function') {
-                    GM_setClipboard(value);
-                    toast(okMsg, false);
-                    return false;
-                }
-            } catch (e) {}
-
-            // 2. Clipboard API (нужен secure context и разрешение браузера).
-            try {
-                if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-                    navigator.clipboard.writeText(value).then(
-                        () => toast(okMsg, false),
-                        () => legacyCopy()
-                    );
-                    return false;
-                }
-            } catch (e) {}
-
-            return legacyCopy();
-        },
+        }
     };
-    Object.assign(Utils, UtilsChat);
+    Object.assign(Utils, UtilsCommon);
 
     // ===== src/core/styles.js =====
     // ============================================================
@@ -1625,61 +1407,7 @@
         .fab-menu-item { position: relative; flex-shrink: 0; background: #2a2030; color: #ffcf6a; border: 1px solid #555; border-radius: 6px; padding: 10px 14px; font-weight: bold; cursor: pointer; font-size: 13px; text-align: left; transition: all 0.2s; display: flex; justify-content: space-between; align-items: center; }
         .fab-menu-item:hover { background: #caa55c; color: #1d1620; border-color: #caa55c; }
         .fab-menu-item.active { background: #4cc95a; color: #1d1620; border-color: #4cc95a; box-shadow: 0 0 15px rgba(76, 201, 90, 0.5); }
-        .${DOM_IDS.chatBadge}, .chat-badge { position: absolute; top: -6px; right: -6px; background: #ff5a7a; color: #fff; border-radius: 50%; padding: 2px 7px; font-size: 12px; font-weight: 900; box-shadow: 0 2px 5px rgba(0,0,0,0.5); display: none; pointer-events: none; z-index: 2; }
-        .${DOM_IDS.chatWidget}, .chat-widget { position: fixed; bottom: 80px; right: 20px; width: 320px; height: 400px; min-width: 320px; min-height: 400px; max-width: 95vw; max-height: 95vh; resize: both; background: #1d1620; border: 2px solid #caa55c; border-radius: 12px; display: flex; flex-direction: column; z-index: 10000; box-shadow: 0 10px 30px rgba(0,0,0,0.8); overflow: hidden; transition: transform 0.2s, opacity 0.2s; transform: translateY(20px); opacity: 0; pointer-events: none; }
-        .${DOM_IDS.chatWidget}.open, .chat-widget.open { transform: translateY(0); opacity: 1; pointer-events: auto; }
-        .chat-top-bar { background: #2a2030; padding: 10px 12px; font-weight: bold; color: #ffcf6a; display: flex; justify-content: space-between; align-items: center; gap: 8px; overflow: hidden; border-bottom: 1px solid #444; cursor: move; user-select: none; touch-action: none; box-sizing: border-box; flex-shrink: 0; }
-        /* ПАТЧ 11.6.4g: вкладок стало пять (Общий/Торговля/Ремёсла/Гильдия/
-           Личные), а ширина PiP-окна всего 350px. Поэтому горизонтальный
-           padding урезан до 6px, шрифт — 11px, а ряд вкладок переносится
-           (flex-wrap), если не влезает в одну строку рядом с кнопкой «✖». */
-        .chat-main-tabs { display: flex; flex-wrap: wrap; gap: 3px; flex: 1; min-width: 0; }
-        .chat-main-tab, .chat-tab { background: #1d1620; border: 1px solid #444; color: #aaa; padding: 3px 6px; border-radius: 6px; cursor: pointer; font-size: 11px; white-space: nowrap; font-weight: bold; user-select: none; pointer-events: auto; }
-        .chat-main-tab.active, .chat-tab.active { background: #caa55c; color: #1d1620; border-color: #caa55c; font-weight: bold; }
-        .chat-sub-tabs { display: flex; gap: 6px; padding: 6px 12px; background: #231929; border-bottom: 1px solid #3a2b42; flex-shrink: 0; }
-        .chat-sub-tab { background: #1d1620; border: 1px solid #444; color: #bbb; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; white-space: nowrap; user-select: none; pointer-events: auto; }
-        .chat-sub-tab.active { background: #caa55c; color: #1d1620; border-color: #caa55c; font-weight: bold; }
-        .chat-role-icon { margin-right: 4px; }
-        .chat-envelope { display: none; }
-        .chat-close { cursor: pointer; color: #ff8fa3; padding: 4px 6px; flex-shrink: 0; font-size: 16px; line-height: 1; user-select: none; pointer-events: auto; }
-        .chat-close:hover { color: #fff; }
-        .chat-messages { flex: 1 1 0%; min-height: 0; padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: #f7eadf !important; }
-        .chat-msg { background: rgba(255,255,255,0.05); padding: 6px 10px; border-radius: 8px; line-height: 1.3; word-wrap: break-word; color: #f7eadf !important; }
-        .chat-msg.pending { opacity: 0.6; font-style: italic; }
-        .chat-msg.streamer-msg { border-left: 3px solid #ffd700; background: rgba(255, 215, 0, 0.08); }
-        .chat-msg.mention-msg { border-left: 3px solid #f7768e; background: rgba(247, 118, 142, 0.12); }
-        .chat-text { color: #f7eadf !important; word-break: break-word; }
-        .chat-author { font-weight: bold; color: #f7eadf !important; margin-right: 5px; }
 
-        /* v11.7: контекстное меню по нику в вынесенном (PiP) чате.
-           Модуль modules/chat/chat-pip.js: showNickMenu(); пункт «👤 Профиль»
-           появляется только если в page-context есть LGProfile.open. */
-        .lgu-nick-menu {
-            display: flex; flex-direction: column; gap: 2px;
-            min-width: 168px; padding: 4px; z-index: 99999;
-            background: #1d1620; border: 1px solid #caa55c; border-radius: 8px;
-            box-shadow: 0 6px 18px rgba(0, 0, 0, .55);
-            font: 12px/1.25 system-ui, -apple-system, 'Segoe UI', sans-serif;
-            color: #f7eadf;
-        }
-        .lgu-nick-menu-item {
-            display: block; width: 100%; text-align: left;
-            padding: 6px 9px; border: 0; border-radius: 6px;
-            background: transparent; color: #f7eadf;
-            font: inherit; cursor: pointer;
-        }
-        .lgu-nick-menu-item:hover,
-        .lgu-nick-menu-item:focus-visible {
-            background: rgba(202, 165, 92, .22);
-            color: #ffcf6a;
-            outline: none;
-        }
-        .chat-input-area { display: flex; padding: 10px; background: #111; border-top: 1px solid #333; gap: 5px; flex-shrink: 0; }
-        .chat-input { flex: 1; background: #222; border: 1px solid #444; color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 13px; outline: none; }
-        .chat-input:focus { border-color: #caa55c; }
-        .chat-send { background: #caa55c; color: #1d1620; border: none; padding: 0 15px; border-radius: 6px; font-weight: bold; cursor: pointer; user-select: none; pointer-events: auto; }
-        .chat-send:hover { background: #ffcf6a; }
-        .chat-widget button { user-select: none; pointer-events: auto; }
         .auc-buy-btn { padding: 4px 8px; background: #28a745; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 11px; transition: background 0.2s, opacity 0.2s; }
         .auc-buy-btn:hover { background: #218838; }
         .auc-buy-btn:disabled { opacity: 0.6; cursor: not-allowed; }
@@ -1825,15 +1553,6 @@
         .party-heal-btn { pointer-events: auto; flex: none; padding: 0 5px; background: #22352a; border: 1px solid #5fd987; color: #5fd987; border-radius: 4px; font-size: 10px; line-height: 15px; cursor: pointer; transition: background 0.15s, color 0.15s; }
         .party-heal-btn:hover:not(:disabled) { background: #5fd987; color: #16121a; }
         .party-heal-btn:disabled { opacity: 0.6; cursor: default; }
-        /* 7TV-смайлики: размер задаётся переменной --t7-h (S/M/L/XL из настроек чата) */
-        .t7-emote { height: var(--t7-h, 1.9em); vertical-align: middle; margin: 0 2px; }
-        /* Подсветка пользователей аддона (ТЗ 11.6.0h).
-           НЕ переопределяем color — сохраняем индивидуальный цвет игрока
-           (класс/ранг выставляет его самой игрой). text-shadow с currentColor
-           даёт свечение ровно в его родном цвете. */
-        .legion-addon-user {
-            text-shadow: 0 0 4px currentColor, 0 0 10px currentColor !important;
-        }
 
         /* ============================================================
            ПЛАНИРОВЩИК БИЛДОВ — СКРОЛЛ ДЕРЕВА + ГРАНИЦЫ МОДАЛКИ (v11.6.3b)
@@ -2026,8 +1745,9 @@
         /* ============================================================
            11.6.2b: БОЕВОЙ АССИСТЕНТ (modules/combat-assistant.js)
            Контейнер висит по центру сверху и прозрачен для мыши, чтобы не
-           перекрывать нативный UI похода; кликабельна только карточка
-           подсказки (pointer-events: auto) с кнопкой «Вставить в чат».
+           перекрывать нативный UI похода; кликабельны только карточка
+           подсказки (pointer-events: auto) — бейдж команды и кнопка
+           «Вставить» — и баннер сбора отряда с «Присоединиться».
            ============================================================ */
         #lg-combat-assistant {
             position: fixed;
@@ -2060,6 +1780,25 @@
             box-shadow: 0 4px 12px rgba(0,0,0,0.5); pointer-events: none;
             max-width: min(560px, 90vw); text-align: center;
         }
+        /* v11.7.0: команда — кликабельный бейдж (копирование в буфер). */
+        .lg-combat-info { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+        .lg-combat-hint { font-size: 12px; opacity: 0.8; }
+        .lg-combat-cmd {
+            background: #241d10; border: 1px dashed #ffcf6a; color: #ffcf6a;
+            border-radius: 6px; padding: 4px 10px; font: bold 15px Arial;
+            cursor: pointer; transition: background 0.15s, color 0.15s;
+        }
+        .lg-combat-cmd:hover { background: #ffcf6a; color: #000; }
+        .lg-combat-cmd.copied { background: #4cc95a; border-color: #4cc95a; color: #16121a; }
+        /* v11.7.0: сбор отряда — таймер и кнопка «Присоединиться». */
+        .lg-combat-gather {
+            background: rgba(18, 26, 32, 0.95); border: 2px solid #5cc8ff; color: #fff;
+            padding: 10px 16px; border-radius: 10px; display: flex; flex-direction: column;
+            gap: 6px; align-items: center; pointer-events: auto; font: bold 14px Arial;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.55); min-width: 240px; text-align: center;
+        }
+        .lg-combat-gather-head { color: #9fe3ff; }
+        .lg-combat-gather-timer { font: 900 20px/1.1 Consolas, monospace; color: #ffcf6a; }
 
         /* ============================================================
            11.6.5c: СПОСОБНОСТИ АРЕНЫ (modules/hero-planner.js)
@@ -3108,8 +2847,7 @@
 
             // 11.6.4b: подмена LGCity.open тоже снята (любая подмена open на
             // игровых объектах — детект). Контекст города берём из G.X/LGCity
-            // по месту вызова, см. core/utils-api.js, modules/players.js,
-            // modules/chat/chat-pip.js.
+            // по месту вызова, см. core/utils-api.js, modules/players.js.
 
             // Перехват городского SSE (кто зашел в город / вышел)
             if (typeof val.onEvent === 'function' && !val.__onEventHooked) {
@@ -3343,7 +3081,7 @@
         fabMenu(version, ids) {
             // Фолбэк версии — текущая версия сборки (релиз 11.6.0 будет
             // после завершения всех этапов рефакторинга).
-            const v = version || '11.5.3';
+            const v = version || '11.7.0';
             const d = ids || DOM_IDS;
             return `
             <div class="${d.fabMenu}" id="${d.fabMenu}" style="max-height: calc(100vh - 100px); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #caa55c transparent;">
@@ -3370,7 +3108,6 @@
                     <div class="fab-section-body">
                         <button class="fab-menu-item" id="${d.btnPlayers}">👥 Игроки (Разведка)</button>
                         <button class="fab-menu-item" id="${d.btnParty}">🎉 Пати</button>
-                        <button class="fab-menu-item" id="${d.btnPopout}">📺 Вынести чат <span class="${d.chatBadge}" id="${d.chatBadge}">0</span></button>
                     </div>
                 </div>
 
@@ -3393,7 +3130,6 @@
             </div>
             <div class="${d.fabBtn}" id="${d.fabBtn}" title="Меню Legion">
                 <span id="${d.fabIcon}">🐱</span>
-                <span class="${d.chatBadge}" id="${d.fabChatBadge}">0</span>
             </div>
         `;
         },
@@ -3402,35 +3138,17 @@
          * Модалка служебных настроек аддона (открывается из FAB-меню).
          * Обработчики кнопок навешивает UI.openSettings().
          *
-         * @param {boolean} chatDisabled    перехват чата отключён
-         * @param {boolean} addonHighlight  подсветка ников Legion включена (11.6.0g-4)
+         * 11.7.0: настройки чата (7TV, перехват ленты, подсветка ников)
+         * удалены вместе с подсистемой чата — параметров у шаблона больше нет.
          */
-        settingsModal(chatDisabled, addonHighlight = true) {
+        settingsModal() {
             return `
                 <h2>⚙️ Настройки аддона <button class="custom-close" id="custom-close-btn">✖</button></h2>
                 <div style="display:flex; flex-direction:column; gap:15px; padding:10px;">
-                    <button id="modal-7tv-btn" style="width:100%; padding:10px; background:#2a2030; border:1px solid #caa55c; color:#ffcf6a; border-radius:6px; cursor:pointer; text-align:left;">🎭 Настройки канала 7TV</button>
-                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer;">
-                        <span>🚫 Отключить перехват чата</span>
-                        <input type="checkbox" class="lg-toggle" id="modal-chk-chat" ${chatDisabled ? 'checked' : ''}>
-                    </label>
-                    <!-- 11.6.4e: тумблер отображения 7TV-смайлов. Состояние ставит
-                         и сохраняет UI.openSettings() (localStorage
-                         'LEGION_7TV_DISABLED'), читают рендер сообщений и загрузчик
-                         набора (modules/chat/chat-emotes.js). -->
-                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
-                        <span>🎭 Отображать смайлы 7TV</span>
-                        <input type="checkbox" class="lg-toggle" id="modal-chk-7tv">
-                    </label>
-                    <!-- v11.6.0g-4: подсветка ников пользователей аддона в чате -->
-                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
-                        <span>⚡ Подсветка ников Legion</span>
-                        <input type="checkbox" class="lg-toggle" id="modal-chk-addon-hl" ${addonHighlight ? 'checked' : ''}>
-                    </label>
                     <!-- v11.6.1g: тумблер уведомлений о новых версиях.
                          Состояние ставит и сохраняет UI.openSettings() (localStorage
-                         'LEGION_UPDATE_NOTIFY'), сама проверка версии в chat-net.js
-                         продолжает работать — просто молча. -->
+                         'LEGION_UPDATE_NOTIFY'); проверка версии при выключенном
+                         тумблере работает молча. -->
                     <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
                         <span>🔔 Уведомлять о новых версиях</span>
                         <input type="checkbox" class="lg-toggle" id="modal-chk-update-notify">
@@ -3927,60 +3645,18 @@
 
             return modal;
         },
-        // ⚙️ Служебные настройки аддона: канал 7TV и перехват чата.
-        // Вынесены из FAB-меню в модалку, чтобы меню не разрасталось.
+        // ⚙️ Служебные настройки аддона: уведомления о версиях, боевой
+        // ассистент и место входа в меню. Настройки чата (7TV, перехват
+        // ленты, подсветка ников) удалены в 11.7.0 вместе с подсистемой чата.
         openSettings() {
-            const chatDisabled = (typeof Chat !== 'undefined') ? !!Chat.disabled : false;
-            // 11.6.0g-4: состояние тумблера подсветки ников (дефолт — включено).
-            const addonHighlight = (typeof Chat !== 'undefined') ? Chat.addonHighlight !== false : true;
-
             // Разметка модалки — в core/ui-templates.js (UITemplates.settingsModal).
-            const modal = this.showModal(UITemplates.settingsModal(chatDisabled, addonHighlight), { compact: true });
+            const modal = this.showModal(UITemplates.settingsModal(), { compact: true });
 
             if (!modal) return;
 
-            modal.querySelector('#modal-7tv-btn')?.addEventListener('click', () => {
-                this.closeModals();
-                if (typeof Chat !== 'undefined' && typeof Chat.open7tvSettings === 'function') {
-                    Chat.open7tvSettings();
-                }
-            });
-
-            modal.querySelector('#modal-chk-chat')?.addEventListener('change', (e) => {
-                if (typeof Chat !== 'undefined' && typeof Chat.setDisabled === 'function') {
-                    Chat.setDisabled(e.target.checked);
-                }
-            });
-
-            // 11.6.4e: тумблер «🎭 Отображать смайлы 7TV». Дефолт — включено
-            // (ключа в localStorage ещё нет). Флаг читают
-            // SevenTV.replaceEmotes / decorate / load() в
-            // modules/chat/chat-emotes.js, поэтому и замена смайлов, и запросы
-            // к 7TV прекращаются сразу, без перезагрузки страницы.
-            const tvChk = modal.querySelector('#modal-chk-7tv');
-            if (tvChk) {
-                tvChk.checked = localStorage.getItem('LEGION_7TV_DISABLED') !== 'true';
-                tvChk.addEventListener('change', (e) => {
-                    localStorage.setItem('LEGION_7TV_DISABLED', String(!e.target.checked));
-                    // Chat.setSevenTVEnabled() догрузит набор (если аддон
-                    // стартовал с выключенным тумблером) и перерисует
-                    // открытый чат.
-                    if (typeof Chat !== 'undefined' && typeof Chat.setSevenTVEnabled === 'function') {
-                        Chat.setSevenTVEnabled(e.target.checked);
-                    }
-                });
-            }
-
-            // 11.6.0g-4: подсветка ников Legion — сохраняем и перерисовываем чат.
-            modal.querySelector('#modal-chk-addon-hl')?.addEventListener('change', (e) => {
-                if (typeof Chat !== 'undefined' && typeof Chat.setAddonHighlight === 'function') {
-                    Chat.setAddonHighlight(e.target.checked);
-                }
-            });
-
             // 11.6.1g: тумблер уведомлений о новых версиях.
             // Дефолт — включено (ключа в localStorage ещё нет). Значение читает
-            // Chat.checkForUpdates() перед GM_notification.
+            // checkAddonUpdate() из main.js перед GM_notification.
             const notifyOn = localStorage.getItem('LEGION_UPDATE_NOTIFY') !== 'false';
             const notifyChk = modal.querySelector('#modal-chk-update-notify');
             if (notifyChk) notifyChk.checked = notifyOn;
@@ -4398,8 +4074,7 @@
             const inMine = !!document.querySelector('.mn-world') ||
                            !!document.querySelector('.mn-screen') ||
                            location.search.includes('sid=') ||
-                           location.pathname.includes('/mine') ||
-                           (typeof Chat !== 'undefined' && Chat.isInMine && Chat.isInMine());
+                           location.pathname.includes('/mine');
             if (inMine) return { text: '⛏️ Шахта', color: '#4cc95a' };
 
             let inQuest = false;
@@ -4767,6 +4442,15 @@
         }
     };
 
+    // ===== src/modules/miner.js (удалён в 11.6.4b: античит, используется заглушка) =====
+    const Miner = {
+        abortController: null,
+        init() {
+            document.getElementById(DOM_IDS.btnAutoMine)?.remove();
+        },
+        stopMining() {}
+    };
+
     // ===== src/modules/build-sim.js =====
     // ============================================================
     // 4. МОДУЛЬ: ПЛАНИРОВЩИК БИЛДОВ — РАДИАЛЬНОЕ СОЗВЕЗДИЕ
@@ -4925,6 +4609,22 @@
         isSkipFx(key) { return SKIP_FX_PREFIXES.some(p => key.indexOf(p) === 0); },
 
         /**
+         * Коэффициент перевода сырого fx во вторичную характеристику.
+         *
+         * В игре resist/pierce лежат в fx «сырыми» и переводятся в статы через
+         * LGGameData.xstats.fromFx (обычно 0.5: fx 60 -> +30). Без множителя
+         * подсказки и сводка показывали удвоенные значения (+60 вместо +30).
+         */
+        xstatFromFx() {
+            const src = (typeof G !== 'undefined' && G && G.LGGameData && G.LGGameData.xstats)
+                ? G.LGGameData.xstats.fromFx
+                : null;
+            const base = { resist: 0.5, pierce: 0.5 };
+            if (!src || typeof src !== 'object') return base;
+            return { ...base, ...src };
+        },
+
+        /**
          * Текст навыка с подстановкой значений fx за текущий ранг.
          * Макросы cleaveBoss/penBoss/critX считаются на лету — их нет в fx
          * (см. kv() в reference/LegionFrontSRC/site/skills.js).
@@ -4933,14 +4633,36 @@
             if (!node || !node.text) return '';
             const r = Math.max(1, +rank || 1);
             const fx = node.fx || {};
+            const fromFx = this.xstatFromFx();
             const fmt = (val) => Number.isInteger(val) ? String(val) : val.toFixed(1).replace(/\.0$/, '').replace('.', ',');
-            return String(node.text).replace(/\{(\w+)\}/g, (match, key) => {
+            const scaleOf = (key) => {
+                const s = +fromFx[key];
+                return isFinite(s) ? s : 1;
+            };
+            const rawText = String(node.text);
+
+            let out = rawText.replace(/\{(\w+)\}/g, (match, key) => {
                 if (key === 'cleaveBoss') return fmt((fx.cleave || 0) * r * 0.4);
                 if (key === 'penBoss') return fmt((fx.pierce || 0) * r / 20);
                 if (key === 'critX') return fmt(2 + (fx.critDmg || 0) * r / 100);
+                // resist/pierce: сырой fx -> характеристика через fromFx.
+                if (key === 'resist' || key === 'pierce') return fmt((fx[key] || 0) * r * scaleOf(key));
                 if (fx[key] !== undefined) return fmt(fx[key] * r);
                 return match;
             });
+
+            // Игра дописывает вторичные статы, даже если в тексте узла нет
+            // плейсхолдера: «Физ. урон +5 · Сопротивление +30».
+            const notes = [];
+            if (fx.resist !== undefined && !/\{resist\}/.test(rawText)) {
+                notes.push(`Сопротивление +${fmt(fx.resist * r * scaleOf('resist'))}`);
+            }
+            if (fx.pierce !== undefined && !/\{pierce\}/.test(rawText)) {
+                notes.push(`Пробивание +${fmt(fx.pierce * r * scaleOf('pierce'))}%`);
+            }
+            if (notes.length) out += ' · ' + notes.join(' · ');
+
+            return out;
         },
 
         /** Кнопка BuildSim больше не нужна (её ведёт HeroPlanner), но init
@@ -6336,14 +6058,19 @@
                         return;
                     }
                     // Фолбэк: структурированные fx узла (текст не распознан).
+                    const fromFx = this.xstatFromFx();
                     for (const [fk, fv] of Object.entries(n.fx || {})) {
                         if (this.isSkipFx(fk) || !isFinite(+fv)) continue;
                         const pct = ['critDmg', 'skelN', 'skelT', 'def', 'resist', 'pierce'].indexOf(fk) < 0;
+                        // resist/pierce: сырой fx -> стат через fromFx (0.5),
+                        // иначе сводка удваивала значения (+60 вместо +30).
+                        const scale = isFinite(+fromFx[fk]) ? +fromFx[fk] : 1;
+                        const amount = (+fv) * r * scale;
                         const key = 'fx:' + fk;
                         const hit = map.get(key);
-                        if (hit) { hit.v += (+fv) * r; hit.names.push(n.name); }
+                        if (hit) { hit.v += amount; hit.names.push(n.name); }
                         else {
-                            const item = { label: this.fxNames[fk] || fk, sign: '+', suf: pct ? '%' : '', v: (+fv) * r, color: this.branchColor(bi), names: [n.name] };
+                            const item = { label: this.fxNames[fk] || fk, sign: '+', suf: pct ? '%' : '', v: amount, color: this.branchColor(bi), names: [n.name] };
                             map.set(key, item);
                             out.push(item);
                         }
@@ -9150,8 +8877,7 @@
             // ME живёт в page-context: в песочнице Tampermonkey только через G.
             const me = G.ME || null;
             const hero = me?.hero || me?.me || null;
-            const login = me?.user?.login || hero?.login
-                || (typeof Chat !== 'undefined' ? Chat.myNick : '') || '';
+            const login = me?.user?.login || hero?.login || '';
             return { hero, login: String(login || '') };
         },
 
@@ -10047,14 +9773,12 @@ const Players = {
             const num = Math.max(0, Number(count) || 0);
             if (num > 0) this.unreadDMs[key] = num;
             else delete this.unreadDMs[key];
-            this.refreshUnreadDMViews();
         },
 
         addUnreadDM(nick) {
             if (!nick) return 0;
             const key = String(nick).trim().toLowerCase();
             this.unreadDMs[key] = (this.unreadDMs[key] || 0) + 1;
-            this.refreshUnreadDMViews();
             return this.unreadDMs[key];
         },
 
@@ -10063,17 +9787,6 @@ const Players = {
             const key = String(nick).trim().toLowerCase();
             if (!(key in this.unreadDMs)) return;
             delete this.unreadDMs[key];
-            this.refreshUnreadDMViews();
-        },
-
-        refreshUnreadDMViews() {
-            // Перерисовываем вкладку «✉️ ЛС», если она активна.
-            // (Список «Друзья» удалён в 11.5.4: в игре появились нативные друзья.)
-            try {
-                if (typeof Chat !== 'undefined' && Chat.activeTab === 'dm' && typeof Chat.renderMessages === 'function') {
-                    Chat.renderMessages();
-                }
-            } catch (e) {}
         },
 
         init() {
@@ -10083,9 +9796,8 @@ const Players = {
         getMyNick() {
             // ME живёт в page-context: в песочнице Tampermonkey (@grant) обычный
             // window его не видит, поэтому читаем через G (= unsafeWindow).
-            return (G.ME && (G.ME.user?.name || G.ME.hero?.n || G.ME.hero?.name)) ||
-                   (typeof Chat !== 'undefined' && Chat.myNick) ||
-                   '';
+            // 11.7.0: фолбэк на Chat.myNick убран вместе с подсистемой чата.
+            return (G.ME && (G.ME.user?.name || G.ME.hero?.n || G.ME.hero?.name)) || '';
         },
 
         getCityPlayers() {
@@ -10263,11 +9975,8 @@ const Players = {
                     }
                 });
             } catch (e) {}
-            if (typeof Chat !== 'undefined' && Array.isArray(Chat.messages)) {
-                Chat.messages.slice(-50).forEach(m => {
-                    if (m && m.author && !m.isSystem) this.addPlayer(m.author, '💬 Чат');
-                });
-            }
+            // 11.7.0: сбор ников из Chat.messages удалён вместе с подсистемой
+            // чата — остаются DOM-источники (.cy-chat-*) и карта онлайна.
 
             // Пересчёт лотов по снимку аукциона (без повторного запроса)
             const applyLots = (lots) => {
@@ -10469,15 +10178,16 @@ const Players = {
                 this.clearUnreadDM(peerNick);
                 this.renderDMMessages(peerNick);
             } else if (!isSelf && saved) {
-                // Счётчик непрочитанных + кликабельный тост
+                // Счётчик непрочитанных + кликабельный тост: открываем окно
+                // «Разведка» сразу на диалоге с этим игроком. v11.7.0: раньше
+                // тост дёргал Chat.openDM() из удалённой подсистемы чата.
                 this.addUnreadDM(peerNick);
                 UI.showToast(
                     `✉️ ЛС от ${peerNick}: ${text.length > 25 ? text.slice(0, 25) + '...' : text}`,
                     false,
-                    () => {
-                        if (typeof Chat !== 'undefined' && typeof Chat.openDM === 'function') {
-                            Chat.openDM(peerNick);
-                        }
+                    async () => {
+                        await this.open();
+                        this.openDossier(peerNick, 'players', true);
                     }
                 );
             }
@@ -10516,38 +10226,6 @@ const Players = {
             }).join('');
 
             historyBox.scrollTop = historyBox.scrollHeight;
-        },
-
-        /**
-         * Открыть ЛС с игроком (ПАТЧ 11.6.4f).
-         *
-         * Раньше здесь кликали по нативным узлам .cy-chat (data-dm + вкладка
-         * «Личные»), но нативный чат теперь скрыт CSS-ом и живёт в DOM только
-         * ради LGChatOne.place()/dock(). Идём через собственный Chat.openDM():
-         * он открывает PiP и переключает вкладку «✉️ ЛС».
-         *
-         * text — необязательный черновик. openDM() асинхронный (может создать
-         * PiP-окно), поэтому поле ввода ищем после его завершения.
-         */
-        async openWhisperWith(nick, text = '') {
-            if (!nick) return;
-            if (typeof Chat === 'undefined' || typeof Chat.openDM !== 'function') return;
-
-            try {
-                await Chat.openDM(nick);
-
-                if (!text) return;
-                const pipDoc = Chat._pipDoc;
-                const inp = pipDoc && typeof pipDoc.getElementById === 'function'
-                    ? pipDoc.getElementById('chat-input')
-                    : null;
-                if (inp) {
-                    inp.value = text;
-                    inp.focus();
-                }
-            } catch (e) {
-                dbg('openWhisperWith failed:', e);
-            }
         },
 
         async open() {
@@ -11073,12 +10751,8 @@ const Players = {
             const pageWin = (typeof G !== 'undefined' && G) ? G : window;
 
             if (from.inMine && PocketCity.isMineOpen()) {
-                // LGCity.open() перевешивает общий чат в root города, из-за чего
-                // после возврата в шахту он оставался под оверлеем. Dock('mine')
-                // делает шахту последней сценой и возвращает блок на место.
-                if (typeof Chat !== 'undefined' && typeof Chat.showForMine === 'function') {
-                    try { Chat.showForMine(); } catch (e) { dbg('Чат шахты не вернулся:', e); }
-                }
+                // 11.7.0: возврат нативного чата шахты (Chat.showForMine())
+                // удалён вместе с подсистемой чата — LGChatOne игра вешает сама.
                 const city = pageWin.LGCity;
                 // Гасим городской слой только пока игра всё ещё на вкладке
                 // «Город» (шахта всегда лежит поверх неё). Иначе не мешаем.
@@ -11178,7 +10852,7 @@ const Players = {
 
             // Игровые объекты (LGCity / __lgQuestContext / cityFiles) живут
             // в page-context: после @grant window — песочница, поэтому берём
-            // unsafeWindow (G), как это уже делается в chat.js.
+            // unsafeWindow (G), как это уже делается в main.js.
             const pageWin = (typeof G !== 'undefined' && G) ? G : window;
 
             // 0. Запоминаем, откуда пришли (v11.6.4d), чтобы вернуться туда же
@@ -11263,8 +10937,13 @@ const Players = {
     // Подсказки по механикам боссов в походе (патч 11.6.2b): раз в секунду
     // читает состояние похода штатным геттером игры LGQuest._view()
     // (структура — docs/API.md, раздел «Объект состояния похода»).
-    // Вывод — поверх экрана: либо красный баннер «НЕ ПИШИ!», либо готовая
-    // команда с кнопкой «Вставить в чат».
+    // Вывод — поверх экрана: предупреждение «ничего не пиши» без кнопок либо
+    // кликабельный бейдж с командой и кнопкой «Вставить».
+    //
+    // v11.7.0: автоотправки POST /api/qsay здесь нет и не было — аддон только
+    // копирует команду в буфер и/или подставляет её в #qSayIn нативным
+    // сеттером (обход noPaste). Отправляет игрок сам по Enter. Тот же тик
+    // показывает баннер сбора отряда с кнопкой «Присоединиться» (qact join).
     //
     // Подключается после core/ui.js и modules/pocket-city.js (SHARED_MODULES
     // в build.js). Игровые объекты берём из G (core/constants.js — это
@@ -11312,9 +10991,22 @@ const Players = {
 
             try {
                 const q = quest._view();
-                // Ассистент нужен только полноправному участнику похода:
+                if (!q || !q.on) {
+                    this._clear();
+                    return;
+                }
+
+                // 11.7.0: сбор отряда. Баннер с кнопкой «Присоединиться» видят
+                // все, кто ещё не в отряде; как только party станет 'in'/'q'
+                // или истечёт таймер — баннер уходит сам.
+                if (this._gatherActive(q)) {
+                    this._renderGather(q);
+                    return;
+                }
+
+                // Подсказки нужны только полноправному участнику похода:
                 // party = 'q' (очередь), 'ghost' (призрак), 'out' — не наш бой.
-                if (!q || !q.on || q.party !== 'in') {
+                if (q.party !== 'in') {
                     this._clear();
                     return;
                 }
@@ -11322,6 +11014,106 @@ const Players = {
                 this._render(this._evaluate(q));
             } catch (e) {
                 console.warn('[LGU] CombatAssistant error:', e);
+            }
+        },
+
+        /**
+         * Идёт ли сбор отряда и мы ещё не внутри.
+         *
+         * Условия из ТЗ 11.7.0: фаза `gather` с живым таймером (или q.k ===
+         * 'gather' без таймера) и party не 'in'/'q'/'ghost'.
+         */
+        _gatherActive(q) {
+            if (!q) return false;
+            if (q.party === 'in' || q.party === 'q' || q.party === 'ghost') return false;
+            const until = +(q.gather && q.gather.until) || 0;
+            if (until > Date.now()) return true;
+            // k === 'gather' без until — «сбор идёт», обратного отсчёта нет.
+            return (q.k === 'gather' || q.kind === 'gather') && !until;
+        },
+
+        /**
+         * Баннер сбора с таймером MM:SS и кнопкой «Присоединиться».
+         * Перерисовывается только при смене фазы/дедлайна, а текст таймера
+         * обновляется каждый тик — кнопку при этом не пересоздаём.
+         */
+        _renderGather(q) {
+            if (!this._el) return;
+            const until = +(q.gather && q.gather.until) || 0;
+            const hw = !!(q.gather && q.gather.hw);
+            const sign = `gather|${until}|${hw}|${q.k || q.kind || ''}`;
+
+            if (this._currentState !== sign) {
+                this._currentState = sign;
+                this._el.innerHTML = `
+                    <div class="lg-combat-gather">
+                        <div class="lg-combat-gather-head">${hw ? '🌀 Сбор у портала Изнанки' : '⚔️ Идёт сбор в поход'}</div>
+                        <div class="lg-combat-gather-timer" id="lg-gather-timer">--:--</div>
+                        <button type="button" class="lg-combat-btn" id="lg-gather-join">Присоединиться</button>
+                    </div>
+                `;
+                const btn = this._el.querySelector('#lg-gather-join');
+                if (btn) btn.addEventListener('click', () => this._joinQuest(btn));
+            }
+
+            this._updateGatherTimer(until);
+        },
+
+        /** Обратный отсчёт MM:SS до q.gather.until. */
+        _updateGatherTimer(until) {
+            if (!this._el) return;
+            const el = this._el.querySelector('#lg-gather-timer');
+            if (!el) return;
+            if (!until) {
+                el.textContent = 'сбор идёт';
+                return;
+            }
+            const left = Math.max(0, until - Date.now());
+            // ceil: на последней секунде показываем 00:01, а не 00:00 раньше времени.
+            const total = Math.ceil(left / 1000);
+            const mm = String(Math.floor(total / 60)).padStart(2, '0');
+            const ss = String(total % 60).padStart(2, '0');
+            el.textContent = `${mm}:${ss}`;
+        },
+
+        /**
+         * Вступление в отряд: POST /api/qact { k: 'join' } через Utils.fetchApi.
+         * Кнопка блокируется на время запроса, результат — тостом.
+         * Автоотправки команд в чат здесь нет: только действие игры qact.
+         */
+        async _joinQuest(btn) {
+            if (!btn || btn.disabled) return;
+            const label = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Вступаем...';
+
+            const toast = (msg, isError) => {
+                if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, !!isError);
+            };
+
+            let ok = false;
+            let errText = '';
+            try {
+                const res = (typeof Utils !== 'undefined' && typeof Utils.fetchApi === 'function')
+                    ? await Utils.fetchApi('/api/qact', { k: 'join' })
+                    : null;
+                ok = !!res && res.ok !== false;
+                errText = (res && (res.body?.error || res.body?.err || res.error)) || '';
+            } catch (e) {
+                errText = (e && e.message) || '';
+            }
+
+            if (ok) {
+                toast('✅ Заявка на вступление отправлена', false);
+                // Баннер уходит сразу: следующий тик увидит party === 'in'/'q'.
+                this._clear();
+                return;
+            }
+
+            toast(`Не удалось вступить: ${errText || 'ошибка сервера'}`, true);
+            if (btn.isConnected) {
+                btn.disabled = false;
+                btn.textContent = label || 'Присоединиться';
             }
         },
 
@@ -11387,7 +11179,7 @@ const Players = {
 
             // 2. Газ в ловушке: писать нельзя, пока он не рассеется.
             if (q.tr && q.tr.gas && (q.tr.st === 'act' || q.tr.st === 'wait')) {
-                return { action: 'SILENCE', text: 'ГАЗ! НЕ ПИШИ!' };
+                return { action: 'SILENCE', text: '⚠️ ФИНТ / ТИШИНА — ничего не пиши!' };
             }
 
             // 3. Режим тишины босса. Логика 1:1 с sayHush() из site/quest.js:
@@ -11396,19 +11188,19 @@ const Players = {
             const M = q.bg && q.bg.mech;
             if (M) {
                 if (M.fake === true) {
-                    return { action: 'SILENCE', text: 'ФИНТ! НЕ ПИШИ!' };
+                    return { action: 'SILENCE', text: '⚠️ ФИНТ / ТИШИНА — ничего не пиши!' };
                 }
                 const silentFam = M.fam === 'silence' && M.id !== 'M94' && M.id !== 'M55';
                 const silentTip = /ничего не пиш|молчите|не пишите/i.test(M.tip || '');
                 if (silentFam || silentTip) {
-                    return { action: 'SILENCE', text: 'ТИШИНА! НЕ ПИШИ!' };
+                    return { action: 'SILENCE', text: '⚠️ ФИНТ / ТИШИНА — ничего не пиши!' };
                 }
             }
 
             // 3.1. Финт/тишина на телеграфе обычного боя (docs/API.md: tele.fake,
             //      tele.hush). Писать слово в этом случае запрещено.
             if (q.b && q.b.tele && (q.b.tele.fake === true || q.b.tele.hush === true)) {
-                return { action: 'SILENCE', text: 'ФИНТ! НЕ ПИШИ!' };
+                return { action: 'SILENCE', text: '⚠️ ФИНТ / ТИШИНА — ничего не пиши!' };
             }
 
             // 4. Фонари Джека-Фонарщика: hw.lan.lit — 6 фонарей, false = погас.
@@ -11491,19 +11283,51 @@ const Players = {
         },
 
         /**
+         * Копирование команды в буфер обмена (клик по бейджу).
+         * Подпись бейджа кратко меняется на «Скопировано ✓».
+         */
+        _copyCmd(el, text) {
+            const restore = () => {
+                if (!el || !el.isConnected) return;
+                el.textContent = text;
+                el.classList.remove('copied');
+            };
+            const done = () => {
+                if (!el || !el.isConnected) return;
+                el.textContent = 'Скопировано ✓';
+                el.classList.add('copied');
+                setTimeout(restore, 1200);
+            };
+            const fail = () => {
+                if (typeof UI !== 'undefined' && UI.showToast) {
+                    UI.showToast(`Не удалось скопировать. Текст: ${text}`, true);
+                }
+            };
+
+            if (typeof Utils === 'undefined' || typeof Utils.copyText !== 'function') {
+                fail();
+                return;
+            }
+            Utils.copyText(text).then(ok => (ok ? done() : fail()), fail);
+        },
+
+        /**
          * Вставка подсказки в поле команды похода.
          *
-         * v11.6.2b.1: сама логика (нативный сеттер value + input/change,
-         * обход запрета вставки в quest.js) вынесена в общий хелпер
-         * core/utils-chat.js — он же нужен кнопке «❤» в модуле пати.
+         * v11.6.2b.1: логика (нативный сеттер value + input/change, обход
+         * запрета вставки quest.js) вынесена в общий хелпер core/utils.js —
+         * он же нужен кнопке «❤» в модуле пати. Автоотправки нет: игрок жмёт
+         * Enter сам.
+         *
+         * @returns {boolean} true — текст оказался в поле ввода
          */
         _insert(text) {
-            if (typeof Utils === 'undefined' || typeof Utils.insertToQuestChat !== 'function') return;
+            if (typeof Utils === 'undefined' || typeof Utils.insertToQuestChat !== 'function') return false;
             const inserted = Utils.insertToQuestChat(text);
-            // Если поля нет — хелпер уже показал тост про копирование в буфер.
             if (inserted && typeof UI !== 'undefined' && UI.showToast) {
                 UI.showToast(`Вставлено: ${text} — Enter, чтобы отправить`);
             }
+            return inserted;
         },
 
         _render(res) {
@@ -11541,18 +11365,28 @@ const Players = {
                 if (this._currentState === sign) return;
                 this._currentState = sign;
 
+                const cmd = String(res.text == null ? '' : res.text);
+                // Команда — кликабельный бейдж (копирование в буфер) и кнопка
+                // «Вставить» (нативный сеттер #qSayIn). Автоотправки нет.
                 this._el.innerHTML = `
                     <div class="lg-combat-suggest">
-                        <div>
-                            <div style="font-size:12px; opacity:0.8;">${esc(res.hint || '')}</div>
-                            <div style="color:#ffcf6a;">${esc(res.text)}</div>
+                        <div class="lg-combat-info">
+                            <div class="lg-combat-hint">${esc(res.hint || '')}</div>
+                            <button type="button" class="lg-combat-cmd" data-copy-cmd="${esc(cmd)}" title="Нажми, чтобы скопировать">${esc(cmd)}</button>
                         </div>
-                        <button class="lg-combat-btn" id="lg-combat-insert">Вставить в чат</button>
+                        <button type="button" class="lg-combat-btn" data-insert-cmd="${esc(cmd)}">Вставить</button>
                     </div>
                 `;
 
-                const btn = this._el.querySelector('#lg-combat-insert');
-                if (btn) btn.onclick = () => this._insert(res.text);
+                const copyBtn = this._el.querySelector('[data-copy-cmd]');
+                if (copyBtn) copyBtn.addEventListener('click', () => this._copyCmd(copyBtn, cmd));
+
+                const insertBtn = this._el.querySelector('[data-insert-cmd]');
+                if (insertBtn) insertBtn.addEventListener('click', () => {
+                    if (!this._insert(cmd) && typeof UI !== 'undefined' && UI.showToast) {
+                        UI.showToast('Поле команды похода не найдено', true);
+                    }
+                });
             }
         }
     };
@@ -11601,7 +11435,7 @@ const Players = {
     // v11.6.0d: взаимный хил. В строке HP-панели у раненого союзника появляется
     // кнопка «❤». v11.6.2b.1: прямой POST /api/qact убран — кнопка теперь
     // подставляет в поле похода команду «лечить @ник» через общий хелпер
-    // Utils.insertToQuestChat() (core/utils-chat.js), отправляет игрок по Enter.
+    // Utils.insertToQuestChat() (core/utils.js), отправляет игрок по Enter.
     // Кнопка только если цель не мы, цель ранена, свой герой в походе и наш
     // класс — жрец (v11.6.0g-2: _prevMe.role === 'priest').
     // Под HP-панелью — блок «Журнал» с ленивой догрузкой GET .../log?since=.
@@ -13164,11 +12998,15 @@ const Players = {
             if (!target) return;
 
             const healCommand = `лечить @${target}`;
-            // Поля может не быть (не в походе / чат похода скрыт): тогда хелпер
-            // сам скопирует команду в буфер и покажет тост.
+            // Поля может не быть (не в походе / чат похода скрыт) — сообщаем
+            // игроку, что вставлять некуда (v11.7.0: автокопирования в буфер
+            // больше нет, команду можно скопировать кликом по бейджу
+            // боевого ассистента).
             const inserted = Utils.insertToQuestChat(healCommand);
             if (inserted) {
                 UI.showToast(`Текст «${healCommand}» вставлен в чат. Нажмите Enter.`, false);
+            } else {
+                UI.showToast('Поле команды похода не найдено', true);
             }
 
             // Кнопку возвращаем в исходный вид: busy-рендер («...») остался
@@ -16485,3092 +16323,6 @@ const Players = {
         summaryWin.LegionGuildSummary = GuildSummary;
     } catch (e) {}
 
-    // ===== src/modules/miner.js (удалён в 11.6.4b: античит, используется заглушка) =====
-    const Miner = {
-        abortController: null,
-        init() {
-            document.getElementById(DOM_IDS.btnAutoMine)?.remove();
-        },
-        stopMining() {}
-    };
-
-    // ===== src/modules/chat/chat-emotes.js =====
-    // ============================================================
-    // 7.1 МОДУЛЬ: ЧАТ — 7TV эмоуты
-    // ============================================================
-    // Вынесено из modules/chat.js (v11.6.0, этап 2 декомпозиции).
-    // Слой-миксин: ChatEmotes.SevenTV пробрасывается в Chat.SevenTV,
-    // а load()/loadSize() вызываются из Chat.init().
-
-    // 7TV: глобальные смайлики в чате
-    //
-    // Сайт отдаёт CSP `connect-src 'self'` и `img-src 'self' data: blob:`,
-    // поэтому:
-    //   • JSON эмоутов тянем через GM_xmlhttpRequest (обходит CSP);
-    //   • картинки грузим блобом и подставляем blob:-URL (разрешён img-src).
-    // UI стороннего аддона не копируем — только рендер смайликов.
-    // ============================================================
-    const SevenTV = {
-        API_URL: 'https://7tv.io/v3/emote-sets/global',
-        IVR_URL: 'https://api.ivr.fi/v2/twitch/user?login=',
-        CHANNEL_API_URL: 'https://7tv.io/v3/users/twitch/',
-        DEFAULT_CHANNEL: 'zakvielchannel',
-        CHANNEL_KEY: 'LEGION_7TV_CHANNEL',
-        // 11.6.4e: 'true' — смайлы 7TV не отображаются и не загружаются
-        // (тумблер «🎭 Отображать смайлы 7TV» в UI.openSettings()).
-        DISABLE_KEY: 'LEGION_7TV_DISABLED',
-        channel: 'zakvielchannel',   // текущий канал (переопределяется из localStorage)
-        _reloadQueued: false,
-        _cacheEpoch: 0,
-
-        // Размеры смайлов: применяются через CSS-переменную --t7-h.
-        SIZES: {
-            s: { h: '1.3em', label: 'S' },
-            m: { h: '1.9em', label: 'M' },
-            l: { h: '2.6em', label: 'L' },
-            x: { h: '3.4em', label: 'XL' }
-        },
-        size: 'm',
-        SIZE_KEY: 'LEGION_7TV_SIZE',
-
-        applySize() {
-            const conf = this.SIZES[this.size] || this.SIZES.m;
-            const docs = [document];
-            // Виджет может быть вынесен в PiP-окно — переменную нужно задать и там.
-            try {
-                if (typeof Chat !== 'undefined' && Chat._popoutWin && Chat._popoutWin.document) {
-                    docs.push(Chat._popoutWin.document);
-                }
-            } catch (e) {}
-            docs.forEach(doc => {
-                try {
-                    if (doc && doc.documentElement) {
-                        doc.documentElement.style.setProperty('--t7-h', conf.h);
-                    }
-                } catch (e) {}
-            });
-        },
-
-        loadSize() {
-            try {
-                const saved = localStorage.getItem(this.SIZE_KEY);
-                if (saved && this.SIZES[saved]) this.size = saved;
-            } catch (e) {}
-            this.applySize();
-        },
-
-        /**
-         * 11.6.4e: выключен ли рендер 7TV-смайлов.
-         *
-         * Ключ читается на каждом рендере/загрузке, а не кэшируется в поле:
-         * тумблер должен действовать сразу, без перезагрузки страницы.
-         */
-        isDisabled() {
-            try {
-                return localStorage.getItem(this.DISABLE_KEY) === 'true';
-            } catch (e) {
-                // localStorage недоступен (приватный режим) — считаем, что включено.
-                return false;
-            }
-        },
-        // 1×1 прозрачный GIF: заглушка до подгрузки блоба (data: разрешён CSP).
-        PLACEHOLDER: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
-        emotes: new Map(),      // name -> { url }
-        blobUrls: new Map(),    // name -> blob: URL
-        pending: new Map(),     // name -> Promise<string|null>
-        loaded: false,
-        loading: false,
-
-        requestJson(url) {
-            return new Promise((resolve, reject) => {
-                if (typeof GM_xmlhttpRequest === 'function') {
-                    GM_xmlhttpRequest({
-                        method: 'GET', url, timeout: 15000,
-                        onload: (r) => {
-                            if (r.status < 200 || r.status >= 300) return reject(new Error('HTTP ' + r.status));
-                            try { resolve(JSON.parse(r.responseText)); } catch (e) { reject(e); }
-                        },
-                        onerror: () => reject(new Error('network error')),
-                        ontimeout: () => reject(new Error('timeout'))
-                    });
-                    return;
-                }
-                // Без @grant запрос, скорее всего, заблокирует CSP сайта;
-                // оставляем fetch как совместимый фолбэк для других менеджеров.
-                fetch(url).then(r => r.json()).then(resolve, reject);
-            });
-        },
-
-        requestBlob(url) {
-            return new Promise((resolve, reject) => {
-                if (typeof GM_xmlhttpRequest === 'function') {
-                    GM_xmlhttpRequest({
-                        method: 'GET', url, responseType: 'blob', timeout: 15000,
-                        onload: (r) => {
-                            if (r.status < 200 || r.status >= 300 || !r.response) {
-                                return reject(new Error('HTTP ' + r.status));
-                            }
-                            resolve(r.response);
-                        },
-                        onerror: () => reject(new Error('network error')),
-                        ontimeout: () => reject(new Error('timeout'))
-                    });
-                    return;
-                }
-                fetch(url, { mode: 'cors' })
-                    .then(r => r.ok ? r.blob() : Promise.reject(new Error('HTTP ' + r.status)))
-                    .then(resolve, reject);
-            });
-        },
-
-        async load(force = false) {
-            // 11.6.4e: тумблер выключен — наборы 7TV не запрашиваем вовсе
-            // (экономия трафика). Chat.setSevenTVEnabled() догрузит набор,
-            // когда тумблер включат обратно.
-            if (this.isDisabled()) return;
-
-            if (this.loading) {
-                // Перезагрузка во время текущей загрузки — выполним после неё.
-                if (force) this._reloadQueued = true;
-                return;
-            }
-            if (this.loaded && !force) return;
-
-            this.loading = true;
-            this._resetCaches();
-
-            let count = 0;
-            try {
-                // 1. Глобальный набор 7TV.
-                const dataGlobal = await this.requestJson(this.API_URL);
-                count += this._addEmotes(dataGlobal && dataGlobal.emotes);
-
-                // 2. Набор канала: ник → Twitch ID (api.ivr.fi) → emote_set (7tv.io).
-                let saved = '';
-                try { saved = localStorage.getItem(this.CHANNEL_KEY) || ''; } catch (e) {}
-                this.channel = String(saved || this.channel || this.DEFAULT_CHANNEL).trim().toLowerCase();
-
-                if (this.channel) {
-                    try {
-                        const user = await this.requestJson(this.IVR_URL + encodeURIComponent(this.channel));
-                        const id = user && user[0] && user[0].id;
-                        if (id) {
-                            const dataChan = await this.requestJson(this.CHANNEL_API_URL + encodeURIComponent(id));
-                            const set = dataChan && dataChan.emote_set;
-                            count += this._addEmotes(set && set.emotes);
-                        }
-                    } catch (chanErr) {
-                        console.warn('[7TV] Не удалось загрузить канал', this.channel, chanErr);
-                    }
-                }
-
-                this.loaded = count > 0;
-                dbg(`[7TV] Загружено ${this.emotes.size} эмоутов (канал: ${this.channel}).`);
-            } catch (e) {
-                console.error('[7TV] Ошибка загрузки:', e);
-            } finally {
-                this.loading = false;
-                if (this.loaded) {
-                    // Смайлики пришли после первого рендера — обновим открытый чат.
-                    try {
-                        if (typeof Chat !== 'undefined' && Chat.widget) Chat.renderMessages();
-                    } catch (e) {}
-                }
-                if (this._reloadQueued) {
-                    this._reloadQueued = false;
-                    this.load(true);
-                }
-            }
-        },
-
-        // Сброс кэша эмоутов/картинок (смена канала или force-перезагрузка).
-        _resetCaches() {
-            this._cacheEpoch = (this._cacheEpoch || 0) + 1;
-            this.emotes.clear();
-            for (const url of this.blobUrls.values()) {
-                try { URL.revokeObjectURL(url); } catch (e) {}
-            }
-            this.blobUrls.clear();
-            this.pending.clear();
-        },
-
-        _addEmotes(emoteList) {
-            if (!Array.isArray(emoteList)) return 0;
-            let added = 0;
-            emoteList.forEach(e => {
-                const host = e && e.data && e.data.host;
-                if (!host || !host.url || !e.name || e.name === '__proto__') return;
-                const files = (host.files || []).filter(f => f && f.format === 'WEBP' && f.name);
-                const preferred = files.find(f => f.name === '2x.webp') || files[0];
-                this.emotes.set(e.name, { url: 'https:' + host.url + '/' + (preferred ? preferred.name : '2x.webp') });
-                added++;
-            });
-            return added;
-        },
-
-        replaceEmotes(rawText) {
-            if (!rawText) return '';
-            // replaceEmotes — единственная точка экранирования текста сообщения.
-            const text = String(rawText);
-            // 11.6.4e: тумблер «🎭 Отображать смайлы 7TV» выключен — отдаём
-            // обычный текст (экранированный, иначе получим XSS через innerHTML).
-            if (this.isDisabled()) return Utils.escapeHtml(text);
-            if (!this.emotes.size) return Utils.escapeHtml(text);
-
-            return text.split(/([^\p{L}\p{N}_]+)/u).map(part => {
-                if (!part) return '';
-                // Смайлом считается только целое слово; пунктуация/пробелы/эмодзи
-                // отделяются как разделители и экранируются как обычный текст.
-                if (!/^[\p{L}\p{N}_]+$/u.test(part) || !this.emotes.has(part)) return Utils.escapeHtml(part);
-                const name = Utils.escapeHtml(part);
-                return `<img class="t7-emote" data-t7="${name}" src="${this.PLACEHOLDER}" title="${name}" alt="${name}" loading="lazy">`;
-            }).join('');
-        },
-
-        // После вставки HTML: меняем заглушки на blob:-URL смайликов.
-        decorate(root) {
-            // 11.6.4e: тумблер выключен — img.t7-emote в разметке не появляются,
-            // но на всякий случай не тянем блобы смайлов.
-            if (this.isDisabled()) return;
-            if (!root || typeof root.querySelectorAll !== 'function' || !this.emotes.size) return;
-            root.querySelectorAll('img.t7-emote[data-t7]').forEach(img => {
-                const name = img.getAttribute('data-t7');
-                if (!name) return;
-                const ready = this.blobUrls.get(name);
-                if (ready) { img.src = ready; return; }
-                if (img.getAttribute('data-t7-loading') === '1') return;
-                img.setAttribute('data-t7-loading', '1');
-                this.getBlobUrl(name).then(url => {
-                    img.removeAttribute('data-t7-loading');
-                    if (url) img.src = url;
-                    else if (img.parentNode) img.replaceWith((img.ownerDocument || document).createTextNode(name));
-                });
-            });
-        },
-
-        getBlobUrl(name) {
-            if (this.blobUrls.has(name)) return Promise.resolve(this.blobUrls.get(name));
-            if (this.pending.has(name)) return this.pending.get(name);
-            const emote = this.emotes.get(name);
-            if (!emote || !emote.url) return Promise.resolve(null);
-
-            const epoch = this._cacheEpoch;
-            const task = this.requestBlob(emote.url).then(blob => {
-                const url = URL.createObjectURL(blob);
-                // Пока грузили, канал/набор могли перезагрузить — старый блоб не кэшируем.
-                if (epoch !== this._cacheEpoch) {
-                    try { URL.revokeObjectURL(url); } catch (e) {}
-                    return null;
-                }
-                this.blobUrls.set(name, url);
-                return url;
-            }).catch(e => {
-                dbg('[7TV] Не удалось загрузить эмоут', name, e);
-                return null;
-            }).finally(() => this.pending.delete(name));
-
-            this.pending.set(name, task);
-            return task;
-        }
-    };
-
-    // Слой чата: 7TV-эмоуты (склейка — см. chat/chat.js).
-    const ChatEmotes = { SevenTV };
-
-    // ===== src/modules/chat/chat-history.js =====
-    // ============================================================
-    // 7.2 МОДУЛЬ: ЧАТ — история и кэш сообщений
-    // ============================================================
-    // Вынесено из modules/chat.js (v11.6.0, этап 2 декомпозиции).
-    // Слой-миксин: методы рассчитывают на this === Chat, поэтому
-    // вливаются через Object.assign(Chat, ChatHistory).
-
-    const ChatHistory = {
-        // Ключ localStorage, куда пишется кэш последних 200 сообщений.
-        STORAGE_KEY: 'LEGION_CHAT_HISTORY',
-        // Флаг «история уже подтянута» — loadHistory() выполняется один раз.
-        historyLoaded: false,
-        // Статусы из /api/city/enter (заполняются в loadHistory).
-        muted: false,
-        mod: null,
-        ign: new Set(),
-
-        saveToStorage(author, text, role, isSystem, channel = null, k = null, aw = null, rank = null, id = null) {
-            try {
-                const history = this.loadFromStorage();
-                history.push({ author, text, role, isSystem, channel, k, aw, rank, id, ts: Date.now() });
-                const trimmed = history.length > 200 ? history.slice(-200) : history;
-                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(trimmed));
-            } catch (e) { /* quota */ }
-        },
-
-        loadFromStorage() {
-            try {
-                const raw = localStorage.getItem(this.STORAGE_KEY);
-                if (!raw) return [];
-                const arr = JSON.parse(raw);
-                return Array.isArray(arr) ? arr : [];
-            } catch (e) { return []; }
-        },
-
-        // Своё сообщение кэшируем/обновляем. Ответ на отправку и эхо из потока —
-        // это один и тот же объект (общий ts), поэтому запись ищется по нему:
-        // эхо дописывает в localStorage id, aw и rank, не плодя дублей.
-        cacheOwnMessage(msg) {
-            if (!msg || !msg.text) return;
-            try {
-                const channel = msg.channel || 'city';
-                const ts = msg.ts || Date.now();
-                const entry = {
-                    author: msg.author, text: msg.text, role: msg.role, isSystem: !!msg.isSystem,
-                    channel: msg.channel, k: msg.k, aw: msg.aw, rank: msg.rank,
-                    id: msg.id || null, ts
-                };
-                const history = this.loadFromStorage();
-                const idx = history.findIndex(h => h && h.ts === ts && h.text === msg.text
-                    && (h.author || '') === (msg.author || '')
-                    && (h.channel || 'city') === channel);
-                if (idx >= 0) {
-                    history[idx] = { ...history[idx], ...entry };
-                    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(history));
-                    return;
-                }
-                history.push(entry);
-                const trimmed = history.length > 200 ? history.slice(-200) : history;
-                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(trimmed));
-            } catch (e) {}
-        },
-
-        async loadHistory() {
-            if (this.historyLoaded) return;
-            this.historyLoaded = true;
-
-            const cached = this.loadFromStorage();
-            if (cached.length > 0) {
-                cached.forEach(m => {
-                    if (!this.messages.some(cur => (cur.id && cur.id === m.id) || (cur.author === m.author && cur.text === m.text && cur.channel === m.channel))) {
-                        this.messages.push({ author: m.author, text: m.text, role: m.role, rank: m.rank, isSystem: m.isSystem, channel: m.channel, k: m.k, aw: m.aw, id: m.id || null, ts: m.ts });
-                    }
-                });
-            }
-
-            try {
-                const res = await Utils.fetchApi('/api/city/enter', {});
-                const data = res?.body || res;
-
-                // Флаги мута / модерации / игнора из ответа сервера
-                if (data && data.ok) {
-                    if (data.chatMe) {
-                        if ('muted' in data.chatMe) this.muted = data.chatMe.muted;
-                        if ('mod' in data.chatMe && data.chatMe.mod !== 'own') this.mod = data.chatMe.mod;
-                    }
-                    if (Array.isArray(data.ign)) this.ign = new Set(data.ign);
-                }
-
-                if (data && data.ok && Array.isArray(data.chat)) {
-                    data.chat.forEach(m => {
-                        const parsed = Utils.extractChatFields(m);
-                        if (!parsed.text) return;
-                        const ch = parsed.channel || 'city';
-                        // Не дублируем то, что уже есть в this.messages: по id ИЛИ по автору+тексту
-                        const existing = this.messages.find(cur =>
-                            (parsed.id && cur.id && cur.id === parsed.id) ||
-                            (!cur._pending && cur.author === parsed.author && cur.text === parsed.text &&
-                                (cur.channel || 'city') === ch)
-                        );
-                        if (existing) {
-                            // Кэш мог быть сохранён без титула/статуса — дополняем из истории сервера
-                            if (parsed.aw && !existing.aw) existing.aw = parsed.aw;
-                            if (parsed.rank && !existing.rank) existing.rank = parsed.rank;
-                            return;
-                        }
-                        this.handleIncoming(parsed.author, parsed.text, true, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
-                    });
-                }
-            } catch (e) {
-                dbg('Не удалось стянуть историю города', e);
-            }
-
-            this.renderMessages();
-        },
-
-        async syncMe() {
-            try {
-                const res = await Utils.fetchApi('/api/me');
-                // v11.6.0g-5: ник — это user.login из /api/me. LG_CH сюда не
-                // подмешиваем: там логин Twitch-канала, а не игрока (баг «чужой
-                // ник в чате»). Фолбэк — ME.user из page-context.
-                const user = res?.user || (typeof G !== 'undefined' && G.ME?.user);
-                const login = user?.login || user?.name;
-                if (login) {
-                    this.myNick = String(login).trim().toLowerCase();
-                }
-                const me = res?.hero || res?.body?.hero;
-                if (me) {
-                    this.myRole = me.class || me.sk?.c || 'legionary';
-                }
-            } catch (e) {}
-        },
-    };
-
-    // ===== src/modules/chat/chat-net.js =====
-    // ============================================================
-    // 7.3 МОДУЛЬ: ЧАТ — сеть: перехватчики и живой поток
-    // ============================================================
-    // Вынесено из modules/chat.js (v11.6.0, этап 2 декомпозиции).
-    // Слой-миксин: перехват EventSource / WebSocket, хуки нативной ленты
-    // LGChatOne (ПАТЧ 11.6.4f: свой поток /api/live больше не открываем),
-    // наблюдение за сетевой активностью игры (PerformanceObserver) и разбор
-    // входящих в общий Chat.handleIncoming().
-    // 11.6.4b: перехват window.fetch удалён — античит шахты палит подмену
-    // fetch по отсутствию [native code] (см. блок «Наблюдение за сетевой
-    // активностью игры» ниже).
-    // this внутри методов — это Chat (Object.assign в chat/chat.js).
-
-    // v11.6.0g-3: период поллинга «кто играет с аддоном» (ТЗ — раз в 30 с).
-    // Один тик = POST /heartbeat + GET /users, окно онлайна на сервере 15 мин.
-    const ADDON_USERS_POLL_MS = 30000;
-
-    // ПАТЧ 11.6.4f: период Keep-Alive нативного чата. LGChatOne.sync() отправляет
-    // POST /api/chat/watch {on:true} только при H.chat.open === true, а сервер
-    // стримит сообщения в SSE лишь по watch. Свой поток мы больше не держим,
-    // поэтому раз в 30 с возвращаем флаг открытия (Chat.startNativeChatWatch) —
-    // но только пока открыт наш вынесенный чат (ПАТЧ 11.6.4g).
-    const NATIVE_CHAT_KEEPALIVE_MS = 30000;
-
-    // v11.6.1c: как часто спрашивать GET /latest-version (раз в час). Троттлинг
-    // хранится в localStorage 'lgUpdateCheck', чтобы проверка не зависела от
-    // перезапуска поллинга (переключение вкладок, повторный init чата).
-    const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
-
-    // 11.6.4b: минимальный интервал между нашими syncMe() по сигналу
-    // PerformanceObserver. Игра зовёт /api/me часто (SSE `me`, действия, HUD),
-    // а нам хватает знать логин и класс — 10 секунд более чем достаточно.
-    const GAME_ME_SYNC_MS = 10000;
-
-    // v11.6.0g-6: ключ доступа к нашему серверу. Должен совпадать с API_KEY в
-    // server/index.js (env LGU_API_KEY). Это фильтр от случайных ботов, а не
-    // секрет: значение лежит в публичной сборке аддона.
-    const ADDON_API_KEY = 'LGU-default-secret-key-change-me';
-
-    const ChatNet = {
-        // id текущей шахты (обновляется из ленты LGChatOne и /api/mine/*).
-        // ПАТЧ 11.6.4f: своего потока /api/live больше нет — состояние поллинга
-        // и таймеры EventSource удалены вместе с startBackgroundLiveListener.
-        currentMineId: 'home',
-
-        getChannelLogin() {
-            try {
-                const m = location.pathname.match(/\/c\/([^/?#]+)/i);
-                if (m && m[1]) return m[1].toLowerCase().trim();
-                const paramC = new URL(location.href).searchParams.get('c');
-                if (paramC && !/^\d+$/.test(paramC)) return paramC.toLowerCase().trim();
-            } catch (e) {}
-            return '';
-        },
-
-        isStreamerMessage(msg) {
-            if (!msg || !msg.author) return false;
-            const author = String(msg.author).toLowerCase().trim();
-            const chLogin = this.getChannelLogin();
-            if (!chLogin) return false;
-            const chBase = chLogin.replace(/channel$/i, '');
-            const authorBase = author.replace(/channel$/i, '');
-            return author === chLogin || author === chBase || authorBase === chBase || authorBase === chLogin;
-        },
-
-        isMentionedMessage(msg) {
-            if (!msg || !msg.text || !this.myNick) return false;
-            const myNick = String(this.myNick).trim();
-            if (!myNick || myNick.length < 2) return false;
-            if (msg.author && String(msg.author).toLowerCase() === myNick.toLowerCase()) return false;
-            const text = String(msg.text).toLowerCase();
-            const lowerNick = myNick.toLowerCase();
-            return text.includes('@' + lowerNick) || text.includes(lowerNick);
-        },
-
-        processMineMessages(list) {
-            if (!list) return;
-            const chats = Utils.extractChatDeep(list);
-            let added = false;
-            chats.forEach(m => {
-                const parsed = Utils.extractChatFields(m);
-                if (parsed.text) {
-                    this.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, 'mine', parsed.k, parsed.to, parsed.rank);
-                    added = true;
-                }
-            });
-            if (added) this.renderMessages();
-        },
-
-        // Определяем канал живого потока: город или шахта
-        resolveLiveChannel(data) {
-            try {
-                const d = (data && (data.body || data.data || data)) || null;
-                if (d) {
-                    if (d.chatRoom === 'city' || d.town) return 'city';
-                    if (d.chatRoom === 'mine' || d.mine) return 'mine';
-                }
-            } catch (e) {}
-            return this.isInMine() ? 'mine' : 'city';
-        },
-
-        /**
-         * ПАТЧ 11.6.4f: приём ленты нативного чата игры.
-         *
-         * Свой EventSource('/api/live') больше НЕ открываем: клиент Legion сам
-         * стримит чат, а LGChatOne.onFeed(room, data) / enterFeed(room, r)
-         * получают уже разобранные пакеты комнаты (см. reference/.../site-chatone.js).
-         * Хуки на эти колбэки ставит Chat.hookNativeChat(), а сюда приходит тот же
-         * формат, что раньше разбирался из SSE: { chat, chatDel, chatMe, c }.
-         *
-         * @param {string}  room      'city' | 'mine'
-         * @param {object}  data      пакет ленты (onFeed) или истории (enterFeed)
-         * @param {boolean} isHistory true для enterFeed — историю не считаем непрочитанной
-         */
-        ingestGameFeed(room, data, isHistory = false) {
-            if (!data) return;
-            const loc = room === 'mine' ? 'mine' : 'city';
-            try {
-                if (data.c != null) this.currentMineId = data.c;
-
-                // Игроков и входящие ЛС разбираем всегда — на них держатся
-                // «Друзья» и тосты ЛС, даже при выключенном перехвате чата.
-                Utils.updateOnlinePlayers(data, loc);
-                Utils.processIncomingDMs(data);
-
-                if (this.disabled) return;
-
-                // data.chat — массив сообщений комнаты: в шахте игра помечает их
-                // rm: 'mine' и префиксом id 'm:', остальные поля те же, что
-                // понимает Utils.extractChatFields() (l/n — автор, t — текст, c — класс).
-                const list = Array.isArray(data.chat) ? data.chat : [];
-                list.forEach((m) => {
-                    const parsed = Utils.extractChatFields(m);
-                    if (!parsed.text) return;
-                    const ch = parsed.channel || loc;
-                    this.handleIncoming(
-                        parsed.author || 'Игрок', parsed.text, !!isHistory,
-                        parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw,
-                        ch, parsed.k, parsed.to, parsed.rank
-                    );
-                });
-            } catch (err) {
-                dbg('[CHAT] ingestGameFeed error:', err);
-            }
-        },
-
-        /**
-         * @deprecated ПАТЧ 11.6.4f: свой EventSource и поллинг /api/live удалены.
-         *
-         * Имя сохранено как точка совместимости для main.js, chat-pip.js и
-         * Chat.setDisabled(): раньше метод поднимал фоновый поток, теперь он
-         * идемпотентно вешает хуки на нативную ленту и включает Keep-Alive.
-         */
-        startBackgroundLiveListener() {
-            if (this.disabled) return;
-            this.hookNativeChat();
-            this.startNativeChatWatch();
-        },
-
-        /**
-         * @deprecated ПАТЧ 11.6.4f: полная остановка перехвата (выключение чата в
-         * настройках, restart скрипта). Снимает Keep-Alive и хуки, чтобы после
-         * перезапуска на G.LGChatOne не остался колбэк в мёртвый инстанс Chat.
-         */
-        stopBackgroundLiveListener() {
-            this.stopNativeChatWatch();
-        },
-
-        interceptEventSource() {
-            if (this._esIntercepted) return;
-            // @grant переводит Tampermonkey в sandbox: window — это прокси,
-            // поэтому конструктор на странице патчим через unsafeWindow (G).
-            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
-            const OrigES = pageWin.EventSource || window.EventSource;
-            if (!OrigES || OrigES.__lgChatProxied) return;
-            this._esIntercepted = true;
-            const self = this;
-            class ESProxy extends OrigES {
-                constructor(...args) {
-                    super(...args);
-                    if (args[1]?._customLive) return;
-                    const url = String(args[0] || '');
-                    const isLive = url.includes('/api/live');
-                    const isMine = isLive || url.includes('/api/mine/');
-
-                    const handler = (e) => {
-                        try {
-                            let data = e.data;
-                            if (typeof data === 'string') {
-                                try { data = JSON.parse(data); } catch(err) {}
-                            }
-                            let loc = 'city';
-                            if (isLive && data) {
-                                const d = data.body || data.data || data;
-                                // Используем общий метод, который понимает контекст
-                                loc = self.resolveLiveChannel(d);
-                            } else {
-                                loc = isMine ? 'mine' : 'city';
-                            }
-                            // Перехват игроков для модуля «Друзья» (работает всегда)
-                            Utils.updateOnlinePlayers(data, loc);
-                            Utils.processIncomingDMs(data);
-
-                            // Если перехват отключен — ничего не парсим (закрытый виджет не помеха).
-                            if (self.disabled) return;
-
-                            const chats = Utils.extractChatDeep(data);
-                            if (chats.length > 0) {
-                                chats.forEach(m => {
-                                    const parsed = Utils.extractChatFields(m);
-                                    if (parsed.text) {
-                                        const ch = parsed.channel || (loc === 'mine' ? 'mine' : 'city');
-                                        Chat.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
-                                    }
-                                });
-                            }
-                        } catch (err) {
-                            dbg('ES intercept error:', err);
-                        }
-                    };
-
-                    this.addEventListener('message', handler);
-                    // 'message' обрабатывается строкой выше — второй раз не вешаем
-                    ['city', 'chat', 'say', 'init', 'mine', 'live', 'event', 'update'].forEach(ev => {
-                        try { this.addEventListener(ev, handler); } catch(e) {}
-                    });
-                }
-            }
-            try { ESProxy.__lgChatProxied = true; } catch (e) {}
-            try { pageWin.EventSource = ESProxy; } catch (e) {}
-            if (pageWin !== window) { try { window.EventSource = ESProxy; } catch (e) {} }
-        },
-
-        interceptWebSocket() {
-            if (this._wsIntercepted) return;
-            // См. interceptEventSource: патчим конструктор страницы (unsafeWindow).
-            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
-            const OrigWS = pageWin.WebSocket || window.WebSocket;
-            if (!OrigWS || OrigWS.__lgChatProxied) return;
-            this._wsIntercepted = true;
-            const self = this;
-            class WSProxy extends OrigWS {
-                constructor(...args) {
-                    super(...args);
-                    const url = String(args[0] || '');
-                    const isLive = url.includes('/api/live');
-                    const isMine = isLive || url.includes('/api/mine/');
-
-                    this.addEventListener('message', async (e) => {
-                        try {
-                            let data = e.data;
-                            if (typeof Blob !== 'undefined' && data instanceof Blob) {
-                                try {
-                                    const text = await data.text();
-                                    try { data = JSON.parse(text); } catch(err) { data = text; }
-                                } catch (err) {}
-                            } else if (typeof ArrayBuffer !== 'undefined' && data instanceof ArrayBuffer) {
-                                try {
-                                    const text = new TextDecoder().decode(data);
-                                    try { data = JSON.parse(text); } catch(err) { data = text; }
-                                } catch (err) {}
-                            } else if (typeof data === 'string') {
-                                try { data = JSON.parse(data); } catch(err) {}
-                            }
-
-                            let loc = 'city';
-                            if (isLive && data) {
-                                const d = data.body || data.data || data;
-                                // Используем общий метод, который понимает контекст
-                                loc = self.resolveLiveChannel(d);
-                            } else {
-                                loc = isMine ? 'mine' : 'city';
-                            }
-                            // Перехват игроков для модуля «Друзья» (работает всегда)
-                            Utils.updateOnlinePlayers(data, loc);
-                            Utils.processIncomingDMs(data);
-
-                            // Если перехват отключен — ничего не парсим.
-                            // При закрытом виджете сообщения всё равно нужны (счётчик непрочитанных).
-                            if (self.disabled) return;
-
-                            // 1. Извлекаем сообщения через глубокий парсер extractChatDeep
-                            const chats = Utils.extractChatDeep(data);
-                            if (chats.length > 0) {
-                                chats.forEach(m => {
-                                    const parsed = Utils.extractChatFields(m);
-                                    if (parsed.text) {
-                                        const ch = parsed.channel || (loc === 'mine' ? 'mine' : 'city');
-                                        Chat.handleIncoming(parsed.author || 'Игрок', parsed.text, false, parsed.id, parsed.seq, parsed.role, parsed.isSystem, parsed.aw, ch, parsed.k, parsed.to, parsed.rank);
-                                    }
-                                });
-                                return;
-                            }
-
-                            // 2. Строка вида Author: text
-                            if (typeof data === 'string' && data.includes(':')) {
-                                const i = data.indexOf(':');
-                                const a = data.slice(0, i).trim();
-                                const t = data.slice(i + 1).trim();
-                                if (a && t && t.length < 500) {
-                                    Chat.handleIncoming(a, t, false, null, null, null, false, null, loc);
-                                }
-                            }
-                        } catch (err) {
-                            dbg('WS intercept error:', err);
-                        }
-                    });
-                }
-            }
-            try { WSProxy.__lgChatProxied = true; } catch (e) {}
-            try { pageWin.WebSocket = WSProxy; } catch (e) {}
-            if (pageWin !== window) { try { window.WebSocket = WSProxy; } catch (e) {} }
-        },
-
-        /* ---------------------------------------------------------- */
-        /* Наблюдение за сетевой активностью игры (11.6.4b)            */
-        /* ---------------------------------------------------------- */
-        // Античит шахты (reference/.../site/mine.js) считает подмену
-        // window.fetch детектом:
-        //   natv(window.fetch) === false && window.fetch !== LG_FETCH.w -> pi |= 1
-        // Поэтому хук fetch снят полностью. Вместо него — пассивное наблюдение
-        // через PerformanceObserver (тот же приём, что в modules/party.js для
-        // /api/me и /api/qact): слушаем resource-записи браузера и НИЧЕГО не
-        // перезаписываем — ни fetch, ни ответы.
-
-        /** Слушатель resource-записей браузера. */
-        _perfObserver: null,
-        /** Date.now() последней синхронизации /api/me (троттлинг). */
-        _lastMeSync: 0,
-
-        /**
-         * Поднимает наблюдатель за запросами игры. Идемпотентен.
-         *
-         * Что даёт без fetch-хука:
-         *   • игра сходила в /api/me         -> наш syncMe() (ник и класс);
-         *   • игра общается с городом/шахтой -> добираем хуки на LGChatOne
-         *     (модуль site-chatone.js грузится лениво, на init() его могло не быть).
-         *
-         * Тела чужих ответов прочитать нельзя (PerformanceObserver отдаёт только
-         * метаданные). Данные чата берём из колбэков нативного LGChatOne
-         * (Chat.hookNativeChat -> ChatNet.ingestGameFeed), история города —
-         * POST /api/city/enter в loadHistory(), топ шахты и «сколько народу в
-         * шахте» — SSE-событием mine через Utils.updateOnlinePlayers().
-         * Отдельный перехват ответов не нужен.
-         */
-        startNetworkObserver() {
-            if (this._perfObserver) return;
-            if (typeof PerformanceObserver !== 'function') {
-                // Старые браузеры: остаёмся на хуках LGChatOne, деградация мягкая.
-                dbg('[CHAT] PerformanceObserver не поддерживается — работаем без наблюдателя');
-                return;
-            }
-
-            try {
-                this._perfObserver = new PerformanceObserver((list) => {
-                    for (const entry of list.getEntries()) {
-                        const name = entry && entry.name ? entry.name : '';
-                        // includes, а не ===: name — полный URL вида
-                        // https://legiongame.gg/c/<канал>/api/me?...
-                        if (name.includes('/api/me')) {
-                            this._onGameMeTraffic();
-                            break;
-                        }
-                        if (name.includes('/api/city/') || name.includes('/api/mine/') || name.includes('/api/live')) {
-                            this._onGameChatTraffic();
-                            break;
-                        }
-                    }
-                });
-                // buffered: false — прошлые записи не нужны, слушаем только новые.
-                this._perfObserver.observe({ type: 'resource', buffered: false });
-            } catch (e) {
-                dbg('[CHAT] PerformanceObserver не запустился:', e);
-                this._perfObserver = null;
-            }
-        },
-
-        /** Гасит наблюдатель (выход, перезапуск скрипта). */
-        stopNetworkObserver() {
-            if (!this._perfObserver) return;
-            try { this._perfObserver.disconnect(); } catch (e) {}
-            this._perfObserver = null;
-        },
-
-        /**
-         * Игра обновила /api/me — освежаем свой ник и класс своим запросом.
-         *
-         * Троттлинг GAME_ME_SYNC_MS: игру /api/me зовут часто (SSE `me`, любое
-         * действие, HUD), а нам достаточно знать логин и класс. Свой запрос
-         * тоже даёт resource-запись /api/me — троттлинг заодно не даёт
-         * наблюдателю раскрутиться в бесконечный цикл.
-         */
-        _onGameMeTraffic() {
-            const now = Date.now();
-            if (now - this._lastMeSync < GAME_ME_SYNC_MS) return;
-            this._lastMeSync = now;
-            this.syncMe();
-        },
-
-        /**
-         * Игра общается с городом/шахтой — значит, LGChatOne уже жив: модуль
-         * site-chatone.js подгружается лениво (oneLoad() в app.js), поэтому на
-         * момент Chat.init() его могло ещё не быть.
-         *
-         * ПАТЧ 11.6.4f: своего EventSource больше нет, так что здесь только
-         * добираем хуки на нативную ленту (метод идемпотентен).
-         */
-        _onGameChatTraffic() {
-            if (this.disabled) return;
-            this.hookNativeChat();
-        },
-
-        /* ---------------------------------------------------------- */
-        /* Подсветка пользователей аддона (v11.6.0g-3)                 */
-        /* ---------------------------------------------------------- */
-
-        // Таймер поллинга /heartbeat + /users.
-        // ТЗ 11.6.0h.2: DOM-наблюдатель удалён — подсветку рисует CSS.
-        _addonPollTimer: null,
-
-        // ПАТЧ 11.6.6d: токен этого клиента, закэшированный на время жизни
-        // страницы. Хранится в GM_setValue('lgClientToken') — привязан к
-        // браузеру/профилю, поэтому переживает перезагрузку вкладки.
-        _clientTokenCache: null,
-
-        /**
-         * База сервера аддона: сначала адрес пати (Party.getBaseUrl), затем
-         * прод-домен. Party объявлен раньше чата (build.js: SHARED_MODULES
-         * идут до CHAT_MODULES), но проверка на undefined оставлена — чат не
-         * должен падать, если модуль пати когда-нибудь исключат из сборки.
-         */
-        _addonBaseUrl() {
-            try {
-                if (typeof Party !== 'undefined' && Party && typeof Party.getBaseUrl === 'function') {
-                    const base = Party.getBaseUrl();
-                    if (base) return String(base).trim().replace(/\/+$/, '');
-                }
-            } catch (e) {}
-            return 'https://legion.ctrlfree.host';
-        },
-
-        /**
-         * Генерация нового clientToken (ПАТЧ 11.6.6d).
-         *
-         * Основной путь — crypto.randomUUID() (36 символов, https-контекст
-         * игры это позволяет). Фолбэк — случайная base36-строка: длина
-         * гарантируется циклом, потому что сервер отклоняет токены короче
-         * 16 символов (400 bad_client_token), а «сырой» Math.random() даёт
-         * всего ~10-11 значимых символов.
-         *
-         * @returns {string} токен длиной ≥ 16 символов
-         */
-        _newClientToken() {
-            try {
-                if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-                    const uuid = crypto.randomUUID();
-                    if (typeof uuid === 'string' && uuid.length >= 16) return uuid;
-                }
-            } catch (e) {}
-
-            let rand = '';
-            while (rand.length < 16) {
-                rand += Math.random().toString(36).slice(2);
-            }
-            return 'lgu-' + rand;
-        },
-
-        /**
-         * Стабильный идентификатор клиента для POST /heartbeat (ПАТЧ 11.6.6d).
-         *
-         * Сервер резервирует ник за первым clientToken'ом на 15 минут: чужой
-         * (или второй, «пустой») клиент с тем же ником получит 409
-         * login_claimed. Поэтому токен генерируется один раз и хранится в
-         * GM_setValue — иначе каждая перезагрузка страницы считалась бы новым
-         * клиентом и отбирала ник у самой себя.
-         *
-         * localStorage — фолбэк для окружений без @grant (и на случай, если
-         * GM_getValue бросит): это не секрет, а метка устройства.
-         *
-         * @returns {string} токен длиной ≥ 16 символов (никогда не пустой)
-         */
-        getClientToken() {
-            if (this._clientTokenCache) return this._clientTokenCache;
-
-            let token = '';
-            try {
-                if (typeof GM_getValue === 'function') {
-                    token = String(GM_getValue('lgClientToken') || '').trim();
-                }
-            } catch (e) {}
-            if (!token) {
-                try {
-                    token = String(localStorage.getItem('lgClientToken') || '').trim();
-                } catch (e) {}
-            }
-
-            // Значение из хранилища могло быть испорчено вручную или быть
-            // короче минимума сервера — тогда молча перегенерируем.
-            if (token.length < 16) {
-                token = this._newClientToken();
-                try {
-                    if (typeof GM_setValue === 'function') GM_setValue('lgClientToken', token);
-                } catch (e) {}
-                try {
-                    localStorage.setItem('lgClientToken', token);
-                } catch (e) {}
-            }
-
-            this._clientTokenCache = token;
-            return token;
-        },
-
-        /**
-         * Запрос к серверу аддона через GM_xmlhttpRequest: домен чужой для
-         * игры, обычный fetch упёрся бы в CORS и CSP `connect-src 'self'`
-         * (см. AGENTS.md §3). Разбираем только JSON и только 2xx.
-         */
-        _addonRequest(method, url, body = null) {
-            return new Promise((resolve, reject) => {
-                if (typeof GM_xmlhttpRequest !== 'function') {
-                    reject(new Error('GM_xmlhttpRequest недоступен: проверьте @grant в шапке'));
-                    return;
-                }
-                GM_xmlhttpRequest({
-                    method,
-                    url,
-                    // v11.6.0g-6: сервер пускает только с ключом (401 иначе).
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Legion-Key': ADDON_API_KEY
-                    },
-                    data: body ? JSON.stringify(body) : undefined,
-                    timeout: 8000,
-                    onload: (res) => {
-                        if (res.status < 200 || res.status >= 300) {
-                            reject(new Error(`HTTP ${res.status}: ${url}`));
-                            return;
-                        }
-                        try {
-                            resolve(res.responseText ? JSON.parse(res.responseText) : null);
-                        } catch (e) {
-                            reject(new Error(`Некорректный JSON от ${url}`));
-                        }
-                    },
-                    onerror: () => reject(new Error(`Сервер аддона недоступен: ${url}`)),
-                    ontimeout: () => reject(new Error(`Сервер аддона не ответил за 8 с: ${url}`)),
-                    onabort: () => reject(new Error('Запрос к серверу аддона отменён'))
-                });
-            });
-        },
-
-        /**
-         * Канал игры (LG_CH.login) в нижнем регистре.
-         *
-         * v11.6.0g-5: это НЕ ник игрока, а логин Twitch-канала. Нужен только
-         * затем, чтобы не подсвечивать служебные сообщения канала как
-         * «пользователь аддона».
-         */
-        _channelLogin() {
-            try {
-                if (typeof G === 'undefined' || !G) return '';
-                return String(G.LG_CH?.login || '').trim().toLowerCase();
-            } catch (e) {
-                return '';
-            }
-        },
-
-        /**
-         * Ник текущего игрока для heartbeat и подсветки (нижний регистр).
-         *
-         * v11.6.0g-5: источники только игровые — ME.user из page-context и,
-         * как фолбэк, GET /api/me. LG_CH сюда не подмешивается: там логин
-         * Twitch-канала, из-за которого отправлялся и подсвечивался чужой ник.
-         *
-         * @returns {Promise<string>} нормализованный логин либо '' (неизвестен)
-         */
-        async _resolveMyLogin() {
-            // 1. Страница уже знает игрока — самый дешёвый и свежий путь.
-            try {
-                if (typeof G !== 'undefined' && G) {
-                    const pageLogin = G.ME?.user?.login || G.ME?.user?.name;
-                    if (pageLogin) return String(pageLogin).trim().toLowerCase();
-                }
-            } catch (e) {}
-
-            // 2. Ник, полученный ранее (syncMe / собственный GET /api/me).
-            // 11.6.4b: перехвата /api/me больше нет — данные берём своим запросом.
-            if (this.myNick) {
-                const known = String(this.myNick).trim().toLowerCase();
-                if (known) return known;
-            }
-
-            // 3. Фолбэк: сам /api/me — ME в странице может быть ещё пуст, а
-            // первый heartbeat откладывать нельзя. Результат кэшируем в myNick,
-            // поэтому следующий тик пойдёт уже без запроса.
-            try {
-                const res = await Utils.fetchApi('/api/me');
-                const user = res?.user || res?.body?.user;
-                const login = user?.login || user?.name;
-                if (login) {
-                    const norm = String(login).trim().toLowerCase();
-                    this.myNick = norm;
-                    return norm;
-                }
-            } catch (e) {}
-
-            return '';
-        },
-
-        /**
-         * Отметка «я онлайн» + обновление списка пользователей аддона.
-         *
-         * POST /heartbeat {login, version, clientToken} — чтобы нас видели другие
-         * (и чтобы сервер знал версию аддона для GET /stats); GET /users — чтобы
-         * увидели мы. Ошибки сети не всплывают тостом: сервер аддона может быть
-         * недоступен, подсветка просто остаётся на прошлом наборе.
-         *
-         * ПАТЧ 11.6.6d: clientToken обязателен — сервер резервирует ник за
-         * клиентом (409 login_claimed для чужих токенов), поэтому вторым
-         * «нами» из другой вкладки чужого профиля ник уже не отметишь.
-         */
-        async syncAddonUsers() {
-            // v11.6.1c: раз в час заодно спрашиваем сервер о новой версии.
-            // Без await — уведомление не должно задерживать подсветку, а
-            // собственные ошибки checkForUpdates() гасит внутри себя.
-            this.checkForUpdates();
-            // v11.6.0g-5: ник резолвится через ME.user / /api/me, LG_CH не в счёт.
-            const nick = await this._resolveMyLogin();
-            // Ник ещё не пришёл (/api/me в пути) — отправим на следующем тике.
-            if (!nick) return;
-
-            const base = this._addonBaseUrl();
-            // Канал игры: его логин не должен попасть в список подсветки.
-            const channel = this._channelLogin();
-
-            try {
-                // Версия из шапки userscript'а: GM_info доступен в песочнице
-                // Tampermonkey и не зависит от игры (фолбэк 'unknown').
-                const ver = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || 'unknown';
-                // ПАТЧ 11.6.6d: clientToken — метка «это тот же клиент». Сервер
-                // держит ник за первым токеном 15 минут и отвечает 409
-                // login_claimed всем остальным, поэтому подставить чужой ник
-                // в /heartbeat (и в подсветку /users) больше нельзя.
-                await this._addonRequest('POST', base + '/heartbeat', {
-                    login: nick,
-                    version: ver,
-                    clientToken: this.getClientToken()
-                });
-
-                const data = await this._addonRequest('GET', base + '/users');
-                const list = (data && Array.isArray(data.users)) ? data.users : [];
-
-                const next = new Set();
-                list.forEach((login) => {
-                    const norm = String(login || '').trim().toLowerCase();
-                    // Канал игры (G.LG_CH.login) — не игрок: служебные сообщения
-                    // канала идут в нативной ленте с его data-nick, и подсветка
-                    // «аддоном» на них была бы ложной (v11.6.0g-5).
-                    if (!norm || norm === channel) return;
-                    next.add(norm);
-                });
-                // Свой ник добавляем локально: heartbeat уже ушёл, а снимок
-                // /users мог быть собран сервером до нашей вставки. nick уже
-                // нормализован (нижний регистр) в _resolveMyLogin().
-                next.add(nick);
-
-                const prev = this.addonUsers || new Set();
-                const changed = next.size !== prev.size || Array.from(next).some((n) => !prev.has(n));
-                this.addonUsers = next;
-
-                // ТЗ 11.6.0h.1: persist-кэш списка. Нужен, чтобы после
-                // перезагрузки страницы подсветка появилась мгновенно, не
-                // дожидаясь ответа /users (см. Chat.init). TTL проверяется
-                // при чтении — 1 час.
-                try {
-                    localStorage.setItem('LEGION_ADDON_USERS_CACHE', JSON.stringify({
-                        list: Array.from(this.addonUsers),
-                        ts: Date.now()
-                    }));
-                } catch (e) {}
-
-                // ТЗ 11.6.0h.2: вместо обхода DOM и DOM-наблюдателя — просто
-                // перегенерируем CSS-правила под новый список. Браузер применит
-                // их к уже существующим <b data-nick> и к тем, которые игра
-                // вставит позже, поэтому флэша при перерисовке ленты нет.
-                this._applyAddonStyles();
-                if (this._pipDoc) this._applyAddonStylesToPip(this._pipDoc);
-                // Свой PiP-чат перерисовываем только при изменении состава:
-                // innerHTML каждые 30 с сбивал бы выделение текста у читающего.
-                if (changed && this.isOpen()) this.renderMessages();
-            } catch (e) {
-                dbg('[CHAT] подсветка аддона: синхронизация не удалась:', e && e.message ? e.message : e);
-            }
-        },
-
-        /* ---------------------------------------------------------- */
-        /* Проверка обновлений (ТЗ 11.6.1c)                           */
-        /* ---------------------------------------------------------- */
-
-        /**
-         * Спрашивает GET /latest-version и, если на сервере версия новее,
-         * показывает GM_notification со ссылкой на raw-сборку GitHub.
-         *
-         * Троттлинг — localStorage 'lgUpdateCheck' (раз в час). Хранилище
-         * намеренно не GM-овское: это не настройка, а кэш момента проверки,
-         * потеря которого стоит одного лишнего запроса.
-         *
-         * Ошибки не всплывают: старый сервер без эндпоинта ответит 404,
-         * сервер может быть недоступен — тогда отметка времени не пишется и
-         * проверка повторится на следующем тике поллинга.
-         */
-        async checkForUpdates() {
-            try {
-                const now = Date.now();
-                const lastCheck = Number(localStorage.getItem('lgUpdateCheck') || 0) || 0;
-                if (now - lastCheck <= UPDATE_CHECK_INTERVAL_MS) return;
-
-                const base = this._addonBaseUrl();
-                const res = await this._addonRequest('GET', base + '/latest-version');
-                // Пустой ответ — не повод считать проверку выполненной.
-                if (!res || !res.version) return;
-                localStorage.setItem('lgUpdateCheck', String(now));
-
-                // Своя версия — из шапки userscript'а. Без GM_info сравнение
-                // невозможно (не Tampermonkey), поэтому просто выходим.
-                const current = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '';
-                if (!current) return;
-
-                // numeric:true обязателен: лексикографически «11.6.10» < «11.6.9»,
-                // а числовое сравнение даёт правильный порядок сегментов.
-                const isNewer = String(res.version)
-                    .localeCompare(String(current), undefined, { numeric: true, sensitivity: 'base' }) > 0;
-                if (!isNewer) return;
-
-                // GM_notification/GM_openInTab требуют @grant в шапке; проверка
-                // typeof оставлена, чтобы в менеджере без этих API аддон не падал.
-                // v11.6.1g: настройка «🔔 Уведомлять о новых версиях» (дефолт —
-                // включено). Проверка версии выше всё равно выполняется, поэтому
-                // троттлинг lgUpdateCheck обновляется, а уведомление просто не
-                // показывается при выключенном тумблере.
-                const notifyOn = localStorage.getItem('LEGION_UPDATE_NOTIFY') !== 'false';
-                if (notifyOn && typeof GM_notification === 'function') {
-                    GM_notification({
-                        title: 'Legion Ultimate Assistant',
-                        text: `Вышла новая версия ${res.version}. Нажмите, чтобы обновить.`,
-                        onclick: () => {
-                            if (typeof GM_openInTab === 'function') GM_openInTab(res.url);
-                        }
-                    });
-                }
-            } catch (e) {
-                dbg('[CHAT] проверка обновлений не удалась:', e && e.message ? e.message : e);
-            }
-        },
-
-        /* ---------------------------------------------------------- */
-        /* CSS-подсветка (ТЗ 11.6.0h.2)                               */
-        /* ---------------------------------------------------------- */
-        // DOM-наблюдатель, навешивание класса и вставка бейджа из JS удалены.
-        // Вместо этого на каждый список /users генерируется одна CSS-простыня:
-        // браузер сам применяет правила к любому <b data-nick="...">, даже если
-        // игра полностью пересоздала DOM. Класс навешивать не нужно, поэтому
-        // перерисовка ленты не может дать флэш «без подсветки».
-
-        /**
-         * Экранирование значения для строкового селектора атрибута.
-         * Обратный слэш обязателен первым: иначе он «съест» следующую кавычку.
-         */
-        _cssAttrValue(nick) {
-            return String(nick).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        },
-
-        /**
-         * Собирает CSS для текущего набора addonUsers.
-         * Один источник и для основной страницы, и для PiP-документа.
-         *
-         * Флаг `i` в [data-nick="..." i] обязателен: addonUsers хранится в
-         * нижнем регистре (сервер отдаёт логины нормализованными), а в
-         * разметке игры ник стоит как в профиле — например, «BlackWolf».
-         * Без `i` селектор не совпал бы и подсветки не было бы вообще.
-         */
-        _buildAddonStylesCss() {
-            const nicks = Array.from(this.addonUsers || []);
-            if (nicks.length === 0) return '';
-
-            const esc = (n) => this._cssAttrValue(n);
-            // Нативная лента игры: <b data-nick="login"> (reference/.../site-chat.js).
-            const nativeSel = nicks.map(n => `b[data-nick="${esc(n)}" i]`).join(',');
-            // Наш PiP-чат: <span class="chat-author" data-nick="login">.
-            const pipSel = nicks.map(n => `.chat-author[data-nick="${esc(n)}" i]`).join(',');
-
-            // v11.6.1c: бейдж «⚡» убран полностью. Он рисовался фоновой
-            // SVG-картинкой (чтобы не портить textContent ника), но визуально
-            // мешал и сдвигал ник вправо из-за padding-left. Осталось только
-            // свечение text-shadow — оно не меняет ни разметку, ни ширину узла.
-            return `
-            ${nativeSel} {
-                text-shadow: 0 0 4px currentColor, 0 0 10px currentColor !important;
-            }
-            ${pipSel} {
-                text-shadow: 0 0 4px currentColor, 0 0 10px currentColor !important;
-            }
-        `;
-        },
-
-        /**
-         * Создаёт/обновляет <style id="lg-addon-hl-styles"> в основной странице.
-         * Одна запись textContent — браузер пересчитывает правила ровно один
-         * раз за тик поллинга, а не на каждом узле ленты.
-         */
-        _applyAddonStyles() {
-            const on = this.addonHighlight !== false;
-            let style = document.getElementById('lg-addon-hl-styles');
-            if (!on || this.addonUsers.size === 0) {
-                // Тумблер выключен либо список пуст — простыня пустая,
-                // подсветка исчезает мгновенно на всех уже отрисованных никах.
-                if (style) style.textContent = '';
-                return;
-            }
-            if (!style) {
-                style = document.createElement('style');
-                style.id = 'lg-addon-hl-styles';
-                (document.head || document.documentElement).appendChild(style);
-            }
-            style.textContent = this._buildAddonStylesCss();
-        },
-
-        /**
-         * То же самое для документа PiP-окна: у него свой DOM и свои стили.
-         * Вызывать после создания PiP-окна и при каждом обновлении addonUsers.
-         *
-         * @param {Document} pipDoc документ PiP-окна (Chat._pipDoc)
-         */
-        _applyAddonStylesToPip(pipDoc) {
-            if (!pipDoc || !pipDoc.head) return;
-            const on = this.addonHighlight !== false;
-            let style = typeof pipDoc.getElementById === 'function'
-                ? pipDoc.getElementById('lg-addon-hl-styles')
-                : null;
-            if (!on || this.addonUsers.size === 0) {
-                if (style) style.textContent = '';
-                return;
-            }
-            if (!style) {
-                style = pipDoc.createElement('style');
-                style.id = 'lg-addon-hl-styles';
-                pipDoc.head.appendChild(style);
-            }
-            style.textContent = this._buildAddonStylesCss();
-        },
-
-        /** Запуск поллинга /heartbeat + /users (раз в 30 с, идемпотентно). */
-        startAddonUsersPolling() {
-            if (this._addonPollTimer) return;
-
-            // Первый тик сразу: ждать полминуты до первой подсветки незачем.
-            // Наблюдателя за DOM здесь больше нет (ТЗ 11.6.0h.2) — подсветку
-            // рисует CSS, который syncAddonUsers() перегенерирует сам.
-            this.syncAddonUsers();
-
-            this._addonPollTimer = setInterval(() => {
-                this.syncAddonUsers();
-            }, ADDON_USERS_POLL_MS);
-        },
-
-        /** Остановка поллинга (Chat.destroy). DOM-наблюдатель удалён — гасить нечего. */
-        stopAddonUsersPolling() {
-            if (this._addonPollTimer) {
-                clearInterval(this._addonPollTimer);
-                this._addonPollTimer = null;
-            }
-        },
-    };
-
-    // ===== src/modules/chat/chat-pip.js =====
-    // ============================================================
-    // 7.4 МОДУЛЬ: ЧАТ — PiP-окно, рендер и отправка
-    // ============================================================
-    // Вынесено из modules/chat.js (v11.6.0, этап 2 декомпозиции).
-    // Слой-миксин: единственное место, где живёт DOM чата (окно PiP,
-    // documentPictureInPicture). Рендер ленты и отправка сообщений.
-    // this внутри методов — это Chat (Object.assign в chat/chat.js).
-
-    // ПАТЧ 11.6.4g: вкладки вынесенного чата. Набор и порядок повторяют
-    // нативный чат игры (reference/LegionFrontSRC/lib/site-chat.js: TABS):
-    // g — общий город, tr — торговля, mn — ремёсла/шахта, gl — гильдия,
-    // dm — личные сообщения. Одна ось на всё состояние (Chat.activeTab).
-    const CHAT_TABS = ['g', 'tr', 'mn', 'gl', 'dm'];
-
-    // Подсказки в поле ввода под активную вкладку.
-    const CHAT_TAB_PH = {
-        g: 'Написать в чат города...',
-        tr: 'Куплю / продам / меняю...',
-        mn: 'Написать в чат шахты...',
-        gl: 'Написать гильдии...',
-        dm: 'Лично...'
-    };
-
-    const ChatPip = {
-        widget: null,
-        _popoutWin: null,
-        // Документ PiP-окна. С v11.5.3 это единственное место, где живёт DOM чата:
-        // обычный (встроенный) виджет удалён, за него отвечает плагин Legion7TV.
-        _pipDoc: null,
-        cooldownUntil: 0,
-        _toastTimer: null,
-        // v11.7: контекстное меню ника в PiP-чате (см. showNickMenu).
-        _nickMenu: null,
-        _nickMenuBound: null,
-
-        // Корень чата: всегда берём актуальный DOM из документа PiP-окна.
-        // this.widget может ссылаться на отсоединённый (detached) узел, поэтому
-        // поиск идёт по документу, а не по сохранённой ссылке.
-        _pipRoot() {
-            if (this._pipDoc && this.isOpen()) {
-                return this._pipDoc.querySelector('.chat-pip') || this._pipDoc.body;
-            }
-            return null;
-        },
-
-        // Поиск элемента чата (инпут, кнопка, лента сообщений) внутри PiP-документа.
-        _pipEl(selector) {
-            const root = this._pipRoot();
-            return root ? root.querySelector(selector) : null;
-        },
-
-        // Синхронизация подсветки вкладок с this.activeTab.
-        // Ищем по всему документу PiP-окна, а не только внутри this.widget: если
-        // ссылка на виджет устарела (окно пересоздано), поиск по документу всё равно
-        // найдёт реальные вкладки и снимет лишние active.
-        _syncTabs(doc) {
-            const d = doc || this._pipDoc || (this.widget && this.widget.ownerDocument) || null;
-            if (!d || typeof d.querySelectorAll !== 'function') return;
-
-            // ПАТЧ 11.6.4g: одна ось вкладок. Ключ лежит в data-tab кнопки
-            // (g/tr/mn/gl/dm), а не в двух атрибутах main/sub, как раньше.
-            d.querySelectorAll('.chat-main-tab').forEach(t => {
-                const key = t.getAttribute('data-tab')
-                    || (t.dataset && t.dataset.tab) || 'g';
-                t.classList.toggle('active', key === this.activeTab);
-            });
-        },
-
-        showError(msg) {
-            // Встроенного виджета больше нет: тост живёт внутри PiP-окна,
-            // а если оно закрыто — показываем обычный тост аддона.
-            const root = this._pipRoot();
-            if (!root) {
-                UI.showToast(msg, true);
-                return;
-            }
-            const doc = root.ownerDocument || document;
-            let toast = doc.getElementById('chat-toast');
-            if (!toast) {
-                toast = doc.createElement('div');
-                toast.id = 'chat-toast';
-                toast.style.cssText = 'position:absolute;top:45px;left:10px;right:10px;background:#ff5a7a;color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;text-align:center;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,0.5);transition:opacity 0.3s;';
-                root.appendChild(toast);
-            }
-            toast.textContent = msg;
-            toast.style.opacity = '1';
-            toast.style.display = 'block';
-            clearTimeout(this._toastTimer);
-            this._toastTimer = setTimeout(() => {
-                if (toast) {
-                    toast.style.opacity = '0';
-                    setTimeout(() => { if (toast) toast.style.display = 'none'; }, 300);
-                }
-            }, 2000);
-        },
-
-        updateInputState() {
-            const inp = this._pipEl('#chat-input');
-            const sendBtn = this._pipEl('#chat-send');
-            const tab = this.activeTab;
-
-            // Вкладка «Личные»: писать можно только внутри открытого диалога.
-            if (tab === 'dm') {
-                if (this.dmTarget) {
-                    if (inp) {
-                        inp.disabled = false;
-                        inp.placeholder = `Написать ${this.dmTarget}...`;
-                    }
-                    if (sendBtn) sendBtn.disabled = false;
-                } else {
-                    if (inp) {
-                        inp.disabled = true;
-                        inp.placeholder = 'Выберите диалог в списке «Личные»';
-                        inp.value = '';
-                    }
-                    if (sendBtn) sendBtn.disabled = true;
-                }
-                return;
-            }
-
-            // Ремёсла/шахта: сервер принимает сообщения только из шахты.
-            if (tab === 'mn' && !this.isInMine()) {
-                if (inp) {
-                    inp.disabled = true;
-                    inp.placeholder = 'Доступно только в шахте';
-                    inp.value = '';
-                }
-                if (sendBtn) sendBtn.disabled = true;
-                return;
-            }
-
-            // g / tr / gl — обычный ввод с подсказкой под вкладку.
-            if (inp) {
-                inp.disabled = false;
-                inp.placeholder = CHAT_TAB_PH[tab] || 'Написать сообщение...';
-            }
-            if (sendBtn) sendBtn.disabled = false;
-        },
-
-        // DOM чата собирается только внутри документа PiP-окна.
-        // В основной документ виджет больше не вставляется.
-        _buildWidget(doc) {
-            const docRef = doc || document;
-            const widget = docRef.createElement('div');
-            widget.className = 'chat-pip';
-            // Важно: id НЕ должен совпадать с DOM_IDS.chatWidget — на этот id
-            // в styles.js висят стили встроенного виджета (opacity:0, position:fixed).
-            widget.id = 'chat-pip';
-            widget.style.cssText = 'position:relative; display:flex; flex-direction:column; width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; background:#1d1620; color:#f7eadf;';
-            widget.innerHTML = `
-                <div class="chat-top-bar" id="chat-drag-handle">
-                    <div class="chat-main-tabs" role="tablist">
-                        <button class="chat-main-tab active" data-tab="g" type="button">Общий</button>
-                        <button class="chat-main-tab" data-tab="tr" type="button">Торговля</button>
-                        <button class="chat-main-tab" data-tab="mn" type="button">Ремёсла</button>
-                        <button class="chat-main-tab" data-tab="gl" type="button">Гильдия</button>
-                        <button class="chat-main-tab" data-tab="dm" type="button">Личные</button>
-                    </div>
-                    <span class="chat-close" id="chat-close-btn" title="Закрыть">✖</span>
-                </div>
-                <div class="chat-messages" id="chat-messages"></div>
-                <div class="chat-input-area">
-                    <input type="text" class="chat-input" id="chat-input" placeholder="Написать в чат города..." maxlength="200">
-                    <button class="chat-send" id="chat-send" type="button">➤</button>
-                </div>`;
-            this.widget = widget;
-
-            // Делегирование событий: клики по вкладкам/кнопкам внутри PiP-окна.
-            widget.addEventListener('click', (e) => {
-                const target = e.target?.closest ? e.target : (e.target?.parentElement || e.target);
-                if (!target || !target.closest) return;
-
-                if (target.closest('#chat-close-btn') || target.closest('.chat-close')) {
-                    e.preventDefault();
-                    this.close();
-                    return;
-                }
-
-                if (target.closest('#chat-send') || target.closest('.chat-send')) {
-                    e.preventDefault();
-                    this.send();
-                    return;
-                }
-
-                const mainTab = target.closest('.chat-main-tab');
-                if (mainTab) {
-                    e.preventDefault();
-                    // Ищем вкладки в документе PiP-окна, а не в this.widget:
-                    // после пересоздания окна ссылка на виджет может быть устаревшей.
-                    const tabDoc = this._pipDoc || (this.widget && this.widget.ownerDocument) || mainTab.ownerDocument;
-                    const nextTab = mainTab.getAttribute('data-tab')
-                        || (mainTab.dataset && mainTab.dataset.tab) || 'g';
-                    // Неизвестный ключ не должен «терять» ленту — падаем на общий чат.
-                    this.activeTab = CHAT_TABS.indexOf(nextTab) !== -1 ? nextTab : 'g';
-                    if (tabDoc) {
-                        tabDoc.querySelectorAll('.chat-main-tab').forEach(t => t.classList.remove('active'));
-                    }
-                    mainTab.classList.add('active');
-                    this._syncTabs(tabDoc);
-                    this.updateInputState();
-                    this.renderMessages();
-                    return;
-                }
-            });
-
-            const inp = this.widget.querySelector('#chat-input');
-            if (inp) {
-                // keydown вместо keypress: keypress не срабатывает для части
-                // раскладок/методов ввода и помечен как deprecated.
-                inp.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        this.send();
-                    }
-                });
-            }
-
-            // Восстанавливаем активную вкладку: DOM пересоздаётся при каждом открытии PiP,
-            // а состояние (g/tr/mn/gl/dm) хранится в Chat.activeTab.
-            // Передаём сам виджет: он ещё не вставлен в документ, и querySelectorAll
-            // по документу его вкладок не найдёт (по элементу — найдёт).
-            this._syncTabs(widget);
-
-            this.syncMe();
-            return widget;
-        },
-
-        open7tvSettings() {
-            const modal = UI.showModal(`
-                <h2>🎭 Настройки 7TV <button class="custom-close" id="custom-close-btn">✖</button></h2>
-                <div style="padding: 10px;">
-                    <div style="font-size: 13px; color: #aaa; margin-bottom: 15px;">
-                        Введите Twitch-ник канала, эмоуты которого хотите видеть (например, zakvielchannel).
-                    </div>
-                    <input type="text" id="t7-channel-input" class="search-bar" style="width: 100%; margin-bottom: 15px;" value="${Utils.escapeHtml(SevenTV.channel)}" placeholder="Ник на Twitch">
-                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px; border-top:1px solid #333; padding-top:15px;">
-                        <span style="font-size:13px; color:#aaa;">Размер:</span>
-                        <div style="display:flex; gap:5px;">
-                            ${Object.entries(SevenTV.SIZES).map(([key, conf]) => `
-                                <button class="t7-size-btn" data-size="${key}" style="padding:5px 12px; border-radius:6px; border:1px solid ${SevenTV.size === key ? '#9146ff' : '#444'}; background:${SevenTV.size === key ? '#9146ff' : '#111'}; color:#fff; cursor:pointer; font-weight:bold;">
-                                    ${conf.label}
-                                </button>
-                            `).join('')}
-                        </div>
-                    </div>
-                    <button id="t7-save-btn" style="width: 100%; padding: 10px; background: #caa55c; color: #1d1620; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">Сохранить и загрузить</button>
-                </div>
-            `, { compact: true });
-
-            const input = modal?.querySelector('#t7-channel-input');
-            const saveBtn = modal?.querySelector('#t7-save-btn');
-            if (!input || !saveBtn) return;
-
-            // Мгновенная смена размера смайлов + сохранение в localStorage.
-            modal.querySelectorAll('.t7-size-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    SevenTV.size = btn.dataset.size;
-                    try {
-                        localStorage.setItem(SevenTV.SIZE_KEY, SevenTV.size);
-                    } catch (e) {
-                        dbg('[7TV] Не удалось сохранить размер', e);
-                    }
-                    SevenTV.applySize();
-
-                    // Обновляем визуал кнопок
-                    modal.querySelectorAll('.t7-size-btn').forEach(b => {
-                        const isActive = b.dataset.size === SevenTV.size;
-                        b.style.border = isActive ? '1px solid #9146ff' : '1px solid #444';
-                        b.style.background = isActive ? '#9146ff' : '#111';
-                    });
-                });
-            });
-
-            saveBtn.addEventListener('click', async () => {
-                const nick = String(input.value || '').trim().toLowerCase();
-                const nextChannel = nick || SevenTV.DEFAULT_CHANNEL;
-
-                // Канал не изменился — просто закрываем окно, без запросов к API.
-                if (nextChannel === SevenTV.channel) {
-                    UI.closeModals();
-                    return;
-                }
-
-                // Канал изменился — сохраняем и принудительно перезагружаем набор.
-                try {
-                    localStorage.setItem(SevenTV.CHANNEL_KEY, nick);
-                } catch (e) {
-                    dbg('[7TV] Не удалось сохранить канал', e);
-                }
-                SevenTV.channel = nextChannel;
-                UI.closeModals();
-                UI.showToast('Загрузка эмоутов канала...');
-                await SevenTV.load(true); // Принудительная перезагрузка
-                this.renderMessages();    // Перерисовать чат (если открыт)
-                UI.showToast(`Эмоуты обновлены (${SevenTV.emotes.size} шт)`);
-            });
-        },
-
-        // Открыть ЛС с игроком в вынесенном чате (используется тостами ЛС).
-        async openDM(nick) {
-            if (!nick) return;
-            if (this.disabled) {
-                UI.showToast('🚫 Чат отключен в настройках FAB', true);
-                return;
-            }
-
-            this.dmTarget = nick;
-
-            // Переключаем вкладку на личные сообщения
-            this.activeTab = 'dm';
-
-            // Виджет живёт только в PiP-окне: если оно закрыто — открываем.
-            if (!this._pipRoot()) await this.popoutChat();
-            if (!this._pipRoot()) return;
-
-            // Синхронизируем UI (подсветка вкладок, поле ввода)
-            this._syncTabs();
-
-            // Диалог открыт — снимаем счётчик непрочитанных
-            if (typeof Players !== 'undefined' && typeof Players.clearUnreadDM === 'function') {
-                Players.clearUnreadDM(nick);
-            }
-
-            this.updateInputState();
-            this.renderMessages();
-        },
-
-        close() {
-            // v11.7: контекстное меню живёт в документе PiP — снимаем до
-            // закрытия окна, иначе останутся ссылки на мёртвый DOM.
-            this.closeNickMenu();
-            if (this._popoutWin) {
-                try { this._popoutWin.close(); } catch(e) {}
-            }
-            // DOM чата живёт в PiP-окне и умирает вместе с ним.
-            this._popoutWin = null;
-            this._pipDoc = null;
-            this.widget = null;
-            // ВАЖНО: stopBackgroundLiveListener() здесь НЕ вызываем. Фоновый
-            // слушатель запущен специально, чтобы ловить непрочитанные ЛС/чат при
-            // закрытом PiP. Останавливает его только shutdown() в main.js.
-        },
-
-        async popoutChat() {
-            if (this.disabled) {
-                UI.showToast('🚫 Чат отключен в настройках FAB', true);
-                return;
-            }
-
-            if (this._popoutWin) {
-                if (!this._popoutWin.closed) {
-                    try { this._popoutWin.focus(); } catch (e) {}
-                    return;
-                }
-                // Окно закрылось без pagehide (kill процесса) — сбрасываем ссылки
-                this._popoutWin = null;
-                this._pipDoc = null;
-                this.widget = null;
-            }
-
-            try {
-                let win = null;
-
-                // 1. Проверяем API documentPictureInPicture
-                if (window.documentPictureInPicture && typeof window.documentPictureInPicture.requestWindow === 'function') {
-                    // Не открывать второй PiP, если первый уже висит
-                    if (window.documentPictureInPicture.window) {
-                        const existing = window.documentPictureInPicture.window;
-                        try { existing.focus(); } catch (e) {}
-                        this._popoutWin = existing;
-                        this._pipDoc = existing.document;
-                        // v11.6.0h.2: PiP мог остаться от прошлого запуска
-                        // скрипта — правил подсветки в нём тогда нет.
-                        this._applyAddonStylesToPip(this._pipDoc);
-                        // Если DOM чата в окне почему-то потерялся — собираем заново.
-                        if (!this._pipRoot()) {
-                            try { existing.document.body.appendChild(this._buildWidget(existing.document)); } catch (e) {}
-                        }
-                        SevenTV.applySize();
-                        this.unreadCount = 0;
-                        this.updateBadge();
-                        this.renderMessages();
-                        this.updateInputState();
-                        return;
-                    }
-                    try {
-                        win = await window.documentPictureInPicture.requestWindow({ width: 350, height: 500 });
-                    } catch (pipErr) {
-                        dbg('documentPictureInPicture error:', pipErr);
-                        // Не падаем в window.open молча — это источник about:blank.
-                        UI.showToast('PiP недоступен: ' + (pipErr.message || 'unknown'), true);
-                        return;
-                    }
-                }
-
-                // 2. Резервный путь только если PiP API вообще нет (не Chrome)
-                if (!win) {
-                    try {
-                        win = window.open('', 'LegionChatPopout', 'width=350,height=500,resizable=yes,scrollbars=no');
-                    } catch (e) {}
-                }
-
-                if (!win) {
-                    UI.showToast('Не удалось открыть окно чата', true);
-                    return;
-                }
-
-                this._popoutWin = win;
-                this._pipDoc = win.document;
-
-                // 3. Копируем все CSS стили в новое окно
-                try {
-                    [...document.styleSheets].forEach(sheet => {
-                        try {
-                            // v11.6.0h.2: простыню подсветки ников не копируем —
-                            // в PiP её генерирует _applyAddonStylesToPip().
-                            // Иначе в окне остался бы «снимок» старых правил,
-                            // который нельзя погасить тумблером.
-                            if (sheet.ownerNode && sheet.ownerNode.id === 'lg-addon-hl-styles') return;
-                            if (sheet.href) {
-                                const link = win.document.createElement('link');
-                                link.rel = 'stylesheet';
-                                link.href = sheet.href;
-                                win.document.head.appendChild(link);
-                            } else if (sheet.cssRules) {
-                                const style = win.document.createElement('style');
-                                for (const rule of sheet.cssRules) {
-                                    style.appendChild(win.document.createTextNode(rule.cssText));
-                                }
-                                win.document.head.appendChild(style);
-                            }
-                        } catch (e) {}
-                    });
-
-                    document.querySelectorAll('style').forEach(s => {
-                        try {
-                            // Наша простыня подсветки — тоже мимо (см. выше).
-                            if (s.id === 'lg-addon-hl-styles') return;
-                            const style = win.document.createElement('style');
-                            style.textContent = s.textContent;
-                            win.document.head.appendChild(style);
-                        } catch (e) {}
-                    });
-
-                    const baseStyle = win.document.createElement('style');
-                    baseStyle.textContent = `
-                        html, body {
-                            color-scheme: dark;
-                            color: #f7eadf;
-                            background: #1a1418;
-                            margin: 0;
-                            padding: 0;
-                            width: 100%;
-                            height: 100%;
-                            overflow: hidden;
-                            font-family: 'Nunito', sans-serif;
-                        }
-                        .chat-pip {
-                            display: flex !important;
-                            flex-direction: column !important;
-                            height: 100% !important;
-                            width: 100% !important;
-                            overflow: hidden !important;
-                        }
-                        .chat-top-bar, .chat-sub-tabs {
-                            flex-shrink: 0 !important;
-                        }
-                        .chat-messages {
-                            flex: 1 1 0% !important; /* Жестко задаем базовый размер 0, чтобы контейнер сжимался */
-                            min-height: 0 !important;
-                            overflow-y: auto !important;
-                            display: flex !important;
-                            flex-direction: column !important;
-                        }
-                        .chat-input-area {
-                            flex-shrink: 0 !important;
-                            background: #111;
-                            border-top: 1px solid #333;
-                            padding: 10px;
-                            display: flex;
-                            gap: 5px;
-                        }
-                    `;
-                    win.document.head.appendChild(baseStyle);
-                    win.document.title = '💬 Чат Legion';
-                } catch (e) {
-                    dbg('Error copying styles to popout window:', e);
-                }
-
-                // v11.6.0h.2: CSS-подсветка ников для документа PiP-окна.
-                // Своя простыня нужна отдельно: document-правила из основной
-                // страницы на другой документ не действуют.
-                this._applyAddonStylesToPip(win.document);
-
-                // Размер смайлов 7TV задаётся CSS-переменной — переносим её в PiP.
-                SevenTV.applySize();
-
-                // 4. DOM чата собираем сразу в документе PiP-окна:
-                //    в основной странице встроенного виджета больше нет (v11.5.3).
-                const widget = this._buildWidget(win.document);
-                win.document.body.appendChild(widget);
-
-                // 5. Очистка ссылок при закрытии окна: DOM чата умирает вместе с PiP,
-                //    возвращать его в основную страницу больше не нужно.
-                const cleanupPip = () => {
-                    if (!this._popoutWin) return;
-                    this.closeNickMenu();
-                    this._popoutWin = null;
-                    this._pipDoc = null;
-                    this.widget = null;
-                    // Фоновый слушатель не останавливаем: он должен продолжать
-                    // считать непрочитанные сообщения после закрытия PiP.
-                };
-
-                win.addEventListener('pagehide', cleanupPip);
-                win.addEventListener('unload', cleanupPip);
-
-                this.startBackgroundLiveListener();
-
-                // Открыли чат — счётчик непрочитанных сбрасываем.
-                this.unreadCount = 0;
-                this.updateBadge();
-
-                // История (кэш localStorage + /api/city/enter) нужна, чтобы PiP
-                // открывался уже с сообщениями. loadHistory сам вызовет renderMessages.
-                this.loadHistory();
-                this.renderMessages();
-                this.updateInputState();
-                UI.showToast('📺 Чат вынесен в отдельное окно');
-            } catch (err) {
-                dbg('Popout chat failed:', err);
-                UI.showToast('Ошибка при открытии окна чата', true);
-            }
-        },
-
-        // Клик по нику автора: вставляем «@Ник » в поле ввода
-        insertMention(nick) {
-            if (!nick) return;
-            const inp = this._pipEl('#chat-input');
-            if (!inp || inp.disabled) return;
-            const mention = '@' + nick + ' ';
-            const val = inp.value || '';
-            let start = typeof inp.selectionStart === 'number' ? inp.selectionStart : val.length;
-            let end = typeof inp.selectionEnd === 'number' ? inp.selectionEnd : val.length;
-            if (start > val.length) start = val.length;
-            if (end > val.length) end = val.length;
-            inp.value = val.slice(0, start) + mention + val.slice(end);
-            const pos = start + mention.length;
-            try { inp.setSelectionRange(pos, pos); } catch (e) {}
-            inp.focus();
-        },
-
-        // ------------------------------------------------------------
-        // v11.7: контекстное меню по нику в вынесенном (PiP) чате
-        //
-        // ЛКМ по нику по-прежнему вставляет «@Ник » в поле ввода, ПКМ
-        // открывает меню: упомянуть, написать в ЛС и «👤 Профиль» — если в
-        // page-context есть LGProfile.open (client b62dcb896a:
-        // reference/LegionFrontSRC/site/app.js). Свой DOM игры не патчим,
-        // профиль открывает нативный модуль.
-        // ------------------------------------------------------------
-
-        /** Доступен ли нативный профиль (LGProfile.open из app.js). */
-        profileAvailable() {
-            const page = (typeof G !== 'undefined' && G) ? G : null;
-            const P = page && page.LGProfile;
-            if (!P || typeof P.open !== 'function') return false;
-            try {
-                if (typeof P.on === 'function' && P.on() === false) return false;
-            } catch (e) { /* on() может бросить — считаем профиль доступным */ }
-            return true;
-        },
-
-        /** Закрыть контекстное меню ника и снять его слушатели. */
-        closeNickMenu() {
-            const menu = this._nickMenu;
-            this._nickMenu = null;
-            if (menu && menu.parentNode) menu.parentNode.removeChild(menu);
-            const bound = this._nickMenuBound;
-            this._nickMenuBound = null;
-            if (bound) {
-                try { bound.doc.removeEventListener('pointerdown', bound.outside, true); } catch (e) {}
-                try { bound.doc.removeEventListener('keydown', bound.esc, true); } catch (e) {}
-            }
-        },
-
-        /**
-         * Показать контекстное меню для ника.
-         *
-         * @param {string} nick ник автора сообщения
-         * @param {number} x координата клика (clientX)
-         * @param {number} y координата клика (clientY)
-         */
-        showNickMenu(nick, x, y) {
-            if (!nick) return;
-            const root = this._pipRoot();
-            if (!root) return;
-            const doc = root.ownerDocument || document;
-
-            this.closeNickMenu();
-
-            const menu = doc.createElement('div');
-            menu.className = 'lgu-nick-menu';
-            menu.setAttribute('role', 'menu');
-
-            const add = (label, fn) => {
-                const btn = doc.createElement('button');
-                btn.type = 'button';
-                btn.className = 'lgu-nick-menu-item';
-                btn.setAttribute('role', 'menuitem');
-                btn.textContent = label;
-                // Инлайн-стили — страховка: PiP мог открыться до того, как в
-                // него скопировались правила core/styles.js.
-                btn.style.cssText = 'display:block;width:100%;text-align:left;padding:6px 9px;'
-                    + 'border:0;border-radius:6px;background:transparent;color:#f7eadf;'
-                    + 'font:inherit;cursor:pointer;';
-                btn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    this.closeNickMenu();
-                    try { fn(); } catch (err) { dbg('nick menu action failed:', err); }
-                });
-                menu.appendChild(btn);
-            };
-
-            add('💬 Упомянуть', () => this.insertMention(nick));
-            add('✉️ Написать в ЛС', () => { this.openDM(nick); });
-
-            if (this.profileAvailable()) {
-                add('👤 Профиль', () => {
-                    const page = (typeof G !== 'undefined' && G) ? G : null;
-                    if (!page || !page.LGProfile || typeof page.LGProfile.open !== 'function') return;
-                    // LGProfile.open(login) сам ходит на GET /api/profile/<login>
-                    // и рисует нативное окно профиля.
-                    Promise.resolve(page.LGProfile.open(nick)).catch(() => {});
-                });
-            }
-
-            // Позиция: фиксированная, с зажимом по границам окна PiP.
-            menu.style.cssText = 'position:fixed;display:flex;flex-direction:column;gap:2px;'
-                + 'min-width:168px;padding:4px;z-index:99999;visibility:hidden;'
-                + 'background:#1d1620;border:1px solid #caa55c;border-radius:8px;'
-                + 'box-shadow:0 6px 18px rgba(0,0,0,.55);color:#f7eadf;'
-                + "font:12px/1.25 system-ui,-apple-system,'Segoe UI',sans-serif;";
-            doc.body.appendChild(menu);
-
-            const vw = doc.defaultView ? doc.defaultView.innerWidth : (window.innerWidth || 0);
-            const vh = doc.defaultView ? doc.defaultView.innerHeight : (window.innerHeight || 0);
-            const mr = menu.getBoundingClientRect();
-            const left = Math.max(4, Math.min((vw || 0) - mr.width - 4, x));
-            const top = Math.max(4, Math.min((vh || 0) - mr.height - 4, y));
-            menu.style.left = Math.round(left) + 'px';
-            menu.style.top = Math.round(top) + 'px';
-            menu.style.visibility = 'visible';
-
-            this._nickMenu = menu;
-
-            // Клик мимо меню или Escape — закрываем. Capture на документе PiP:
-            // лента перерисовывается целиком, поэтому слушатели живут только
-            // пока меню открыто.
-            const outside = (ev) => {
-                if (menu.contains(ev.target)) return;
-                this.closeNickMenu();
-            };
-            const esc = (ev) => {
-                if (ev.key === 'Escape') this.closeNickMenu();
-            };
-            doc.addEventListener('pointerdown', outside, true);
-            doc.addEventListener('keydown', esc, true);
-            this._nickMenuBound = { doc, outside, esc };
-        },
-
-        // Все диалоги ЛС: ключи LEGION_DM_HISTORY_* в localStorage
-        getDMDialogs() {
-            const dialogs = [];
-            const myNick = (this.myNick || '').toLowerCase();
-            try {
-                for (let i = 0; i < localStorage.length; i++) {
-                    const storageKey = localStorage.key(i);
-                    if (!storageKey || !storageKey.startsWith('LEGION_DM_HISTORY_')) continue;
-                    const nickKey = storageKey.slice('LEGION_DM_HISTORY_'.length);
-                    if (!nickKey) continue;
-                    let history = [];
-                    try {
-                        const rawHistory = JSON.parse(localStorage.getItem(storageKey) || '[]');
-                        if (Array.isArray(rawHistory)) history = rawHistory;
-                    } catch (e) { history = []; }
-                    const last = history[history.length - 1] || null;
-                    let peerNick = nickKey;
-                    if (last) {
-                        // Ник собеседника — участник диалога, совпадающий с ключом хранилища
-                        const candidates = [last.from, last.to].filter(Boolean);
-                        const matched = candidates.find(n => String(n).toLowerCase() === nickKey);
-                        peerNick = matched || ((last.from && String(last.from).toLowerCase() !== myNick) ? last.from : (last.to || nickKey));
-                    }
-                    const unread = (typeof Players !== 'undefined' && typeof Players.getUnreadDM === 'function')
-                        ? Players.getUnreadDM(nickKey) : 0;
-                    dialogs.push({ key: nickKey, nick: peerNick || nickKey, last, ts: (last && last.ts) || 0, unread });
-                }
-            } catch (e) {}
-            return dialogs.sort((a, b) => ((b.unread > 0) ? 1 : 0) - ((a.unread > 0) ? 1 : 0) || (b.ts - a.ts));
-        },
-
-        // Список диалогов во вкладке «✉️ ЛС»
-        renderDMDialogList(box) {
-            const ownerDoc = box.ownerDocument || document;
-            const dialogs = this.getDMDialogs();
-            box.innerHTML = '';
-            if (dialogs.length === 0) {
-                box.innerHTML = `<div style="color:#888; text-align:center; padding:25px 15px; font-style:italic;">Диалогов пока нет.<br><span style="font-size:12px;">Откройте Досье игрока или напишите «/w Ник текст».</span></div>`;
-                return;
-            }
-            dialogs.forEach(d => {
-                const row = ownerDoc.createElement('div');
-                row.className = 'chat-dialog-row';
-                row.setAttribute('data-nick', d.nick);
-                row.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 10px; background:#26202e; border:1px solid #44374a; border-radius:6px; margin-bottom:6px; cursor:pointer;';
-                const preview = d.last ? String(d.last.text || '').slice(0, 45) : '';
-                const unreadBadge = d.unread > 0
-                    ? `<span style="background:#ff3b5c; color:#fff; font-size:10px; font-weight:bold; padding:1px 6px; border-radius:10px;">${d.unread}</span>`
-                    : '';
-                row.innerHTML = `
-                    <div style="min-width:0;">
-                        <div style="font-weight:bold; color:#f7eadf; font-size:13px;">${Utils.escapeHtml(d.nick)}</div>
-                        <div style="color:#aaa; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${Utils.escapeHtml(preview)}</div>
-                    </div>
-                    <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
-                        <span style="color:#8899aa; font-size:10px;">${Utils.escapeHtml((d.last && d.last.time) || '')}</span>
-                        ${unreadBadge}
-                    </div>`;
-                row.addEventListener('click', () => {
-                    // Диалог открывается прямо в виджете, нативный чат игры не трогаем
-                    if (typeof Players !== 'undefined' && typeof Players.clearUnreadDM === 'function') {
-                        Players.clearUnreadDM(d.nick);
-                    }
-                    this.dmTarget = d.nick;
-                    this.updateInputState();
-                    this.renderMessages();
-                });
-                box.appendChild(row);
-            });
-        },
-
-        // Функция отрисовки (вызывается при клике на вкладки и приходе новых сообщений)
-        renderMessages() {
-            // Лента сообщений живёт в документе PiP-окна: если окно закрыто,
-            // рендерить некуда — сообщения просто копятся в this.messages.
-            // ВАЖНО: контейнер должен браться из актуального документа PiP-окна.
-            // this.widget может указывать на устаревший (detached) DOM.
-            const box = (this._pipDoc && this._pipDoc.querySelector('#chat-messages')) || this._pipEl('#chat-messages');
-            if (!box) return;
-
-            // Подсветка вкладок всегда соответствует Chat.activeTab:
-            // раньше active-класс мог накапливаться сразу на нескольких вкладках.
-            this._syncTabs();
-
-            // Окно чата открыто (контейнер найден) — непрочитанных быть не должно.
-            // Гасим счётчик прямо здесь: он копился, если инкремент успевал
-            // пройти до/во время открытия PiP.
-            if (this.unreadCount !== 0) {
-                this.unreadCount = 0;
-                this.updateBadge();
-            }
-
-            // Запоминаем позицию ДО очистки: если пользователь читает историю,
-            // новый рендер не должен утаскивать его вниз.
-            const wasAtBottom = (box.scrollHeight - box.scrollTop - box.clientHeight) < 50;
-            const prevScrollTop = box.scrollTop;
-            const prevDmBox = box.querySelector('.chat-dm-messages');
-            const dmWasAtBottom = prevDmBox ? (prevDmBox.scrollHeight - prevDmBox.scrollTop - prevDmBox.clientHeight) < 50 : true;
-            const dmPrevScrollTop = prevDmBox ? prevDmBox.scrollTop : 0;
-
-            box.innerHTML = '';
-
-            // Вкладка «Личные»: либо открытый диалог, либо список всех диалогов
-            if (this.activeTab === 'dm') {
-                if (this.dmTarget) {
-                    const ownerDoc = box.ownerDocument || document;
-
-                    // Шапка диалога
-                    box.innerHTML = `<div style="padding: 5px 10px; border-bottom: 1px solid #44374a; display: flex; justify-content: space-between; align-items: center; background: #2a2030; flex-shrink: 0;">
-                        <span style="font-weight: bold; color: #ffcf6a;">Диалог с ${Utils.escapeHtml(this.dmTarget)}</span>
-                        <button id="dm-back-btn" style="background: none; border: 1px solid #ff8fa3; color: #ff8fa3; border-radius: 4px; padding: 2px 6px; cursor: pointer; font-size: 11px;">Назад</button>
-                    </div>`;
-
-                    // Контейнер для сообщений
-                    const msgContainer = ownerDoc.createElement('div');
-                    msgContainer.className = 'chat-dm-messages';
-                    msgContainer.style.cssText = 'display: flex; flex-direction: column; gap: 8px; padding: 10px; overflow-y: auto; flex: 1;';
-                    box.appendChild(msgContainer);
-
-                    // Загружаем историю (используем метод из Players)
-                    const history = Players.getDMHistory(this.dmTarget);
-                    const myNick = (this.myNick || '').toLowerCase();
-
-                    if (history.length === 0) {
-                        msgContainer.innerHTML = `<div style="text-align:center; color:#888; font-style:italic; margin:auto;">История пуста...</div>`;
-                    } else {
-                        history.forEach(m => {
-                            const isMe = (m.from || '').toLowerCase() === myNick || m.from === 'Я';
-                            const div = ownerDoc.createElement('div');
-                            div.style.cssText = `align-self: ${isMe ? 'flex-end' : 'flex-start'}; max-width: 80%; background: ${isMe ? '#1d3827' : '#282030'}; border: 1px solid ${isMe ? '#2e5d3e' : '#4d3a5a'}; border-radius: 8px; padding: 6px 10px; color: #fff; word-break: break-word;`;
-                            div.innerHTML = `<div style="font-size:13px; line-height:1.4;">${SevenTV.replaceEmotes(m.text)}</div><div style="font-size:10px; color:#aaa; text-align:right; margin-top:2px;">${Utils.escapeHtml(m.time || '')}</div>`;
-                            msgContainer.appendChild(div);
-                        });
-                        SevenTV.decorate(msgContainer);
-                        // Вниз — только если пользователь и так был внизу.
-                        if (dmWasAtBottom) msgContainer.scrollTop = msgContainer.scrollHeight;
-                        else msgContainer.scrollTop = dmPrevScrollTop;
-                    }
-
-                    // Обработчик кнопки "Назад"
-                    box.querySelector('#dm-back-btn').onclick = () => {
-                        this.dmTarget = null;
-                        this.updateInputState();
-                        this.renderMessages();
-                    };
-                } else {
-                    this.renderDMDialogList(box);
-                }
-                return; // Важно: выходим, чтобы не рендерить общий чат
-            }
-
-            // Заглушка, если игрок находится в городе (§ Задача 2 & 4)
-            if (this.activeTab === 'mn' && !this.isInMine()) {
-                box.innerHTML = `
-                    <div style="color:#aaa; text-align:center; padding:35px 15px; font-style:italic; line-height:1.6;">
-                        <span style="font-size:32px; display:block; margin-bottom:8px;">⛏️</span>
-                        <b style="color:#ffcf6a; font-size:14px;">Вы находитесь в городе.</b><br>
-                        Чат шахты доступен только во время нахождения в шахте.
-                    </div>`;
-                return;
-            }
-
-            // ПАТЧ 11.6.4g: классификация сообщений по вкладкам — копия нативной
-            // логики (reference/LegionFrontSRC/lib/site-chat.js: tabOf):
-            //   • tb — готовый ярлык вкладки от сервера: 'gl' у гильдейских
-            //     сообщений, 'ev' у системных событий (заточки/достижения);
-            //   • rm/channel === 'mine' — сообщения шахты (в нативе тег rm: 'mine');
-            //   • k: 'tr' — торговля, k: 'dm' — личные;
-            //   • всё остальное — общий чат города.
-            const tabOf = (m) => m.tb || ((m.rm === 'mine' || m.channel === 'mine')
-                ? 'mn'
-                : m.k === 'tr' ? 'tr'
-                : m.k === 'dm' ? 'dm'
-                : 'g');
-
-            const tab = this.activeTab;
-            const filtered = this.messages.filter(m => {
-                const t = tabOf(m);
-                if (tab === 'g') {
-                    // Общий: живые сообщения города без торговли и событий.
-                    return t === 'g' && !m.isSystem && !m.ev;
-                }
-                // Торговля/Ремёсла: только живые сообщения этой вкладки.
-                if (tab === 'tr') return t === 'tr' && !m.isSystem;
-                if (tab === 'mn') return t === 'mn' && !m.isSystem;
-                // Гильдия: tb === 'gl' (системных сообщений в гильдии не бывает).
-                if (tab === 'gl') return t === 'gl';
-                // 'dm' отрисован отдельной ветвью выше и сюда не доходит.
-                return false;
-            });
-
-            const ownerDoc = box.ownerDocument || document;
-
-            filtered.slice(-150).forEach(m => {
-                const meta = this.getRoleMeta(m.role, m.isSystem);
-                const div = ownerDoc.createElement('div');
-                div.className = 'chat-msg' + (m._pending ? ' pending' : '');
-
-                const isStreamer = !m.isSystem && this.isStreamerMessage(m);
-                const isMention = !m.isSystem && this.isMentionedMessage(m);
-
-                if (isStreamer) div.classList.add('streamer-msg');
-                if (isMention) div.classList.add('mention-msg');
-
-                const streamerBadge = isStreamer 
-                    ? `<span style="background:#ffd700; color:#1d1620; font-size:10px; font-weight:bold; padding:1px 5px; border-radius:4px; margin-right:4px;">👑 Стример</span>` 
-                    : '';
-                const mentionBadge = isMention 
-                    ? `<span style="background:#f7768e; color:#fff; font-size:10px; font-weight:bold; padding:1px 5px; border-radius:4px; margin-right:4px;">🔔 Упоминание</span>` 
-                    : '';
-
-                let formattedText = (typeof SevenTV !== 'undefined' && SevenTV.replaceEmotes)
-                    ? SevenTV.replaceEmotes(m.text)
-                    : Utils.escapeHtml(m.text);
-                if (isMention && this.myNick) {
-                    const escNick = Utils.escapeRegex(Utils.escapeHtml(this.myNick));
-                    const reg = new RegExp(`(@?${escNick})`, 'gi');
-                    // Подсвечиваем ник только в текстовых узлах, не задевая атрибуты img эмоутов.
-                    formattedText = formattedText.split(/(<[^>]*>)/).map(part =>
-                        part.startsWith('<') ? part : part.replace(reg, '<mark style="background:rgba(247,118,142,0.35);color:#ff757f;padding:1px 3px;border-radius:3px;">$1</mark>')
-                    ).join('');
-                }
-
-                // Бейдж титула (aw) перед ником автора
-                let awardBadge = '';
-                const aw = m.aw;
-                if (Array.isArray(aw) && aw.length > 0 && aw[0] && typeof aw[0] === 'object') {
-                    const award = aw[0];
-                    awardBadge = `<span class="chat-award-badge" title="${Utils.escapeHtml(award.d || '')}" style="display:inline-block; background:rgba(202,165,92,0.15); border:1px solid #caa55c; color:#ffcf6a; font-size:10px; font-weight:bold; padding:1px 6px; border-radius:10px; margin-right:6px; vertical-align:middle;">${Utils.escapeHtml(award.i || '')} ${Utils.escapeHtml(award.n || '')}</span>`;
-                }
-
-                // Щиток модератора: сервер отдаёт статус отдельно от класса
-                // (r: "mod"), поэтому рисуем его перед иконкой класса.
-                const modBadge = m.rank === 'mod'
-                    ? `<span class="chat-mod-badge" title="Модератор" style="display:inline-block; background:rgba(255, 207, 106, 0.15); border:1px solid #caa55c; color:#ffcf6a; font-size:10px; font-weight:bold; padding:1px 5px; border-radius:4px; margin-right:4px; vertical-align:middle;">⚖️ Модер</span>`
-                    : '';
-
-                const authorNick = m.author || '';
-                const isAddon = this.isAddonUser(authorNick);
-                // v11.6.1c: бейджа «⚡» больше нет ни в HTML, ни в CSS — ник
-                // остаётся чистым текстом. Класс .legion-addon-user оставляем:
-                // по нему core/styles.js и динамическая простыня дают свечение.
-                const addonClass = isAddon ? ' legion-addon-user' : '';
-                // v11.6.0h: бирюзовый #00f0ff больше не подставляется — у ника
-                // остаётся его родной цвет класса (meta.color), а свечение
-                // .legion-addon-user рисуется через currentColor, т.е. в нём же.
-                // Оставлять style пустым для addon-ников нельзя: правило
-                // .chat-author в core/styles.js задаёт color !important и
-                // перекрасило бы их в белый, потеряв и цвет, и оттенок свечения.
-                const authorColor = meta.color || '#ffcf6a';
-                const styleColor = `color: ${authorColor} !important; `;
-                const authorHtml = `<span class="chat-author nick-clickable${addonClass}" data-nick="${Utils.escapeHtml(authorNick)}" title="Кликните, чтобы упомянуть" style="${styleColor}cursor: pointer;">${Utils.escapeHtml(authorNick)}</span>`;
-
-                if (m.k === 'dm') {
-                    div.innerHTML = `
-                        <span style="background:#007bff; color:#fff; font-size:10px; font-weight:bold; padding:1px 5px; border-radius:4px; margin-right:4px;">✉️ ЛС для ${Utils.escapeHtml(m.to || '')}</span>
-                        ${modBadge}${awardBadge}${authorHtml}
-                        <span class="chat-text" style="color: #6edff6 !important;">${formattedText}</span>
-                    `;
-                } else if (m.isSystem) {
-                    div.innerHTML = `
-                        ${modBadge}<span class="chat-role-icon">${meta.icon}</span>
-                        <span class="chat-author" style="color: ${meta.color || '#ffcf6a'} !important;">${Utils.escapeHtml(m.author)}</span>
-                        <span class="chat-text" style="color: #aaa !important; font-style: italic;">${formattedText}</span>
-                    `;
-                } else {
-                    div.innerHTML = `
-                        ${streamerBadge}${mentionBadge}${awardBadge}${modBadge}<span class="chat-role-icon">${meta.icon}</span>
-                        ${authorHtml}
-                        <span class="chat-envelope">✉️</span>
-                        <span class="chat-text" style="color: #f7eadf !important;">${formattedText}</span>
-                    `;
-                }
-                const nickEl = div.querySelector('.nick-clickable');
-                if (nickEl) {
-                    // title подсказывает оба жеста: ЛКМ — упоминание, ПКМ — меню.
-                    nickEl.setAttribute('title', 'Кликните, чтобы упомянуть; правая кнопка — меню (профиль, ЛС)');
-
-                    nickEl.addEventListener('click', (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        this.insertMention(nickEl.getAttribute('data-nick'));
-                    });
-
-                    // v11.7: контекстное меню. Своё нативное меню браузера
-                    // гасим только на нике, остальной чат не трогаем.
-                    nickEl.addEventListener('contextmenu', (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        this.showNickMenu(nickEl.getAttribute('data-nick'), e.clientX, e.clientY);
-                    });
-                }
-                box.appendChild(div);
-            });
-
-            // 7TV-смайлики: подгружаем blob:-картинки для вставленных img.t7-emote.
-            SevenTV.decorate(box);
-
-            if (filtered.length === 0) {
-                box.innerHTML = `<div style="color:#888; text-align:center; padding:20px; font-style:italic;">(Здесь пока пусто...)</div>`;
-            }
-
-            // Автоскролл: если пользователь был внизу ИЛИ последнее сообщение наше
-            // (своё только что отправленное не должно «пропадать» под краем).
-            const lastMsg = filtered[filtered.length - 1];
-            const lastIsMine = lastMsg && (lastMsg._pending || lastMsg.author === this.myNick || (this.myNick && String(lastMsg.author || '').toLowerCase() === this.myNick.toLowerCase()));
-
-            if (wasAtBottom || lastIsMine) {
-                box.scrollTop = box.scrollHeight;
-            } else {
-                box.scrollTop = prevScrollTop;
-            }
-        },
-
-        async send() {
-            const input = this._pipEl('#chat-input');
-            if (!input) return;
-            const rawText = input.value.trim();
-            if (!rawText) return;
-
-            // Открыт диалог во вкладке «Личные» — отправляем ЛС прямо из виджета
-            if (this.activeTab === 'dm' && this.dmTarget) {
-                // Сначала проверяем, не команда ли это /w: иначе в текст сообщения
-                // уйдёт «/w Ник привет» целиком, и собеседник получит команду как текст.
-                const dmCmd = rawText.match(/^\/(?:w|dm|whisper)\s+(?:"([^"]+)"|'([^']+)'|(\S+))(?:\s+(.*))?$/i);
-                const actualText = dmCmd ? (dmCmd[4] || '').trim() : rawText;
-                if (!actualText) {
-                    this.showError('Формат: /w Ник сообщение');
-                    return;
-                }
-                if (typeof Players === 'undefined' || typeof Players.sendDM !== 'function') {
-                    this.showError('Отправка ЛС недоступна');
-                    return;
-                }
-                input.value = '';
-                const ok = await Players.sendDM(this.dmTarget, actualText);
-                if (ok) {
-                    this.renderMessages(); // Перерисовываем историю с новым сообщением
-                } else {
-                    input.value = rawText; // Возвращаем текст, если ошибка
-                }
-                return; // Выходим, чтобы не отправлять в общий чат
-            }
-
-            if (this.activeTab === 'dm') {
-                this.showError('Выберите диалог в списке «Личные»');
-                return;
-            }
-            if (this.cooldownUntil && Date.now() < this.cooldownUntil) {
-                this.showError('Подождите перед отправкой...');
-                return;
-            }
-
-            // ЛС: /w nick text, /dm nick text, /whisper nick text.
-            // «@nick текст» — это НЕ ЛС, а обычное сообщение в общий чат (упоминание).
-            const dmMatch = rawText.match(/^\/(?:w|dm|whisper)\s+(?:"([^"]+)"|'([^']+)'|(\S+))(?:\s+(.*))?$/i);
-
-            let isMine = false;
-            let mineId = null;
-            let toUser = null;
-            let cleanText = rawText;
-
-            if (dmMatch) {
-                toUser = (dmMatch[1] || dmMatch[2] || dmMatch[3] || '').trim();
-                cleanText = (dmMatch[4] || '').trim();
-                if (!toUser || !cleanText) {
-                    this.showError('Формат: /w Ник сообщение');
-                    return;
-                }
-            } else if (this.activeTab === 'mn') {
-                if (!this.isInMine()) {
-                    this.showError('Чат шахты доступен только в шахте');
-                    return;
-                }
-                isMine = true;
-                mineId = this.getMineId() || 'home';
-            }
-
-            input.value = '';
-            const channel = dmMatch ? 'city' : (isMine ? 'mine' : 'city');
-
-            const local = { 
-                author: this.myNick, 
-                text: dmMatch ? cleanText : rawText, 
-                to: toUser,
-                k: dmMatch ? 'dm' : (!isMine && this.activeTab === 'tr' ? 'tr' : undefined),
-                role: this.myRole, 
-                isSystem: false, 
-                id: null, 
-                seq: null, 
-                channel,
-                ts: Date.now(), 
-                _pending: true 
-            };
-            this.messages.push(local);
-            this.renderMessages();
-
-            // 3. ПРОГРЕВ СЕССИИ: если отправляем в город (или ЛС), находясь в шахте
-            if (!isMine && this.isInMine()) {
-                try {
-                    // ВАЖНО: чистый fetch, а не Utils.fetchApi — тот возьмёт контекст
-                    // ШАХТЫ, и прогрев улетит не туда, дав 409 при отправке в город.
-                    // ПАТЧ 11.6.4h: адрес собираем через Utils.apiPath, иначе запрос
-                    // уходил в корень домена мимо /c/<channel>/ и получал 404.
-                    await fetch(Utils.apiPath('/api/city/enter'), {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        credentials: 'same-origin',
-                        body: JSON.stringify({})
-                    });
-                } catch (warmErr) {
-                    dbg('City session warmup failed:', warmErr);
-                }
-            }
-
-            try {
-                let res;
-                let data = null;
-
-                // ПАТЧ 11.6.4h: адрес всегда собираем через Utils.apiPath — он
-                // добавляет префикс /c/<channel>/. Голый fetch('/api/...') уходил
-                // в корень домена (legiongame.gg/api/...) и получал 404:
-                // переписывание путей делает window.fetch самой страницы, а из
-                // песочницы Tampermonkey запрос идёт мимо него.
-                let endpoint = '/api/chat/say';
-                let payload = {};
-                if (dmMatch) {
-                    // ЛС — отдельный эндпоинт, тело { to, text }.
-                    endpoint = '/api/dm/say';
-                    payload = { to: toUser, text: cleanText };
-                } else if (this.activeTab === 'gl') {
-                    // Гильдия: ВАЖНО — поле 't', а не 'text'.
-                    endpoint = '/api/guilds/say';
-                    payload = { t: rawText };
-                } else if (this.activeTab === 'mn') {
-                    // Ремёсла/шахта: комнату сервер определяет по текущей сессии,
-                    // поэтому c= в теле и в URL не нужен.
-                    endpoint = '/api/chat/say';
-                    payload = { room: 'mine', text: rawText };
-                } else if (this.activeTab === 'tr') {
-                    // Торговля — общая комната города с флагом k: 'tr'.
-                    endpoint = '/api/chat/say';
-                    payload = { room: 'city', k: 'tr', text: rawText };
-                } else {
-                    // Общий чат города.
-                    endpoint = '/api/chat/say';
-                    payload = { room: 'city', text: rawText };
-                }
-
-                res = await fetch(Utils.apiPath(endpoint), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'same-origin',
-                    body: JSON.stringify(payload)
-                });
-                data = await res.json().catch(() => null);
-
-                // ПАТЧ 11.6.4h: фолбэк на старые адреса — если сервер не знает
-                // новый эндпоинт. Все адреса строго через Utils.apiPath, иначе они
-                // тоже улетали бы в корень домена. На rate_limited не ретраим,
-                // чтобы не получить двойной запрос.
-                const unknownEndpoint = !!res && (
-                    res.status === 404
-                    || (data && (data.error === 'not_found' || data.error === 'method_not_allowed'))
-                );
-                if (unknownEndpoint && dmMatch) {
-                    // Старый путь ЛС: комната города с флагом k: 'dm'.
-                    res = await fetch(Utils.apiPath('/api/city/say'), {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        credentials: 'same-origin',
-                        body: JSON.stringify({ text: cleanText, to: toUser, k: 'dm' })
-                    });
-                    data = await res.json().catch(() => null);
-                } else if (unknownEndpoint && this.activeTab === 'gl') {
-                    // Для гильдии фолбэка нет: /api/guilds/say — единственный путь.
-                } else if (unknownEndpoint && isMine) {
-                    // Старый путь шахты: обязательный параметр c=.
-                    res = await fetch(Utils.apiPath(`/api/mine/chat/say?c=${encodeURIComponent(mineId)}`), {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        credentials: 'same-origin',
-                        body: JSON.stringify({ text: rawText })
-                    });
-                    data = await res.json().catch(() => null);
-                } else if (unknownEndpoint) {
-                    // Старый путь города: общий чат либо торговля (k: 'tr').
-                    res = await fetch(Utils.apiPath('/api/city/say'), {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        credentials: 'same-origin',
-                        body: JSON.stringify(this.activeTab === 'tr'
-                            ? { text: rawText, k: 'tr' }
-                            : { text: rawText })
-                    });
-                    data = await res.json().catch(() => null);
-                }
-
-                const httpOk = !!(res && res.ok);
-                if (!httpOk || (data && data.ok === false)) {
-                    // откат
-                    this.messages = this.messages.filter(m => m !== local);
-                    input.value = rawText;
-                    this.renderMessages();
-                    const errMsg = (data && (data.error || data.err)) || (res ? `HTTP ${res.status}` : 'Ошибка сети');
-                    this.showError(errMsg);
-                    if ((res && res.status === 429) || /не так быстро/i.test(errMsg)) {
-                        this.cooldownUntil = Date.now() + 5000;
-                    }
-                    return;
-                }
-
-                // Успешная отправка
-                local._pending = false;
-                if (data) {
-                    const msg = data.msg || data;
-                    if (msg.id) local.id = msg.id;
-                    if (msg.s) local.seq = msg.s;
-
-                    // ЗАЩИТА: обновляем ник только если пришло поле l (login).
-                    // Поле n (name/титул) игнорируем, иначе можно стать "Первопроходцем".
-                    if (msg.l && typeof msg.l === 'string' && msg.l.length >= 2) {
-                        this.myNick = msg.l;
-                        local.author = this.myNick;
-                    }
-                    if (Array.isArray(data.m) && data.m.length > 0) {
-                        this.processMineMessages(data.m);
-                    }
-                }
-                // Гарантируем сохранение своего сообщения в кэш: эхо из потока
-                // может не прийти вовсе либо прийти с чужим каналом.
-                this.cacheOwnMessage(local);
-                this.renderMessages();
-
-                // Если это было ЛС, сохраняем в историю диалогов игрока
-                if (dmMatch && toUser) {
-                    if (typeof Players !== 'undefined' && typeof Players.saveDMMessage === 'function') {
-                        const myNick = this.myNick || 'Я';
-                        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                        Players.saveDMMessage(toUser, {
-                            from: myNick,
-                            to: toUser,
-                            text: cleanText,
-                            time: timeStr,
-                            ts: Date.now()
-                        });
-                        if (Players.currentDMPeer && Players.currentDMPeer.toLowerCase() === toUser.toLowerCase()) {
-                            Players.renderDMMessages(toUser);
-                        }
-                    }
-                }
-            } catch (e) {
-                this.messages = this.messages.filter(m => m !== local);
-                input.value = rawText;
-                this.renderMessages();
-                this.showError('Сбой сети');
-            }
-        },
-    };
-
-    // ===== src/modules/chat/chat.js =====
-    // ============================================================
-    // 7. МОДУЛЬ: ЧАТ (фасад)
-    // ============================================================
-    // Чат разложен на независимые слои (src/modules/chat/):
-    //   • chat-emotes.js — 7TV-смайлики и их кэш;
-    //   • chat-history.js — localStorage-кэш и /api/city/enter;
-    //   • chat-net.js — перехватчики сети и разбор входящих;
-    //   • chat-pip.js — DOM/PiP-окно, рендер и отправка.
-    // Слои — обычные объекты, методы которых рассчитывают на this === Chat,
-    // поэтому склеиваются через Object.assign ниже. Внешний контракт
-    // (Chat.popoutChat / renderMessages / startNetworkObserver для ui.js,
-    // players.js и main.js) при этом не меняется.
-    // 11.6.4b: interceptFetch удалён, его место занял startNetworkObserver.
-
-    const Chat = {
-        badge: null,
-        unreadCount: 0,
-        disabled: localStorage.getItem('LEGION_CHAT_DISABLED') === 'true',
-        // v11.6.0h: подсветка ников пользователей аддона (⚡ + свечение в
-        // родном цвете ника). Цвет НЕ перекрашивается — он остаётся игровым.
-        // По умолчанию включена: ключа нет -> true; выключение пишет
-        // строку 'false' (паттерн LEGION_AUC_SOUND). Настройка живёт в
-        // localStorage, т.к. это UI-предпочтение, а не серверные данные.
-
-        addonHighlight: localStorage.getItem('LEGION_ADDON_HIGHLIGHT') !== 'false',
-        _inited: false,
-        // ПАТЧ 11.6.4f: состояние хука нативной ленты LGChatOne и Keep-Alive.
-        // _nativeChatOrig — оригинальные onFeed/enterFeed, чтобы снять хук при
-        // выключении перехвата/перезапуске; _nativeWatchTimer — интервал watch.
-        _nativeWatchTimer: null,
-        _nativeChatOrig: null,
-        messages: [], // Массив всех сообщений
-        // ПАТЧ 11.6.4g: одна активная вкладка в терминах нативного чата игры
-        // (reference/LegionFrontSRC/lib/site-chat.js: TABS = g/tr/mn/gl/dm).
-        // Раньше было две оси — activeMainTab (city/mine/dm) и activeSubTab
-        // (general/trade/ach): «Шахта» и «Торговля» жили в разных полях, и
-        // подсветка вкладок рассинхронивалась.
-        activeTab: 'g',
-        // v11.6.0g-5: ник — это ME.user (page-context), а не LG_CH: в LG_CH
-        // лежит логин Twitch-канала, из-за него в чат/HUD попадал чужой ник.
-        // Если ME ещё пуст — ник придёт асинхронно из syncMe().
-        // Хардкод чужого ника опаснее пустого значения: до ответа /api/me лучше null.
-        myNick: (typeof unsafeWindow !== 'undefined' && (unsafeWindow.ME?.user?.login || unsafeWindow.ME?.user?.name)) || null,
-        myRole: 'legionary',
-        dmTarget: null, // Ник собеседника, с которым сейчас открыт диалог во вкладке ЛС
-        currentMineId: 'home',
-        SevenTV: ChatEmotes.SevenTV, // тот же объект, что и const SevenTV
-
-        // v11.6.0g-3: ники, которые прямо сейчас играют с аддоном, в нижнем
-        // регистре. Источник — GET /users сервера пати; наполняет
-        // ChatNet.syncAddonUsers(). Пустой Set = подсветки нет.
-        addonUsers: new Set(),
-
-        /**
-         * Есть ли ник в списке пользователей аддона.
-         * Сервер отдаёт ники в нижнем регистре, а в сообщениях автор приходит
-         * как в игре — поэтому сравниваем нормализованно.
-         */
-        isAddonUser(nick) {
-            // Единый гейт подсветки. С v11.6.0h.2 нативную ленту красит CSS
-            // (ChatNet._buildAddonStylesCss смотрит на addonHighlight сам),
-            // а этот метод спрашивает PiP-рендер — по нему он ставит класс
-            // .legion-addon-user (свечение) на .chat-author.
-            if (this.addonHighlight === false) return false;
-            if (!nick || this.addonUsers.size === 0) return false;
-            return this.addonUsers.has(String(nick).trim().toLowerCase());
-        },
-
-        isOpen() {
-            // Чат существует только внутри PiP-окна.
-            // Опираемся на ссылки окно/документ, а не на isConnected: проверка
-            // связности внутри PiP-документа нестабильна, из-за чего сообщения
-            // при открытом чате продолжали копить непрочитанные.
-            if (!this._popoutWin || this._popoutWin.closed) return false;
-            return !!(this._pipDoc || this.widget);
-        },
-
-        getMineId() {
-            return this.currentMineId 
-                || (location.search.match(/[?&]c=([^&]+)/)?.[1]) 
-                || 'home';
-        },
-
-        isInMine() {
-            return !!document.querySelector('.mn-world') ||
-                   !!document.querySelector('.mn-screen') ||
-                   !!document.querySelector('.mn-heroes') ||
-                   (location.pathname.includes('/mine') && location.search.includes('sid='));
-        },
-
-        /**
-         * Вернуть нативный чат игры в шахту (v11.6.4d).
-         *
-         * LGChatOne — общий чат города/шахты: dock(k, root) регистрирует сцену,
-         * а place() переносит блок в последнюю видимую. LGCity.open() заново
-         * докает город, поэтому после «Карманного города» чат оставался в root
-         * города под оверлеем `.mn` и в шахте не появлялся. Повторный
-         * dock('mine') делает шахту последней и возвращает блок на место.
-         *
-         * Возвращает false, если шахта закрыта или LGChatOne недоступен —
-         * это не ошибка (чат мог быть отключён настройками игры).
-         */
-        showForMine() {
-            const mineRoot = document.querySelector('.mn');
-            if (!mineRoot || !document.body.classList.contains('mn-on')) return false;
-            const one = (typeof G !== 'undefined' && G) ? G.LGChatOne : null;
-            if (!one || typeof one.dock !== 'function') return false;
-            try {
-                one.dock('mine', mineRoot); // dock() сам вызывает place()
-                return true;
-            } catch (e) {
-                return false;
-            }
-        },
-
-        /* ---------------------------------------------------------- */
-        /* ПАТЧ 11.6.4f: хук нативной ленты LGChatOne                  */
-        /* ---------------------------------------------------------- */
-
-        /**
-         * Перехват ленты нативного чата игры.
-         *
-         * Свой EventSource('/api/live') удалён: клиент Legion сам стримит чат и
-         * отдаёт его разобранным в LGChatOne.onFeed(room, data) — новые сообщения
-         * комнаты (city/mine) — и LGChatOne.enterFeed(room, r) — история при входе
-         * в город/шахту. Формат пакета тот же, что приходил из SSE:
-         * { chat: [...], chatDel: [...], chatMe, c }.
-         *
-         * Хук ставится ПОВЕРХ игры: сначала наш разбор, затем оригинал — поэтому
-         * нативный чат продолжает работать как обычно (11.6.4g: он снова виден
-         * на экране, мы его больше не скрываем и не подменяем).
-         *
-         * Модуль site-chatone.js грузится лениво (oneLoad() в reference/.../app.js),
-         * поэтому метод идемпотентен и вызывается повторно из
-         * ChatNet._onGameChatTraffic(), пока LGChatOne не появится.
-         *
-         * @returns {boolean} true, если хуки стоят на объекте игры
-         */
-        hookNativeChat() {
-            const one = (typeof G !== 'undefined' && G) ? G.LGChatOne : null;
-            if (!one || typeof one.onFeed !== 'function' || typeof one.enterFeed !== 'function') return false;
-            // Уже обёрнут (этим или прежним инстансом, пока хуки не сняты).
-            if (one.__lgChatHooked) return true;
-
-            const self = this;
-            // Сохраняем оригиналы: по ним же снимаем хук в unhookNativeChat().
-            this._nativeChatOrig = { onFeed: one.onFeed, enterFeed: one.enterFeed };
-
-            one.onFeed = function (room, data) {
-                try { self.ingestGameFeed(room, data, false); } catch (e) {}
-                return self._nativeChatOrig.onFeed.apply(this, arguments);
-            };
-
-            one.enterFeed = function (room, history) {
-                try { self.ingestGameFeed(room, history, true); } catch (e) {}
-                return self._nativeChatOrig.enterFeed.apply(this, arguments);
-            };
-
-            try { one.__lgChatHooked = true; } catch (e) {}
-            dbg('[CHAT] Хук нативной ленты LGChatOne установлен');
-            return true;
-        },
-
-        /**
-         * Снять хуки с нативной ленты (выключение перехвата, restart скрипта).
-         *
-         * Возвращаем ровно те функции, что были до нас: иначе после перезапуска
-         * аддона игра продолжала бы звать колбэк в мёртвый инстанс Chat.
-         */
-        unhookNativeChat() {
-            const one = (typeof G !== 'undefined' && G) ? G.LGChatOne : null;
-            const orig = this._nativeChatOrig;
-            if (!one || !orig || !one.__lgChatHooked) return false;
-            try {
-                one.onFeed = orig.onFeed;
-                one.enterFeed = orig.enterFeed;
-                try { delete one.__lgChatHooked; } catch (e) { one.__lgChatHooked = false; }
-            } catch (e) {
-                return false;
-            }
-            this._nativeChatOrig = null;
-            return true;
-        },
-
-        /**
-         * Keep-Alive нативного чата (ТЗ 11.6.4f, раз в 30 с).
-         *
-         * LGChatOne.sync() отправляет POST /api/chat/watch {on:true} только когда
-         * state().open === true, а сервер стримит сообщения в SSE лишь по watch.
-         * Своей ленты у нас нет — сообщения приходят из хука onFeed, поэтому
-         * watch нужно поддерживать живым.
-         *
-         * ПАТЧ 11.6.4g: нативный чат больше не скрыт CSS-ом, поэтому флаг open
-         * навязываем ТОЛЬКО пока открыт наш вынесенный чат (Chat.isOpen()).
-         * Если наш чат закрыт — нативные флаги не трогаем: игрок сам решает,
-         * свернуть ему нативную ленту или оставить.
-         */
-        startNativeChatWatch() {
-            if (this._nativeWatchTimer) return;
-            const tick = () => {
-                try {
-                    const one = (typeof G !== 'undefined' && G) ? G.LGChatOne : null;
-                    if (!one || typeof one.state !== 'function') {
-                        // Модуль игры ещё не подгрузился — доберём хуки на следующем тике.
-                        this.hookNativeChat();
-                        return;
-                    }
-                    // Наш чат закрыт — не перебиваем выбор игрока по нативной ленте.
-                    if (!this.isOpen()) return;
-                    const st = one.state();
-                    if (!st) return;
-                    st.open = true;
-                    if (typeof one.sync === 'function') one.sync();
-                } catch (e) {}
-            };
-            tick();
-            this._nativeWatchTimer = setInterval(tick, NATIVE_CHAT_KEEPALIVE_MS);
-        },
-
-        /** Остановка Keep-Alive и снятие хуков (Chat.destroy, выключение чата). */
-        stopNativeChatWatch() {
-            if (this._nativeWatchTimer) {
-                clearInterval(this._nativeWatchTimer);
-                this._nativeWatchTimer = null;
-            }
-            this.unhookNativeChat();
-        },
-
-        setDisabled(val) {
-            this.disabled = !!val;
-            try {
-                localStorage.setItem('LEGION_CHAT_DISABLED', String(this.disabled));
-            } catch (e) {}
-            if (this.disabled) {
-                // ПАТЧ 11.6.4f: своего потока /api/live нет — гасим Keep-Alive
-                // и снимаем хуки с нативной ленты LGChatOne.
-                this.stopNativeChatWatch();
-                if (this.isOpen()) {
-                    this.close();
-                }
-                UI.showToast('🚫 Перехват чата отключен');
-            } else {
-                UI.showToast('💬 Перехват чата включен');
-                this.hookNativeChat();
-                this.startNativeChatWatch();
-            }
-        },
-
-        /**
-         * Тумблер «⚡ Подсветка ников Legion» (ТЗ 11.6.0g-4, 11.6.0h.2).
-         *
-         * Сохраняем выбор и сразу перегенерируем CSS: пустая простыня снимает
-         * подсветку со всех уже отрисованных ников мгновенно, без обхода DOM.
-         * renderMessages() нужен только PiP-чату — там класс .legion-addon-user
-         * ставит сам рендер.
-         */
-        setAddonHighlight(val) {
-            this.addonHighlight = !!val;
-            try {
-                localStorage.setItem('LEGION_ADDON_HIGHLIGHT', String(this.addonHighlight));
-            } catch (e) {}
-
-            // ТЗ 11.6.0h.1: подсветку выключили — persist-кэш списка не нужен
-            // (иначе после перезагрузки он бы «оживил» набор впустую). При
-            // включении кэш заново запишет ближайший syncAddonUsers().
-            if (!this.addonHighlight) {
-                try { localStorage.removeItem('LEGION_ADDON_USERS_CACHE'); } catch (e) {}
-            }
-
-            // ТЗ 11.6.0h.2: переключение = одна перезапись <style>. Маркеров
-            // data-legion-addon-applied в DOM больше нет — сбрасывать нечего.
-            this._applyAddonStyles();
-            if (this._pipDoc) this._applyAddonStylesToPip(this._pipDoc);
-            if (this.isOpen && this.isOpen()) this.renderMessages();
-        },
-
-        /**
-         * Тумблер «🎭 Отображать смайлы 7TV» (ТЗ 11.6.4e).
-         *
-         * Сам флаг живёт в localStorage (LEGION_7TV_DISABLED) и читается в точке
-         * рендера — SevenTV.replaceEmotes()/decorate() — а также в SevenTV.load(),
-         * поэтому выключение действует сразу и не требует перезагрузки страницы.
-         * Здесь: сохраняем выбор, догружаем набор, если аддон стартовал с
-         * выключенным тумблером, и перерисовываем открытый PiP-чат.
-         */
-        setSevenTVEnabled(val) {
-            const enabled = !!val;
-            try {
-                localStorage.setItem(SevenTV.DISABLE_KEY, String(!enabled));
-            } catch (e) {}
-
-            // Набор не грузился, пока тумблер был выключен: load() сам вызовет
-            // renderMessages() после успешной загрузки.
-            if (enabled && !SevenTV.loaded) {
-                SevenTV.load();
-            }
-
-            if (typeof this.isOpen === 'function' && this.isOpen() && typeof this.renderMessages === 'function') {
-                this.renderMessages();
-            }
-        },
-
-        // v11.5.3: встроенный виджет чата удалён — его заменил сторонний плагин
-        // Legion7TV (ProCto_Fliy). Здесь остаётся только то, что нужно нашему
-        // вынесенному чату и перехватчикам:
-        //   • кнопка «Вынести чат» и настройки 7TV;
-        //   • эмоуты 7TV + синхронизация ника;
-        //   • детектор внешнего чата.
-        // interceptEventSource / interceptWebSocket вызываются из main.js сразу
-        // после init() — они идемпотентны и остаются включёнными. 11.6.4b:
-        // interceptFetch удалён (античит шахты), вместо него startNetworkObserver.
-        init() {
-            if (this._inited) return;
-            this._inited = true;
-
-            // ТЗ 11.6.0h.1: сначала поднимаем прошлый список пользователей
-            // аддона из localStorage — тогда подсветка появляется в первом же
-            // кадре, не дожидаясь POST /heartbeat + GET /users. Кэш старше
-            // часа (TTL) игнорируем: за это время состав мог поменяться, а
-            // свежий набор придёт из syncAddonUsers() на первом тике.
-            try {
-                const raw = localStorage.getItem('LEGION_ADDON_USERS_CACHE');
-                if (raw) {
-                    const c = JSON.parse(raw);
-                    if (Array.isArray(c?.list) && (Date.now() - (c.ts || 0)) < 60 * 60 * 1000) {
-                        this.addonUsers = new Set(c.list.map(x => String(x).trim().toLowerCase()));
-                    }
-                }
-            } catch (e) {}
-
-            this.badge = document.getElementById(DOM_IDS.chatBadge) || document.getElementById('chat-badge');
-
-            // btn-chat-pip — id из старой разметки FAB, оставлен для совместимости.
-            (document.getElementById(DOM_IDS.btnPopout)
-                || document.getElementById('btn-popout')
-                || document.getElementById('btn-chat-pip'))?.addEventListener('click', () => this.popoutChat());
-
-            // Настройки 7TV (канал и размер смайлов). В v11.5.3 кнопка FAB
-            // «🎭 Канал 7TV» переехала в модалку UI.openSettings(), поэтому
-            // эта привязка — только фолбэк для старой разметки.
-            document.getElementById('btn-7tv-settings')?.addEventListener('click', () => this.open7tvSettings());
-
-            // 7TV нужен PiP-чату: размер смайлов + набор эмоутов грузим один раз.
-            SevenTV.loadSize();
-            SevenTV.load();
-
-            this.syncMe();
-
-            // v11.6.0g-3: подсветка ников пользователей аддона. Поллинг сам
-            // шлёт POST /heartbeat (мы тоже в списке) и раз в 30 с обновляет
-            // набор из GET /users; сеть и CSS-генератор — в chat-net.js.
-            this.startAddonUsersPolling();
-
-            // ТЗ 11.6.0h.2: подсветка из кэша применяется CSS-правилами, а не
-            // классами в DOM. Браузер применит их к уже отрисованной ленте в
-            // первом же кадре — ни флэша, ни ожидания ответа /users.
-            if (typeof this._applyAddonStyles === 'function') this._applyAddonStyles();
-
-            // ПАТЧ 11.6.4f: фундамент нового чата. Нативный LGChatOne остаётся
-            // в DOM (его place()/dock() перевешивают блок между городом и
-            // шахтой — узел удалять нельзя). С 11.6.4g он снова виден на экране:
-            // CSS-скрытие .cy-chat из styles.js удалено.
-            // Ленту берём из его колбэков onFeed/enterFeed, а Keep-Alive держит
-            // watch {on:true} включённым, иначе сервер не стримит сообщения.
-            this.hookNativeChat();
-            this.startNativeChatWatch();
-        },
-
-        getRoleMeta(role, isSystem) {
-            if (isSystem) return { icon: '🏆', color: '#f0ad4e' }; // Для летописи/достижений
-            const map = {
-                'necromancer': { icon: '💀', color: '#b9a2ff' },
-                'paladin': { icon: '🔨', color: '#f3d36b' },
-                'priest': { icon: '✨', color: '#f0ad4e' },
-                'mage': { icon: '🔮', color: '#5bc0de' },
-                'rogue': { icon: '🗡️', color: '#d8bfd8' },
-                'archer': { icon: '🏹', color: '#5cb85c' },
-                'legionary': { icon: '🛡️', color: '#d9534f' },
-            };
-            return map[role] || { icon: '👤', color: '#ffcf6a' };
-        },
-
-        // Главная функция приема сообщений (§2.3 дедуп по id + дедуп своих исходящих)
-        // isMine убран из сигнатуры: все вызовы передавали false, а свои сообщения
-        // определяются по нику (isSelf) ниже.
-        handleIncoming(author, text, isHistory = false, id = null, seq = null, role = null, isSystem = false, aw = null, channel = null, k = null, to = null, rank = null) {
-            if (!text) return;
-
-            // Перехват и фильтрация ЛС (не добавлять в общий чат)
-            if (channel === 'dm' || k === 'dm') {
-                // processIncomingDMs() уже вызвал Players.handleIncomingDM для этого
-                // пакета (chat-net парсит входящие ЛС отдельно), поэтому историю
-                // повторно в Players не отдаём — иначе дублируются тосты/счётчики.
-                if (!isHistory && typeof Players !== 'undefined' && Players.handleIncomingDM) {
-                    Players.handleIncomingDM(author, text, to);
-                }
-
-                // Пытаемся склеить с pending-сообщением из ЛС, чтобы оно не висело
-                // в памяти черновиком (эхо приходит через тот же поток).
-                if (this.myNick) {
-                    for (let i = this.messages.length - 1; i >= 0; i--) {
-                        const m = this.messages[i];
-                        if (m._pending && m.k === 'dm' && m.text === text) {
-                            m._pending = false;
-                            break;
-                        }
-                    }
-                }
-
-                // Если этот диалог сейчас открыт во вкладке «✉️ Личные» — считаем прочитанным.
-                // Перерисовку выполняет Players.refreshUnreadDMViews() -> Chat.renderMessages().
-                if (typeof Players !== 'undefined' && this.activeTab === 'dm' && this.dmTarget) {
-                    const myNick = (this.myNick || '').toLowerCase();
-                    const isSelf = (author === 'Я') || (!!myNick && String(author || '').toLowerCase() === myNick);
-                    const peer = isSelf ? (to || '') : (author || '');
-                    if (peer && String(peer).toLowerCase() === String(this.dmTarget).toLowerCase()) {
-                        Players.clearUnreadDM(peer);
-                    }
-                }
-                return;
-            }
-
-            // 1. Если сообщение с таким ID уже есть и оно НЕ в статусе pending — это повтор из поллинга, пропускаем
-            if (id && this.messages.slice(-100).some(m => m.id === id && !m._pending)) {
-                return;
-            }
-
-            // 2. Дедупликация и сопоставление своих исходящих сообщений (_pending)
-            const isSelf = author === this.myNick || (this.myNick && author && author.toLowerCase() === this.myNick.toLowerCase());
-            if (isSelf) {
-                let pendingMsg = null;
-                for (let i = this.messages.length - 1; i >= 0; i--) {
-                    const m = this.messages[i];
-                    const authorMatch = m.author === author || m.author === this.myNick;
-                    const textMatch = m.text === text;
-                    // Pending-сообщение наше собственное: канал эха может отличаться
-                    // (мы в шахте, а отправили в город), поэтому для _pending канал
-                    // не проверяем — он останется тем, куда мы реально отправили.
-                    const channelMatch = !channel || !m.channel || m.channel === channel || m._pending;
-                    if (authorMatch && textMatch && channelMatch && (m._pending || (id && m.id === id))) {
-                        pendingMsg = m;
-                        break;
-                    }
-                }
-                if (pendingMsg) {
-                    pendingMsg._pending = false;
-                    if (id && !pendingMsg.id) pendingMsg.id = id;
-                    if (seq && !pendingMsg.seq) pendingMsg.seq = seq;
-                    if (role && !pendingMsg.role) pendingMsg.role = role;
-                    if (rank && !pendingMsg.rank) pendingMsg.rank = rank;
-                    if (aw && !pendingMsg.aw) pendingMsg.aw = aw;
-                    // НЕ ПЕРЕЗАПИСЫВАЕМ КАНАЛ, если он уже задан (например, 'city')
-                    // Эхо может прийти как 'mine', если мы в шахте, но мы знаем, куда отправили.
-                    if (!pendingMsg.channel && channel) pendingMsg.channel = channel;
-                    // Своё сообщение тоже должно попасть в кэш: сюда мы приходим
-                    // на эхо сервера, а основная ветка ниже уже пропускается.
-                    if (!isHistory) this.cacheOwnMessage(pendingMsg);
-                    this.renderMessages();
-                    return;
-                }
-            }
-
-            // 3. Дедупликация сообщений без ID (по автору и тексту за последние 8 секунд)
-            if (!isHistory && !id) {
-                if (this.messages.slice(-25).some(m => m.author === author && m.text === text && (m.channel === channel || !m.channel || !channel) && Date.now() - m.ts < 8000)) return;
-            }
-
-            const msgObj = { author, text, role, rank, isSystem, id, seq, aw, channel, k, to, ts: Date.now() };
-            this.messages.push(msgObj);
-
-            // Сохраняем в кэш только живые сообщения
-            if (!isHistory) this.saveToStorage(author, text, role, isSystem, channel, k, aw, rank, id);
-
-            // Ограничиваем массив, чтобы не копить память в долгих сессиях.
-            // Срез делаем только при переполнении — это редкая операция.
-            if (this.messages.length > 500) {
-                this.messages = this.messages.slice(-500);
-            }
-
-            // Обновляем UI
-            if (!isHistory) {
-                this.renderMessages();
-                // Скролл вниз выполняет renderMessages() и только если пользователь
-                // уже был внизу — иначе чтение истории не прерывается.
-                if (!this.isOpen() && !isSelf) {
-                    this.unreadCount++;
-                    this.updateBadge();
-                }
-            }
-        },
-
-        updateBadge() {
-            const badges = document.querySelectorAll('#' + DOM_IDS.chatBadge + ', #' + DOM_IDS.fabChatBadge + ', #chat-badge, #fab-chat-badge');
-            badges.forEach(b => {
-                if (this.unreadCount > 0) {
-                    b.textContent = this.unreadCount > 99 ? '99+' : this.unreadCount;
-                    b.style.display = 'block';
-                } else {
-                    // Сбрасываем и текст: иначе при повторном показе остаётся старый «99+».
-                    b.textContent = '0';
-                    b.style.display = 'none';
-                }
-            });
-        },
-
-        toggle() {
-            if (this.disabled) {
-                UI.showToast('🚫 Перехват чата отключен в меню 🐱', true);
-                return;
-            }
-            // Обычного (встроенного) виджета больше нет: «открыть чат» = вынести в PiP.
-            if (this.isOpen()) {
-                try { this._popoutWin?.focus(); } catch (e) {}
-                return;
-            }
-            this.popoutChat();
-        },
-
-        /**
-         * Остановка фоновых задач чата (ТЗ 11.6.0g-3).
-         *
-         * Вызывается из legionApi.shutdown() в main.js при перезапуске скрипта.
-         * Своего потока /api/live больше нет (ПАТЧ 11.6.4f): Keep-Alive и хуки
-         * нативной ленты снимает stopNativeChatWatch(); здесь — таймер поллинга
-         * /heartbeat + /users и PerformanceObserver. DOM-наблюдатель нативной
-         * ленты удалён в 11.6.0h.2 (подсветку рисует CSS).
-         */
-        destroy() {
-            this.stopAddonUsersPolling();
-            // ПАТЧ 11.6.4f: снимаем Keep-Alive и хуки с нативной ленты — иначе
-            // после перезапуска скрипта на G.LGChatOne остался бы колбэк в
-            // мёртвый инстанс Chat (и лишний интервал каждые 30 с).
-            this.stopNativeChatWatch();
-            // 11.6.4b: гасим PerformanceObserver, иначе старый инстанс продолжал
-            // бы слушать запросы игры (/api/me, /api/city, /api/mine) после
-            // перезапуска скрипта.
-            this.stopNetworkObserver();
-        },
-    };
-
-    // Подмешиваем слои. Объекты независимы и не пересекаются по ключам,
-    // порядок важен лишь для читаемости: сначала данные, потом сеть, потом UI.
-    Object.assign(Chat, ChatHistory);
-    Object.assign(Chat, ChatNet);
-    Object.assign(Chat, ChatPip);
-
-    // Экспорт 7TV для отладки: window.__LEGION__.Chat.SevenTV
-    Chat.SevenTV = SevenTV;
-
     // ===== src/main.js =====
     // ============================================================
     // ТОЧКА ВХОДА (src/main.js)
@@ -19581,7 +16333,7 @@ const Players = {
     //   core/utils-format.js -> Utils.calculateMedian / formatMoney / parseCoinsText / formatCoinsHtml / formatTimeLeft
     //   core/utils-api.js    -> Utils.apiPath / fetchApi
     //   core/utils-art.js    -> Utils.getItemArtSvg / getItemArtHtml / getItemName / getItemIcon + декор UI
-    //   core/utils-chat.js   -> Utils.chatHash / extractChatFields / extractChatDeep / updateOnlinePlayers / processIncomingDMs
+    //   core/utils.js        -> Utils.copyText / insertToQuestChat / updateOnlinePlayers
     //   core/styles.js -> STYLES
     //   core/hooks.js  -> перехватчики LGCity / LGAuction / LGQuest
     //                     (LGMine снят в 11.6.4b — античит шахты)
@@ -19589,7 +16341,8 @@ const Players = {
     //   core/ui.js     -> UI
     //   modules/*      -> BuildSim, HeroPlanner, Auction, Players,
     //                     PocketCity, CombatAssistant, Party, Arena,
-    //                     Miner (заглушка), Chat
+    //                     Miner (заглушка)
+    // 11.7.0: подсистема чата (modules/chat/*, core/utils-chat.js) удалена.
     // ============================================================
 
     // 5.3. Защита от повторного запуска (single-instance guard)
@@ -19598,6 +16351,69 @@ const Players = {
     const LG_ROOT = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
     if (LG_ROOT.__LEGION__?._booted) {
         try { LG_ROOT.__LEGION__.shutdown?.(); } catch (e) {}
+    }
+
+    // ============================================================
+    // 5.4. Проверка обновлений аддона
+    //
+    // До 11.7.0 жила в modules/chat/chat-net.js и удалилась вместе с чатом.
+    // GET /latest-version нашего сервера открытый (без X-Legion-Key), поэтому
+    // хватает GM_xmlhttpRequest. Тумблер «🔔 Уведомлять о новых версиях»
+    // (localStorage LEGION_UPDATE_NOTIFY) уважается: при 'false' не шлём даже
+    // запрос. Сравнение версий — по числовым сегментам (11.7.0 > 11.6.10).
+    // ============================================================
+    function checkAddonUpdate() {
+        try {
+            if (localStorage.getItem('LEGION_UPDATE_NOTIFY') === 'false') return;
+        } catch (e) { return; }
+        if (typeof GM_xmlhttpRequest !== 'function') return;
+
+        const current = (typeof GM_info !== 'undefined' && GM_info.script) ? String(GM_info.script.version || '') : '';
+        if (!current) return;
+
+        let base = 'https://legion.ctrlfree.host';
+        try {
+            if (Party && typeof Party.getBaseUrl === 'function') base = Party.getBaseUrl();
+        } catch (e) {}
+
+        const cmp = (a, b) => {
+            const A = String(a).split('.').map(Number);
+            const B = String(b).split('.').map(Number);
+            for (let i = 0; i < Math.max(A.length, B.length); i++) {
+                const x = A[i] || 0, y = B[i] || 0;
+                if (x !== y) return x - y;
+            }
+            return 0;
+        };
+
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: String(base).replace(/\/+$/, '') + '/latest-version',
+            timeout: 10000,
+            onload(res) {
+                if (!res || res.status !== 200) return;
+                let data = null;
+                try { data = JSON.parse(res.responseText); } catch (e) { return; }
+                const latest = String((data && data.version) || '');
+                if (!latest || cmp(latest, current) <= 0) return;
+
+                const go = () => {
+                    try {
+                        if (typeof GM_openInTab === 'function') GM_openInTab(data.url || '', { active: true });
+                    } catch (e) {}
+                };
+                if (typeof GM_notification === 'function') {
+                    GM_notification({
+                        title: 'Legion Ultimate Assistant',
+                        text: `Доступна версия ${latest} (у вас ${current})`,
+                        timeout: 15000,
+                        onclick: go
+                    });
+                } else if (typeof UI !== 'undefined' && UI.showToast) {
+                    UI.showToast(`🔔 Доступна версия ${latest}`, false, go);
+                }
+            }
+        });
     }
 
     // ============================================================
@@ -19639,7 +16455,7 @@ const Players = {
         fabWrap.id = DOM_IDS.fabWrap;
         // Вся разметка FAB-меню и круглой кнопки — в core/ui-templates.js
         // (v11.6.0, этап 3): main.js только подставляет id и версию скрипта.
-        fabWrap.innerHTML = UITemplates.fabMenu(typeof GM_info !== 'undefined' && GM_info.script ? GM_info.script.version : '11.5.3', DOM_IDS);
+        fabWrap.innerHTML = UITemplates.fabMenu(typeof GM_info !== 'undefined' && GM_info.script ? GM_info.script.version : '11.7.0', DOM_IDS);
         document.body.appendChild(fabWrap);
 
         // Восстановление позиции FAB из localStorage (§ Задача 2)
@@ -19711,14 +16527,10 @@ const Players = {
         (document.getElementById(DOM_IDS.btnPocketCity) || document.getElementById('btn-pocket-city'))?.addEventListener('click', () => PocketCity.open());
         (document.getElementById(DOM_IDS.btnProfile) || document.getElementById('btn-profile'))?.addEventListener('click', () => UI.togglePlayerHud());
 
-        // ⚙️ Настройки (7TV, перехват чата) вынесены в отдельную модалку:
-        // FAB-меню стало короче, а служебные переключатели больше не мешают кнопкам.
-        // Кнопку «Вынести чат» (PiP) привязывает Chat.init(): второй слушатель
-        // здесь давал двойной вызов popoutChat() и мигающее окно.
+        // ⚙️ Настройки (уведомления, боевой ассистент, вход в меню) вынесены
+        // в отдельную модалку: FAB-меню стало короче, а служебные
+        // переключатели больше не мешают кнопкам.
         document.getElementById('btn-fab-settings')?.addEventListener('click', () => UI.openSettings());
-
-        // Чекбокс «Отключить перехват чата» переехал в UI.openSettings()
-        // (модалка), поэтому старая привязка к DOM_IDS.chkChatDisable удалена.
 
         Miner.init();
         BuildSim.init();        // без кнопки — регистрирует только глобальный клик для .sim-card
@@ -19740,20 +16552,10 @@ const Players = {
         //    (leader/lead/officer/trusted); данные — /api/guilds/guild
         //    с кэшем в памяти, window.fetch не патчится.
         GuildSummary.init();
-        Chat.init();
 
-        Chat.interceptEventSource();
-        Chat.interceptWebSocket();
-        // 11.6.4b: подмена window.fetch удалена (античит шахты палит её по
-        // отсутствию [native code]). Вместо хука — пассивный PerformanceObserver:
-        // ловит запросы игры к /api/me и к городу/шахте и обновляет данные
-        // своими запросами, ничего не перезаписывая.
-        Chat.startNetworkObserver();
-        // Фоновые задачи чата: хуки нативной ленты + Keep-Alive watch (ПАТЧ 11.6.4f).
-        // Идемпотентно; своего EventSource на /api/live больше нет.
-        if (!Chat.disabled) {
-            Chat.startBackgroundLiveListener();
-        }
+        // 🔔 Проверка обновлений: через 8 с после старта, чтобы не мешать
+        // загрузке страницы и первому рендеру аддона.
+        setTimeout(checkAddonUpdate, 8000);
 
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape') UI.closeModals(); });
 
@@ -19772,7 +16574,6 @@ const Players = {
             Arena,
             GuildSummary,
             Party,
-            Chat,
             DOM_IDS,
             RAND_ID,
             _booted: true,
@@ -19801,11 +16602,8 @@ const Players = {
                 UI._navMode = '';
                 UI._navRetries = 0;
                 document.querySelectorAll('.lgu-nav-btn').forEach(el => el.remove());
-                if (Chat._popoutWin) {
-                    try { Chat._popoutWin.close(); } catch(e) {}
-                    Chat._popoutWin = null;
-                }
-                Chat.stopBackgroundLiveListener();
+                // 11.7.0: подсистемы чата больше нет — её окно PiP, лента и
+                // фоновые интервалы удалены вместе с модулем, гасить нечего.
                 // 11.6.2b: гасим интервал боевого ассистента и убираем его контейнер,
                 // иначе после перезапуска скрипта тикали бы два таймера.
                 CombatAssistant.destroy();
@@ -19815,15 +16613,11 @@ const Players = {
                 // Статистика гильдии: снимаем наблюдатель и capture-клик,
                 // чистим кэш состава и убираем вкладку/панель из .gl-modal.
                 try { GuildSummary.destroy?.(); } catch (e) {}
-                // ТЗ 11.6.0g-3: гасим поллинг /heartbeat + /users и
-                // MutationObserver нативной ленты (иначе после перезапуска
-                // скрипта остались бы два интервала).
-                Chat.destroy();
                 // 11.6.3c: гасим PerformanceObserver и HP-интервал Пати — иначе
                 // старый инстанс продолжал бы слушать запросы игры (/api/me,
                 // /api/qact) и слать state на наш сервер после перезапуска.
                 Party.destroy();
-                document.querySelectorAll('.' + DOM_IDS.customModal + ', .sim-card, .' + DOM_IDS.chatWidget + ', .float-btns, .' + DOM_IDS.fabWrap + ', #' + DOM_IDS.playerHud + ', .custom-modal, .chat-widget, .legion-fab-wrap, #legion-player-hud').forEach(el => el.remove());
+                document.querySelectorAll('.' + DOM_IDS.customModal + ', .sim-card, .float-btns, .' + DOM_IDS.fabWrap + ', #' + DOM_IDS.playerHud + ', .custom-modal, .legion-fab-wrap, #legion-player-hud').forEach(el => el.remove());
                 legionApi._booted = false;
             }
         };

@@ -155,6 +155,22 @@
         isSkipFx(key) { return SKIP_FX_PREFIXES.some(p => key.indexOf(p) === 0); },
 
         /**
+         * Коэффициент перевода сырого fx во вторичную характеристику.
+         *
+         * В игре resist/pierce лежат в fx «сырыми» и переводятся в статы через
+         * LGGameData.xstats.fromFx (обычно 0.5: fx 60 -> +30). Без множителя
+         * подсказки и сводка показывали удвоенные значения (+60 вместо +30).
+         */
+        xstatFromFx() {
+            const src = (typeof G !== 'undefined' && G && G.LGGameData && G.LGGameData.xstats)
+                ? G.LGGameData.xstats.fromFx
+                : null;
+            const base = { resist: 0.5, pierce: 0.5 };
+            if (!src || typeof src !== 'object') return base;
+            return { ...base, ...src };
+        },
+
+        /**
          * Текст навыка с подстановкой значений fx за текущий ранг.
          * Макросы cleaveBoss/penBoss/critX считаются на лету — их нет в fx
          * (см. kv() в reference/LegionFrontSRC/site/skills.js).
@@ -163,14 +179,36 @@
             if (!node || !node.text) return '';
             const r = Math.max(1, +rank || 1);
             const fx = node.fx || {};
+            const fromFx = this.xstatFromFx();
             const fmt = (val) => Number.isInteger(val) ? String(val) : val.toFixed(1).replace(/\.0$/, '').replace('.', ',');
-            return String(node.text).replace(/\{(\w+)\}/g, (match, key) => {
+            const scaleOf = (key) => {
+                const s = +fromFx[key];
+                return isFinite(s) ? s : 1;
+            };
+            const rawText = String(node.text);
+
+            let out = rawText.replace(/\{(\w+)\}/g, (match, key) => {
                 if (key === 'cleaveBoss') return fmt((fx.cleave || 0) * r * 0.4);
                 if (key === 'penBoss') return fmt((fx.pierce || 0) * r / 20);
                 if (key === 'critX') return fmt(2 + (fx.critDmg || 0) * r / 100);
+                // resist/pierce: сырой fx -> характеристика через fromFx.
+                if (key === 'resist' || key === 'pierce') return fmt((fx[key] || 0) * r * scaleOf(key));
                 if (fx[key] !== undefined) return fmt(fx[key] * r);
                 return match;
             });
+
+            // Игра дописывает вторичные статы, даже если в тексте узла нет
+            // плейсхолдера: «Физ. урон +5 · Сопротивление +30».
+            const notes = [];
+            if (fx.resist !== undefined && !/\{resist\}/.test(rawText)) {
+                notes.push(`Сопротивление +${fmt(fx.resist * r * scaleOf('resist'))}`);
+            }
+            if (fx.pierce !== undefined && !/\{pierce\}/.test(rawText)) {
+                notes.push(`Пробивание +${fmt(fx.pierce * r * scaleOf('pierce'))}%`);
+            }
+            if (notes.length) out += ' · ' + notes.join(' · ');
+
+            return out;
         },
 
         /** Кнопка BuildSim больше не нужна (её ведёт HeroPlanner), но init
@@ -1566,14 +1604,19 @@
                         return;
                     }
                     // Фолбэк: структурированные fx узла (текст не распознан).
+                    const fromFx = this.xstatFromFx();
                     for (const [fk, fv] of Object.entries(n.fx || {})) {
                         if (this.isSkipFx(fk) || !isFinite(+fv)) continue;
                         const pct = ['critDmg', 'skelN', 'skelT', 'def', 'resist', 'pierce'].indexOf(fk) < 0;
+                        // resist/pierce: сырой fx -> стат через fromFx (0.5),
+                        // иначе сводка удваивала значения (+60 вместо +30).
+                        const scale = isFinite(+fromFx[fk]) ? +fromFx[fk] : 1;
+                        const amount = (+fv) * r * scale;
                         const key = 'fx:' + fk;
                         const hit = map.get(key);
-                        if (hit) { hit.v += (+fv) * r; hit.names.push(n.name); }
+                        if (hit) { hit.v += amount; hit.names.push(n.name); }
                         else {
-                            const item = { label: this.fxNames[fk] || fk, sign: '+', suf: pct ? '%' : '', v: (+fv) * r, color: this.branchColor(bi), names: [n.name] };
+                            const item = { label: this.fxNames[fk] || fk, sign: '+', suf: pct ? '%' : '', v: amount, color: this.branchColor(bi), names: [n.name] };
                             map.set(key, item);
                             out.push(item);
                         }

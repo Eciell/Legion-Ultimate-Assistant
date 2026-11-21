@@ -374,61 +374,7 @@
         .fab-menu-item { position: relative; flex-shrink: 0; background: #2a2030; color: #ffcf6a; border: 1px solid #555; border-radius: 6px; padding: 10px 14px; font-weight: bold; cursor: pointer; font-size: 13px; text-align: left; transition: all 0.2s; display: flex; justify-content: space-between; align-items: center; }
         .fab-menu-item:hover { background: #caa55c; color: #1d1620; border-color: #caa55c; }
         .fab-menu-item.active { background: #4cc95a; color: #1d1620; border-color: #4cc95a; box-shadow: 0 0 15px rgba(76, 201, 90, 0.5); }
-        .${DOM_IDS.chatBadge}, .chat-badge { position: absolute; top: -6px; right: -6px; background: #ff5a7a; color: #fff; border-radius: 50%; padding: 2px 7px; font-size: 12px; font-weight: 900; box-shadow: 0 2px 5px rgba(0,0,0,0.5); display: none; pointer-events: none; z-index: 2; }
-        .${DOM_IDS.chatWidget}, .chat-widget { position: fixed; bottom: 80px; right: 20px; width: 320px; height: 400px; min-width: 320px; min-height: 400px; max-width: 95vw; max-height: 95vh; resize: both; background: #1d1620; border: 2px solid #caa55c; border-radius: 12px; display: flex; flex-direction: column; z-index: 10000; box-shadow: 0 10px 30px rgba(0,0,0,0.8); overflow: hidden; transition: transform 0.2s, opacity 0.2s; transform: translateY(20px); opacity: 0; pointer-events: none; }
-        .${DOM_IDS.chatWidget}.open, .chat-widget.open { transform: translateY(0); opacity: 1; pointer-events: auto; }
-        .chat-top-bar { background: #2a2030; padding: 10px 12px; font-weight: bold; color: #ffcf6a; display: flex; justify-content: space-between; align-items: center; gap: 8px; overflow: hidden; border-bottom: 1px solid #444; cursor: move; user-select: none; touch-action: none; box-sizing: border-box; flex-shrink: 0; }
-        /* ПАТЧ 11.6.4g: вкладок стало пять (Общий/Торговля/Ремёсла/Гильдия/
-           Личные), а ширина PiP-окна всего 350px. Поэтому горизонтальный
-           padding урезан до 6px, шрифт — 11px, а ряд вкладок переносится
-           (flex-wrap), если не влезает в одну строку рядом с кнопкой «✖». */
-        .chat-main-tabs { display: flex; flex-wrap: wrap; gap: 3px; flex: 1; min-width: 0; }
-        .chat-main-tab, .chat-tab { background: #1d1620; border: 1px solid #444; color: #aaa; padding: 3px 6px; border-radius: 6px; cursor: pointer; font-size: 11px; white-space: nowrap; font-weight: bold; user-select: none; pointer-events: auto; }
-        .chat-main-tab.active, .chat-tab.active { background: #caa55c; color: #1d1620; border-color: #caa55c; font-weight: bold; }
-        .chat-sub-tabs { display: flex; gap: 6px; padding: 6px 12px; background: #231929; border-bottom: 1px solid #3a2b42; flex-shrink: 0; }
-        .chat-sub-tab { background: #1d1620; border: 1px solid #444; color: #bbb; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; white-space: nowrap; user-select: none; pointer-events: auto; }
-        .chat-sub-tab.active { background: #caa55c; color: #1d1620; border-color: #caa55c; font-weight: bold; }
-        .chat-role-icon { margin-right: 4px; }
-        .chat-envelope { display: none; }
-        .chat-close { cursor: pointer; color: #ff8fa3; padding: 4px 6px; flex-shrink: 0; font-size: 16px; line-height: 1; user-select: none; pointer-events: auto; }
-        .chat-close:hover { color: #fff; }
-        .chat-messages { flex: 1 1 0%; min-height: 0; padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: #f7eadf !important; }
-        .chat-msg { background: rgba(255,255,255,0.05); padding: 6px 10px; border-radius: 8px; line-height: 1.3; word-wrap: break-word; color: #f7eadf !important; }
-        .chat-msg.pending { opacity: 0.6; font-style: italic; }
-        .chat-msg.streamer-msg { border-left: 3px solid #ffd700; background: rgba(255, 215, 0, 0.08); }
-        .chat-msg.mention-msg { border-left: 3px solid #f7768e; background: rgba(247, 118, 142, 0.12); }
-        .chat-text { color: #f7eadf !important; word-break: break-word; }
-        .chat-author { font-weight: bold; color: #f7eadf !important; margin-right: 5px; }
 
-        /* v11.7: контекстное меню по нику в вынесенном (PiP) чате.
-           Модуль modules/chat/chat-pip.js: showNickMenu(); пункт «👤 Профиль»
-           появляется только если в page-context есть LGProfile.open. */
-        .lgu-nick-menu {
-            display: flex; flex-direction: column; gap: 2px;
-            min-width: 168px; padding: 4px; z-index: 99999;
-            background: #1d1620; border: 1px solid #caa55c; border-radius: 8px;
-            box-shadow: 0 6px 18px rgba(0, 0, 0, .55);
-            font: 12px/1.25 system-ui, -apple-system, 'Segoe UI', sans-serif;
-            color: #f7eadf;
-        }
-        .lgu-nick-menu-item {
-            display: block; width: 100%; text-align: left;
-            padding: 6px 9px; border: 0; border-radius: 6px;
-            background: transparent; color: #f7eadf;
-            font: inherit; cursor: pointer;
-        }
-        .lgu-nick-menu-item:hover,
-        .lgu-nick-menu-item:focus-visible {
-            background: rgba(202, 165, 92, .22);
-            color: #ffcf6a;
-            outline: none;
-        }
-        .chat-input-area { display: flex; padding: 10px; background: #111; border-top: 1px solid #333; gap: 5px; flex-shrink: 0; }
-        .chat-input { flex: 1; background: #222; border: 1px solid #444; color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 13px; outline: none; }
-        .chat-input:focus { border-color: #caa55c; }
-        .chat-send { background: #caa55c; color: #1d1620; border: none; padding: 0 15px; border-radius: 6px; font-weight: bold; cursor: pointer; user-select: none; pointer-events: auto; }
-        .chat-send:hover { background: #ffcf6a; }
-        .chat-widget button { user-select: none; pointer-events: auto; }
         .auc-buy-btn { padding: 4px 8px; background: #28a745; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 11px; transition: background 0.2s, opacity 0.2s; }
         .auc-buy-btn:hover { background: #218838; }
         .auc-buy-btn:disabled { opacity: 0.6; cursor: not-allowed; }
@@ -574,15 +520,6 @@
         .party-heal-btn { pointer-events: auto; flex: none; padding: 0 5px; background: #22352a; border: 1px solid #5fd987; color: #5fd987; border-radius: 4px; font-size: 10px; line-height: 15px; cursor: pointer; transition: background 0.15s, color 0.15s; }
         .party-heal-btn:hover:not(:disabled) { background: #5fd987; color: #16121a; }
         .party-heal-btn:disabled { opacity: 0.6; cursor: default; }
-        /* 7TV-смайлики: размер задаётся переменной --t7-h (S/M/L/XL из настроек чата) */
-        .t7-emote { height: var(--t7-h, 1.9em); vertical-align: middle; margin: 0 2px; }
-        /* Подсветка пользователей аддона (ТЗ 11.6.0h).
-           НЕ переопределяем color — сохраняем индивидуальный цвет игрока
-           (класс/ранг выставляет его самой игрой). text-shadow с currentColor
-           даёт свечение ровно в его родном цвете. */
-        .legion-addon-user {
-            text-shadow: 0 0 4px currentColor, 0 0 10px currentColor !important;
-        }
 
         /* ============================================================
            ПЛАНИРОВЩИК БИЛДОВ — СКРОЛЛ ДЕРЕВА + ГРАНИЦЫ МОДАЛКИ (v11.6.3b)
@@ -775,8 +712,9 @@
         /* ============================================================
            11.6.2b: БОЕВОЙ АССИСТЕНТ (modules/combat-assistant.js)
            Контейнер висит по центру сверху и прозрачен для мыши, чтобы не
-           перекрывать нативный UI похода; кликабельна только карточка
-           подсказки (pointer-events: auto) с кнопкой «Вставить в чат».
+           перекрывать нативный UI похода; кликабельны только карточка
+           подсказки (pointer-events: auto) — бейдж команды и кнопка
+           «Вставить» — и баннер сбора отряда с «Присоединиться».
            ============================================================ */
         #lg-combat-assistant {
             position: fixed;
@@ -809,6 +747,25 @@
             box-shadow: 0 4px 12px rgba(0,0,0,0.5); pointer-events: none;
             max-width: min(560px, 90vw); text-align: center;
         }
+        /* v11.7.0: команда — кликабельный бейдж (копирование в буфер). */
+        .lg-combat-info { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+        .lg-combat-hint { font-size: 12px; opacity: 0.8; }
+        .lg-combat-cmd {
+            background: #241d10; border: 1px dashed #ffcf6a; color: #ffcf6a;
+            border-radius: 6px; padding: 4px 10px; font: bold 15px Arial;
+            cursor: pointer; transition: background 0.15s, color 0.15s;
+        }
+        .lg-combat-cmd:hover { background: #ffcf6a; color: #000; }
+        .lg-combat-cmd.copied { background: #4cc95a; border-color: #4cc95a; color: #16121a; }
+        /* v11.7.0: сбор отряда — таймер и кнопка «Присоединиться». */
+        .lg-combat-gather {
+            background: rgba(18, 26, 32, 0.95); border: 2px solid #5cc8ff; color: #fff;
+            padding: 10px 16px; border-radius: 10px; display: flex; flex-direction: column;
+            gap: 6px; align-items: center; pointer-events: auto; font: bold 14px Arial;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.55); min-width: 240px; text-align: center;
+        }
+        .lg-combat-gather-head { color: #9fe3ff; }
+        .lg-combat-gather-timer { font: 900 20px/1.1 Consolas, monospace; color: #ffcf6a; }
 
         /* ============================================================
            11.6.5c: СПОСОБНОСТИ АРЕНЫ (modules/hero-planner.js)

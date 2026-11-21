@@ -207,12 +207,8 @@
             const pageWin = (typeof G !== 'undefined' && G) ? G : window;
 
             if (from.inMine && PocketCity.isMineOpen()) {
-                // LGCity.open() перевешивает общий чат в root города, из-за чего
-                // после возврата в шахту он оставался под оверлеем. Dock('mine')
-                // делает шахту последней сценой и возвращает блок на место.
-                if (typeof Chat !== 'undefined' && typeof Chat.showForMine === 'function') {
-                    try { Chat.showForMine(); } catch (e) { dbg('Чат шахты не вернулся:', e); }
-                }
+                // 11.7.0: возврат нативного чата шахты (Chat.showForMine())
+                // удалён вместе с подсистемой чата — LGChatOne игра вешает сама.
                 const city = pageWin.LGCity;
                 // Гасим городской слой только пока игра всё ещё на вкладке
                 // «Город» (шахта всегда лежит поверх неё). Иначе не мешаем.
@@ -312,7 +308,7 @@
 
             // Игровые объекты (LGCity / __lgQuestContext / cityFiles) живут
             // в page-context: после @grant window — песочница, поэтому берём
-            // unsafeWindow (G), как это уже делается в chat.js.
+            // unsafeWindow (G), как это уже делается в main.js.
             const pageWin = (typeof G !== 'undefined' && G) ? G : window;
 
             // 0. Запоминаем, откуда пришли (v11.6.4d), чтобы вернуться туда же
