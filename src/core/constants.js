@@ -67,6 +67,59 @@
      */
     const API_BASE = window.LG_BASE || (location.pathname.match(/^\/c\/[^/]+/)?.[0] || '');
     const MAX_POINTS = 50;
+
+    /*
+     * ------------------------------------------------------------
+     * 0.9. НАСТРОЙКИ АДДОНА (v11.7.0)
+     *
+     * Реестр переключателей модалки «⚙️ Настройки аддона» (core/ui.js):
+     * ключ localStorage + значение по умолчанию. Глобального состояния нет,
+     * значение читается по месту через Settings.get(), поэтому тумблер
+     * начинает работать сразу после клика — без перезагрузки страницы.
+     *
+     * autoSkipMonsters — автоскип боёв с обычными и элитными монстрами.
+     * Наблюдатель и клики по нативным кнопкам .cm-dlg живут в
+     * modules/pocket-city.js (PocketCity.startMonsterAutoSkip / init).
+     * ------------------------------------------------------------
+     */
+    const DEFAULT_SETTINGS = Object.freeze({
+        autoSkipMonsters: false,
+    });
+    const SETTINGS_KEYS = Object.freeze({
+        autoSkipMonsters: 'LEGION_AUTO_SKIP_MONSTERS',
+    });
+    const Settings = {
+        // Есть ли такая настройка в реестре (защита от опечаток в имени).
+        has(name) {
+            return Object.prototype.hasOwnProperty.call(SETTINGS_KEYS, name);
+        },
+        // Чтение флага: нет ключа (или он пуст) — значение по умолчанию.
+        // Исключение доступа (приватный режим / заблокированное хранилище)
+        // тоже даёт дефолт, чтобы UI не падал.
+        get(name) {
+            const def = Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, name)
+                ? DEFAULT_SETTINGS[name]
+                : false;
+            if (!Settings.has(name)) return def;
+            try {
+                const raw = localStorage.getItem(SETTINGS_KEYS[name]);
+                return (raw === null || raw === '') ? def : raw === 'true';
+            } catch (e) {
+                return def;
+            }
+        },
+        // Запись флага строкой 'true'/'false' (как остальные ключи аддона).
+        set(name, value) {
+            if (!Settings.has(name)) return false;
+            try {
+                localStorage.setItem(SETTINGS_KEYS[name], value ? 'true' : 'false');
+                return true;
+            } catch (e) {
+                dbg('[Settings] не удалось сохранить настройку', name, e);
+                return false;
+            }
+        },
+    };
     /*
      * v11.6.1: сетка дерева навыков сжата под 1920x1080 без скролла.
      * Нативные пропорции (reference/LegionFrontSRC/site/skills.js):

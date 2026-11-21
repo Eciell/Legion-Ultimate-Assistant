@@ -102,6 +102,15 @@
                         <span>⚔️ Боевой ассистент в походах</span>
                         <input type="checkbox" class="lg-toggle" id="modal-chk-combat-assist">
                     </label>
+                    <!-- 11.7.0: автоскип боёв с монстрами (.cm-dlg). Состояние
+                         ставит и сохраняет UI.openSettings() (Settings,
+                         ключ 'LEGION_AUTO_SKIP_MONSTERS'); наблюдатель живёт
+                         в modules/pocket-city.js и включается сразу. -->
+                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
+                        <span>⏭️ Автоскип боёв с монстрами</span>
+                        <input type="checkbox" class="lg-toggle" id="modal-chk-auto-skip-monsters">
+                    </label>
+                    <div style="font-size:10px; color:#888; line-height:1.3; margin:-2px 2px 0;">Автоматически нажимает «Пропустить» / «Пропустить всё» в окне боя с обычными и элитными монстрами</div>
                     <!-- ПАТЧ 11.6.5h: куда девать вход в меню — в нативный бар
                          города или оставить плавающую FAB. Состояние ставит
                          и сохраняет UI.openSettings() (localStorage

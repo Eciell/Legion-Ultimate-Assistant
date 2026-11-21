@@ -38,6 +38,16 @@
         // по «Карманному городу» не должны плодить watchers).
         _closeWatch: null,
 
+        // ---------------- 11.7.0: автоскип боёв с монстрами ----------------
+        // Окно `.cm-dlg` — бой с обычным или элитным монстром. Работаем
+        // только нативными кликами по кнопкам интерфейса: сетевых запросов
+        // нет, window.fetch / LGMine не патчатся, поход и арена не трогаются.
+        MONSTER_SKIP_CLICK_DELAY_MS: 100,
+        _monsterObserver: null,
+        _monsterRaf: 0,
+        // Отложенные клики: гасятся в stopMonsterAutoSkip() / destroy().
+        _monsterTimers: new Set(),
+
         // Модалка со списком зданий: карточка -> нативное здание игры.
         open() {
             // Модалку берём из возврата showModal: её класс — с рандомным
@@ -383,5 +393,143 @@
             }
 
             UI.showToast('Не удалось открыть здание', true);
+        },
+
+        // ============================================================
+        // 6.5.x. АВТОСКИП БОЁВ С МОНСТРАМИ (v11.7.0)
+        //
+        // Тумблер «⏭️ Автоскип боёв с монстрами» в «⚙️ Настройках аддона»
+        // (ключ localStorage 'LEGION_AUTO_SKIP_MONSTERS', реестр Settings
+        // в core/constants.js). Работает только через нативный клик по
+        // кнопкам окна `.cm-dlg`: никаких запросов, перехватов LGMine и
+        // патчей window.fetch. Поход и арена не затрагиваются.
+        // ============================================================
+
+        /**
+         * Включение автоскипа. Идемпотентно: повторный вызов не создаёт
+         * второй MutationObserver (например, если открыть настройки дважды).
+         */
+        startMonsterAutoSkip() {
+            if (PocketCity._monsterObserver) return true;
+            if (typeof MutationObserver !== 'function' || !document.body) return false;
+
+            const observer = new MutationObserver(() => PocketCity.scheduleMonsterSkip());
+            // childList + subtree: окно .cm-dlg вставляется в body целиком, а
+            // его кнопки дорисовываются позже. attributes/disabled нужен,
+            // чтобы поймать момент, когда кнопка перестала быть disabled.
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['disabled'],
+            });
+            PocketCity._monsterObserver = observer;
+
+            // После «выкл → вкл» метки могли остаться на кнопках живого
+            // диалога: без сброса проход уже не нажал бы «Пропустить».
+            document.querySelectorAll('.cm-dlg [data-lgu-skipped]').forEach(el => {
+                try { delete el.dataset.lguSkipped; } catch (e) {}
+            });
+
+            // Окно боя могло быть открыто ещё до включения тумблера —
+            // мутации в этом случае не будет, проверяем сразу.
+            PocketCity.scheduleMonsterSkip();
+            dbg('Автоскип боёв с монстрами включён.');
+            return true;
+        },
+
+        /**
+         * Выключение автоскипа: снимаем наблюдатель, отменяем кадр и все
+         * отложенные клики, чтобы после переключения тумблера ничего не нажалось.
+         */
+        stopMonsterAutoSkip() {
+            if (PocketCity._monsterObserver) {
+                try { PocketCity._monsterObserver.disconnect(); } catch (e) {}
+                PocketCity._monsterObserver = null;
+            }
+            if (PocketCity._monsterRaf) {
+                if (typeof cancelAnimationFrame === 'function') {
+                    try { cancelAnimationFrame(PocketCity._monsterRaf); } catch (e) {}
+                }
+                clearTimeout(PocketCity._monsterRaf);
+                PocketCity._monsterRaf = 0;
+            }
+            PocketCity._monsterTimers.forEach(timer => clearTimeout(timer));
+            PocketCity._monsterTimers.clear();
+            dbg('Автоскип боёв с монстрами выключен.');
+        },
+
+        /**
+         * Троттлинг MutationObserver: в городе и бою мутации идут пачками,
+         * поэтому один проход на кадр (requestAnimationFrame), лишние
+         * вызовы склеиваются в один.
+         */
+        scheduleMonsterSkip() {
+            if (!PocketCity._monsterObserver || PocketCity._monsterRaf) return;
+            const run = () => {
+                PocketCity._monsterRaf = 0;
+                PocketCity.trySkipMonsterFight();
+            };
+            PocketCity._monsterRaf = (typeof requestAnimationFrame === 'function')
+                ? requestAnimationFrame(run)
+                : setTimeout(run, 16);
+        },
+
+        /**
+         * Один проход по открытому окну боя с монстром.
+         *
+         * Порядок проверок:
+         *   1) button[data-all] — «Пропустить всё»: полный скип цепочки
+         *      элитного монстра (когда цепочка кончилась, кнопки нет);
+         *   2) .cm-fight button[data-sp="skip"] — «Пропустить» одиночного боя.
+         *
+         * data-lguSkipped защищает от повторного клика, пока игра не закрыла
+         * диалог: MutationObserver успевает вызвать проход несколько раз.
+         */
+        trySkipMonsterFight() {
+            const dlg = document.querySelector('.cm-dlg');
+            if (!dlg) return;
+
+            let btn = dlg.querySelector('button[data-all]:not([disabled])');
+            if (!btn) btn = dlg.querySelector('.cm-fight button[data-sp="skip"]:not([disabled])');
+            if (!btn || btn.dataset.lguSkipped) return;
+
+            btn.dataset.lguSkipped = '1';
+            // 100 мс: клиент игры вешает обработчик click уже после рендера
+            // диалога, поэтому мгновенный click() уходил бы в пустоту.
+            const timer = setTimeout(() => {
+                PocketCity._monsterTimers.delete(timer);
+                // За эту задержку диалог мог закрыться — кликаем только
+                // живую и всё ещё активную кнопку.
+                if (btn.isConnected && !btn.disabled) {
+                    try {
+                        btn.click();
+                        dbg('Автоскип: нажата кнопка пропуска боя.');
+                    } catch (e) {
+                        dbg('Автоскип: клик не прошёл:', e);
+                    }
+                }
+            }, PocketCity.MONSTER_SKIP_CLICK_DELAY_MS);
+            PocketCity._monsterTimers.add(timer);
+        },
+
+        /**
+         * init() из boot() в main.js: поднимаем автоскип, если тумблер был
+         * включён в прошлой сессии (настройка хранится в localStorage).
+         */
+        init() {
+            if (Settings.get('autoSkipMonsters')) PocketCity.startMonsterAutoSkip();
+        },
+
+        /**
+         * destroy() из shutdown() в main.js: снимаем наблюдатель и таймеры,
+         * иначе старый инстанс кликал бы по кнопкам после перезапуска скрипта.
+         */
+        destroy() {
+            PocketCity.stopMonsterAutoSkip();
+            if (PocketCity._closeWatch) {
+                try { PocketCity._closeWatch(); } catch (e) {}
+                PocketCity._closeWatch = null;
+            }
         }
     };

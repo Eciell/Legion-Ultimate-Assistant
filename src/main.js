@@ -226,6 +226,10 @@
         //    (leader/lead/officer/trusted); данные — /api/guilds/guild
         //    с кэшем в памяти, window.fetch не патчится.
         GuildSummary.init();
+        // 🏰 Карманный город: init() поднимает автоскип боёв с монстрами
+        //    (тумблер «⏭️ Автоскип боёв с монстрами» в настройках), если он
+        //    был включён в прошлой сессии. Клики — только нативные, по .cm-dlg.
+        PocketCity.init();
 
         // 🔔 Проверка обновлений: через 8 с после старта, чтобы не мешать
         // загрузке страницы и первому рендеру аддона.
@@ -291,6 +295,10 @@
                 // старый инстанс продолжал бы слушать запросы игры (/api/me,
                 // /api/qact) и слать state на наш сервер после перезапуска.
                 Party.destroy();
+                // 11.7.0: снимаем наблюдатель автоскипа боёв с монстрами и его
+                // отложенные клики — иначе старый инстанс продолжал бы нажимать
+                // «Пропустить» в окне .cm-dlg после перезапуска скрипта.
+                try { PocketCity.destroy?.(); } catch (e) {}
                 document.querySelectorAll('.' + DOM_IDS.customModal + ', .sim-card, .float-btns, .' + DOM_IDS.fabWrap + ', #' + DOM_IDS.playerHud + ', .custom-modal, .legion-fab-wrap, #legion-player-hud').forEach(el => el.remove());
                 legionApi._booted = false;
             }

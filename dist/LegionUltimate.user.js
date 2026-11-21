@@ -2,7 +2,7 @@
 // @name         Legion: Ultimate Assistant (Auction, Pocket City, Party)
 // @namespace    http://tampermonkey.net/
 // @version      11.7.0
-// @description  QoL-аддон для Легиона: Сканер аукциона, Разведка, Планировщик, Карманный город, Пати, Поход. Без авто-копания.
+// @description  QoL-аддон для Легиона: Сканер аукциона, Разведка, Планировщик, Карманный город, Пати, Поход.
 // @connect      localhost
 // @connect      127.0.0.1
 // @connect      legion.ctrlfree.host
@@ -94,6 +94,59 @@
      */
     const API_BASE = window.LG_BASE || (location.pathname.match(/^\/c\/[^/]+/)?.[0] || '');
     const MAX_POINTS = 50;
+
+    /*
+     * ------------------------------------------------------------
+     * 0.9. НАСТРОЙКИ АДДОНА (v11.7.0)
+     *
+     * Реестр переключателей модалки «⚙️ Настройки аддона» (core/ui.js):
+     * ключ localStorage + значение по умолчанию. Глобального состояния нет,
+     * значение читается по месту через Settings.get(), поэтому тумблер
+     * начинает работать сразу после клика — без перезагрузки страницы.
+     *
+     * autoSkipMonsters — автоскип боёв с обычными и элитными монстрами.
+     * Наблюдатель и клики по нативным кнопкам .cm-dlg живут в
+     * modules/pocket-city.js (PocketCity.startMonsterAutoSkip / init).
+     * ------------------------------------------------------------
+     */
+    const DEFAULT_SETTINGS = Object.freeze({
+        autoSkipMonsters: false,
+    });
+    const SETTINGS_KEYS = Object.freeze({
+        autoSkipMonsters: 'LEGION_AUTO_SKIP_MONSTERS',
+    });
+    const Settings = {
+        // Есть ли такая настройка в реестре (защита от опечаток в имени).
+        has(name) {
+            return Object.prototype.hasOwnProperty.call(SETTINGS_KEYS, name);
+        },
+        // Чтение флага: нет ключа (или он пуст) — значение по умолчанию.
+        // Исключение доступа (приватный режим / заблокированное хранилище)
+        // тоже даёт дефолт, чтобы UI не падал.
+        get(name) {
+            const def = Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, name)
+                ? DEFAULT_SETTINGS[name]
+                : false;
+            if (!Settings.has(name)) return def;
+            try {
+                const raw = localStorage.getItem(SETTINGS_KEYS[name]);
+                return (raw === null || raw === '') ? def : raw === 'true';
+            } catch (e) {
+                return def;
+            }
+        },
+        // Запись флага строкой 'true'/'false' (как остальные ключи аддона).
+        set(name, value) {
+            if (!Settings.has(name)) return false;
+            try {
+                localStorage.setItem(SETTINGS_KEYS[name], value ? 'true' : 'false');
+                return true;
+            } catch (e) {
+                dbg('[Settings] не удалось сохранить настройку', name, e);
+                return false;
+            }
+        },
+    };
     /*
      * v11.6.1: сетка дерева навыков сжата под 1920x1080 без скролла.
      * Нативные пропорции (reference/LegionFrontSRC/site/skills.js):
@@ -3161,6 +3214,15 @@
                         <span>⚔️ Боевой ассистент в походах</span>
                         <input type="checkbox" class="lg-toggle" id="modal-chk-combat-assist">
                     </label>
+                    <!-- 11.7.0: автоскип боёв с монстрами (.cm-dlg). Состояние
+                         ставит и сохраняет UI.openSettings() (Settings,
+                         ключ 'LEGION_AUTO_SKIP_MONSTERS'); наблюдатель живёт
+                         в modules/pocket-city.js и включается сразу. -->
+                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
+                        <span>⏭️ Автоскип боёв с монстрами</span>
+                        <input type="checkbox" class="lg-toggle" id="modal-chk-auto-skip-monsters">
+                    </label>
+                    <div style="font-size:10px; color:#888; line-height:1.3; margin:-2px 2px 0;">Автоматически нажимает «Пропустить» / «Пропустить всё» в окне боя с обычными и элитными монстрами</div>
                     <!-- ПАТЧ 11.6.5h: куда девать вход в меню — в нативный бар
                          города или оставить плавающую FAB. Состояние ставит
                          и сохраняет UI.openSettings() (localStorage
@@ -3671,6 +3733,26 @@
                 combatChk.checked = localStorage.getItem('LEGION_COMBAT_ASSIST') !== 'false';
                 combatChk.addEventListener('change', (e) => {
                     localStorage.setItem('LEGION_COMBAT_ASSIST', String(e.target.checked));
+                });
+            }
+
+            // 11.7.0: автоскип боёв с обычными и элитными монстрами (.cm-dlg).
+            // По умолчанию выключен. Наблюдатель из modules/pocket-city.js
+            // поднимается и снимается сразу — без перезагрузки страницы.
+            const monsterSkipChk = modal.querySelector('#modal-chk-auto-skip-monsters');
+            if (monsterSkipChk) {
+                monsterSkipChk.checked = Settings.get('autoSkipMonsters');
+                monsterSkipChk.addEventListener('change', (e) => {
+                    const isEnabled = !!e.target.checked;
+                    // Сначала применяем к наблюдателю (работает даже если
+                    // localStorage заблокирован), затем сохраняем выбор.
+                    try {
+                        if (isEnabled) PocketCity.startMonsterAutoSkip();
+                        else PocketCity.stopMonsterAutoSkip();
+                    } catch (err) {
+                        dbg('[UI] автоскип монстров: сбой переключения', err);
+                    }
+                    Settings.set('autoSkipMonsters', isEnabled);
                 });
             }
 
@@ -10582,6 +10664,16 @@ const Players = {
         // по «Карманному городу» не должны плодить watchers).
         _closeWatch: null,
 
+        // ---------------- 11.7.0: автоскип боёв с монстрами ----------------
+        // Окно `.cm-dlg` — бой с обычным или элитным монстром. Работаем
+        // только нативными кликами по кнопкам интерфейса: сетевых запросов
+        // нет, window.fetch / LGMine не патчатся, поход и арена не трогаются.
+        MONSTER_SKIP_CLICK_DELAY_MS: 100,
+        _monsterObserver: null,
+        _monsterRaf: 0,
+        // Отложенные клики: гасятся в stopMonsterAutoSkip() / destroy().
+        _monsterTimers: new Set(),
+
         // Модалка со списком зданий: карточка -> нативное здание игры.
         open() {
             // Модалку берём из возврата showModal: её класс — с рандомным
@@ -10927,6 +11019,144 @@ const Players = {
             }
 
             UI.showToast('Не удалось открыть здание', true);
+        },
+
+        // ============================================================
+        // 6.5.x. АВТОСКИП БОЁВ С МОНСТРАМИ (v11.7.0)
+        //
+        // Тумблер «⏭️ Автоскип боёв с монстрами» в «⚙️ Настройках аддона»
+        // (ключ localStorage 'LEGION_AUTO_SKIP_MONSTERS', реестр Settings
+        // в core/constants.js). Работает только через нативный клик по
+        // кнопкам окна `.cm-dlg`: никаких запросов, перехватов LGMine и
+        // патчей window.fetch. Поход и арена не затрагиваются.
+        // ============================================================
+
+        /**
+         * Включение автоскипа. Идемпотентно: повторный вызов не создаёт
+         * второй MutationObserver (например, если открыть настройки дважды).
+         */
+        startMonsterAutoSkip() {
+            if (PocketCity._monsterObserver) return true;
+            if (typeof MutationObserver !== 'function' || !document.body) return false;
+
+            const observer = new MutationObserver(() => PocketCity.scheduleMonsterSkip());
+            // childList + subtree: окно .cm-dlg вставляется в body целиком, а
+            // его кнопки дорисовываются позже. attributes/disabled нужен,
+            // чтобы поймать момент, когда кнопка перестала быть disabled.
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['disabled'],
+            });
+            PocketCity._monsterObserver = observer;
+
+            // После «выкл → вкл» метки могли остаться на кнопках живого
+            // диалога: без сброса проход уже не нажал бы «Пропустить».
+            document.querySelectorAll('.cm-dlg [data-lgu-skipped]').forEach(el => {
+                try { delete el.dataset.lguSkipped; } catch (e) {}
+            });
+
+            // Окно боя могло быть открыто ещё до включения тумблера —
+            // мутации в этом случае не будет, проверяем сразу.
+            PocketCity.scheduleMonsterSkip();
+            dbg('Автоскип боёв с монстрами включён.');
+            return true;
+        },
+
+        /**
+         * Выключение автоскипа: снимаем наблюдатель, отменяем кадр и все
+         * отложенные клики, чтобы после переключения тумблера ничего не нажалось.
+         */
+        stopMonsterAutoSkip() {
+            if (PocketCity._monsterObserver) {
+                try { PocketCity._monsterObserver.disconnect(); } catch (e) {}
+                PocketCity._monsterObserver = null;
+            }
+            if (PocketCity._monsterRaf) {
+                if (typeof cancelAnimationFrame === 'function') {
+                    try { cancelAnimationFrame(PocketCity._monsterRaf); } catch (e) {}
+                }
+                clearTimeout(PocketCity._monsterRaf);
+                PocketCity._monsterRaf = 0;
+            }
+            PocketCity._monsterTimers.forEach(timer => clearTimeout(timer));
+            PocketCity._monsterTimers.clear();
+            dbg('Автоскип боёв с монстрами выключен.');
+        },
+
+        /**
+         * Троттлинг MutationObserver: в городе и бою мутации идут пачками,
+         * поэтому один проход на кадр (requestAnimationFrame), лишние
+         * вызовы склеиваются в один.
+         */
+        scheduleMonsterSkip() {
+            if (!PocketCity._monsterObserver || PocketCity._monsterRaf) return;
+            const run = () => {
+                PocketCity._monsterRaf = 0;
+                PocketCity.trySkipMonsterFight();
+            };
+            PocketCity._monsterRaf = (typeof requestAnimationFrame === 'function')
+                ? requestAnimationFrame(run)
+                : setTimeout(run, 16);
+        },
+
+        /**
+         * Один проход по открытому окну боя с монстром.
+         *
+         * Порядок проверок:
+         *   1) button[data-all] — «Пропустить всё»: полный скип цепочки
+         *      элитного монстра (когда цепочка кончилась, кнопки нет);
+         *   2) .cm-fight button[data-sp="skip"] — «Пропустить» одиночного боя.
+         *
+         * data-lguSkipped защищает от повторного клика, пока игра не закрыла
+         * диалог: MutationObserver успевает вызвать проход несколько раз.
+         */
+        trySkipMonsterFight() {
+            const dlg = document.querySelector('.cm-dlg');
+            if (!dlg) return;
+
+            let btn = dlg.querySelector('button[data-all]:not([disabled])');
+            if (!btn) btn = dlg.querySelector('.cm-fight button[data-sp="skip"]:not([disabled])');
+            if (!btn || btn.dataset.lguSkipped) return;
+
+            btn.dataset.lguSkipped = '1';
+            // 100 мс: клиент игры вешает обработчик click уже после рендера
+            // диалога, поэтому мгновенный click() уходил бы в пустоту.
+            const timer = setTimeout(() => {
+                PocketCity._monsterTimers.delete(timer);
+                // За эту задержку диалог мог закрыться — кликаем только
+                // живую и всё ещё активную кнопку.
+                if (btn.isConnected && !btn.disabled) {
+                    try {
+                        btn.click();
+                        dbg('Автоскип: нажата кнопка пропуска боя.');
+                    } catch (e) {
+                        dbg('Автоскип: клик не прошёл:', e);
+                    }
+                }
+            }, PocketCity.MONSTER_SKIP_CLICK_DELAY_MS);
+            PocketCity._monsterTimers.add(timer);
+        },
+
+        /**
+         * init() из boot() в main.js: поднимаем автоскип, если тумблер был
+         * включён в прошлой сессии (настройка хранится в localStorage).
+         */
+        init() {
+            if (Settings.get('autoSkipMonsters')) PocketCity.startMonsterAutoSkip();
+        },
+
+        /**
+         * destroy() из shutdown() в main.js: снимаем наблюдатель и таймеры,
+         * иначе старый инстанс кликал бы по кнопкам после перезапуска скрипта.
+         */
+        destroy() {
+            PocketCity.stopMonsterAutoSkip();
+            if (PocketCity._closeWatch) {
+                try { PocketCity._closeWatch(); } catch (e) {}
+                PocketCity._closeWatch = null;
+            }
         }
     };
 
@@ -16552,6 +16782,10 @@ const Players = {
         //    (leader/lead/officer/trusted); данные — /api/guilds/guild
         //    с кэшем в памяти, window.fetch не патчится.
         GuildSummary.init();
+        // 🏰 Карманный город: init() поднимает автоскип боёв с монстрами
+        //    (тумблер «⏭️ Автоскип боёв с монстрами» в настройках), если он
+        //    был включён в прошлой сессии. Клики — только нативные, по .cm-dlg.
+        PocketCity.init();
 
         // 🔔 Проверка обновлений: через 8 с после старта, чтобы не мешать
         // загрузке страницы и первому рендеру аддона.
@@ -16617,6 +16851,10 @@ const Players = {
                 // старый инстанс продолжал бы слушать запросы игры (/api/me,
                 // /api/qact) и слать state на наш сервер после перезапуска.
                 Party.destroy();
+                // 11.7.0: снимаем наблюдатель автоскипа боёв с монстрами и его
+                // отложенные клики — иначе старый инстанс продолжал бы нажимать
+                // «Пропустить» в окне .cm-dlg после перезапуска скрипта.
+                try { PocketCity.destroy?.(); } catch (e) {}
                 document.querySelectorAll('.' + DOM_IDS.customModal + ', .sim-card, .float-btns, .' + DOM_IDS.fabWrap + ', #' + DOM_IDS.playerHud + ', .custom-modal, .legion-fab-wrap, #legion-player-hud').forEach(el => el.remove());
                 legionApi._booted = false;
             }

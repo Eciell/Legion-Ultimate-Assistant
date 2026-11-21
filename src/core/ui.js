@@ -241,6 +241,26 @@
                 });
             }
 
+            // 11.7.0: автоскип боёв с обычными и элитными монстрами (.cm-dlg).
+            // По умолчанию выключен. Наблюдатель из modules/pocket-city.js
+            // поднимается и снимается сразу — без перезагрузки страницы.
+            const monsterSkipChk = modal.querySelector('#modal-chk-auto-skip-monsters');
+            if (monsterSkipChk) {
+                monsterSkipChk.checked = Settings.get('autoSkipMonsters');
+                monsterSkipChk.addEventListener('change', (e) => {
+                    const isEnabled = !!e.target.checked;
+                    // Сначала применяем к наблюдателю (работает даже если
+                    // localStorage заблокирован), затем сохраняем выбор.
+                    try {
+                        if (isEnabled) PocketCity.startMonsterAutoSkip();
+                        else PocketCity.stopMonsterAutoSkip();
+                    } catch (err) {
+                        dbg('[UI] автоскип монстров: сбой переключения', err);
+                    }
+                    Settings.set('autoSkipMonsters', isEnabled);
+                });
+            }
+
             // ПАТЧ 11.6.5h / h.1: тумблер «📌 Кнопка аддона в нижнем меню игры».
             // Порядок операций важен: сначала применяем выключение к DOM, потом
             // пишем в хранилище, и только затем пересчитываем режим. Так выбор
