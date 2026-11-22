@@ -285,7 +285,7 @@
         .stats-panel h3 { color: #ffcf6a; margin-top: 0; font-size: 14px; border-bottom: 1px solid #3d2f44; padding-bottom: 10px; }
         .stat-line { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
         .stat-line span { color: #aaa; }
-        .stat-line b { color: #4cc95a; }
+        .stat-line b { color: #d8c9a8; }
         .search-bar { width: 100%; padding: 10px; margin-bottom: 15px; background: #111; border: 1px solid #555; color: #fff; border-radius: 6px; font-size: 14px; outline: none; box-sizing: border-box; }
         .table-container { overflow-y: auto; flex: 1; border: 1px solid #333; border-radius: 6px; }
         .${DOM_IDS.customModal} table, .custom-modal table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -346,7 +346,63 @@
         .${DOM_IDS.fabMenu}::-webkit-scrollbar, .legion-fab-menu::-webkit-scrollbar { width: 4px; }
         .${DOM_IDS.fabMenu}::-webkit-scrollbar-thumb, .legion-fab-menu::-webkit-scrollbar-thumb { background: #caa55c; border-radius: 4px; }
         .${DOM_IDS.fabMenu}::-webkit-scrollbar-track, .legion-fab-menu::-webkit-scrollbar-track { background: transparent; }
-        .fab-section-title { flex-shrink: 0; }
+        /* Заголовки категорий FAB-меню: единый жирный золотой стиль аддона,
+           без блёклого тонкого шрифта — под статьи с золотыми кнопками. */
+        .fab-section-title {
+            flex-shrink: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 8px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #e6c789;
+            cursor: pointer;
+            user-select: none;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+            border-bottom: 1px solid rgba(202, 165, 92, 0.22);
+            transition: color 0.2s, border-color 0.2s;
+        }
+        .fab-section-title:hover {
+            color: #ffcf6a;
+            border-bottom-color: rgba(255, 207, 106, 0.45);
+        }
+        .fab-section-title:focus-visible {
+            outline: 1px solid #caa55c;
+            outline-offset: 1px;
+            border-radius: 4px;
+        }
+        .fab-footer {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 3px;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #333;
+            user-select: none;
+        }
+        .fab-thanks-btn {
+            background: none;
+            border: none;
+            color: #d8b878;
+            font: inherit;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            padding: 3px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: color 0.2s, background 0.2s;
+        }
+        .fab-thanks-btn:hover {
+            color: #ffcf6a;
+            background: rgba(202, 165, 92, 0.12);
+            text-decoration: underline;
+        }
+        .fab-version { font-size: 10px; color: #888; }
         .fab-section { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
         .fab-section-body { display: flex; flex-direction: column; gap: 6px; overflow: hidden; transition: max-height 0.2s ease-out; }
         .fab-section.collapsed .fab-section-body { display: none; }
@@ -1467,7 +1523,7 @@
         }
         .hp-stat-val { white-space: nowrap; font-variant-numeric: tabular-nums; }
         .hp-stat-val b { color: #ffcf6a; }
-        .hp-stat-gain { color: #8ff2a0; font-size: 11px; }
+        .hp-stat-gain { color: #9c8fa8; font-size: 11px; }
         /* v11.7.1: значение на текущей заточке (когда смотрим другой уровень). */
         .hp-stat-cur { color: #9c8fa8; font-size: 11px; }
         .hp-cost-total { font-size: 20px; font-weight: bold; color: #ffcf6a; font-variant-numeric: tabular-nums; }
@@ -2399,6 +2455,132 @@
         .lgu-skm-gear-col h3 { margin: 0 0 8px; color: #ffcf6a; font-size: 14px; }
 
         /* На узких экранах карта и инспектор — в колонку. */
+        /* ── 11.7.1: «💛 Благодарность» — титры в тёмно-золотой стилистике ── */
+        .custom-modal.lg-thanks-modal { width: 560px; max-width: 95vw; max-height: 80vh; }
+        .lg-thanks {
+            overflow-y: auto;
+            min-height: 0;
+            flex: 1 1 auto;
+            padding: 2px 4px 4px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .lg-thanks-intro { color: #b9a58a; font-size: 12.5px; text-align: center; letter-spacing: 0.01em; }
+        .lg-thanks-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+        .lg-thanks-item {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            padding: 9px 12px;
+            background: linear-gradient(90deg, rgba(202, 165, 92, 0.14), rgba(29, 22, 32, 0.25));
+            border: 1px solid #3d2f44;
+            border-left: 3px solid #caa55c;
+            border-radius: 7px;
+        }
+        .lg-thanks-nick {
+            color: #ffcf6a;
+            font-weight: 700;
+            font-size: 13.5px;
+            letter-spacing: 0.03em;
+            text-shadow: 0 0 10px rgba(255, 207, 106, 0.18);
+        }
+        .lg-thanks-text { color: #d8c9a8; font-size: 12px; line-height: 1.4; }
+        .lg-thanks-foot {
+            margin-top: 2px;
+            padding-top: 9px;
+            border-top: 1px dashed #3d2f44;
+            color: #9c8fa8;
+            font-size: 11px;
+            text-align: center;
+            line-height: 1.4;
+        }
+
+        /* ── 11.7.1: закреплённый мини-виджет «🏰 Карманный Город» ── */
+        .pocket-city-head-actions { display: flex; align-items: center; gap: 8px; }
+        .pocket-city-pin-btn {
+            background: rgba(202, 165, 92, 0.12);
+            border: 1px solid #caa55c;
+            color: #ffcf6a;
+            font-size: 15px;
+            line-height: 1;
+            padding: 3px 7px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s, transform 0.2s;
+        }
+        .pocket-city-pin-btn:hover { background: #caa55c; color: #1d1620; transform: translateY(-1px); }
+        .lg-pocket-city-widget {
+            position: fixed;
+            top: 120px;
+            right: 20px;
+            width: 188px;
+            background: #1d1620;
+            border: 2px solid #caa55c;
+            border-radius: 10px;
+            z-index: 10001;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            font-family: 'Nunito', sans-serif;
+        }
+        .lg-pc-widget-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 7px;
+            background: #2a2030;
+            border-bottom: 1px solid #444;
+            cursor: move;
+            user-select: none;
+            touch-action: none;
+        }
+        .lg-pc-widget-title {
+            color: #ffcf6a;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .lg-pc-widget-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+        .lg-pc-widget-btn {
+            background: none;
+            border: none;
+            color: #caa55c;
+            font-size: 13px;
+            line-height: 1;
+            padding: 2px 3px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: color 0.2s, background 0.2s;
+        }
+        .lg-pc-widget-btn:hover { color: #ffcf6a; background: rgba(202, 165, 92, 0.14); }
+        .lg-pc-widget-close { color: #ff8fa3; }
+        .lg-pc-widget-close:hover { color: #fff; background: rgba(255, 143, 163, 0.14); }
+        .lg-pc-widget-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 5px;
+            padding: 6px;
+        }
+        .lg-pc-widget-grid .pocket-grid-btn { width: 100%; }
+
+        /* ── 11.7.1: знак изменения статов (Планировщик → Экипировка) ──
+           .stat-line b раньше был всегда зелёным; теперь цвет задаёт
+           строгий класс по знаку: + зелёный, − красный, 0 нейтральный. */
+        .stat-line b.stat-up { color: #4cc95a; }
+        .stat-line b.stat-down { color: #ff5a7a; }
+        .stat-line b.stat-eq { color: #888; }
+        /* Прирост в карточке заточки — тот же строгий знак. */
+        .hp-stat-gain { font-size: 11px; }
+        .hp-stat-gain.up { color: #8ff2a0; }
+        .hp-stat-gain.down { color: #ff9a8a; }
+        .hp-stat-gain.same { color: #9c8fa8; }
+
         @media (max-width: 900px) {
             .lgu-skm-stage { grid-template-columns: minmax(0, 1fr); }
             .lgu-skm-inspector { max-height: none; }

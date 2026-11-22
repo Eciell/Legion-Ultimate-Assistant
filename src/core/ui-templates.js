@@ -11,6 +11,41 @@
     // UITemplates нужен UI.openSettings()/UI.togglePlayerHud() по вызову,
     // поэтому TDZ-порядок должен держать его строго перед ui.js.
     // ============================================================
+    /**
+     * Единый набор карточек «Карманного Города»: полное окно и компактный
+     * закреплённый виджет рисуют одни и те же здания, иконки и цвета.
+     * Так игрок не путается при переключении между режимами.
+     */
+    const POCKET_CITY_ROOMS = [
+        { room: 'auction', icon: '🏛️', name: 'Аукцион', hint: 'Рынок', bg: '#1b2838', border: '#335577', color: '#8fd3ff' },
+        { room: 'shop', icon: '🏪', name: 'Лавка', hint: 'Магазин NPC', bg: '#1b3824', border: '#2d663e', color: '#78e08f' },
+        { room: 'anvil', icon: '🔨', name: 'Заточка', hint: 'Наковальня / Ремонт', bg: '#381e3a', border: '#663366', color: '#f3a683' },
+        { room: 'trainer', icon: '🎓', name: 'Тренер', hint: 'Дерево навыков', bg: '#3a351e', border: '#665b2d', color: '#f7d794' },
+        { room: 'storage', icon: '📦', name: 'Склад', hint: 'Банк / Сундук', bg: '#292929', border: '#555', color: '#e0e0e0' },
+        { room: 'forge', icon: '⚔️', name: 'Кузня', hint: 'Оружие и броня', bg: '#3a1a14', border: '#663322', color: '#ff9977' },
+        { room: 'magic', icon: '🔮', name: 'Звездочёт', hint: 'Зелья/Свитки', bg: '#1a1a38', border: '#333366', color: '#aaaaff' },
+        { room: 'guild', icon: '🛡️', name: 'Гильдия', hint: 'Альянс', bg: '#2a2140', border: '#6c4fa8', color: '#cbb6ff' }
+    ];
+
+    /**
+     * Разметка кнопок-зданий. compact=true — мини-виджет закрепа:
+     * те же иконки и цвета, но меньше отступы и без подписей.
+     */
+    const pocketCityRoomButtons = (guildLocked, compact = false) => POCKET_CITY_ROOMS.map(r => {
+        const locked = r.room === 'guild' && guildLocked;
+        const hint = (!compact && r.hint)
+            ? `<small style="color:#8899aa; font-size:10px; font-weight:normal;">${locked ? 'Недоступно' : r.hint}</small>`
+            : '';
+        const pad = compact
+            ? 'padding:8px 4px; gap:4px;'
+            : 'padding:16px 10px; gap:8px;';
+        return `<button class="pocket-grid-btn${compact ? ' pocket-grid-btn-compact' : ''}" data-room="${r.room}"${locked ? ' aria-disabled="true" title="Недоступно"' : ''} style="${pad} background:${r.bg}; border:2px solid ${r.border}; border-radius:10px; color:${r.color}; font-weight:bold; ${locked ? 'cursor:not-allowed; opacity:0.45; filter:grayscale(1);' : 'cursor:pointer;'} display:flex; flex-direction:column; align-items:center; font-size:${compact ? '10px' : '14px'}; transition:all 0.2s; min-width:0;">
+            <span style="font-size:${compact ? '22px' : '32px'}; line-height:1;">${r.icon}</span>
+            <span style="${compact ? 'line-height:1.15; text-align:center;' : ''}">${r.name}</span>
+            ${hint}
+        </button>`;
+    }).join('');
+
     const UITemplates = {
         /**
          * Разметка FAB-обёртки: сворачиваемое меню из трёх секций + круглая
@@ -28,9 +63,9 @@
             <div class="${d.fabMenu}" id="${d.fabMenu}" style="max-height: calc(100vh - 100px); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #caa55c transparent;">
                 <!-- БЛОК: Инструменты (сворачиваемый) -->
                 <div class="fab-section" data-section="tools">
-                    <div class="fab-section-title" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#888; text-transform:uppercase; padding:4px 8px; user-select:none;">
+                    <div class="fab-section-title" role="button" tabindex="0">
                         <span>🛠 Инструменты</span>
-                        <span class="fab-arrow" style="font-size:16px; color:#caa55c; font-weight:bold; line-height:1;">▼</span>
+                        <span class="fab-arrow" aria-hidden="true">▼</span>
                     </div>
                     <div class="fab-section-body">
                         <button class="fab-menu-item" id="${d.btnAutoMine}">⛏️ Умная Шахта (Выкл)</button>
@@ -42,9 +77,9 @@
 
                 <!-- БЛОК: Социальное (сворачиваемый) -->
                 <div class="fab-section" data-section="social">
-                    <div class="fab-section-title" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#888; text-transform:uppercase; padding:4px 8px; user-select:none;">
+                    <div class="fab-section-title" role="button" tabindex="0">
                         <span>👥 Социальное</span>
-                        <span class="fab-arrow" style="font-size:16px; color:#caa55c; font-weight:bold; line-height:1;">▼</span>
+                        <span class="fab-arrow" aria-hidden="true">▼</span>
                     </div>
                     <div class="fab-section-body">
                         <button class="fab-menu-item" id="${d.btnPlayers}">👥 Игроки (Разведка)</button>
@@ -54,9 +89,9 @@
 
                 <!-- БЛОК: Прочее (сворачиваемый) -->
                 <div class="fab-section" data-section="settings">
-                    <div class="fab-section-title" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#888; text-transform:uppercase; padding:4px 8px; user-select:none;">
+                    <div class="fab-section-title" role="button" tabindex="0">
                         <span>⚙️ Прочее</span>
-                        <span class="fab-arrow" style="font-size:16px; color:#caa55c; font-weight:bold; line-height:1;">▼</span>
+                        <span class="fab-arrow" aria-hidden="true">▼</span>
                     </div>
                     <div class="fab-section-body">
                         <button class="fab-menu-item" id="${d.btnProfile}">👤 Профиль</button>
@@ -65,8 +100,9 @@
                 </div>
 
                 <!-- ФУТЕР -->
-                <div style="text-align:center; font-size:10px; color:#888; margin-top:8px; padding-top:8px; border-top:1px solid #333; user-select:none;">
-                    Version: ${v}
+                <div class="fab-footer">
+                    <button type="button" class="fab-thanks-btn" id="btn-fab-thanks" title="Люди, которые помогли аддону">💛 Благодарность</button>
+                    <div class="fab-version">Version: ${v}</div>
                 </div>
             </div>
             <div class="${d.fabBtn}" id="${d.fabBtn}" title="Меню Legion">
@@ -134,6 +170,38 @@
                         <input type="checkbox" id="modal-chk-native-fab" class="lg-toggle">
                     </label>
                     <div style="font-size:10px; color:#888; line-height:1.3; margin:-2px 2px 0;">Если выключено, кнопка аддона останется плавающей в правом нижнем углу.</div>
+                </div>
+            `;
+        },
+
+        /**
+         * Модалка «💛 Благодарность» из футера FAB-меню.
+         * Титры в тёмно-золотой стилистике аддона: ники выделены акцентом,
+         * рядом — короткая причина благодарности. Обработчик закрытия
+         * (#custom-close-btn) вешает UI.showModal().
+         */
+        thanksModal() {
+            const people = [
+                ['spector99th', 'реакции на обновлениях реально сильно умиляют, спасибо😭'],
+                ['ghostiz_s6', 'регулярные баг-репорты и идеи для улучшения аддона, спасибо'],
+                ['procto_fliy', 'помощь с багами и подсказки, как лучше сделать, спасибо'],
+                ['b00mblch', 'идеи и баг-репорты, спасибо'],
+                ['host1k', 'баг-репорты и идеи, спасибо']
+            ];
+            return `
+                <h2>💛 Благодарность <button class="custom-close" id="custom-close-btn">✖</button></h2>
+                <div class="lg-thanks">
+                    <div class="lg-thanks-intro">
+                        Аддон живёт и становится лучше благодаря этим людям:
+                    </div>
+                    <ul class="lg-thanks-list">
+                        ${people.map(([nick, text]) => `
+                            <li class="lg-thanks-item">
+                                <span class="lg-thanks-nick">${Utils.escapeHtml(nick)}</span>
+                                <span class="lg-thanks-text">${Utils.escapeHtml(text)}</span>
+                            </li>`).join('')}
+                    </ul>
+                    <div class="lg-thanks-foot">Спасибо всем, кто пишет баг-репорты, предлагает идеи и просто поддерживает аддон ❤️</div>
                 </div>
             `;
         },
@@ -305,61 +373,43 @@
          *                              клик по ней PocketCity превращает в тост
          */
         pocketCityModal(guildLocked = false) {
-            // Стиль кнопки один и тот же; серое состояние — отдельным хвостом,
-            // чтобы не дублировать всю строку inline-стилей.
-            const guildStyle = 'padding:16px 10px; background:#2a2140; border:2px solid #6c4fa8; border-radius:10px; color:#cbb6ff; font-weight:bold; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s; '
-                + (guildLocked ? 'cursor:not-allowed; opacity:0.45; filter:grayscale(1);' : 'cursor:pointer;');
             return `
-                <h2>🏰 Карманный Город <button class="custom-close" id="custom-close-btn">✖</button></h2>
+                <h2>🏰 Карманный Город
+                    <span class="pocket-city-head-actions">
+                        <button type="button" class="pocket-city-pin-btn" id="pocket-city-pin-btn" title="Закрепить компактным виджетом">📌</button>
+                        <button class="custom-close" id="custom-close-btn">✖</button>
+                    </span>
+                </h2>
                 <div style="font-size:13px; color:#aaa; margin-bottom:15px; text-align:center;">
                     Прямой доступ к официальным зданиям игры из любой локации:
                 </div>
                 <!-- minmax(120px): 8 карточек (7 зданий + гильдия) укладываются в один ряд при ширине окна 1200px -->
                 <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:12px; margin-bottom:10px;">
-                    <button class="pocket-grid-btn" data-room="auction" style="padding:16px 10px; background:#1b2838; border:2px solid #335577; border-radius:10px; color:#8fd3ff; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
-                        <span style="font-size:32px;">🏛️</span>
-                        <span>Аукцион</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Рынок</small>
-                    </button>
-                    <button class="pocket-grid-btn" data-room="shop" style="padding:16px 10px; background:#1b3824; border:2px solid #2d663e; border-radius:10px; color:#78e08f; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
-                        <span style="font-size:32px;">🏪</span>
-                        <span>Лавка</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Магазин NPC</small>
-                    </button>
-                    <button class="pocket-grid-btn" data-room="anvil" style="padding:16px 10px; background:#381e3a; border:2px solid #663366; border-radius:10px; color:#f3a683; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
-                        <span style="font-size:32px;">🔨</span>
-                        <span>Заточка</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Наковальня / Ремонт</small>
-                    </button>
-                    <button class="pocket-grid-btn" data-room="trainer" style="padding:16px 10px; background:#3a351e; border:2px solid #665b2d; border-radius:10px; color:#f7d794; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
-                        <span style="font-size:32px;">🎓</span>
-                        <span>Тренер</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Дерево навыков</small>
-                    </button>
-                    <button class="pocket-grid-btn" data-room="storage" style="padding:16px 10px; background:#292929; border:2px solid #555; border-radius:10px; color:#e0e0e0; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
-                        <span style="font-size:32px;">📦</span>
-                        <span>Склад</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Банк / Сундук</small>
-                    </button>
-                    <button class="pocket-grid-btn" data-room="forge" style="padding:16px 10px; background:#3a1a14; border:2px solid #663322; border-radius:10px; color:#ff9977; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
-                        <span style="font-size:32px;">⚔️</span>
-                        <span>Кузня</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Оружие и броня</small>
-                    </button>
-                    <button class="pocket-grid-btn" data-room="magic" style="padding:16px 10px; background:#1a1a38; border:2px solid #333366; border-radius:10px; color:#aaaaff; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
-                        <span style="font-size:32px;">🔮</span>
-                        <span>Звездочёт</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Зелья/Свитки</small>
-                    </button>
-                    <!-- v11.6.6f: Гильдия — не здание города (LGCity.panel('guild')
-                         не существует), а отдельное окно модуля гильдий LGGuilds.
-                         aria-disabled вместо disabled: клик должен доходить до
-                         обработчика PocketCity, чтобы показать тост. -->
-                    <button class="pocket-grid-btn" data-room="guild"${guildLocked ? ' aria-disabled="true" title="Недоступно"' : ''} style="${guildStyle}">
-                        <span style="font-size:32px;">🛡️</span>
-                        <span>Гильдия</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">${guildLocked ? 'Недоступно' : 'Альянс'}</small>
-                    </button>
+                    ${pocketCityRoomButtons(guildLocked, false)}
+                </div>
+            `;
+        },
+
+        /**
+         * Компактный закреплённый виджет «🏰 Карманный Город».
+         * Тот же набор зданий, иконок и цветов, что в полном окне, но
+         * в 2 колонки и без подписей — игрок не путается при сворачивании.
+         * Обработчики (перетаскивание, кнопки, здания) навешивает
+         * PocketCity.showPinnedWidget().
+         *
+         * @param {boolean} guildLocked нет доступа к гильдиям (карточка серая)
+         */
+        pocketCityPinnedWidget(guildLocked = false) {
+            return `
+                <div class="lg-pc-widget-head" id="lg-pc-widget-drag">
+                    <span class="lg-pc-widget-title">🏰 Город</span>
+                    <span class="lg-pc-widget-actions">
+                        <button type="button" class="lg-pc-widget-btn" id="lg-pc-widget-expand" title="Развернуть в полное окно">⛶</button>
+                        <button type="button" class="lg-pc-widget-btn lg-pc-widget-close" id="lg-pc-widget-close" title="Открепить и скрыть">✖</button>
+                    </span>
+                </div>
+                <div class="lg-pc-widget-grid">
+                    ${pocketCityRoomButtons(guildLocked, true)}
                 </div>
             `;
         },

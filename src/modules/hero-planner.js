@@ -1042,9 +1042,13 @@
                         const curNote = preview !== curEn
                             ? ` <span class="hp-stat-cur" title="Сейчас, на +${curEn}">(+${curEn}: ${this.enchantStat(b, curEn, k)})</span>`
                             : '';
+                        // v11.7.1: цвет строго по знаку, а не «зелёный для любого
+                        // отличия». Плюс — зелёный, минус — красный, ноль — без бейджа.
+                        const gainCls = gain > 0 ? 'up' : (gain < 0 ? 'down' : 'same');
+                        const gainTxt = gain > 0 ? `+${gain}` : (gain < 0 ? `−${Math.abs(gain)}` : '');
                         return `<div class="hp-stat-row">
                             <span class="hp-stat-name" title="${safeName}">${safeName}</span>
-                            <span class="hp-stat-val">${b} → <b>${fin}</b>${gain > 0 ? ` <span class="hp-stat-gain">+${gain}</span>` : ''}${curNote}</span>
+                            <span class="hp-stat-val">${b} → <b>${fin}</b>${gain !== 0 ? ` <span class="hp-stat-gain ${gainCls}">${gainTxt}</span>` : ''}${curNote}</span>
                         </div>`;
                     }).join('') || '<div class="hp-cost-sub">У предмета нет характеристик.</div>';
 

@@ -124,6 +124,13 @@
         style.textContent = STYLES;
         document.head.appendChild(style);
 
+        // ПАТЧ 11.7.2: монтирование FAB строго идемпотентно. Перед
+        // созданием убираем обёртки прошлых запусков (второй экземпляр
+        // скрипта, повторный boot, старый RAND_ID): иначе в правом нижнем
+        // углу оказывались две FAB, в том числе поверх встроенной кнопки
+        // «Аддон» при открытии Аукциона из Карманного Города.
+        UI.removeAllFabs();
+
         const fabWrap = document.createElement('div');
         fabWrap.className = DOM_IDS.fabWrap;
         fabWrap.id = DOM_IDS.fabWrap;
@@ -155,6 +162,9 @@
 
         const fabBtn = document.getElementById(DOM_IDS.fabBtn) || document.getElementById('legion-fab-btn');
         const fabMenu = document.getElementById(DOM_IDS.fabMenu) || document.getElementById('legion-fab-menu');
+        // Единый контроллер: регистрирует единственный экземпляр и сразу
+        // выбирает режим — FAB или встроенная кнопка «Аддон» в городе.
+        UI.mountFab(fabWrap);
         UI.setupFab(fabWrap, fabBtn, fabMenu);
 
         // ============================================================
@@ -205,6 +215,11 @@
         // в отдельную модалку: FAB-меню стало короче, а служебные
         // переключатели больше не мешают кнопкам.
         document.getElementById('btn-fab-settings')?.addEventListener('click', () => UI.openSettings());
+        // 💛 Благодарность: титры с никами из футера FAB-меню.
+        document.getElementById('btn-fab-thanks')?.addEventListener('click', () => {
+            UI.closeFabMenu();
+            UI.openThanks();
+        });
 
         Miner.init();
         BuildSim.init();        // без кнопки — регистрирует только глобальный клик для .sim-card
@@ -303,7 +318,7 @@
                 // продолжал бы нажимать «Пропустить» в окне .cm-dlg и слать
                 // запросы после перезапуска скрипта.
                 try { PocketCity.destroy?.(); } catch (e) {}
-                document.querySelectorAll('.' + DOM_IDS.customModal + ', .sim-card, .float-btns, .' + DOM_IDS.fabWrap + ', #' + DOM_IDS.playerHud + ', .custom-modal, .legion-fab-wrap, #legion-player-hud').forEach(el => el.remove());
+                document.querySelectorAll('.' + DOM_IDS.customModal + ', .sim-card, .float-btns, .' + DOM_IDS.fabWrap + ', #' + DOM_IDS.playerHud + ', .custom-modal, .legion-fab-wrap, [id$="-fab-wrap"], [class*="-fab-wrap"], #legion-player-hud, #lg-pocket-city-widget').forEach(el => el.remove());
                 legionApi._booted = false;
             }
         };

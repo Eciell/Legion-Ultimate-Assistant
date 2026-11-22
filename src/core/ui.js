@@ -326,7 +326,8 @@
                     UI._nativeFabDisabled = !isEnabled;
                     if (!isEnabled) {
                         document.querySelectorAll('.lgu-nav-btn').forEach(el => el.remove());
-                        if (UI._fabBtn) UI._fabBtn.style.display = 'flex';
+                        UI.pruneFabDuplicates();
+                        UI._setFabVisible(true);
                         UI._navMode = 'fab';
                     }
 
@@ -343,6 +344,14 @@
                     UI.syncNavButton();
                 });
             }
+        },
+        /**
+         * «💛 Благодарность» из футера FAB-меню: титры с никами тех, кто
+         * помог аддону. Разметка — UITemplates.thanksModal(), закрытие
+         * (крестик / Esc / клик по затемнению при наличии) — общий showModal.
+         */
+        openThanks() {
+            return this.showModal(UITemplates.thanksModal(), { compact: true, customClass: 'lg-thanks-modal' });
         },
         // 🏰 Карманный город вынесен в modules/pocket-city.js (v11.6.0, этап 3):
         //    UI.openPocketCity()     -> PocketCity.open()
@@ -404,9 +413,163 @@
         // при открытом окне героя/чате на мобиле — тогда единственный вход
         // в меню остаётся плавающая FAB, и якорем должна быть она.
         _getNativeNavButton() {
-            const btn = document.querySelector('.lgu-nav-btn');
-            if (!btn || btn.getClientRects().length === 0) return null;
-            return btn;
+            // ПАТЧ 11.7.2: кнопок в документе может быть несколько — игра
+            // пересобирает #gu-hud, а старый узел остаётся в DOM скрытым.
+            // Берём только реально отрисованную кнопку в видимом баре.
+            const buttons = document.querySelectorAll('.lgu-nav-btn');
+            for (const btn of buttons) {
+                if (btn.getClientRects().length === 0) continue;
+                const bar = btn.closest('#gu-hud .gu-main') || btn.parentElement;
+                if (bar && bar.getClientRects().length > 0) return btn;
+            }
+            return null;
+        },
+
+        // ============================================================
+        // ПАТЧ 11.7.2: ЕДИНЫЙ КОНТРОЛЛЕР ВХОДА В МЕНЮ АДДОНА
+        //
+        // Входов в меню два:
+        //   • плавающая FAB (.${DOM_IDS.fabWrap}) — шахта, поход, город
+        //     с выключенным тумблером или скрытым баром;
+        //   • кнопка «Аддон» в нижнем баре города (.lgu-nav-btn).
+        //
+        // Раньше каждый вход управлял только собой, поэтому при переходах
+        // (Карманный Город -> Аукцион и другие здания) и при пересборке
+        // игрового HUD в DOM могли остаться несколько FAB: от предыдущего
+        // запуска скрипта (другой RAND_ID) или от гонки boot(). Теперь
+        // монтирование идемпотентно: перед показом FAB всегда проверяется
+        // видимость встроенной кнопки «Аддон», а лишние экземпляры
+        // вычищаются из DOM.
+        // ============================================================
+
+        /**
+         * Все обёртки FAB в документе, включая экземпляры прошлых запусков.
+         * DOM_IDS.fabWrap содержит случайный RAND_ID, поэтому ищем ещё и по
+         * стабильному суффиксу id/класса «-fab-wrap» (например, x-abcd-fab-wrap).
+         * @returns {HTMLElement[]} только верхние обёртки, без вложенных
+         */
+        _fabWraps() {
+            const nodes = new Set();
+            const add = (sel) => {
+                try { document.querySelectorAll(sel).forEach(el => nodes.add(el)); } catch (e) {}
+            };
+            add(`.${DOM_IDS.fabWrap}`);
+            add(`#${DOM_IDS.fabWrap}`);
+            add('[id$="-fab-wrap"]');
+            add('[class*="-fab-wrap"]');
+
+            const list = Array.from(nodes);
+            // Если селектор зацепил вложенный узел, удалять нужно верхнюю
+            // обёртку: иначе останется пустой контейнер с тем же суффиксом.
+            return list.filter(el => !list.some(other => other !== el && other.contains(el)));
+        },
+
+        /**
+         * Оставляет ровно один экземпляр FAB и перепривязывает ссылки
+         * this._fabWrap / _fabBtn / _fabMenu к живым узлам DOM.
+         * @param {HTMLElement|null} keep обёртка, которую нужно сохранить
+         * @returns {HTMLElement|null} каноническая обёртка
+         */
+        pruneFabDuplicates(keep = null) {
+            const wraps = this._fabWraps();
+            if (!wraps.length) {
+                this._fabWrap = this._fabBtn = this._fabMenu = null;
+                return null;
+            }
+
+            let canonical = (keep && wraps.includes(keep)) ? keep : null;
+            if (!canonical && this._fabWrap && wraps.includes(this._fabWrap)) canonical = this._fabWrap;
+            if (!canonical) {
+                // Предпочитаем экземпляр текущего запуска (с нашим RAND_ID).
+                canonical = wraps.find(el => el.id === DOM_IDS.fabWrap || el.classList.contains(DOM_IDS.fabWrap)) || wraps[0];
+            }
+
+            wraps.forEach(el => {
+                if (el === canonical) return;
+                try { el.remove(); } catch (e) {}
+            });
+
+            this._fabWrap = canonical;
+            this._fabBtn = canonical.querySelector(`#${DOM_IDS.fabBtn}`)
+                || canonical.querySelector(`.${DOM_IDS.fabBtn}`)
+                || canonical.querySelector('.legion-fab-btn');
+            this._fabMenu = canonical.querySelector(`#${DOM_IDS.fabMenu}`)
+                || canonical.querySelector(`.${DOM_IDS.fabMenu}`)
+                || canonical.querySelector('.legion-fab-menu');
+            return canonical;
+        },
+
+        /** Полностью убирает все обёртки FAB (перед повторным монтированием). */
+        removeAllFabs() {
+            this._fabWraps().forEach(el => {
+                try { el.remove(); } catch (e) {}
+            });
+            this._fabWrap = this._fabBtn = this._fabMenu = null;
+        },
+
+        /** Виден ли сейчас вход «Аддон» в нижнем баре города. */
+        hasVisibleNativeNav() {
+            const btn = this._getNativeNavButton();
+            if (!btn) return false;
+            const bar = btn.closest('#gu-hud .gu-main') || btn.parentElement;
+            return !!bar && bar.getClientRects().length > 0;
+        },
+
+        /**
+         * Показ/скрытие FAB по живому узлу (ссылка могла устареть после
+         * пересборки игрового DOM). Возвращает false, если кнопки нет.
+         */
+        _setFabVisible(visible) {
+            let btn = (this._fabBtn && this._fabBtn.isConnected) ? this._fabBtn : null;
+            if (!btn && this._fabWrap && this._fabWrap.isConnected) {
+                btn = this._fabWrap.querySelector(`#${DOM_IDS.fabBtn}`)
+                    || this._fabWrap.querySelector(`.${DOM_IDS.fabBtn}`)
+                    || this._fabWrap.querySelector('.legion-fab-btn');
+            }
+            if (!btn) return false;
+            this._fabBtn = btn;
+            btn.style.display = visible ? 'flex' : 'none';
+            return true;
+        },
+
+        /**
+         * Идемпотентное монтирование FAB. main.js передаёт готовую обёртку
+         * (единственное место, где создаётся разметка), а метод:
+         *   1) вычищает дубли прошлых запусков, оставляя переданную обёртку;
+         *   2) если видна встроенная кнопка «Аддон» — FAB скрывается,
+         *      режим сразу переключается на 'native';
+         *   3) иначе FAB показывается, режим 'fab'.
+         * Повторный вызов не создаёт второй экземпляр и не плодит обработчики.
+         *
+         * @param {HTMLElement} wrap вновь созданная обёртка FAB
+         * @returns {{wrap: HTMLElement, mode: 'fab'|'native'}|null}
+         */
+        mountFab(wrap) {
+            if (!wrap || !wrap.isConnected) return null;
+
+            const canonical = this.pruneFabDuplicates(wrap) || wrap;
+            const btn = canonical.querySelector(`#${DOM_IDS.fabBtn}`)
+                || canonical.querySelector(`.${DOM_IDS.fabBtn}`)
+                || canonical.querySelector('.legion-fab-btn');
+            if (!btn) return null;
+
+            this._fabWrap = canonical;
+            this._fabBtn = btn;
+            this._fabMenu = canonical.querySelector(`#${DOM_IDS.fabMenu}`)
+                || canonical.querySelector(`.${DOM_IDS.fabMenu}`)
+                || canonical.querySelector('.legion-fab-menu');
+
+            // Встроенная городская кнопка «Аддон» важнее: пока она на экране,
+            // плавающий экземпляр не показываем — иначе два входа подряд.
+            if (this.hasVisibleNativeNav()) {
+                this._setFabVisible(false);
+                this._navMode = 'native';
+                return { wrap: canonical, mode: 'native' };
+            }
+
+            this._setFabVisible(true);
+            this._navMode = 'fab';
+            return { wrap: canonical, mode: 'fab' };
         },
 
         // ПАТЧ 11.6.6e: меню — ребёнок .legion-fab-wrap (position:fixed в
@@ -534,6 +697,12 @@
         // ПАТЧ 11.6.6g: шахту (оверлей .mn поверх города, html.gu-city остаётся)
         // проверяем ОТДЕЛЬНО и раньше тумблера — см. первую ветку метода.
         syncNavButton() {
+            // ПАТЧ 11.7.2: перед любым решением о показе FAB приводим DOM
+            // к инварианту «ровно один экземпляр». Это убирает дубли от
+            // второго запуска скрипта/прошлого RAND_ID, в том числе если
+            // FAB оказалась поверх встроенной кнопки «Аддон».
+            this.pruneFabDuplicates();
+
             // ПАТЧ 11.6.6g: в шахте бара игры не видно (он под оверлеем `.mn`),
             // поэтому единственный вход в аддон — плавающая FAB. Ветка стоит
             // ДО проверки тумблера: при включённом «📌 Кнопка аддона в нижнем
@@ -541,7 +710,7 @@
             // она недоступна и должна быть убрана из DOM.
             if (this.isInMine()) {
                 document.querySelectorAll('.lgu-nav-btn').forEach(el => el.remove());
-                if (this._fabBtn) this._fabBtn.style.display = 'flex';
+                this._setFabVisible(true);
                 if (this._navMode !== 'fab') {
                     // Меню нужно гасить только при переходе из города: там оно
                     // привязано координатами к нативной кнопке (position:fixed),
@@ -564,7 +733,7 @@
                 // 1. Удаляем нативную кнопку из бара игры, если она есть.
                 document.querySelectorAll('.lgu-nav-btn').forEach(el => el.remove());
                 // 2. Возвращаем плавающую FAB (её мог спрятать нативный режим).
-                if (this._fabBtn) this._fabBtn.style.display = 'flex';
+                this._setFabVisible(true);
                 this._navMode = 'fab';
                 this._navRetries = 0;
                 return false;
@@ -575,9 +744,21 @@
 
             if (inCity) {
                 this._navRetries = 0;
-                if (!bar.querySelector('.lgu-nav-btn')) {
+
+                // ПАТЧ 11.7.2: один «Аддон» на актуальный бар. После
+                // пересборки #gu-hud (например, при открытии Аукциона из
+                // Карманного Города) в DOM могут остаться кнопки старого
+                // бара — удаляем их, оставляя единственную актуальную.
+                const buttons = Array.from(document.querySelectorAll('.lgu-nav-btn'));
+                const current = buttons.find(el => el.parentElement === bar) || null;
+                buttons.forEach(el => {
+                    if (el === current) return;
+                    try { el.remove(); } catch (e) {}
+                });
+                if (!current) {
                     bar.prepend(this.createNativeNavButton());
                 }
+
                 if (this._navMode !== 'native') {
                     this._navMode = 'native';
                     // Меню, открытое в шахте, не должно висеть в городе без FAB.
@@ -585,13 +766,18 @@
                 }
                 // Бар бывает скрыт (открыто окно героя, чат на мобиле) —
                 // тогда FAB оставляем, иначе в меню аддона было бы не попасть.
-                const barVisible = bar.getClientRects().length > 0;
-                if (this._fabBtn) this._fabBtn.style.display = barVisible ? 'none' : 'flex';
+                // ПАТЧ 11.7.2: смотрим именно на видимость встроенной кнопки
+                // «Аддон»: пока она на экране, плавающий дубль не показываем.
+                this._setFabVisible(!this.hasVisibleNativeNav());
                 return true;
             }
 
+            // Не город: активный вход — плавающая FAB. Оставшиеся в скрытом
+            // баре кнопки «Аддон» больше не нужны (актуальная создастся при
+            // возвращении в город) и не должны дублировать FAB.
+            document.querySelectorAll('.lgu-nav-btn').forEach(el => el.remove());
             this._navMode = 'fab';
-            if (this._fabBtn) this._fabBtn.style.display = 'flex';
+            this._setFabVisible(true);
 
             // HUD игра создаёт лениво (guRender -> guHud, до ~2 с после входа
             // в город). Пока бара нет, но город уже включён — добиваем парой
@@ -693,11 +879,15 @@
             // Аккордеон: клик по заголовку секции сворачивает/разворачивает её.
             // stopPropagation не даёт событию дойти до обработчиков меню и страницы.
             menu.querySelectorAll('.fab-section-title').forEach(title => {
-                title.addEventListener('click', (e) => {
+                const toggleSection = (e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     const section = title.parentElement;
                     if (section) section.classList.toggle('collapsed');
+                };
+                title.addEventListener('click', toggleSection);
+                title.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') toggleSection(e);
                 });
             });
         },

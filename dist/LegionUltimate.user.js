@@ -1413,7 +1413,7 @@ Object.assign(Utils, UtilsApi);
         .stats-panel h3 { color: #ffcf6a; margin-top: 0; font-size: 14px; border-bottom: 1px solid #3d2f44; padding-bottom: 10px; }
         .stat-line { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
         .stat-line span { color: #aaa; }
-        .stat-line b { color: #4cc95a; }
+        .stat-line b { color: #d8c9a8; }
         .search-bar { width: 100%; padding: 10px; margin-bottom: 15px; background: #111; border: 1px solid #555; color: #fff; border-radius: 6px; font-size: 14px; outline: none; box-sizing: border-box; }
         .table-container { overflow-y: auto; flex: 1; border: 1px solid #333; border-radius: 6px; }
         .${DOM_IDS.customModal} table, .custom-modal table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -1474,7 +1474,63 @@ Object.assign(Utils, UtilsApi);
         .${DOM_IDS.fabMenu}::-webkit-scrollbar, .legion-fab-menu::-webkit-scrollbar { width: 4px; }
         .${DOM_IDS.fabMenu}::-webkit-scrollbar-thumb, .legion-fab-menu::-webkit-scrollbar-thumb { background: #caa55c; border-radius: 4px; }
         .${DOM_IDS.fabMenu}::-webkit-scrollbar-track, .legion-fab-menu::-webkit-scrollbar-track { background: transparent; }
-        .fab-section-title { flex-shrink: 0; }
+        /* Заголовки категорий FAB-меню: единый жирный золотой стиль аддона,
+           без блёклого тонкого шрифта — под статьи с золотыми кнопками. */
+        .fab-section-title {
+            flex-shrink: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 8px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #e6c789;
+            cursor: pointer;
+            user-select: none;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+            border-bottom: 1px solid rgba(202, 165, 92, 0.22);
+            transition: color 0.2s, border-color 0.2s;
+        }
+        .fab-section-title:hover {
+            color: #ffcf6a;
+            border-bottom-color: rgba(255, 207, 106, 0.45);
+        }
+        .fab-section-title:focus-visible {
+            outline: 1px solid #caa55c;
+            outline-offset: 1px;
+            border-radius: 4px;
+        }
+        .fab-footer {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 3px;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #333;
+            user-select: none;
+        }
+        .fab-thanks-btn {
+            background: none;
+            border: none;
+            color: #d8b878;
+            font: inherit;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            padding: 3px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: color 0.2s, background 0.2s;
+        }
+        .fab-thanks-btn:hover {
+            color: #ffcf6a;
+            background: rgba(202, 165, 92, 0.12);
+            text-decoration: underline;
+        }
+        .fab-version { font-size: 10px; color: #888; }
         .fab-section { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
         .fab-section-body { display: flex; flex-direction: column; gap: 6px; overflow: hidden; transition: max-height 0.2s ease-out; }
         .fab-section.collapsed .fab-section-body { display: none; }
@@ -2595,7 +2651,7 @@ Object.assign(Utils, UtilsApi);
         }
         .hp-stat-val { white-space: nowrap; font-variant-numeric: tabular-nums; }
         .hp-stat-val b { color: #ffcf6a; }
-        .hp-stat-gain { color: #8ff2a0; font-size: 11px; }
+        .hp-stat-gain { color: #9c8fa8; font-size: 11px; }
         /* v11.7.1: значение на текущей заточке (когда смотрим другой уровень). */
         .hp-stat-cur { color: #9c8fa8; font-size: 11px; }
         .hp-cost-total { font-size: 20px; font-weight: bold; color: #ffcf6a; font-variant-numeric: tabular-nums; }
@@ -3527,6 +3583,132 @@ Object.assign(Utils, UtilsApi);
         .lgu-skm-gear-col h3 { margin: 0 0 8px; color: #ffcf6a; font-size: 14px; }
 
         /* На узких экранах карта и инспектор — в колонку. */
+        /* ── 11.7.1: «💛 Благодарность» — титры в тёмно-золотой стилистике ── */
+        .custom-modal.lg-thanks-modal { width: 560px; max-width: 95vw; max-height: 80vh; }
+        .lg-thanks {
+            overflow-y: auto;
+            min-height: 0;
+            flex: 1 1 auto;
+            padding: 2px 4px 4px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .lg-thanks-intro { color: #b9a58a; font-size: 12.5px; text-align: center; letter-spacing: 0.01em; }
+        .lg-thanks-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+        .lg-thanks-item {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            padding: 9px 12px;
+            background: linear-gradient(90deg, rgba(202, 165, 92, 0.14), rgba(29, 22, 32, 0.25));
+            border: 1px solid #3d2f44;
+            border-left: 3px solid #caa55c;
+            border-radius: 7px;
+        }
+        .lg-thanks-nick {
+            color: #ffcf6a;
+            font-weight: 700;
+            font-size: 13.5px;
+            letter-spacing: 0.03em;
+            text-shadow: 0 0 10px rgba(255, 207, 106, 0.18);
+        }
+        .lg-thanks-text { color: #d8c9a8; font-size: 12px; line-height: 1.4; }
+        .lg-thanks-foot {
+            margin-top: 2px;
+            padding-top: 9px;
+            border-top: 1px dashed #3d2f44;
+            color: #9c8fa8;
+            font-size: 11px;
+            text-align: center;
+            line-height: 1.4;
+        }
+
+        /* ── 11.7.1: закреплённый мини-виджет «🏰 Карманный Город» ── */
+        .pocket-city-head-actions { display: flex; align-items: center; gap: 8px; }
+        .pocket-city-pin-btn {
+            background: rgba(202, 165, 92, 0.12);
+            border: 1px solid #caa55c;
+            color: #ffcf6a;
+            font-size: 15px;
+            line-height: 1;
+            padding: 3px 7px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s, transform 0.2s;
+        }
+        .pocket-city-pin-btn:hover { background: #caa55c; color: #1d1620; transform: translateY(-1px); }
+        .lg-pocket-city-widget {
+            position: fixed;
+            top: 120px;
+            right: 20px;
+            width: 188px;
+            background: #1d1620;
+            border: 2px solid #caa55c;
+            border-radius: 10px;
+            z-index: 10001;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            font-family: 'Nunito', sans-serif;
+        }
+        .lg-pc-widget-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 7px;
+            background: #2a2030;
+            border-bottom: 1px solid #444;
+            cursor: move;
+            user-select: none;
+            touch-action: none;
+        }
+        .lg-pc-widget-title {
+            color: #ffcf6a;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .lg-pc-widget-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+        .lg-pc-widget-btn {
+            background: none;
+            border: none;
+            color: #caa55c;
+            font-size: 13px;
+            line-height: 1;
+            padding: 2px 3px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: color 0.2s, background 0.2s;
+        }
+        .lg-pc-widget-btn:hover { color: #ffcf6a; background: rgba(202, 165, 92, 0.14); }
+        .lg-pc-widget-close { color: #ff8fa3; }
+        .lg-pc-widget-close:hover { color: #fff; background: rgba(255, 143, 163, 0.14); }
+        .lg-pc-widget-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 5px;
+            padding: 6px;
+        }
+        .lg-pc-widget-grid .pocket-grid-btn { width: 100%; }
+
+        /* ── 11.7.1: знак изменения статов (Планировщик → Экипировка) ──
+           .stat-line b раньше был всегда зелёным; теперь цвет задаёт
+           строгий класс по знаку: + зелёный, − красный, 0 нейтральный. */
+        .stat-line b.stat-up { color: #4cc95a; }
+        .stat-line b.stat-down { color: #ff5a7a; }
+        .stat-line b.stat-eq { color: #888; }
+        /* Прирост в карточке заточки — тот же строгий знак. */
+        .hp-stat-gain { font-size: 11px; }
+        .hp-stat-gain.up { color: #8ff2a0; }
+        .hp-stat-gain.down { color: #ff9a8a; }
+        .hp-stat-gain.same { color: #9c8fa8; }
+
         @media (max-width: 900px) {
             .lgu-skm-stage { grid-template-columns: minmax(0, 1fr); }
             .lgu-skm-inspector { max-height: none; }
@@ -3785,6 +3967,41 @@ Object.assign(Utils, UtilsApi);
     // UITemplates нужен UI.openSettings()/UI.togglePlayerHud() по вызову,
     // поэтому TDZ-порядок должен держать его строго перед ui.js.
     // ============================================================
+    /**
+     * Единый набор карточек «Карманного Города»: полное окно и компактный
+     * закреплённый виджет рисуют одни и те же здания, иконки и цвета.
+     * Так игрок не путается при переключении между режимами.
+     */
+    const POCKET_CITY_ROOMS = [
+        { room: 'auction', icon: '🏛️', name: 'Аукцион', hint: 'Рынок', bg: '#1b2838', border: '#335577', color: '#8fd3ff' },
+        { room: 'shop', icon: '🏪', name: 'Лавка', hint: 'Магазин NPC', bg: '#1b3824', border: '#2d663e', color: '#78e08f' },
+        { room: 'anvil', icon: '🔨', name: 'Заточка', hint: 'Наковальня / Ремонт', bg: '#381e3a', border: '#663366', color: '#f3a683' },
+        { room: 'trainer', icon: '🎓', name: 'Тренер', hint: 'Дерево навыков', bg: '#3a351e', border: '#665b2d', color: '#f7d794' },
+        { room: 'storage', icon: '📦', name: 'Склад', hint: 'Банк / Сундук', bg: '#292929', border: '#555', color: '#e0e0e0' },
+        { room: 'forge', icon: '⚔️', name: 'Кузня', hint: 'Оружие и броня', bg: '#3a1a14', border: '#663322', color: '#ff9977' },
+        { room: 'magic', icon: '🔮', name: 'Звездочёт', hint: 'Зелья/Свитки', bg: '#1a1a38', border: '#333366', color: '#aaaaff' },
+        { room: 'guild', icon: '🛡️', name: 'Гильдия', hint: 'Альянс', bg: '#2a2140', border: '#6c4fa8', color: '#cbb6ff' }
+    ];
+
+    /**
+     * Разметка кнопок-зданий. compact=true — мини-виджет закрепа:
+     * те же иконки и цвета, но меньше отступы и без подписей.
+     */
+    const pocketCityRoomButtons = (guildLocked, compact = false) => POCKET_CITY_ROOMS.map(r => {
+        const locked = r.room === 'guild' && guildLocked;
+        const hint = (!compact && r.hint)
+            ? `<small style="color:#8899aa; font-size:10px; font-weight:normal;">${locked ? 'Недоступно' : r.hint}</small>`
+            : '';
+        const pad = compact
+            ? 'padding:8px 4px; gap:4px;'
+            : 'padding:16px 10px; gap:8px;';
+        return `<button class="pocket-grid-btn${compact ? ' pocket-grid-btn-compact' : ''}" data-room="${r.room}"${locked ? ' aria-disabled="true" title="Недоступно"' : ''} style="${pad} background:${r.bg}; border:2px solid ${r.border}; border-radius:10px; color:${r.color}; font-weight:bold; ${locked ? 'cursor:not-allowed; opacity:0.45; filter:grayscale(1);' : 'cursor:pointer;'} display:flex; flex-direction:column; align-items:center; font-size:${compact ? '10px' : '14px'}; transition:all 0.2s; min-width:0;">
+            <span style="font-size:${compact ? '22px' : '32px'}; line-height:1;">${r.icon}</span>
+            <span style="${compact ? 'line-height:1.15; text-align:center;' : ''}">${r.name}</span>
+            ${hint}
+        </button>`;
+    }).join('');
+
     const UITemplates = {
         /**
          * Разметка FAB-обёртки: сворачиваемое меню из трёх секций + круглая
@@ -3802,9 +4019,9 @@ Object.assign(Utils, UtilsApi);
             <div class="${d.fabMenu}" id="${d.fabMenu}" style="max-height: calc(100vh - 100px); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #caa55c transparent;">
                 <!-- БЛОК: Инструменты (сворачиваемый) -->
                 <div class="fab-section" data-section="tools">
-                    <div class="fab-section-title" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#888; text-transform:uppercase; padding:4px 8px; user-select:none;">
+                    <div class="fab-section-title" role="button" tabindex="0">
                         <span>🛠 Инструменты</span>
-                        <span class="fab-arrow" style="font-size:16px; color:#caa55c; font-weight:bold; line-height:1;">▼</span>
+                        <span class="fab-arrow" aria-hidden="true">▼</span>
                     </div>
                     <div class="fab-section-body">
                         <button class="fab-menu-item" id="${d.btnAutoMine}">⛏️ Умная Шахта (Выкл)</button>
@@ -3816,9 +4033,9 @@ Object.assign(Utils, UtilsApi);
 
                 <!-- БЛОК: Социальное (сворачиваемый) -->
                 <div class="fab-section" data-section="social">
-                    <div class="fab-section-title" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#888; text-transform:uppercase; padding:4px 8px; user-select:none;">
+                    <div class="fab-section-title" role="button" tabindex="0">
                         <span>👥 Социальное</span>
-                        <span class="fab-arrow" style="font-size:16px; color:#caa55c; font-weight:bold; line-height:1;">▼</span>
+                        <span class="fab-arrow" aria-hidden="true">▼</span>
                     </div>
                     <div class="fab-section-body">
                         <button class="fab-menu-item" id="${d.btnPlayers}">👥 Игроки (Разведка)</button>
@@ -3828,9 +4045,9 @@ Object.assign(Utils, UtilsApi);
 
                 <!-- БЛОК: Прочее (сворачиваемый) -->
                 <div class="fab-section" data-section="settings">
-                    <div class="fab-section-title" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-size:10px; color:#888; text-transform:uppercase; padding:4px 8px; user-select:none;">
+                    <div class="fab-section-title" role="button" tabindex="0">
                         <span>⚙️ Прочее</span>
-                        <span class="fab-arrow" style="font-size:16px; color:#caa55c; font-weight:bold; line-height:1;">▼</span>
+                        <span class="fab-arrow" aria-hidden="true">▼</span>
                     </div>
                     <div class="fab-section-body">
                         <button class="fab-menu-item" id="${d.btnProfile}">👤 Профиль</button>
@@ -3839,8 +4056,9 @@ Object.assign(Utils, UtilsApi);
                 </div>
 
                 <!-- ФУТЕР -->
-                <div style="text-align:center; font-size:10px; color:#888; margin-top:8px; padding-top:8px; border-top:1px solid #333; user-select:none;">
-                    Version: ${v}
+                <div class="fab-footer">
+                    <button type="button" class="fab-thanks-btn" id="btn-fab-thanks" title="Люди, которые помогли аддону">💛 Благодарность</button>
+                    <div class="fab-version">Version: ${v}</div>
                 </div>
             </div>
             <div class="${d.fabBtn}" id="${d.fabBtn}" title="Меню Legion">
@@ -3908,6 +4126,38 @@ Object.assign(Utils, UtilsApi);
                         <input type="checkbox" id="modal-chk-native-fab" class="lg-toggle">
                     </label>
                     <div style="font-size:10px; color:#888; line-height:1.3; margin:-2px 2px 0;">Если выключено, кнопка аддона останется плавающей в правом нижнем углу.</div>
+                </div>
+            `;
+        },
+
+        /**
+         * Модалка «💛 Благодарность» из футера FAB-меню.
+         * Титры в тёмно-золотой стилистике аддона: ники выделены акцентом,
+         * рядом — короткая причина благодарности. Обработчик закрытия
+         * (#custom-close-btn) вешает UI.showModal().
+         */
+        thanksModal() {
+            const people = [
+                ['spector99th', 'реакции на обновлениях реально сильно умиляют, спасибо😭'],
+                ['ghostiz_s6', 'регулярные баг-репорты и идеи для улучшения аддона, спасибо'],
+                ['procto_fliy', 'помощь с багами и подсказки, как лучше сделать, спасибо'],
+                ['b00mblch', 'идеи и баг-репорты, спасибо'],
+                ['host1k', 'баг-репорты и идеи, спасибо']
+            ];
+            return `
+                <h2>💛 Благодарность <button class="custom-close" id="custom-close-btn">✖</button></h2>
+                <div class="lg-thanks">
+                    <div class="lg-thanks-intro">
+                        Аддон живёт и становится лучше благодаря этим людям:
+                    </div>
+                    <ul class="lg-thanks-list">
+                        ${people.map(([nick, text]) => `
+                            <li class="lg-thanks-item">
+                                <span class="lg-thanks-nick">${Utils.escapeHtml(nick)}</span>
+                                <span class="lg-thanks-text">${Utils.escapeHtml(text)}</span>
+                            </li>`).join('')}
+                    </ul>
+                    <div class="lg-thanks-foot">Спасибо всем, кто пишет баг-репорты, предлагает идеи и просто поддерживает аддон ❤️</div>
                 </div>
             `;
         },
@@ -4079,61 +4329,43 @@ Object.assign(Utils, UtilsApi);
          *                              клик по ней PocketCity превращает в тост
          */
         pocketCityModal(guildLocked = false) {
-            // Стиль кнопки один и тот же; серое состояние — отдельным хвостом,
-            // чтобы не дублировать всю строку inline-стилей.
-            const guildStyle = 'padding:16px 10px; background:#2a2140; border:2px solid #6c4fa8; border-radius:10px; color:#cbb6ff; font-weight:bold; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s; '
-                + (guildLocked ? 'cursor:not-allowed; opacity:0.45; filter:grayscale(1);' : 'cursor:pointer;');
             return `
-                <h2>🏰 Карманный Город <button class="custom-close" id="custom-close-btn">✖</button></h2>
+                <h2>🏰 Карманный Город
+                    <span class="pocket-city-head-actions">
+                        <button type="button" class="pocket-city-pin-btn" id="pocket-city-pin-btn" title="Закрепить компактным виджетом">📌</button>
+                        <button class="custom-close" id="custom-close-btn">✖</button>
+                    </span>
+                </h2>
                 <div style="font-size:13px; color:#aaa; margin-bottom:15px; text-align:center;">
                     Прямой доступ к официальным зданиям игры из любой локации:
                 </div>
                 <!-- minmax(120px): 8 карточек (7 зданий + гильдия) укладываются в один ряд при ширине окна 1200px -->
                 <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:12px; margin-bottom:10px;">
-                    <button class="pocket-grid-btn" data-room="auction" style="padding:16px 10px; background:#1b2838; border:2px solid #335577; border-radius:10px; color:#8fd3ff; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
-                        <span style="font-size:32px;">🏛️</span>
-                        <span>Аукцион</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Рынок</small>
-                    </button>
-                    <button class="pocket-grid-btn" data-room="shop" style="padding:16px 10px; background:#1b3824; border:2px solid #2d663e; border-radius:10px; color:#78e08f; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
-                        <span style="font-size:32px;">🏪</span>
-                        <span>Лавка</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Магазин NPC</small>
-                    </button>
-                    <button class="pocket-grid-btn" data-room="anvil" style="padding:16px 10px; background:#381e3a; border:2px solid #663366; border-radius:10px; color:#f3a683; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
-                        <span style="font-size:32px;">🔨</span>
-                        <span>Заточка</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Наковальня / Ремонт</small>
-                    </button>
-                    <button class="pocket-grid-btn" data-room="trainer" style="padding:16px 10px; background:#3a351e; border:2px solid #665b2d; border-radius:10px; color:#f7d794; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
-                        <span style="font-size:32px;">🎓</span>
-                        <span>Тренер</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Дерево навыков</small>
-                    </button>
-                    <button class="pocket-grid-btn" data-room="storage" style="padding:16px 10px; background:#292929; border:2px solid #555; border-radius:10px; color:#e0e0e0; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
-                        <span style="font-size:32px;">📦</span>
-                        <span>Склад</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Банк / Сундук</small>
-                    </button>
-                    <button class="pocket-grid-btn" data-room="forge" style="padding:16px 10px; background:#3a1a14; border:2px solid #663322; border-radius:10px; color:#ff9977; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
-                        <span style="font-size:32px;">⚔️</span>
-                        <span>Кузня</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Оружие и броня</small>
-                    </button>
-                    <button class="pocket-grid-btn" data-room="magic" style="padding:16px 10px; background:#1a1a38; border:2px solid #333366; border-radius:10px; color:#aaaaff; font-weight:bold; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; font-size:14px; transition:all 0.2s;">
-                        <span style="font-size:32px;">🔮</span>
-                        <span>Звездочёт</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">Зелья/Свитки</small>
-                    </button>
-                    <!-- v11.6.6f: Гильдия — не здание города (LGCity.panel('guild')
-                         не существует), а отдельное окно модуля гильдий LGGuilds.
-                         aria-disabled вместо disabled: клик должен доходить до
-                         обработчика PocketCity, чтобы показать тост. -->
-                    <button class="pocket-grid-btn" data-room="guild"${guildLocked ? ' aria-disabled="true" title="Недоступно"' : ''} style="${guildStyle}">
-                        <span style="font-size:32px;">🛡️</span>
-                        <span>Гильдия</span>
-                        <small style="color:#8899aa; font-size:10px; font-weight:normal;">${guildLocked ? 'Недоступно' : 'Альянс'}</small>
-                    </button>
+                    ${pocketCityRoomButtons(guildLocked, false)}
+                </div>
+            `;
+        },
+
+        /**
+         * Компактный закреплённый виджет «🏰 Карманный Город».
+         * Тот же набор зданий, иконок и цветов, что в полном окне, но
+         * в 2 колонки и без подписей — игрок не путается при сворачивании.
+         * Обработчики (перетаскивание, кнопки, здания) навешивает
+         * PocketCity.showPinnedWidget().
+         *
+         * @param {boolean} guildLocked нет доступа к гильдиям (карточка серая)
+         */
+        pocketCityPinnedWidget(guildLocked = false) {
+            return `
+                <div class="lg-pc-widget-head" id="lg-pc-widget-drag">
+                    <span class="lg-pc-widget-title">🏰 Город</span>
+                    <span class="lg-pc-widget-actions">
+                        <button type="button" class="lg-pc-widget-btn" id="lg-pc-widget-expand" title="Развернуть в полное окно">⛶</button>
+                        <button type="button" class="lg-pc-widget-btn lg-pc-widget-close" id="lg-pc-widget-close" title="Открепить и скрыть">✖</button>
+                    </span>
+                </div>
+                <div class="lg-pc-widget-grid">
+                    ${pocketCityRoomButtons(guildLocked, true)}
                 </div>
             `;
         },
@@ -4497,7 +4729,8 @@ Object.assign(Utils, UtilsApi);
                     UI._nativeFabDisabled = !isEnabled;
                     if (!isEnabled) {
                         document.querySelectorAll('.lgu-nav-btn').forEach(el => el.remove());
-                        if (UI._fabBtn) UI._fabBtn.style.display = 'flex';
+                        UI.pruneFabDuplicates();
+                        UI._setFabVisible(true);
                         UI._navMode = 'fab';
                     }
 
@@ -4514,6 +4747,14 @@ Object.assign(Utils, UtilsApi);
                     UI.syncNavButton();
                 });
             }
+        },
+        /**
+         * «💛 Благодарность» из футера FAB-меню: титры с никами тех, кто
+         * помог аддону. Разметка — UITemplates.thanksModal(), закрытие
+         * (крестик / Esc / клик по затемнению при наличии) — общий showModal.
+         */
+        openThanks() {
+            return this.showModal(UITemplates.thanksModal(), { compact: true, customClass: 'lg-thanks-modal' });
         },
         // 🏰 Карманный город вынесен в modules/pocket-city.js (v11.6.0, этап 3):
         //    UI.openPocketCity()     -> PocketCity.open()
@@ -4575,9 +4816,163 @@ Object.assign(Utils, UtilsApi);
         // при открытом окне героя/чате на мобиле — тогда единственный вход
         // в меню остаётся плавающая FAB, и якорем должна быть она.
         _getNativeNavButton() {
-            const btn = document.querySelector('.lgu-nav-btn');
-            if (!btn || btn.getClientRects().length === 0) return null;
-            return btn;
+            // ПАТЧ 11.7.2: кнопок в документе может быть несколько — игра
+            // пересобирает #gu-hud, а старый узел остаётся в DOM скрытым.
+            // Берём только реально отрисованную кнопку в видимом баре.
+            const buttons = document.querySelectorAll('.lgu-nav-btn');
+            for (const btn of buttons) {
+                if (btn.getClientRects().length === 0) continue;
+                const bar = btn.closest('#gu-hud .gu-main') || btn.parentElement;
+                if (bar && bar.getClientRects().length > 0) return btn;
+            }
+            return null;
+        },
+
+        // ============================================================
+        // ПАТЧ 11.7.2: ЕДИНЫЙ КОНТРОЛЛЕР ВХОДА В МЕНЮ АДДОНА
+        //
+        // Входов в меню два:
+        //   • плавающая FAB (.${DOM_IDS.fabWrap}) — шахта, поход, город
+        //     с выключенным тумблером или скрытым баром;
+        //   • кнопка «Аддон» в нижнем баре города (.lgu-nav-btn).
+        //
+        // Раньше каждый вход управлял только собой, поэтому при переходах
+        // (Карманный Город -> Аукцион и другие здания) и при пересборке
+        // игрового HUD в DOM могли остаться несколько FAB: от предыдущего
+        // запуска скрипта (другой RAND_ID) или от гонки boot(). Теперь
+        // монтирование идемпотентно: перед показом FAB всегда проверяется
+        // видимость встроенной кнопки «Аддон», а лишние экземпляры
+        // вычищаются из DOM.
+        // ============================================================
+
+        /**
+         * Все обёртки FAB в документе, включая экземпляры прошлых запусков.
+         * DOM_IDS.fabWrap содержит случайный RAND_ID, поэтому ищем ещё и по
+         * стабильному суффиксу id/класса «-fab-wrap» (например, x-abcd-fab-wrap).
+         * @returns {HTMLElement[]} только верхние обёртки, без вложенных
+         */
+        _fabWraps() {
+            const nodes = new Set();
+            const add = (sel) => {
+                try { document.querySelectorAll(sel).forEach(el => nodes.add(el)); } catch (e) {}
+            };
+            add(`.${DOM_IDS.fabWrap}`);
+            add(`#${DOM_IDS.fabWrap}`);
+            add('[id$="-fab-wrap"]');
+            add('[class*="-fab-wrap"]');
+
+            const list = Array.from(nodes);
+            // Если селектор зацепил вложенный узел, удалять нужно верхнюю
+            // обёртку: иначе останется пустой контейнер с тем же суффиксом.
+            return list.filter(el => !list.some(other => other !== el && other.contains(el)));
+        },
+
+        /**
+         * Оставляет ровно один экземпляр FAB и перепривязывает ссылки
+         * this._fabWrap / _fabBtn / _fabMenu к живым узлам DOM.
+         * @param {HTMLElement|null} keep обёртка, которую нужно сохранить
+         * @returns {HTMLElement|null} каноническая обёртка
+         */
+        pruneFabDuplicates(keep = null) {
+            const wraps = this._fabWraps();
+            if (!wraps.length) {
+                this._fabWrap = this._fabBtn = this._fabMenu = null;
+                return null;
+            }
+
+            let canonical = (keep && wraps.includes(keep)) ? keep : null;
+            if (!canonical && this._fabWrap && wraps.includes(this._fabWrap)) canonical = this._fabWrap;
+            if (!canonical) {
+                // Предпочитаем экземпляр текущего запуска (с нашим RAND_ID).
+                canonical = wraps.find(el => el.id === DOM_IDS.fabWrap || el.classList.contains(DOM_IDS.fabWrap)) || wraps[0];
+            }
+
+            wraps.forEach(el => {
+                if (el === canonical) return;
+                try { el.remove(); } catch (e) {}
+            });
+
+            this._fabWrap = canonical;
+            this._fabBtn = canonical.querySelector(`#${DOM_IDS.fabBtn}`)
+                || canonical.querySelector(`.${DOM_IDS.fabBtn}`)
+                || canonical.querySelector('.legion-fab-btn');
+            this._fabMenu = canonical.querySelector(`#${DOM_IDS.fabMenu}`)
+                || canonical.querySelector(`.${DOM_IDS.fabMenu}`)
+                || canonical.querySelector('.legion-fab-menu');
+            return canonical;
+        },
+
+        /** Полностью убирает все обёртки FAB (перед повторным монтированием). */
+        removeAllFabs() {
+            this._fabWraps().forEach(el => {
+                try { el.remove(); } catch (e) {}
+            });
+            this._fabWrap = this._fabBtn = this._fabMenu = null;
+        },
+
+        /** Виден ли сейчас вход «Аддон» в нижнем баре города. */
+        hasVisibleNativeNav() {
+            const btn = this._getNativeNavButton();
+            if (!btn) return false;
+            const bar = btn.closest('#gu-hud .gu-main') || btn.parentElement;
+            return !!bar && bar.getClientRects().length > 0;
+        },
+
+        /**
+         * Показ/скрытие FAB по живому узлу (ссылка могла устареть после
+         * пересборки игрового DOM). Возвращает false, если кнопки нет.
+         */
+        _setFabVisible(visible) {
+            let btn = (this._fabBtn && this._fabBtn.isConnected) ? this._fabBtn : null;
+            if (!btn && this._fabWrap && this._fabWrap.isConnected) {
+                btn = this._fabWrap.querySelector(`#${DOM_IDS.fabBtn}`)
+                    || this._fabWrap.querySelector(`.${DOM_IDS.fabBtn}`)
+                    || this._fabWrap.querySelector('.legion-fab-btn');
+            }
+            if (!btn) return false;
+            this._fabBtn = btn;
+            btn.style.display = visible ? 'flex' : 'none';
+            return true;
+        },
+
+        /**
+         * Идемпотентное монтирование FAB. main.js передаёт готовую обёртку
+         * (единственное место, где создаётся разметка), а метод:
+         *   1) вычищает дубли прошлых запусков, оставляя переданную обёртку;
+         *   2) если видна встроенная кнопка «Аддон» — FAB скрывается,
+         *      режим сразу переключается на 'native';
+         *   3) иначе FAB показывается, режим 'fab'.
+         * Повторный вызов не создаёт второй экземпляр и не плодит обработчики.
+         *
+         * @param {HTMLElement} wrap вновь созданная обёртка FAB
+         * @returns {{wrap: HTMLElement, mode: 'fab'|'native'}|null}
+         */
+        mountFab(wrap) {
+            if (!wrap || !wrap.isConnected) return null;
+
+            const canonical = this.pruneFabDuplicates(wrap) || wrap;
+            const btn = canonical.querySelector(`#${DOM_IDS.fabBtn}`)
+                || canonical.querySelector(`.${DOM_IDS.fabBtn}`)
+                || canonical.querySelector('.legion-fab-btn');
+            if (!btn) return null;
+
+            this._fabWrap = canonical;
+            this._fabBtn = btn;
+            this._fabMenu = canonical.querySelector(`#${DOM_IDS.fabMenu}`)
+                || canonical.querySelector(`.${DOM_IDS.fabMenu}`)
+                || canonical.querySelector('.legion-fab-menu');
+
+            // Встроенная городская кнопка «Аддон» важнее: пока она на экране,
+            // плавающий экземпляр не показываем — иначе два входа подряд.
+            if (this.hasVisibleNativeNav()) {
+                this._setFabVisible(false);
+                this._navMode = 'native';
+                return { wrap: canonical, mode: 'native' };
+            }
+
+            this._setFabVisible(true);
+            this._navMode = 'fab';
+            return { wrap: canonical, mode: 'fab' };
         },
 
         // ПАТЧ 11.6.6e: меню — ребёнок .legion-fab-wrap (position:fixed в
@@ -4705,6 +5100,12 @@ Object.assign(Utils, UtilsApi);
         // ПАТЧ 11.6.6g: шахту (оверлей .mn поверх города, html.gu-city остаётся)
         // проверяем ОТДЕЛЬНО и раньше тумблера — см. первую ветку метода.
         syncNavButton() {
+            // ПАТЧ 11.7.2: перед любым решением о показе FAB приводим DOM
+            // к инварианту «ровно один экземпляр». Это убирает дубли от
+            // второго запуска скрипта/прошлого RAND_ID, в том числе если
+            // FAB оказалась поверх встроенной кнопки «Аддон».
+            this.pruneFabDuplicates();
+
             // ПАТЧ 11.6.6g: в шахте бара игры не видно (он под оверлеем `.mn`),
             // поэтому единственный вход в аддон — плавающая FAB. Ветка стоит
             // ДО проверки тумблера: при включённом «📌 Кнопка аддона в нижнем
@@ -4712,7 +5113,7 @@ Object.assign(Utils, UtilsApi);
             // она недоступна и должна быть убрана из DOM.
             if (this.isInMine()) {
                 document.querySelectorAll('.lgu-nav-btn').forEach(el => el.remove());
-                if (this._fabBtn) this._fabBtn.style.display = 'flex';
+                this._setFabVisible(true);
                 if (this._navMode !== 'fab') {
                     // Меню нужно гасить только при переходе из города: там оно
                     // привязано координатами к нативной кнопке (position:fixed),
@@ -4735,7 +5136,7 @@ Object.assign(Utils, UtilsApi);
                 // 1. Удаляем нативную кнопку из бара игры, если она есть.
                 document.querySelectorAll('.lgu-nav-btn').forEach(el => el.remove());
                 // 2. Возвращаем плавающую FAB (её мог спрятать нативный режим).
-                if (this._fabBtn) this._fabBtn.style.display = 'flex';
+                this._setFabVisible(true);
                 this._navMode = 'fab';
                 this._navRetries = 0;
                 return false;
@@ -4746,9 +5147,21 @@ Object.assign(Utils, UtilsApi);
 
             if (inCity) {
                 this._navRetries = 0;
-                if (!bar.querySelector('.lgu-nav-btn')) {
+
+                // ПАТЧ 11.7.2: один «Аддон» на актуальный бар. После
+                // пересборки #gu-hud (например, при открытии Аукциона из
+                // Карманного Города) в DOM могут остаться кнопки старого
+                // бара — удаляем их, оставляя единственную актуальную.
+                const buttons = Array.from(document.querySelectorAll('.lgu-nav-btn'));
+                const current = buttons.find(el => el.parentElement === bar) || null;
+                buttons.forEach(el => {
+                    if (el === current) return;
+                    try { el.remove(); } catch (e) {}
+                });
+                if (!current) {
                     bar.prepend(this.createNativeNavButton());
                 }
+
                 if (this._navMode !== 'native') {
                     this._navMode = 'native';
                     // Меню, открытое в шахте, не должно висеть в городе без FAB.
@@ -4756,13 +5169,18 @@ Object.assign(Utils, UtilsApi);
                 }
                 // Бар бывает скрыт (открыто окно героя, чат на мобиле) —
                 // тогда FAB оставляем, иначе в меню аддона было бы не попасть.
-                const barVisible = bar.getClientRects().length > 0;
-                if (this._fabBtn) this._fabBtn.style.display = barVisible ? 'none' : 'flex';
+                // ПАТЧ 11.7.2: смотрим именно на видимость встроенной кнопки
+                // «Аддон»: пока она на экране, плавающий дубль не показываем.
+                this._setFabVisible(!this.hasVisibleNativeNav());
                 return true;
             }
 
+            // Не город: активный вход — плавающая FAB. Оставшиеся в скрытом
+            // баре кнопки «Аддон» больше не нужны (актуальная создастся при
+            // возвращении в город) и не должны дублировать FAB.
+            document.querySelectorAll('.lgu-nav-btn').forEach(el => el.remove());
             this._navMode = 'fab';
-            if (this._fabBtn) this._fabBtn.style.display = 'flex';
+            this._setFabVisible(true);
 
             // HUD игра создаёт лениво (guRender -> guHud, до ~2 с после входа
             // в город). Пока бара нет, но город уже включён — добиваем парой
@@ -4864,11 +5282,15 @@ Object.assign(Utils, UtilsApi);
             // Аккордеон: клик по заголовку секции сворачивает/разворачивает её.
             // stopPropagation не даёт событию дойти до обработчиков меню и страницы.
             menu.querySelectorAll('.fab-section-title').forEach(title => {
-                title.addEventListener('click', (e) => {
+                const toggleSection = (e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     const section = title.parentElement;
                     if (section) section.classList.toggle('collapsed');
+                };
+                title.addEventListener('click', toggleSection);
+                title.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') toggleSection(e);
                 });
             });
         },
@@ -7030,8 +7452,13 @@ Object.assign(Utils, UtilsApi);
                 keys.forEach((k) => {
                     const nv = (item.stats && item.stats[k]) || 0;
                     const ov = (cur && cur.stats && cur.stats[k]) || 0;
-                    if (nv === ov) return;
-                    changes.push(`<div class="stat-line"><span>${this.esc(this.statNames[k] || k)}</span><b>${nv > ov ? '+' : ''}${nv - ov}</b></div>`);
+                    const diff = nv - ov;
+                    if (diff === 0) return;
+                    // v11.7.1: строгий знак. Раньше .stat-line b всегда был
+                    // зелёным, и отрицательные изменения (−1, −10, −63)
+                    // выглядели как бонус. Теперь + / − / 0 — разными классами.
+                    const cls = diff > 0 ? 'stat-up' : (diff < 0 ? 'stat-down' : 'stat-eq');
+                    changes.push(`<div class="stat-line"><span>${this.esc(this.statNames[k] || k)}</span><b class="${cls}">${diff > 0 ? '+' : ''}${diff}</b></div>`);
                 });
                 return `<tr><td><b>${this.esc(item.name || '—')}</b><br><small>${this.esc(item.slot)}</small></td><td>${changes.join('') || '<span class="stat-eq">без изменений</span>'}</td></tr>`;
             }).join('');
@@ -8374,9 +8801,13 @@ Object.assign(Utils, UtilsApi);
                         const curNote = preview !== curEn
                             ? ` <span class="hp-stat-cur" title="Сейчас, на +${curEn}">(+${curEn}: ${this.enchantStat(b, curEn, k)})</span>`
                             : '';
+                        // v11.7.1: цвет строго по знаку, а не «зелёный для любого
+                        // отличия». Плюс — зелёный, минус — красный, ноль — без бейджа.
+                        const gainCls = gain > 0 ? 'up' : (gain < 0 ? 'down' : 'same');
+                        const gainTxt = gain > 0 ? `+${gain}` : (gain < 0 ? `−${Math.abs(gain)}` : '');
                         return `<div class="hp-stat-row">
                             <span class="hp-stat-name" title="${safeName}">${safeName}</span>
-                            <span class="hp-stat-val">${b} → <b>${fin}</b>${gain > 0 ? ` <span class="hp-stat-gain">+${gain}</span>` : ''}${curNote}</span>
+                            <span class="hp-stat-val">${b} → <b>${fin}</b>${gain !== 0 ? ` <span class="hp-stat-gain ${gainCls}">${gainTxt}</span>` : ''}${curNote}</span>
                         </div>`;
                     }).join('') || '<div class="hp-cost-sub">У предмета нет характеристик.</div>';
 
@@ -12000,6 +12431,8 @@ const PocketCity = (() => {
         // Отключение текущего наблюдателя закрытия здания (повторные клики
         // по «Карманному городу» не должны плодить watchers).
         _closeWatch: null,
+        // v11.7.1: DOM компактного закреплённого виджета (см. pin()).
+        _pinEl: null,
 
         // ---------------- 11.7.0: автоскип боёв с монстрами ----------------
         // Окно `.cm-dlg` — бой с обычным или элитным монстром. Работаем
@@ -12045,21 +12478,54 @@ const PocketCity = (() => {
             const modal = UI.showModal(UITemplates.pocketCityModal(guildLocked));
             if (!modal) return;
 
-            // Обработчики вешаем только на кнопки этой модалки: раньше поиск
-            // шёл по всему документу и мог зацепить чужие .pocket-grid-btn.
-            modal.querySelectorAll('.pocket-grid-btn').forEach(btn => {
+            // v11.7.1: кнопка закрепа в шапке окна. Сворачивает Карманный
+            // Город в компактный виджет (состояние сохраняется в localStorage).
+            const pinBtn = modal.querySelector('#pocket-city-pin-btn');
+            if (pinBtn) {
+                pinBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    PocketCity.pin();
+                });
+            }
+
+            PocketCity._bindRoomButtons(modal);
+        },
+
+        /**
+         * Общие обработчики карточек-зданий для полного окна и мини-виджета.
+         * Отдельный метод, чтобы закреплённый режим вёл себя ровно так же
+         * (hover, тост для закрытой гильдии, нативное открытие здания).
+         */
+        _bindRoomButtons(container) {
+            if (!container) return;
+            container.querySelectorAll('.pocket-grid-btn').forEach(btn => {
+                if (btn.dataset.lguBound === '1') return;
+                btn.dataset.lguBound = '1';
+
                 // Серая карточка «Гильдия» не должна «подпрыгивать» на hover.
                 if (btn.getAttribute('aria-disabled') !== 'true') {
-                    btn.addEventListener('mouseenter', () => { btn.style.transform = 'translateY(-3px)'; btn.style.boxShadow = '0 6px 15px rgba(0,0,0,0.5)'; });
-                    btn.addEventListener('mouseleave', () => { btn.style.transform = 'none'; btn.style.boxShadow = 'none'; });
+                    const compact = btn.classList.contains('pocket-grid-btn-compact');
+                    btn.addEventListener('mouseenter', () => {
+                        btn.style.transform = compact ? 'translateY(-1px)' : 'translateY(-3px)';
+                        btn.style.boxShadow = compact
+                            ? '0 3px 8px rgba(0,0,0,0.5)'
+                            : '0 6px 15px rgba(0,0,0,0.5)';
+                    });
+                    btn.addEventListener('mouseleave', () => {
+                        btn.style.transform = 'none';
+                        btn.style.boxShadow = 'none';
+                    });
                 }
+
                 btn.addEventListener('click', (e) => {
                     const el = e.currentTarget;
                     const room = el.getAttribute('data-room');
                     // Недоступную карточку гасим через aria-disabled, а не
                     // disabled: disabled-кнопка не присылает клик, и игрок не
                     // поймёт, почему карточка не реагирует. Здесь — тост.
-                    if (el.getAttribute('aria-disabled') === 'true') {
+                    if (el.getAttribute('aria-disabled') === 'true'
+                        || (room === 'guild' && PocketCity.isGuildLocked())) {
                         UI.showToast('Гильдия пока недоступна вашему герою', true);
                         return;
                     }
@@ -12067,6 +12533,117 @@ const PocketCity = (() => {
                     if (room) PocketCity.openBuilding(room);
                 });
             });
+        },
+
+        // ============================================================
+        // 6.5.p. РЕЖИМ ЗАКРЕПА «КАРМАННОГО ГОРОДА» (v11.7.1)
+        //
+        // Полное окно можно свернуть в компактный плавающий виджет:
+        // кнопка «📌» в шапке модалки, состояние живёт в localStorage
+        // ('LEGION_POCKET_CITY_PINNED'), позиция — в
+        // ('LEGION_POCKET_CITY_POS'). Иконки и цвета зданий те же, что и
+        // в большом окне (общий шаблон UITemplates), только 2 колонки без
+        // подписей. Кнопка «⛶» разворачивает обратно в полное окно.
+        // ============================================================
+
+        /** Сохранён ли режим закрепа. Любая ошибка хранилища = «выключен». */
+        isPinned() {
+            try { return localStorage.getItem('LEGION_POCKET_CITY_PINNED') === 'true'; }
+            catch (e) { return false; }
+        },
+
+        /** Запоминаем выбранный режим, чтобы он пережил перезагрузку страницы. */
+        _setPinnedFlag(isPinned) {
+            try { localStorage.setItem('LEGION_POCKET_CITY_PINNED', String(!!isPinned)); }
+            catch (e) { dbg('Карманный Город: не удалось сохранить режим закрепа', e); }
+        },
+
+        /** Закрепить: закрыть полное окно и показать мини-виджет. */
+        pin() {
+            PocketCity._setPinnedFlag(true);
+            UI.closeModals();
+            PocketCity.showPinnedWidget();
+        },
+
+        /**
+         * Открепить и спрятать виджет.
+         * @param {boolean} reopenOpenModal true — сразу развернуть полное окно
+         *   (кнопка «⛶»); false — просто убрать виджет (кнопка «✖»).
+         */
+        unpin(reopenOpenModal = false) {
+            PocketCity._setPinnedFlag(false);
+            PocketCity.hidePinnedWidget();
+            if (reopenOpenModal) PocketCity.open();
+        },
+
+        /**
+         * Рисует компактный виджет (если уже на экране — ничего не делает).
+         * Позиция и перетаскивание — через UI.makeDraggable, ключ
+         * LEGION_POCKET_CITY_POS (общий паттерн с HUD профиля).
+         */
+        showPinnedWidget() {
+            let el = PocketCity._pinEl;
+            if (el && el.isConnected) return el;
+            if (!document.body) return null;
+
+            el = document.createElement('div');
+            el.id = 'lg-pocket-city-widget';
+            el.className = 'lg-pocket-city-widget';
+            el.innerHTML = UITemplates.pocketCityPinnedWidget(PocketCity.isGuildLocked());
+            document.body.appendChild(el);
+            PocketCity._pinEl = el;
+
+            // Восстановление позиции: проверяем, что координаты не увели
+            // виджет за пределы экрана (после смены разрешения/зума).
+            try {
+                const pos = JSON.parse(localStorage.getItem('LEGION_POCKET_CITY_POS') || 'null');
+                if (pos && pos.left && pos.top) {
+                    const leftVal = parseInt(pos.left, 10);
+                    const topVal = parseInt(pos.top, 10);
+                    if (!isNaN(leftVal) && !isNaN(topVal)
+                        && leftVal >= 0 && leftVal <= window.innerWidth - 120
+                        && topVal >= 0 && topVal <= window.innerHeight - 80) {
+                        el.style.left = pos.left;
+                        el.style.top = pos.top;
+                        el.style.right = 'auto';
+                    }
+                }
+            } catch (e) {}
+
+            UI.makeDraggable(el, '.lg-pc-widget-head', 'LEGION_POCKET_CITY_POS');
+
+            const expandBtn = el.querySelector('#lg-pc-widget-expand');
+            if (expandBtn) {
+                expandBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    PocketCity.unpin(true);
+                });
+            }
+            const closeBtn = el.querySelector('#lg-pc-widget-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    PocketCity.unpin(false);
+                });
+            }
+
+            PocketCity._bindRoomButtons(el);
+            return el;
+        },
+
+        /** Убрать виджет с экрана (состояние закрепа не трогаем). */
+        hidePinnedWidget() {
+            const el = PocketCity._pinEl;
+            if (el) {
+                try { el.remove(); } catch (e) {}
+            }
+            PocketCity._pinEl = null;
+            const stale = document.getElementById('lg-pocket-city-widget');
+            if (stale) {
+                try { stale.remove(); } catch (e) {}
+            }
         },
         /**
          * Ждём выполнения условия, опрашивая его каждые CITY_POLL_MS.
@@ -12325,21 +12902,28 @@ const PocketCity = (() => {
                 try { await pageWin.cityFiles(); } catch (e) {}
             }
 
-            // 3. Принудительно переключаем вкладку на Город
-            const cityTabBtn = document.querySelector('.tabs button[data-tab="city"]');
-            if (cityTabBtn) {
-                cityTabBtn.hidden = false;
-                cityTabBtn.removeAttribute('aria-disabled');
-                cityTabBtn.classList.remove('tab-lock');
-                try { cityTabBtn.click(); } catch (e) {}
-            }
+            // 3. Принудительно переключаем вкладку на Город.
+            // v11.7.2: если игрок УЖЕ в городе (типовой путь «Карманный
+            // Город» -> «Аукцион» и другие здания), повторный клик по
+            // вкладке не нужен: игра заново строит HUD/город, а старые
+            // кнопки остаются в DOM — отсюда второй вход в меню аддона.
+            const alreadyInCity = PocketCity.activeTabId() === 'city';
+            if (!alreadyInCity) {
+                const cityTabBtn = document.querySelector('.tabs button[data-tab="city"]');
+                if (cityTabBtn) {
+                    cityTabBtn.hidden = false;
+                    cityTabBtn.removeAttribute('aria-disabled');
+                    cityTabBtn.classList.remove('tab-lock');
+                    try { cityTabBtn.click(); } catch (e) {}
+                }
 
-            document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.id === 'tab-city'));
-            document.querySelectorAll('.tabs button').forEach(b => {
-                const tab = b.dataset?.tab || b.getAttribute?.('data-tab');
-                if (tab === 'city') b.setAttribute('aria-current', 'page');
-                else b.removeAttribute('aria-current');
-            });
+                document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.id === 'tab-city'));
+                document.querySelectorAll('.tabs button').forEach(b => {
+                    const tab = b.dataset?.tab || b.getAttribute?.('data-tab');
+                    if (tab === 'city') b.setAttribute('aria-current', 'page');
+                    else b.removeAttribute('aria-current');
+                });
+            }
 
             // 4. Ждём появления LGCity: city.js грузится лениво первым кликом.
             if (!(await PocketCity.waitFor(() => !!pageWin.LGCity, PocketCity.CITY_LOAD_TIMEOUT_MS))) {
@@ -12354,6 +12938,15 @@ const PocketCity = (() => {
                 dbg('Город не загрузился вовремя.');
                 UI.showToast('Город не загрузился вовремя', true);
                 return;
+            }
+
+            // 5.1. v11.7.2: перед открытием панели здания (Аукцион и др.)
+            // сверяем вход в меню аддона. Город к этому моменту готов, бар
+            // уже существует, поэтому syncNavButton() удалит лишние FAB и
+            // оставит активной единственную кнопку: встроенную «Аддон»,
+            // если она видна, иначе плавающую. Второй экземпляр не создаётся.
+            if (typeof UI !== 'undefined' && typeof UI.syncNavButton === 'function') {
+                try { UI.syncNavButton(); } catch (e) { dbg('syncNavButton перед зданием:', e); }
             }
 
             // 6. Открываем здание нативным методом. openBuilding — на случай,
@@ -12685,6 +13278,9 @@ const PocketCity = (() => {
         init() {
             if (Settings.get('autoSkipMonsters')) PocketCity.startMonsterAutoSkip();
             if (Settings.get('citymonGatherEnabled')) PocketCity.startCityMonWatch();
+            // v11.7.1: если Карманный Город был закреплён в прошлой сессии —
+            // сразу поднимаем компактный виджет.
+            if (PocketCity.isPinned()) PocketCity.showPinnedWidget();
         },
 
         /**
@@ -12858,6 +13454,9 @@ const PocketCity = (() => {
         destroy() {
             PocketCity.stopMonsterAutoSkip();
             PocketCity.stopCityMonWatch();
+            // Виджет закрепа убираем из DOM, но сохранённый режим не трогаем:
+            // после перезапуска скрипта init() вернёт его на место.
+            PocketCity.hidePinnedWidget();
             if (PocketCity._closeWatch) {
                 try { PocketCity._closeWatch(); } catch (e) {}
                 PocketCity._closeWatch = null;
@@ -18897,6 +19496,13 @@ const PocketCity = (() => {
         style.textContent = STYLES;
         document.head.appendChild(style);
 
+        // ПАТЧ 11.7.2: монтирование FAB строго идемпотентно. Перед
+        // созданием убираем обёртки прошлых запусков (второй экземпляр
+        // скрипта, повторный boot, старый RAND_ID): иначе в правом нижнем
+        // углу оказывались две FAB, в том числе поверх встроенной кнопки
+        // «Аддон» при открытии Аукциона из Карманного Города.
+        UI.removeAllFabs();
+
         const fabWrap = document.createElement('div');
         fabWrap.className = DOM_IDS.fabWrap;
         fabWrap.id = DOM_IDS.fabWrap;
@@ -18928,6 +19534,9 @@ const PocketCity = (() => {
 
         const fabBtn = document.getElementById(DOM_IDS.fabBtn) || document.getElementById('legion-fab-btn');
         const fabMenu = document.getElementById(DOM_IDS.fabMenu) || document.getElementById('legion-fab-menu');
+        // Единый контроллер: регистрирует единственный экземпляр и сразу
+        // выбирает режим — FAB или встроенная кнопка «Аддон» в городе.
+        UI.mountFab(fabWrap);
         UI.setupFab(fabWrap, fabBtn, fabMenu);
 
         // ============================================================
@@ -18978,6 +19587,11 @@ const PocketCity = (() => {
         // в отдельную модалку: FAB-меню стало короче, а служебные
         // переключатели больше не мешают кнопкам.
         document.getElementById('btn-fab-settings')?.addEventListener('click', () => UI.openSettings());
+        // 💛 Благодарность: титры с никами из футера FAB-меню.
+        document.getElementById('btn-fab-thanks')?.addEventListener('click', () => {
+            UI.closeFabMenu();
+            UI.openThanks();
+        });
 
         Miner.init();
         BuildSim.init();        // без кнопки — регистрирует только глобальный клик для .sim-card
@@ -19076,7 +19690,7 @@ const PocketCity = (() => {
                 // продолжал бы нажимать «Пропустить» в окне .cm-dlg и слать
                 // запросы после перезапуска скрипта.
                 try { PocketCity.destroy?.(); } catch (e) {}
-                document.querySelectorAll('.' + DOM_IDS.customModal + ', .sim-card, .float-btns, .' + DOM_IDS.fabWrap + ', #' + DOM_IDS.playerHud + ', .custom-modal, .legion-fab-wrap, #legion-player-hud').forEach(el => el.remove());
+                document.querySelectorAll('.' + DOM_IDS.customModal + ', .sim-card, .float-btns, .' + DOM_IDS.fabWrap + ', #' + DOM_IDS.playerHud + ', .custom-modal, .legion-fab-wrap, [id$="-fab-wrap"], [class*="-fab-wrap"], #legion-player-hud, #lg-pocket-city-widget').forEach(el => el.remove());
                 legionApi._booted = false;
             }
         };

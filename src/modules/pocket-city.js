@@ -17,6 +17,8 @@ const PocketCity = (() => {
         // Отключение текущего наблюдателя закрытия здания (повторные клики
         // по «Карманному городу» не должны плодить watchers).
         _closeWatch: null,
+        // v11.7.1: DOM компактного закреплённого виджета (см. pin()).
+        _pinEl: null,
 
         // ---------------- 11.7.0: автоскип боёв с монстрами ----------------
         // Окно `.cm-dlg` — бой с обычным или элитным монстром. Работаем
@@ -62,21 +64,54 @@ const PocketCity = (() => {
             const modal = UI.showModal(UITemplates.pocketCityModal(guildLocked));
             if (!modal) return;
 
-            // Обработчики вешаем только на кнопки этой модалки: раньше поиск
-            // шёл по всему документу и мог зацепить чужие .pocket-grid-btn.
-            modal.querySelectorAll('.pocket-grid-btn').forEach(btn => {
+            // v11.7.1: кнопка закрепа в шапке окна. Сворачивает Карманный
+            // Город в компактный виджет (состояние сохраняется в localStorage).
+            const pinBtn = modal.querySelector('#pocket-city-pin-btn');
+            if (pinBtn) {
+                pinBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    PocketCity.pin();
+                });
+            }
+
+            PocketCity._bindRoomButtons(modal);
+        },
+
+        /**
+         * Общие обработчики карточек-зданий для полного окна и мини-виджета.
+         * Отдельный метод, чтобы закреплённый режим вёл себя ровно так же
+         * (hover, тост для закрытой гильдии, нативное открытие здания).
+         */
+        _bindRoomButtons(container) {
+            if (!container) return;
+            container.querySelectorAll('.pocket-grid-btn').forEach(btn => {
+                if (btn.dataset.lguBound === '1') return;
+                btn.dataset.lguBound = '1';
+
                 // Серая карточка «Гильдия» не должна «подпрыгивать» на hover.
                 if (btn.getAttribute('aria-disabled') !== 'true') {
-                    btn.addEventListener('mouseenter', () => { btn.style.transform = 'translateY(-3px)'; btn.style.boxShadow = '0 6px 15px rgba(0,0,0,0.5)'; });
-                    btn.addEventListener('mouseleave', () => { btn.style.transform = 'none'; btn.style.boxShadow = 'none'; });
+                    const compact = btn.classList.contains('pocket-grid-btn-compact');
+                    btn.addEventListener('mouseenter', () => {
+                        btn.style.transform = compact ? 'translateY(-1px)' : 'translateY(-3px)';
+                        btn.style.boxShadow = compact
+                            ? '0 3px 8px rgba(0,0,0,0.5)'
+                            : '0 6px 15px rgba(0,0,0,0.5)';
+                    });
+                    btn.addEventListener('mouseleave', () => {
+                        btn.style.transform = 'none';
+                        btn.style.boxShadow = 'none';
+                    });
                 }
+
                 btn.addEventListener('click', (e) => {
                     const el = e.currentTarget;
                     const room = el.getAttribute('data-room');
                     // Недоступную карточку гасим через aria-disabled, а не
                     // disabled: disabled-кнопка не присылает клик, и игрок не
                     // поймёт, почему карточка не реагирует. Здесь — тост.
-                    if (el.getAttribute('aria-disabled') === 'true') {
+                    if (el.getAttribute('aria-disabled') === 'true'
+                        || (room === 'guild' && PocketCity.isGuildLocked())) {
                         UI.showToast('Гильдия пока недоступна вашему герою', true);
                         return;
                     }
@@ -84,6 +119,117 @@ const PocketCity = (() => {
                     if (room) PocketCity.openBuilding(room);
                 });
             });
+        },
+
+        // ============================================================
+        // 6.5.p. РЕЖИМ ЗАКРЕПА «КАРМАННОГО ГОРОДА» (v11.7.1)
+        //
+        // Полное окно можно свернуть в компактный плавающий виджет:
+        // кнопка «📌» в шапке модалки, состояние живёт в localStorage
+        // ('LEGION_POCKET_CITY_PINNED'), позиция — в
+        // ('LEGION_POCKET_CITY_POS'). Иконки и цвета зданий те же, что и
+        // в большом окне (общий шаблон UITemplates), только 2 колонки без
+        // подписей. Кнопка «⛶» разворачивает обратно в полное окно.
+        // ============================================================
+
+        /** Сохранён ли режим закрепа. Любая ошибка хранилища = «выключен». */
+        isPinned() {
+            try { return localStorage.getItem('LEGION_POCKET_CITY_PINNED') === 'true'; }
+            catch (e) { return false; }
+        },
+
+        /** Запоминаем выбранный режим, чтобы он пережил перезагрузку страницы. */
+        _setPinnedFlag(isPinned) {
+            try { localStorage.setItem('LEGION_POCKET_CITY_PINNED', String(!!isPinned)); }
+            catch (e) { dbg('Карманный Город: не удалось сохранить режим закрепа', e); }
+        },
+
+        /** Закрепить: закрыть полное окно и показать мини-виджет. */
+        pin() {
+            PocketCity._setPinnedFlag(true);
+            UI.closeModals();
+            PocketCity.showPinnedWidget();
+        },
+
+        /**
+         * Открепить и спрятать виджет.
+         * @param {boolean} reopenOpenModal true — сразу развернуть полное окно
+         *   (кнопка «⛶»); false — просто убрать виджет (кнопка «✖»).
+         */
+        unpin(reopenOpenModal = false) {
+            PocketCity._setPinnedFlag(false);
+            PocketCity.hidePinnedWidget();
+            if (reopenOpenModal) PocketCity.open();
+        },
+
+        /**
+         * Рисует компактный виджет (если уже на экране — ничего не делает).
+         * Позиция и перетаскивание — через UI.makeDraggable, ключ
+         * LEGION_POCKET_CITY_POS (общий паттерн с HUD профиля).
+         */
+        showPinnedWidget() {
+            let el = PocketCity._pinEl;
+            if (el && el.isConnected) return el;
+            if (!document.body) return null;
+
+            el = document.createElement('div');
+            el.id = 'lg-pocket-city-widget';
+            el.className = 'lg-pocket-city-widget';
+            el.innerHTML = UITemplates.pocketCityPinnedWidget(PocketCity.isGuildLocked());
+            document.body.appendChild(el);
+            PocketCity._pinEl = el;
+
+            // Восстановление позиции: проверяем, что координаты не увели
+            // виджет за пределы экрана (после смены разрешения/зума).
+            try {
+                const pos = JSON.parse(localStorage.getItem('LEGION_POCKET_CITY_POS') || 'null');
+                if (pos && pos.left && pos.top) {
+                    const leftVal = parseInt(pos.left, 10);
+                    const topVal = parseInt(pos.top, 10);
+                    if (!isNaN(leftVal) && !isNaN(topVal)
+                        && leftVal >= 0 && leftVal <= window.innerWidth - 120
+                        && topVal >= 0 && topVal <= window.innerHeight - 80) {
+                        el.style.left = pos.left;
+                        el.style.top = pos.top;
+                        el.style.right = 'auto';
+                    }
+                }
+            } catch (e) {}
+
+            UI.makeDraggable(el, '.lg-pc-widget-head', 'LEGION_POCKET_CITY_POS');
+
+            const expandBtn = el.querySelector('#lg-pc-widget-expand');
+            if (expandBtn) {
+                expandBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    PocketCity.unpin(true);
+                });
+            }
+            const closeBtn = el.querySelector('#lg-pc-widget-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    PocketCity.unpin(false);
+                });
+            }
+
+            PocketCity._bindRoomButtons(el);
+            return el;
+        },
+
+        /** Убрать виджет с экрана (состояние закрепа не трогаем). */
+        hidePinnedWidget() {
+            const el = PocketCity._pinEl;
+            if (el) {
+                try { el.remove(); } catch (e) {}
+            }
+            PocketCity._pinEl = null;
+            const stale = document.getElementById('lg-pocket-city-widget');
+            if (stale) {
+                try { stale.remove(); } catch (e) {}
+            }
         },
         /**
          * Ждём выполнения условия, опрашивая его каждые CITY_POLL_MS.
@@ -342,21 +488,28 @@ const PocketCity = (() => {
                 try { await pageWin.cityFiles(); } catch (e) {}
             }
 
-            // 3. Принудительно переключаем вкладку на Город
-            const cityTabBtn = document.querySelector('.tabs button[data-tab="city"]');
-            if (cityTabBtn) {
-                cityTabBtn.hidden = false;
-                cityTabBtn.removeAttribute('aria-disabled');
-                cityTabBtn.classList.remove('tab-lock');
-                try { cityTabBtn.click(); } catch (e) {}
-            }
+            // 3. Принудительно переключаем вкладку на Город.
+            // v11.7.2: если игрок УЖЕ в городе (типовой путь «Карманный
+            // Город» -> «Аукцион» и другие здания), повторный клик по
+            // вкладке не нужен: игра заново строит HUD/город, а старые
+            // кнопки остаются в DOM — отсюда второй вход в меню аддона.
+            const alreadyInCity = PocketCity.activeTabId() === 'city';
+            if (!alreadyInCity) {
+                const cityTabBtn = document.querySelector('.tabs button[data-tab="city"]');
+                if (cityTabBtn) {
+                    cityTabBtn.hidden = false;
+                    cityTabBtn.removeAttribute('aria-disabled');
+                    cityTabBtn.classList.remove('tab-lock');
+                    try { cityTabBtn.click(); } catch (e) {}
+                }
 
-            document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.id === 'tab-city'));
-            document.querySelectorAll('.tabs button').forEach(b => {
-                const tab = b.dataset?.tab || b.getAttribute?.('data-tab');
-                if (tab === 'city') b.setAttribute('aria-current', 'page');
-                else b.removeAttribute('aria-current');
-            });
+                document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.id === 'tab-city'));
+                document.querySelectorAll('.tabs button').forEach(b => {
+                    const tab = b.dataset?.tab || b.getAttribute?.('data-tab');
+                    if (tab === 'city') b.setAttribute('aria-current', 'page');
+                    else b.removeAttribute('aria-current');
+                });
+            }
 
             // 4. Ждём появления LGCity: city.js грузится лениво первым кликом.
             if (!(await PocketCity.waitFor(() => !!pageWin.LGCity, PocketCity.CITY_LOAD_TIMEOUT_MS))) {
@@ -371,6 +524,15 @@ const PocketCity = (() => {
                 dbg('Город не загрузился вовремя.');
                 UI.showToast('Город не загрузился вовремя', true);
                 return;
+            }
+
+            // 5.1. v11.7.2: перед открытием панели здания (Аукцион и др.)
+            // сверяем вход в меню аддона. Город к этому моменту готов, бар
+            // уже существует, поэтому syncNavButton() удалит лишние FAB и
+            // оставит активной единственную кнопку: встроенную «Аддон»,
+            // если она видна, иначе плавающую. Второй экземпляр не создаётся.
+            if (typeof UI !== 'undefined' && typeof UI.syncNavButton === 'function') {
+                try { UI.syncNavButton(); } catch (e) { dbg('syncNavButton перед зданием:', e); }
             }
 
             // 6. Открываем здание нативным методом. openBuilding — на случай,
@@ -702,6 +864,9 @@ const PocketCity = (() => {
         init() {
             if (Settings.get('autoSkipMonsters')) PocketCity.startMonsterAutoSkip();
             if (Settings.get('citymonGatherEnabled')) PocketCity.startCityMonWatch();
+            // v11.7.1: если Карманный Город был закреплён в прошлой сессии —
+            // сразу поднимаем компактный виджет.
+            if (PocketCity.isPinned()) PocketCity.showPinnedWidget();
         },
 
         /**
@@ -875,6 +1040,9 @@ const PocketCity = (() => {
         destroy() {
             PocketCity.stopMonsterAutoSkip();
             PocketCity.stopCityMonWatch();
+            // Виджет закрепа убираем из DOM, но сохранённый режим не трогаем:
+            // после перезапуска скрипта init() вернёт его на место.
+            PocketCity.hidePinnedWidget();
             if (PocketCity._closeWatch) {
                 try { PocketCity._closeWatch(); } catch (e) {}
                 PocketCity._closeWatch = null;

@@ -1769,8 +1769,13 @@
                 keys.forEach((k) => {
                     const nv = (item.stats && item.stats[k]) || 0;
                     const ov = (cur && cur.stats && cur.stats[k]) || 0;
-                    if (nv === ov) return;
-                    changes.push(`<div class="stat-line"><span>${this.esc(this.statNames[k] || k)}</span><b>${nv > ov ? '+' : ''}${nv - ov}</b></div>`);
+                    const diff = nv - ov;
+                    if (diff === 0) return;
+                    // v11.7.1: строгий знак. Раньше .stat-line b всегда был
+                    // зелёным, и отрицательные изменения (−1, −10, −63)
+                    // выглядели как бонус. Теперь + / − / 0 — разными классами.
+                    const cls = diff > 0 ? 'stat-up' : (diff < 0 ? 'stat-down' : 'stat-eq');
+                    changes.push(`<div class="stat-line"><span>${this.esc(this.statNames[k] || k)}</span><b class="${cls}">${diff > 0 ? '+' : ''}${diff}</b></div>`);
                 });
                 return `<tr><td><b>${this.esc(item.name || '—')}</b><br><small>${this.esc(item.slot)}</small></td><td>${changes.join('') || '<span class="stat-eq">без изменений</span>'}</td></tr>`;
             }).join('');
