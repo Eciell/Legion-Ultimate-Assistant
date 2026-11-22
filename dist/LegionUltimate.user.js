@@ -13661,14 +13661,16 @@ const PocketCity = (() => {
                             return;
                         }
 
-                        // 401 на bearer-эндпоинте = сессия мертва (кик, выход
-                        // владельца, удалённая пати). POST /party и
+                        // 401, 403, 404 на bearer-эндпоинте = сессия мертва или группа не существует
+                        // (кик, выход владельца, удалённая пати). POST /party и
                         // POST /party/join идут с auth:false и сюда не попадают.
                         // Локальное состояние чистим сразу, иначе клиент
                         // застрянет в «пати», которой уже нет.
-                        if (res.status === 401 && auth) {
+                        if ((res.status === 401 || res.status === 403 || res.status === 404) && auth) {
                             this._resetLocalState();
-                            if (state) UI.showToast('Сессия истекла — вы вне пати', true);
+                            if (state && !path.endsWith('/leave')) {
+                                UI.showToast('Вы вышли из пати или группа распущена', true);
+                            }
                         }
 
                         const err = new Error(this._errorText(res.status, payload, `HTTP ${res.status}`));
@@ -13762,11 +13764,11 @@ const PocketCity = (() => {
                     await this._request('DELETE', `/party/${encodeURIComponent(state.groupId)}/leave`);
                 } catch (e) {
                     const status = Number(e?.status) || 0;
-                    // 401/404 — сессии или пати уже нет (кик, чужой выход):
+                    // 401/403/404 — сессии или пати уже нет (кик, чужой выход):
                     // локальная чистка как раз то, что нужно, без пугалки.
-                    // При 401 _request() уже вызвал _resetLocalState().
-                    if (status === 401) alreadyReset = true;
-                    else if (status !== 404) serverFailed = true;
+                    // При 401/403/404 _request() уже вызвал _resetLocalState().
+                    if (status === 401 || status === 403 || status === 404) alreadyReset = true;
+                    else serverFailed = true;
                     dbg('[PARTY] leave на сервере не удался:', e);
                 }
             }
@@ -13848,11 +13850,15 @@ const PocketCity = (() => {
          */
         _ensureHud() {
             let hud = document.getElementById(this.HUD_ID);
-            if (hud && hud.isConnected) return hud;
+            if (hud && hud.isConnected) {
+                hud.style.display = 'flex';
+                return hud;
+            }
 
             hud = document.createElement('div');
             hud.id = this.HUD_ID;
             hud.className = 'party-hud-container';
+            hud.style.display = 'flex';
             document.body.appendChild(hud);
 
             // Сохранённую позицию применяем сразу; clamp внутри проверит
@@ -13865,6 +13871,14 @@ const PocketCity = (() => {
                 window.addEventListener('resize', () => this._clampHud());
             }
             return hud;
+        },
+
+        _hideHud() {
+            const hud = document.getElementById(this.HUD_ID);
+            if (hud) {
+                hud.style.display = 'none';
+                try { hud.remove(); } catch (e) {}
+            }
         },
 
         /**
@@ -14038,7 +14052,10 @@ const PocketCity = (() => {
 
         _hidePanel() {
             const el = document.getElementById(this.PANEL_ID);
-            if (el) el.style.display = 'none';
+            if (el) {
+                el.style.display = 'none';
+                try { el.remove(); } catch (e) {}
+            }
         },
 
         /**
@@ -14054,12 +14071,21 @@ const PocketCity = (() => {
          * @param {{skipLog?: boolean}} [opts]
          */
         _renderPanel(states, opts = {}) {
+            const party = this._readState();
+            if (!party || !party.groupId || !party.sessionId) {
+                this._hidePanel();
+                this._hideLogPanel();
+                this._resetChat();
+                this._hideHud();
+                return;
+            }
+
             const el = this._ensurePanel();
             const list = Array.isArray(states) ? states : [];
 
             // Свой ник берём из локального состояния: GET /party/:id/state
             // отдаёт только {login, hp, maxHp, updatedAt}, поля self там нет.
-            const selfLogin = String(this._readState()?.login || '').toLowerCase();
+            const selfLogin = String(party.login || '').toLowerCase();
             // Лечить можно только из похода — вне похода игра отклоняет запрос.
             // _prevMe появляется после первого «живого» снимка /api/me в _hpTick();
             // пока его нет, кнопку не рисуем (заведомо провальный запрос).
@@ -14140,12 +14166,16 @@ const PocketCity = (() => {
          */
         _hideLogPanel() {
             const el = document.getElementById(this.LOG_PANEL_ID);
-            if (el) el.style.display = 'none';
+            if (el) {
+                el.style.display = 'none';
+                try { el.remove(); } catch (e) {}
+            }
 
             this._clearLog();
             this._logSince = 0;
             this._logReady = false;
             this._prevMe = null;
+            this._logBodyEl = null;
         },
 
         /**
@@ -14206,7 +14236,11 @@ const PocketCity = (() => {
          * Вызывается из _renderPanel() на каждом тике синхронизации.
          */
         _syncLogPanel() {
-            if (!this._readState()) return;
+            const party = this._readState();
+            if (!party || !party.groupId || !party.sessionId) {
+                this._hideLogPanel();
+                return;
+            }
             const el = this._ensureLogPanel();
             this._positionLogPanel();
             el.style.display = 'block';
@@ -14248,7 +14282,12 @@ const PocketCity = (() => {
         async _pollLog() {
             if (!this._logOpen || this._logBusy) return;
             const party = this._readState();
-            if (!party) return;
+            if (!party || !party.groupId || !party.sessionId) {
+                this._hideLogPanel();
+                return;
+            }
+            const reqPartyId = party.groupId;
+            const reqSessionId = party.sessionId;
 
             this._logBusy = true;
             try {
@@ -14257,13 +14296,16 @@ const PocketCity = (() => {
                     : `?limit=${this.LOG_LIMIT}`;
                 const res = await this._request(
                     'GET',
-                    `/party/${encodeURIComponent(party.groupId)}/log${query}`
+                    `/party/${encodeURIComponent(reqPartyId)}/log${query}`
                 );
 
                 // Пока ждали ответ, могли выйти или перезайти в другую пати:
                 // чужие события в очищенную панель не дописываем.
                 const cur = this._readState();
-                if (!cur || cur.groupId !== party.groupId) return;
+                if (!cur || cur.groupId !== reqPartyId || cur.sessionId !== reqSessionId) {
+                    this._hideLogPanel();
+                    return;
+                }
 
                 // Первая порция заменяет плейсхолдер, следующие — дописываются.
                 if (!this._logReady) {
@@ -14277,10 +14319,13 @@ const PocketCity = (() => {
                 const next = Number(res?.nextSince);
                 if (Number.isFinite(next) && next > this._logSince) this._logSince = next;
             } catch (e) {
+                const status = Number(e?.status) || 0;
+                if (status === 401 || status === 403 || status === 404) {
+                    this._hideLogPanel();
+                    this.stopHpSync();
+                    return;
+                }
                 console.warn('[PARTY] журнал: GET не удался:', e?.message || e);
-                // 401: _request() уже вызвал _resetLocalState() -> stopHpSync()
-                // -> _hideLogPanel(); здесь только страховка.
-                if (Number(e?.status) === 401) this._hideLogPanel();
             } finally {
                 this._logBusy = false;
             }
@@ -14437,17 +14482,36 @@ const PocketCity = (() => {
 
         async _sendChatMessage(text) {
             const party = this._readState();
-            if (!party) return;
+            if (!party || !party.groupId || !party.sessionId) {
+                this._resetChat();
+                return;
+            }
+            const reqPartyId = party.groupId;
+            const reqSessionId = party.sessionId;
+
             try {
                 const res = await this._request(
                     'POST',
-                    `/party/${encodeURIComponent(party.groupId)}/chat`,
+                    `/party/${encodeURIComponent(reqPartyId)}/chat`,
                     { body: { text } }
                 );
+
+                const cur = this._readState();
+                if (!cur || cur.groupId !== reqPartyId || cur.sessionId !== reqSessionId) {
+                    this._resetChat();
+                    return;
+                }
+
                 if (res && res.ok) {
                     this._pollChat();
                 }
             } catch (err) {
+                const status = Number(err?.status) || 0;
+                if (status === 401 || status === 403 || status === 404) {
+                    this._resetChat();
+                    this.stopHpSync();
+                    return;
+                }
                 console.warn('[PARTY] чат: ошибка отправки', err);
                 if (typeof UI !== 'undefined' && UI.showToast) {
                     UI.showToast(err?.message || 'Не удалось отправить сообщение', true);
@@ -14458,18 +14522,26 @@ const PocketCity = (() => {
         async _pollChat() {
             if (this._chatBusy) return;
             const party = this._readState();
-            if (!party) return;
+            if (!party || !party.groupId || !party.sessionId) {
+                this._resetChat();
+                return;
+            }
+            const reqPartyId = party.groupId;
+            const reqSessionId = party.sessionId;
 
             this._chatBusy = true;
             try {
                 const query = this._chatSince > 0 ? `?since=${this._chatSince}` : '';
                 const res = await this._request(
                     'GET',
-                    `/party/${encodeURIComponent(party.groupId)}/chat${query}`
+                    `/party/${encodeURIComponent(reqPartyId)}/chat${query}`
                 );
 
                 const cur = this._readState();
-                if (!cur || cur.groupId !== party.groupId) return;
+                if (!cur || cur.groupId !== reqPartyId || cur.sessionId !== reqSessionId) {
+                    this._resetChat();
+                    return;
+                }
 
                 const msgs = Array.isArray(res?.messages) ? res.messages : [];
                 if (msgs.length > 0) {
@@ -14508,6 +14580,12 @@ const PocketCity = (() => {
                     this._applyChatCollapsedState();
                 }
             } catch (err) {
+                const status = Number(err?.status) || 0;
+                if (status === 401 || status === 403 || status === 404) {
+                    this._resetChat();
+                    this.stopHpSync();
+                    return;
+                }
                 console.warn('[PARTY] чат: GET не удался:', err?.message || err);
             } finally {
                 this._chatBusy = false;
@@ -14515,6 +14593,12 @@ const PocketCity = (() => {
         },
 
         _renderChatMessages() {
+            const party = this._readState();
+            if (!party || !party.groupId || !party.sessionId) {
+                this._resetChat();
+                return;
+            }
+
             const el = this._ensureChatPanel();
             const body = el.querySelector('.party-chat-body');
             if (!body) return;
@@ -14524,7 +14608,7 @@ const PocketCity = (() => {
                 return;
             }
 
-            const selfLogin = String(this._readState()?.login || '').toLowerCase();
+            const selfLogin = String(party.login || '').toLowerCase();
             const esc = (s) => (typeof Utils !== 'undefined' && Utils.escapeHtml ? Utils.escapeHtml(s) : String(s || ''));
 
             body.innerHTML = this._chatMessages.map((m) => {
@@ -14554,7 +14638,11 @@ const PocketCity = (() => {
         },
 
         _syncChatPanel() {
-            if (!this._readState()) return;
+            const party = this._readState();
+            if (!party || !party.groupId || !party.sessionId) {
+                this._resetChat();
+                return;
+            }
             const el = this._ensureChatPanel();
             el.style.display = 'block';
             this._pollChat();
@@ -14562,7 +14650,15 @@ const PocketCity = (() => {
 
         _hideChatPanel() {
             const el = document.getElementById(this.CHAT_PANEL_ID);
-            if (el) el.style.display = 'none';
+            if (el) {
+                const body = el.querySelector('.party-chat-body');
+                if (body) body.innerHTML = '';
+                const input = el.querySelector('.party-chat-input');
+                if (input) input.value = '';
+                el.style.display = 'none';
+                try { el.remove(); } catch (e) {}
+            }
+            this._chatBodyEl = null;
         },
 
         _resetChat() {
@@ -14865,6 +14961,8 @@ const PocketCity = (() => {
             this._hideLogPanel();
             // leave/401: чат прошлой пати очищается и прячется.
             this._resetChat();
+            // Скрыть и удалить весь HUD-контейнер
+            this._hideHud();
         },
 
         /**
@@ -14988,12 +15086,14 @@ const PocketCity = (() => {
             // Предыдущий тик ещё ждёт сеть (медленный сервер) — второй не нужен.
             if (this._hpBusy) return;
             const party = this._readState();
-            if (!party) {
+            if (!party || !party.groupId || !party.sessionId) {
                 this.stopHpSync();
                 return;
             }
+            const reqPartyId = party.groupId;
+            const reqSessionId = party.sessionId;
 
-            const path = `/party/${encodeURIComponent(party.groupId)}/state`;
+            const path = `/party/${encodeURIComponent(reqPartyId)}/state`;
             this._hpBusy = true;
             try {
                 // 1. Свой HP из игры. v11.6.6: если снимок пришёл событием
@@ -15027,25 +15127,32 @@ const PocketCity = (() => {
                         });
                     } catch (e) {
                         console.warn('[PARTY] не удалось отправить HP:', e?.message || e);
-                        // 401 уже обработан в _request(): стейт сброшен, панель
+                        // 401/403/404 уже обработан в _request(): стейт сброшен, панель
                         // скрыта, тост показан — дальше GET бессмыслен.
-                        if (Number(e?.status) === 401) return;
+                        const status = Number(e?.status) || 0;
+                        if (status === 401 || status === 403 || status === 404) return;
                     }
                 }
 
                 // 3. GET всех стейтов -> перерисовка панели.
                 const res = await this._request('GET', path);
                 // Пока ждали ответ, могли выйти из пати — тогда рендер не нужен.
-                if (!this._readState()) return;
+                const cur = this._readState();
+                if (!cur || cur.groupId !== reqPartyId || cur.sessionId !== reqSessionId) {
+                    this.stopHpSync();
+                    return;
+                }
                 // v11.6.6: кэш состояний — по нему _patchSelfHp() мгновенно
                 // перерисовывает свою строку на событиях `me`.
                 this._lastStates = Array.isArray(res?.states) ? res.states : null;
                 this._renderPanel(res?.states);
             } catch (e) {
+                const status = Number(e?.status) || 0;
+                if (status === 401 || status === 403 || status === 404) {
+                    this.stopHpSync();
+                    return;
+                }
                 console.warn('[PARTY] синхронизация HP:', e?.message || e);
-                // 401 = нас кикнули/пати удалена: _request() уже вызвал
-                // _resetLocalState() (там stopHpSync + тост), дублируем страховкой.
-                if (Number(e?.status) === 401) this.stopHpSync();
             } finally {
                 this._hpBusy = false;
             }
