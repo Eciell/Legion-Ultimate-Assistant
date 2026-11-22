@@ -154,6 +154,15 @@
             return [];
         };
 
+        // v11.7.1.1: точная сила своего отряда. Сервер отдаёт её готовым
+        // полем duel.me.squad.power (в отличие от duel.me.power, которого
+        // нет). Пустое/нулевое значение — сигнал использовать оценочную
+        // формулу powerValue (squad.power ещё не пришёл).
+        const mySquadPower = () => {
+            const sq = state.duel && state.duel.me && state.duel.me.squad;
+            return num(sq && sq.power);
+        };
+
         // Бойцы оффера: def[] — клин обороны (карточка), squad[] — подробный
         // список для экрана атаки (site/arena.js, renderForm).
         const foeSquad = (offer) => {
@@ -732,13 +741,17 @@
             const squad = mySquad();
             const foes = foeSquad(offer);
 
-            const myPower = powerValue(me, squad);
+            // Точная сила: duel.me.power (старые сборки API) либо
+            // duel.me.squad.power. Оценочная формула — только фолбэк, пока
+            // squad.power не пришёл. См. mySquadPower().
+            const exactMine = num(me && me.power) || mySquadPower();
+            const myPower = exactMine > 0 ? exactMine : powerValue(me, squad);
             const foePower = powerValue(offer, foes);
             const myRating = num(me && me.rating);
             const foeRating = num(offer && offer.rating);
-            // Сервер не отдаёт power для duel.me — своя сила расчётная,
-            // в подсказке помечаем её «~».
-            const myPowerExact = num(me && me.power) > 0;
+            // Сила точная (power от сервера) — в подсказке без «~»;
+            // расчётная — с «~».
+            const myPowerExact = exactMine > 0;
 
             // 1) Сила. Степенная логистика по отношению сил:
             //      prob = 1 / (1 + (foe/my)^4.8)
