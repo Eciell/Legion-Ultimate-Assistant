@@ -25,7 +25,17 @@
         /* fx-ключи -> подписи в сводке «Что дают открытые навыки».
            v11.7.1: знаки «%» и «+» в подписях НЕ дублируются — суффикс и знак
            значения добавляет statList() (item.sign/item.suf). */
-        fxNames: { melee: 'Физ. урон', magic: 'Магия', hp: 'Макс. HP', def: 'Броня', healPow: 'Сила лечения', healIn: 'Вх. лечение', crit: 'Крит', critDmg: 'Сила крита', skel: 'Урон скелетов', skelT: 'Время скелетов', leech: 'Вампиризм', block: 'Снижение урона', dodge: 'Уклонение', lead: 'Урон по боссам', first: 'Урон 1-й ход', dmg: 'Весь урон', pierce: 'Пробивание', resist: 'Сопротивление', healCrit: 'Крит лечения', regen: 'Регенерация', low: 'Урон при низком HP', ranged: 'Урон луком', poison: 'Отрава', steal: 'Кража', loot: 'Добыча', skelN: 'Скелетов', volley: 'Залп', shieldBlock: 'Щит блок', trapDodge: 'Ловушки', steady: 'Промах→удар', cleave: 'Замах', cleaveBoss: 'Замах по боссу', penBoss: 'Бронебой по боссу', drain: 'Вытягивание', hex: 'Проклятие', holy: 'По нежити', poisonT: 'Время отравы', abNext: 'Удар после умения', angel: 'Ангел-хранитель', backFoe: 'Урон по дальней линии', banner: 'Знамя когорты', breakHeal: 'Лечение при разбитом щите', burnChain: 'Цепной огонь', burnFoe: 'Урон по горящим', chillFoe: 'Урон по ознобу', chillProc: 'Шанс озноба', coverNb: 'Прикрытие соседа', critBleed: 'Кровотечение при крите', critBlind: 'Ослепление при крите', critBurn: 'Поджог при крите', critPierceWard: 'Крит сквозь щиты', dmgHeal: 'Лечение от урона', dodgeNext: 'Выстрел после уклонения', firstTeam: 'Урон команды в 1-й ход', guardAura: 'Аура защиты стойки', healNext: 'Удар после лечения', healRegen: 'Регенерация после лечения', healSplash: 'Всплеск лечения', highFoe: 'Урон по здоровым', highSelf: 'Урон при высоком HP', huntMark: 'Охотничья метка', killHit: 'Добивание врага', lastStand: 'Последний рубеж', lineCut: 'Защита соратников по линии', lowHeal: 'Лечение раненых', multiLow: 'Залп по раненым', overShield: 'Щит избытка лечения', phoenixHeart: 'Сердце феникса', ricochet: 'Рикошет выстрела', sameFoe: 'Пристрелка', shieldDmg: 'Урон под щитом', shieldUp: 'Прочность накладываемых щитов', startShield: 'Стартовый барьер', startWard: 'Стартовый оберег', taunt: 'Провокация', thorns: 'Шипы на щите', trap: 'Капкан', underShield: 'Защита под щитом', weakFoe: 'Урон по ослабленным', winter: 'Вечная зима' },
+        fxNames: { melee: 'Физ. урон', magic: 'Магия', hp: 'Макс. здоровье', def: 'Броня', healPow: 'Сила лечения', healIn: 'Входящее лечение', crit: 'Шанс крита', critDmg: 'Сила крита', skel: 'Урон скелетов', skelT: 'Время скелетов', leech: 'Вампиризм', block: 'Снижение получаемого урона', dodge: 'Уклонение', lead: 'Урон по боссам', first: 'Урон в 1-й ход', dmg: 'Весь урон', pierce: 'Пробивание брони', resist: 'Шанс избежать яда и тины', healCrit: 'Шанс сильного лечения', regen: 'Регенерация', low: 'Урон при низком HP', ranged: 'Урон луком', poison: 'Отрава', steal: 'Кража', loot: 'Добыча', skelN: 'Скелетов', volley: 'Залп', shieldBlock: 'Снижение урона со щитом', trapDodge: 'Избегание ловушек', steady: 'Промах→удар', cleave: 'Замах', cleaveBoss: 'Замах по боссу', penBoss: 'Бронебой по боссу', drain: 'Вытягивание', hex: 'Проклятие', holy: 'По нежити', poisonT: 'Время отравы', abNext: 'Удар после умения', angel: 'Ангел-хранитель', backFoe: 'Урон по дальней линии', banner: 'Знамя когорты', breakHeal: 'Лечение при разбитом щите', burnChain: 'Цепной огонь', burnFoe: 'Урон по горящим', chillFoe: 'Урон по ознобу', chillProc: 'Шанс озноба', coverNb: 'Прикрытие соседа', critBleed: 'Кровотечение при крите', critBlind: 'Ослепление при крите', critBurn: 'Поджог при крите', critPierceWard: 'Крит сквозь щиты', dmgHeal: 'Лечение от урона', dodgeNext: 'Выстрел после уклонения', firstTeam: 'Урон команды в 1-й ход', guardAura: 'Аура защиты стойки', healNext: 'Удар после лечения', healRegen: 'Регенерация после лечения', healSplash: 'Всплеск лечения', highFoe: 'Урон по здоровым', highSelf: 'Урон при высоком HP', huntMark: 'Охотничья метка', killHit: 'Добивание врага', lastStand: 'Последний рубеж', lineCut: 'Защита соратников по линии', lowHeal: 'Лечение раненых', multiLow: 'Залп по раненым', overShield: 'Щит избытка лечения', phoenixHeart: 'Сердце феникса', ricochet: 'Рикошет выстрела', sameFoe: 'Пристрелка', shieldDmg: 'Урон под щитом', shieldUp: 'Прочность накладываемых щитов', startShield: 'Стартовый барьер', startWard: 'Стартовый оберег', taunt: 'Провокация', thorns: 'Шипы на щите', trap: 'Капкан', underShield: 'Защита под щитом', weakFoe: 'Урон по ослабленным', winter: 'Вечная зима' },
+
+        /* v11.7.1: fx-ключи-механики (1 = эффект включён). Это НЕ числовые
+           бонусы: «Ангел-хранитель +1%» или «Последний рубеж +2%» — ложь.
+           Такие узлы описываются полным текстом node.text, а в сводке
+           «Что дают открытые навыки» они не участвуют. */
+        fxFlags: { angel: 1, lastStand: 1, phoenixHeart: 1, winter: 1, critPierceWard: 1, killHit: 1 },
+
+        /* v11.7.1: единицы fx-значений для сводки. По умолчанию «%»;
+           исключения — плоские пункты, штуки и секунды (как в текстах). */
+        fxUnits: { def: '', critDmg: '', skelN: ' шт.', skelT: ' сек.' },
 
         /* Категории прокачки способностей Арены (как в /api/skmap: ab.br[].next). */
         ARENA_KINDS: [['lv', 'Ступень'], ['pow', 'Мощь'], ['eff', 'Эффект'], ['dur', 'Длительность']],
@@ -174,45 +184,85 @@
 
         /**
          * Текст навыка с подстановкой значений fx за текущий ранг.
+         *
+         * Шаблон берётся из node.text (как в игре, site/skills.js: txt()).
+         * Числовые fx умножаются на ранг; для resist/pierce подставляется
+         * «сырое» значение — в текстах это ШАНС избежать яда/тины и процент
+         * игнорируемой брони, а не пункты характеристики. Поэтому ложное
+         * «характеристика "Сопротивление" +N» больше НЕ дописывается:
+         * иначе нода «Чистота» (шанс 40%) выглядела как +40% сопротивления.
+         *
          * Макросы cleaveBoss/penBoss/critX считаются на лету — их нет в fx
          * (см. kv() в reference/LegionFrontSRC/site/skills.js).
+         *
+         * @param {object} node узел из /api/skills
+         * @param {number} rank ранг (1…max)
+         * @returns {string} готовое описание
          */
         formatNodeText(node, rank) {
-            if (!node || !node.text) return '';
+            if (!node) return '';
             const r = Math.max(1, +rank || 1);
             const fx = node.fx || {};
-            const fromFx = this.xstatFromFx();
-            const fmt = (val) => Number.isInteger(val) ? String(val) : val.toFixed(1).replace(/\.0$/, '').replace('.', ',');
-            const scaleOf = (key) => {
-                const s = +fromFx[key];
-                return isFinite(s) ? s : 1;
+            const has = (k) => Object.prototype.hasOwnProperty.call(fx, k);
+            const fmt = (val) => {
+                const n = Math.round((+val || 0) * 10) / 10;
+                return Number.isInteger(n) ? String(n) : String(n).replace('.', ',');
             };
-            const rawText = String(node.text);
 
-            let out = rawText.replace(/\{(\w+)\}/g, (match, key) => {
-                if (key === 'cleaveBoss') return fmt((fx.cleave || 0) * r * 0.4);
-                if (key === 'penBoss') return fmt((fx.pierce || 0) * r / 20);
-                if (key === 'critX') return fmt(2 + (fx.critDmg || 0) * r / 100);
-                // v11.7.0: {resist}/{pierce} в тексте — БАЗОВЫЙ ШАНС срабатывания
-                // умения (например, «10%»), поэтому fx умножается ТОЛЬКО на ранг:
-                // fromFx (0.5) применяется лишь к примечаниям о характеристиках.
-                if (fx[key] !== undefined) return fmt(fx[key] * r);
-                return match;
-            });
+            // В игре крит считается от ×1,5, когда у героя есть вторичные
+            // статы (XON в site/skills.js), иначе от ×2.
+            const xd = (typeof G !== 'undefined' && G && G.LGGameData && G.LGGameData.xstats) || null;
+            const hasXs = !!(this.hero && this.hero.xs && Object.keys(this.hero.xs).length);
+            const critBase = (hasXs && xd && +(xd.base || {}).critDmg > 0)
+                ? 1 + (+xd.base.critDmg / 100)
+                : 2;
+            const hasText = !!node.text;
+            const rawText = hasText ? String(node.text) : this.describeFx(fx, r);
 
-            // v11.7.0: примечания добавляются ВСЕГДА, когда в fx есть resist/
-            // pierce: игра дописывает вторичные статы даже без плейсхолдера
-            // в тексте («Физ. урон +5 · характеристика «Сопротивление» +30»).
+            let out = rawText
+                .replace(hasXs ? /×2 → ×/ : /$^/, () => `×${fmt(critBase)} → ×`)
+                .replace(/\{(\w+)\}/g, (match, key) => {
+                    if (key === 'critX') return fmt(critBase + (fx.critDmg || 0) * r / 100);
+                    if (key === 'cleaveBoss') return fmt((fx.cleave || 0) * r * 0.4);
+                    if (key === 'penBoss') return fmt((fx.pierce || 0) * r / 20);
+                    if (has(key)) return fmt(fx[key] * r);
+                    return match;
+                });
+
+            // Примечания — только для эффектов, которых НЕТ в шаблоне.
+            // Если {resist}/{pierce} уже подставлены, текст игры самодостаточен
+            // и дублировать их «характеристиками» не нужно.
             const notes = [];
-            if (fx.resist !== undefined) {
-                notes.push(`характеристика «Сопротивление» +${fmt(fx.resist * r * scaleOf('resist'))}`);
+            if (hasText && has('resist') && !/\{resist\}/.test(rawText)) {
+                notes.push(`шанс избежать яда и тины +${fmt(fx.resist * r)}%`);
             }
-            if (fx.pierce !== undefined) {
-                notes.push(`характеристика «Пробивание» +${fmt(fx.pierce * r * scaleOf('pierce'))}%`);
+            if (hasText && has('pierce') && !/\{pierce\}/.test(rawText)) {
+                const scale = +this.xstatFromFx().pierce;
+                notes.push(`характеристика «Пробивание» +${fmt(fx.pierce * r * (isFinite(scale) ? scale : 1))}%`);
             }
             if (notes.length) out += ' · ' + notes.join(' · ');
 
             return out;
+        },
+
+        /**
+         * v11.7.1: запасное описание узла, если игра не прислала node.text.
+         * Собирает только числовые бонусы; механики-флаги пропускает.
+         *
+         * @param {object} fx карта эффектов узла
+         * @param {number} rank ранг
+         * @returns {string}
+         */
+        describeFx(fx, rank) {
+            const r = Math.max(1, +rank || 1);
+            const parts = [];
+            for (const [k, v] of Object.entries(fx || {})) {
+                if (this.isSkipFx(k) || this.fxFlags[k] || !isFinite(+v) || !this.fxNames[k]) continue;
+                const unit = (k in this.fxUnits) ? this.fxUnits[k] : '%';
+                const val = Math.round(+v * r * 10) / 10;
+                parts.push(`${this.fxNames[k]} +${String(val).replace('.', ',')}${unit}`);
+            }
+            return parts.join(' · ');
         },
 
         /** Кнопка BuildSim больше не нужна (её ведёт HeroPlanner), но init
@@ -1596,43 +1646,36 @@
                 (B.nodes || []).forEach((n) => {
                     const r = Math.min(Math.max(1, +n.max || 1), +st.nodes[n.id] || 0);
                     if (!r) return;
-                    const t = this.formatNodeText(n, r);
-                    // «Физ. урон +15%» -> { label, sign, suf, v }
-                    const m = /^([А-Яа-яЁё. ]{3,26}?) ?([+−-])(\d+(?:[.,]\d+)?)(%?)$/.exec(t);
-                    if (m) {
-                        const key = m[1].trim() + m[2] + m[4];
-                        const v = parseFloat(m[3].replace(',', '.'));
-                        const hit = map.get(key);
-                        if (hit) { hit.v += v; hit.names.push(n.name); }
-                        else {
-                            const item = { label: m[1].trim(), sign: m[2] === '−' ? '−' : m[2], suf: m[4], v, color: this.branchColor(bi), names: [n.name] };
-                            map.set(key, item);
-                            out.push(item);
-                        }
-                        return;
-                    }
-                    // Фолбэк: структурированные fx узла (текст не распознан).
-                    const fromFx = this.xstatFromFx();
+                    // v11.7.1: сводка строится по ВСЕМ fx узла, а не только по
+                    // тексту, начинающемуся с «Название +N%». Так вершины
+                    // веток и ноды с несколькими эффектами больше не теряются.
                     for (const [fk, fv] of Object.entries(n.fx || {})) {
-                        if (this.isSkipFx(fk) || !isFinite(+fv)) continue;
-                        const pct = ['critDmg', 'skelN', 'skelT', 'def', 'resist', 'pierce'].indexOf(fk) < 0;
-                        // resist/pierce: сырой fx -> стат через fromFx (0.5),
-                        // иначе сводка удваивала значения (+60 вместо +30).
-                        const scale = isFinite(+fromFx[fk]) ? +fromFx[fk] : 1;
-                        const amount = (+fv) * r * scale;
-                        const key = 'fx:' + fk;
-                        const hit = map.get(key);
-                        if (hit) { hit.v += amount; hit.names.push(n.name); }
-                        else {
-                            // v11.7.1: подписи fxNames без «%»/«+», но если
-                            // живой ключ пришёл с хвостом знака — обрезаем его,
-                            // чтобы не получить «Крит %%».
-                            let rawLabel = String(this.fxNames[fk] || fk);
-                            if (pct === true) rawLabel = rawLabel.replace(/\s*[%+]+$/, '').trim();
-                            const item = { label: rawLabel, sign: '+', suf: pct ? '%' : '', v: amount, color: this.branchColor(bi), names: [n.name] };
-                            map.set(key, item);
-                            out.push(item);
+                        if (this.isSkipFx(fk) || this.fxFlags[fk] || !isFinite(+fv) || !+fv) continue;
+                        let label = this.fxNames[fk];
+                        // Неизвестный ключ не выдумываем: лучше пропустить,
+                        // чем показать «+1%» вместо описания механики.
+                        if (!label) continue;
+                        // Ключ resist двузначный: в большинстве узлов это шанс
+                        // избежать яда/тины, но в отдельных ветках — настоящая
+                        // характеристика «Сопротивление». Смотрим на текст узла,
+                        // чтобы не путать эти механики.
+                        const ntext = String(n.text || '').toLowerCase();
+                        if (fk === 'resist') {
+                            label = /сопротивлен/.test(ntext) ? 'Сопротивление' : 'Шанс избежать яда и тины';
+                        } else if (fk === 'pierce' && !/брон/.test(ntext)) {
+                            label = 'Пробивание';
                         }
+                        // Значение — как в тексте узла (fx × ранг), без пересчёта
+                        // в пункты характеристики: resist здесь — шанс избежать
+                        // яда/тины, pierce — процент игнорируемой брони.
+                        const amount = +fv * r;
+                        const key = 'fx:' + fk + ':' + label;
+                        const hit = map.get(key);
+                        if (hit) { hit.v += amount; hit.names.push(n.name); continue; }
+                        const unit = (fk in this.fxUnits) ? this.fxUnits[fk] : '%';
+                        const item = { label, sign: '+', suf: unit, v: amount, color: this.branchColor(bi), names: [n.name] };
+                        map.set(key, item);
+                        out.push(item);
                     }
                 });
             });

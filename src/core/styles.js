@@ -1648,6 +1648,8 @@
         }
         .hp-side-row.strong { color: #f7eadf; font-weight: bold; }
         .hp-side-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        /* v11.7.1: «ⓘ» у индекса билда — подсказка по наведению. */
+        .hp-side-info { color: #b9a7d6; font-size: 10px; cursor: help; }
         .hp-side-vals { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
         .hp-side-vals b { color: #ffcf6a; }
         .hp-side-delta { text-align: right; font-weight: bold; font-variant-numeric: tabular-nums; }

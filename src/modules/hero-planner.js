@@ -67,10 +67,15 @@
             { id: 'trinket', name: 'Амулет', icon: '📿' }
         ],
         /*
-         * Веса боевой мощи (power): Σ stat[k] × POW[k] плюс +2 за каждый
-         * уровень заточки надетых вещей — та же логика, что в карточке героя.
+         * v11.7.1: «Индекс билда» — ВНУТРЕННЯЯ оценка Legion Ultimate
+         * (Σ stat[k] × POW[k] + 2 за каждый уровень заточки). Это НЕ игровой
+         * рейтинг силы «⚔» из карточки героя: тот считает сервер по своим
+         * правилам, а в /api/me поля power обычно нет. Индекс нужен только
+         * для честного сравнения «Сейчас → Примерка».
          */
         FIT_POW: { atk: 1, mag: 1, def: 1, hp: 0.25, crit: 0.8, critDmg: 0.2, dodge: 0.8, pierce: 0.8, healPow: 0.5, luck: 0.5, resist: 0.5 },
+        /* Подписи весов — для подробного title-тултипа индекса. */
+        FIT_POW_LABELS: { atk: 'Физ. урон', mag: 'Магия', def: 'Броня', hp: 'Макс. HP', crit: 'Крит', critDmg: 'Сила крита', dodge: 'Уклонение', pierce: 'Пробивание', healPow: 'Сила лечения', luck: 'Удача', resist: 'Сопротивление' },
         /* Потолки вторичных характеристик (xstats.max из game-data.js). */
         FIT_CAPS: { crit: 50, critDmg: 200, dodge: 35, pierce: 75, healPow: 100, luck: 100 },
         /* Состояние примерки: моделируемый класс/уровень, флаг бонусов
@@ -324,9 +329,10 @@
 
         /**
          * Текущие характеристики героя из /api/me: первичные лежат в
-         * hero.stats, вторичные — в hero.xs. Мощь считается той же формулой,
-         * что и у примерки (Σ × POW + 2 за уровень заточки), иначе сравнение
-         * «Было → Стало» было бы нечестным.
+         * hero.stats, вторичные — в hero.xs. Индекс билда считается той же
+         * формулой, что и у примерки (Σ × POW + 2 за уровень заточки), иначе
+         * сравнение «Было → Стало» было бы нечестным. Это не серверный
+         * рейтинг ⚔ — см. FIT_POW и powerTooltip().
          *
          * @param {object} h hero из /api/me
          * @returns {{stats:object, power:number, penalty:number, parts:Array, critMul:number, enTotal:number}}
@@ -355,6 +361,55 @@
         },
 
         /**
+         * v11.7.1: нативный рейтинг силы героя («⚔ 488» в карточке), если
+         * сервер его прислал. В /api/me поля power обычно нет — число считает
+         * сервер и отдаёт, например, в карточке героя гильдии
+         * (/api/guilds/hero, docs/API.md). Поэтому используем его только
+         * когда оно реально есть и никогда не подменяем им индекс билда.
+         *
+         * @param {object} h hero из /api/me
+         * @returns {number} рейтинг или 0, если сервер его не передал
+         */
+        nativeHeroPower(h) {
+            const v = +(h && h.power);
+            return Number.isFinite(v) && v > 0 ? Math.round(v) : 0;
+        },
+
+        /**
+         * v11.7.1: подробная расшифровка индекса билда для title-тултипа.
+         * Показывает каждый вес, вклад заточки и итог, а также честно
+         * предупреждает, что это не игровой рейтинг ⚔.
+         *
+         * @param {object} stats характеристики
+         * @param {number} enTotal суммарная заточка надетых вещей
+         * @param {number} power посчитанный индекс
+         * @param {number} nativePower нативный рейтинг игры (0 — неизвестен)
+         * @returns {string} многострочная подсказка
+         */
+        powerTooltip(stats, enTotal, power, nativePower) {
+            const fmt = (v) => String(Math.round((+v || 0) * 10) / 10).replace('.', ',');
+            const lines = [
+                `Индекс эффективности билда: ${Math.round(+power || 0)}`,
+                'Это внутренняя оценка Legion Ultimate для сравнения вариантов, а не рейтинг ⚔ из карточки героя.',
+                '',
+                'Из чего складывается:'
+            ];
+            for (const [k, w] of Object.entries(this.FIT_POW)) {
+                const v = +(stats && stats[k]) || 0;
+                if (!v) continue;
+                lines.push(`• ${this.FIT_POW_LABELS[k] || k}: ${v} × ${String(w).replace('.', ',')} = ${fmt(v * w)}`);
+            }
+            if (+enTotal > 0) lines.push(`• Заточка: ${enTotal} ур. × 2 = ${+enTotal * 2}`);
+            lines.push('', `Итого: ${Math.round(+power || 0)}`);
+            if (+nativePower > 0) {
+                lines.push('', `Рейтинг игры ⚔: ${Math.round(+nativePower)} (пришёл с сервера)`);
+            } else {
+                lines.push('', 'Рейтинг ⚔ в карточке героя считает сервер по своей формуле; в /api/me это число не передаётся, поэтому здесь показан только индекс билда.');
+            }
+            return lines.join('\n');
+        },
+
+        /**
          * Точный расчёт характеристик «примерки»: база уровня + 5 предметов
          * на выбранной заточке + бонусы созвездия − штраф экипировки.
          *
@@ -366,7 +421,8 @@
          *    healPow 100, luck 100;
          *  - штраф экипировки (gearPenalty, максимум 50%) режет mag у
          *    mage/priest/necromancer и atk у остальных классов;
-         *  - мощь = Σ stat × POW + 2 за каждый уровень заточки.
+         *  - индекс билда = Σ stat × POW + 2 за каждый уровень заточки
+         *    (внутренняя оценка, не рейтинг ⚔ из профиля).
          *
          * @param {string} role класс, для которого считаем
          * @param {number} level уровень героя (1…50)
@@ -1212,17 +1268,24 @@
                     const critMul = fit ? fit.critMul : cur.critMul;
                     const skillsNote = !this.fitting.useSkills ? ''
                         : (fit && fit.skillsUsed ? ' · 🌟 созвездие учтено' : ' · 🌟 созвездие недоступно');
+                    // v11.7.1: нативный рейтинг ⚔ (если сервер его отдал) и
+                    // подробная расшифровка индекса билда для title.
+                    const nativePw = this.nativeHeroPower(h);
+                    const pwTipBefore = this.powerTooltip(cur.stats, cur.enTotal, pwBefore, nativePw);
+                    const pwTipAfter = fit ? this.powerTooltip(fit.stats, fit.enTotal, pwAfter, nativePw) : pwTipBefore;
+                    const pwTip = `Сейчас:\n${pwTipBefore}` + (fit ? `\n\nПримерка:\n${pwTipAfter}` : '');
                     sideEl.innerHTML = `<div class="hp-side-head">Характеристики</div>
                         <div class="hp-side-cols"><span>Параметр</span><span>Сейчас → Примерка</span><span>Δ</span></div>
                         ${SIDE_ROWS.map(statRow).join('')}
                         <div class="hp-side-sep"></div>
-                        <div class="hp-side-row strong"><span class="hp-side-name">Боевая мощь</span>`
-                        + `<span class="hp-side-vals">${pwBefore} → <b>${pwAfter}</b></span>${delta(pwBefore, pwAfter)}</div>
-                        <div class="hp-side-row"><span class="hp-side-name">Штраф экипировки</span>`
+                        <div class="hp-side-row strong" title="${Utils.escapeHtml(pwTip)}"><span class="hp-side-name">Индекс билда <span class="hp-side-info" aria-hidden="true">ⓘ</span></span>`
+                        + `<span class="hp-side-vals">${pwBefore} → <b>${pwAfter}</b></span>${delta(pwBefore, pwAfter)}</div>`
+                        + (nativePw ? `<div class="hp-side-row" title="Рейтинг силы героя ⚔ из карточки персонажа. Его считает сервер; на индекс билда он не влияет."><span class="hp-side-name">Рейтинг игры ⚔</span><span class="hp-side-vals">${nativePw}</span><span class="hp-side-delta same"></span></div>` : '')
+                        + `<div class="hp-side-row"><span class="hp-side-name">Штраф экипировки</span>`
                         + `<span class="hp-side-vals">${pen ? '−' + pen + '%' : 'нет'}</span><span class="hp-side-delta same"></span></div>
                         <div class="hp-side-row"><span class="hp-side-name">Множитель крита</span>`
                         + `<span class="hp-side-vals">×${critMul.toFixed(2)}</span><span class="hp-side-delta same"></span></div>
-                        <div class="hp-side-foot">Заточка: Σ +${fit ? fit.enTotal : cur.enTotal} ур. · +2 мощи за уровень${skillsNote}</div>`;
+                        <div class="hp-side-foot">Заточка: Σ +${fit ? fit.enTotal : cur.enTotal} ур. · +2 к индексу за уровень${skillsNote} · индекс ≠ ⚔ в профиле</div>`;
                 };
 
                 /**

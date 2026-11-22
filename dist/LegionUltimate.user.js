@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Legion: Ultimate Assistant (Auction, Pocket City, Party)
 // @namespace    http://tampermonkey.net/
-// @version      11.7.0
+// @version      11.7.1
 // @description  QoL-аддон для Легиона: Сканер аукциона, Разведка, Планировщик, Карманный город, Пати, Поход.
 // @connect      localhost
 // @connect      127.0.0.1
@@ -2776,6 +2776,8 @@ Object.assign(Utils, UtilsApi);
         }
         .hp-side-row.strong { color: #f7eadf; font-weight: bold; }
         .hp-side-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        /* v11.7.1: «ⓘ» у индекса билда — подсказка по наведению. */
+        .hp-side-info { color: #b9a7d6; font-size: 10px; cursor: help; }
         .hp-side-vals { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
         .hp-side-vals b { color: #ffcf6a; }
         .hp-side-delta { text-align: right; font-weight: bold; font-variant-numeric: tabular-nums; }
@@ -5284,7 +5286,17 @@ Object.assign(Utils, UtilsApi);
         /* fx-ключи -> подписи в сводке «Что дают открытые навыки».
            v11.7.1: знаки «%» и «+» в подписях НЕ дублируются — суффикс и знак
            значения добавляет statList() (item.sign/item.suf). */
-        fxNames: { melee: 'Физ. урон', magic: 'Магия', hp: 'Макс. HP', def: 'Броня', healPow: 'Сила лечения', healIn: 'Вх. лечение', crit: 'Крит', critDmg: 'Сила крита', skel: 'Урон скелетов', skelT: 'Время скелетов', leech: 'Вампиризм', block: 'Снижение урона', dodge: 'Уклонение', lead: 'Урон по боссам', first: 'Урон 1-й ход', dmg: 'Весь урон', pierce: 'Пробивание', resist: 'Сопротивление', healCrit: 'Крит лечения', regen: 'Регенерация', low: 'Урон при низком HP', ranged: 'Урон луком', poison: 'Отрава', steal: 'Кража', loot: 'Добыча', skelN: 'Скелетов', volley: 'Залп', shieldBlock: 'Щит блок', trapDodge: 'Ловушки', steady: 'Промах→удар', cleave: 'Замах', cleaveBoss: 'Замах по боссу', penBoss: 'Бронебой по боссу', drain: 'Вытягивание', hex: 'Проклятие', holy: 'По нежити', poisonT: 'Время отравы', abNext: 'Удар после умения', angel: 'Ангел-хранитель', backFoe: 'Урон по дальней линии', banner: 'Знамя когорты', breakHeal: 'Лечение при разбитом щите', burnChain: 'Цепной огонь', burnFoe: 'Урон по горящим', chillFoe: 'Урон по ознобу', chillProc: 'Шанс озноба', coverNb: 'Прикрытие соседа', critBleed: 'Кровотечение при крите', critBlind: 'Ослепление при крите', critBurn: 'Поджог при крите', critPierceWard: 'Крит сквозь щиты', dmgHeal: 'Лечение от урона', dodgeNext: 'Выстрел после уклонения', firstTeam: 'Урон команды в 1-й ход', guardAura: 'Аура защиты стойки', healNext: 'Удар после лечения', healRegen: 'Регенерация после лечения', healSplash: 'Всплеск лечения', highFoe: 'Урон по здоровым', highSelf: 'Урон при высоком HP', huntMark: 'Охотничья метка', killHit: 'Добивание врага', lastStand: 'Последний рубеж', lineCut: 'Защита соратников по линии', lowHeal: 'Лечение раненых', multiLow: 'Залп по раненым', overShield: 'Щит избытка лечения', phoenixHeart: 'Сердце феникса', ricochet: 'Рикошет выстрела', sameFoe: 'Пристрелка', shieldDmg: 'Урон под щитом', shieldUp: 'Прочность накладываемых щитов', startShield: 'Стартовый барьер', startWard: 'Стартовый оберег', taunt: 'Провокация', thorns: 'Шипы на щите', trap: 'Капкан', underShield: 'Защита под щитом', weakFoe: 'Урон по ослабленным', winter: 'Вечная зима' },
+        fxNames: { melee: 'Физ. урон', magic: 'Магия', hp: 'Макс. здоровье', def: 'Броня', healPow: 'Сила лечения', healIn: 'Входящее лечение', crit: 'Шанс крита', critDmg: 'Сила крита', skel: 'Урон скелетов', skelT: 'Время скелетов', leech: 'Вампиризм', block: 'Снижение получаемого урона', dodge: 'Уклонение', lead: 'Урон по боссам', first: 'Урон в 1-й ход', dmg: 'Весь урон', pierce: 'Пробивание брони', resist: 'Шанс избежать яда и тины', healCrit: 'Шанс сильного лечения', regen: 'Регенерация', low: 'Урон при низком HP', ranged: 'Урон луком', poison: 'Отрава', steal: 'Кража', loot: 'Добыча', skelN: 'Скелетов', volley: 'Залп', shieldBlock: 'Снижение урона со щитом', trapDodge: 'Избегание ловушек', steady: 'Промах→удар', cleave: 'Замах', cleaveBoss: 'Замах по боссу', penBoss: 'Бронебой по боссу', drain: 'Вытягивание', hex: 'Проклятие', holy: 'По нежити', poisonT: 'Время отравы', abNext: 'Удар после умения', angel: 'Ангел-хранитель', backFoe: 'Урон по дальней линии', banner: 'Знамя когорты', breakHeal: 'Лечение при разбитом щите', burnChain: 'Цепной огонь', burnFoe: 'Урон по горящим', chillFoe: 'Урон по ознобу', chillProc: 'Шанс озноба', coverNb: 'Прикрытие соседа', critBleed: 'Кровотечение при крите', critBlind: 'Ослепление при крите', critBurn: 'Поджог при крите', critPierceWard: 'Крит сквозь щиты', dmgHeal: 'Лечение от урона', dodgeNext: 'Выстрел после уклонения', firstTeam: 'Урон команды в 1-й ход', guardAura: 'Аура защиты стойки', healNext: 'Удар после лечения', healRegen: 'Регенерация после лечения', healSplash: 'Всплеск лечения', highFoe: 'Урон по здоровым', highSelf: 'Урон при высоком HP', huntMark: 'Охотничья метка', killHit: 'Добивание врага', lastStand: 'Последний рубеж', lineCut: 'Защита соратников по линии', lowHeal: 'Лечение раненых', multiLow: 'Залп по раненым', overShield: 'Щит избытка лечения', phoenixHeart: 'Сердце феникса', ricochet: 'Рикошет выстрела', sameFoe: 'Пристрелка', shieldDmg: 'Урон под щитом', shieldUp: 'Прочность накладываемых щитов', startShield: 'Стартовый барьер', startWard: 'Стартовый оберег', taunt: 'Провокация', thorns: 'Шипы на щите', trap: 'Капкан', underShield: 'Защита под щитом', weakFoe: 'Урон по ослабленным', winter: 'Вечная зима' },
+
+        /* v11.7.1: fx-ключи-механики (1 = эффект включён). Это НЕ числовые
+           бонусы: «Ангел-хранитель +1%» или «Последний рубеж +2%» — ложь.
+           Такие узлы описываются полным текстом node.text, а в сводке
+           «Что дают открытые навыки» они не участвуют. */
+        fxFlags: { angel: 1, lastStand: 1, phoenixHeart: 1, winter: 1, critPierceWard: 1, killHit: 1 },
+
+        /* v11.7.1: единицы fx-значений для сводки. По умолчанию «%»;
+           исключения — плоские пункты, штуки и секунды (как в текстах). */
+        fxUnits: { def: '', critDmg: '', skelN: ' шт.', skelT: ' сек.' },
 
         /* Категории прокачки способностей Арены (как в /api/skmap: ab.br[].next). */
         ARENA_KINDS: [['lv', 'Ступень'], ['pow', 'Мощь'], ['eff', 'Эффект'], ['dur', 'Длительность']],
@@ -5433,45 +5445,85 @@ Object.assign(Utils, UtilsApi);
 
         /**
          * Текст навыка с подстановкой значений fx за текущий ранг.
+         *
+         * Шаблон берётся из node.text (как в игре, site/skills.js: txt()).
+         * Числовые fx умножаются на ранг; для resist/pierce подставляется
+         * «сырое» значение — в текстах это ШАНС избежать яда/тины и процент
+         * игнорируемой брони, а не пункты характеристики. Поэтому ложное
+         * «характеристика "Сопротивление" +N» больше НЕ дописывается:
+         * иначе нода «Чистота» (шанс 40%) выглядела как +40% сопротивления.
+         *
          * Макросы cleaveBoss/penBoss/critX считаются на лету — их нет в fx
          * (см. kv() в reference/LegionFrontSRC/site/skills.js).
+         *
+         * @param {object} node узел из /api/skills
+         * @param {number} rank ранг (1…max)
+         * @returns {string} готовое описание
          */
         formatNodeText(node, rank) {
-            if (!node || !node.text) return '';
+            if (!node) return '';
             const r = Math.max(1, +rank || 1);
             const fx = node.fx || {};
-            const fromFx = this.xstatFromFx();
-            const fmt = (val) => Number.isInteger(val) ? String(val) : val.toFixed(1).replace(/\.0$/, '').replace('.', ',');
-            const scaleOf = (key) => {
-                const s = +fromFx[key];
-                return isFinite(s) ? s : 1;
+            const has = (k) => Object.prototype.hasOwnProperty.call(fx, k);
+            const fmt = (val) => {
+                const n = Math.round((+val || 0) * 10) / 10;
+                return Number.isInteger(n) ? String(n) : String(n).replace('.', ',');
             };
-            const rawText = String(node.text);
 
-            let out = rawText.replace(/\{(\w+)\}/g, (match, key) => {
-                if (key === 'cleaveBoss') return fmt((fx.cleave || 0) * r * 0.4);
-                if (key === 'penBoss') return fmt((fx.pierce || 0) * r / 20);
-                if (key === 'critX') return fmt(2 + (fx.critDmg || 0) * r / 100);
-                // v11.7.0: {resist}/{pierce} в тексте — БАЗОВЫЙ ШАНС срабатывания
-                // умения (например, «10%»), поэтому fx умножается ТОЛЬКО на ранг:
-                // fromFx (0.5) применяется лишь к примечаниям о характеристиках.
-                if (fx[key] !== undefined) return fmt(fx[key] * r);
-                return match;
-            });
+            // В игре крит считается от ×1,5, когда у героя есть вторичные
+            // статы (XON в site/skills.js), иначе от ×2.
+            const xd = (typeof G !== 'undefined' && G && G.LGGameData && G.LGGameData.xstats) || null;
+            const hasXs = !!(this.hero && this.hero.xs && Object.keys(this.hero.xs).length);
+            const critBase = (hasXs && xd && +(xd.base || {}).critDmg > 0)
+                ? 1 + (+xd.base.critDmg / 100)
+                : 2;
+            const hasText = !!node.text;
+            const rawText = hasText ? String(node.text) : this.describeFx(fx, r);
 
-            // v11.7.0: примечания добавляются ВСЕГДА, когда в fx есть resist/
-            // pierce: игра дописывает вторичные статы даже без плейсхолдера
-            // в тексте («Физ. урон +5 · характеристика «Сопротивление» +30»).
+            let out = rawText
+                .replace(hasXs ? /×2 → ×/ : /$^/, () => `×${fmt(critBase)} → ×`)
+                .replace(/\{(\w+)\}/g, (match, key) => {
+                    if (key === 'critX') return fmt(critBase + (fx.critDmg || 0) * r / 100);
+                    if (key === 'cleaveBoss') return fmt((fx.cleave || 0) * r * 0.4);
+                    if (key === 'penBoss') return fmt((fx.pierce || 0) * r / 20);
+                    if (has(key)) return fmt(fx[key] * r);
+                    return match;
+                });
+
+            // Примечания — только для эффектов, которых НЕТ в шаблоне.
+            // Если {resist}/{pierce} уже подставлены, текст игры самодостаточен
+            // и дублировать их «характеристиками» не нужно.
             const notes = [];
-            if (fx.resist !== undefined) {
-                notes.push(`характеристика «Сопротивление» +${fmt(fx.resist * r * scaleOf('resist'))}`);
+            if (hasText && has('resist') && !/\{resist\}/.test(rawText)) {
+                notes.push(`шанс избежать яда и тины +${fmt(fx.resist * r)}%`);
             }
-            if (fx.pierce !== undefined) {
-                notes.push(`характеристика «Пробивание» +${fmt(fx.pierce * r * scaleOf('pierce'))}%`);
+            if (hasText && has('pierce') && !/\{pierce\}/.test(rawText)) {
+                const scale = +this.xstatFromFx().pierce;
+                notes.push(`характеристика «Пробивание» +${fmt(fx.pierce * r * (isFinite(scale) ? scale : 1))}%`);
             }
             if (notes.length) out += ' · ' + notes.join(' · ');
 
             return out;
+        },
+
+        /**
+         * v11.7.1: запасное описание узла, если игра не прислала node.text.
+         * Собирает только числовые бонусы; механики-флаги пропускает.
+         *
+         * @param {object} fx карта эффектов узла
+         * @param {number} rank ранг
+         * @returns {string}
+         */
+        describeFx(fx, rank) {
+            const r = Math.max(1, +rank || 1);
+            const parts = [];
+            for (const [k, v] of Object.entries(fx || {})) {
+                if (this.isSkipFx(k) || this.fxFlags[k] || !isFinite(+v) || !this.fxNames[k]) continue;
+                const unit = (k in this.fxUnits) ? this.fxUnits[k] : '%';
+                const val = Math.round(+v * r * 10) / 10;
+                parts.push(`${this.fxNames[k]} +${String(val).replace('.', ',')}${unit}`);
+            }
+            return parts.join(' · ');
         },
 
         /** Кнопка BuildSim больше не нужна (её ведёт HeroPlanner), но init
@@ -6855,43 +6907,36 @@ Object.assign(Utils, UtilsApi);
                 (B.nodes || []).forEach((n) => {
                     const r = Math.min(Math.max(1, +n.max || 1), +st.nodes[n.id] || 0);
                     if (!r) return;
-                    const t = this.formatNodeText(n, r);
-                    // «Физ. урон +15%» -> { label, sign, suf, v }
-                    const m = /^([А-Яа-яЁё. ]{3,26}?) ?([+−-])(\d+(?:[.,]\d+)?)(%?)$/.exec(t);
-                    if (m) {
-                        const key = m[1].trim() + m[2] + m[4];
-                        const v = parseFloat(m[3].replace(',', '.'));
-                        const hit = map.get(key);
-                        if (hit) { hit.v += v; hit.names.push(n.name); }
-                        else {
-                            const item = { label: m[1].trim(), sign: m[2] === '−' ? '−' : m[2], suf: m[4], v, color: this.branchColor(bi), names: [n.name] };
-                            map.set(key, item);
-                            out.push(item);
-                        }
-                        return;
-                    }
-                    // Фолбэк: структурированные fx узла (текст не распознан).
-                    const fromFx = this.xstatFromFx();
+                    // v11.7.1: сводка строится по ВСЕМ fx узла, а не только по
+                    // тексту, начинающемуся с «Название +N%». Так вершины
+                    // веток и ноды с несколькими эффектами больше не теряются.
                     for (const [fk, fv] of Object.entries(n.fx || {})) {
-                        if (this.isSkipFx(fk) || !isFinite(+fv)) continue;
-                        const pct = ['critDmg', 'skelN', 'skelT', 'def', 'resist', 'pierce'].indexOf(fk) < 0;
-                        // resist/pierce: сырой fx -> стат через fromFx (0.5),
-                        // иначе сводка удваивала значения (+60 вместо +30).
-                        const scale = isFinite(+fromFx[fk]) ? +fromFx[fk] : 1;
-                        const amount = (+fv) * r * scale;
-                        const key = 'fx:' + fk;
-                        const hit = map.get(key);
-                        if (hit) { hit.v += amount; hit.names.push(n.name); }
-                        else {
-                            // v11.7.1: подписи fxNames без «%»/«+», но если
-                            // живой ключ пришёл с хвостом знака — обрезаем его,
-                            // чтобы не получить «Крит %%».
-                            let rawLabel = String(this.fxNames[fk] || fk);
-                            if (pct === true) rawLabel = rawLabel.replace(/\s*[%+]+$/, '').trim();
-                            const item = { label: rawLabel, sign: '+', suf: pct ? '%' : '', v: amount, color: this.branchColor(bi), names: [n.name] };
-                            map.set(key, item);
-                            out.push(item);
+                        if (this.isSkipFx(fk) || this.fxFlags[fk] || !isFinite(+fv) || !+fv) continue;
+                        let label = this.fxNames[fk];
+                        // Неизвестный ключ не выдумываем: лучше пропустить,
+                        // чем показать «+1%» вместо описания механики.
+                        if (!label) continue;
+                        // Ключ resist двузначный: в большинстве узлов это шанс
+                        // избежать яда/тины, но в отдельных ветках — настоящая
+                        // характеристика «Сопротивление». Смотрим на текст узла,
+                        // чтобы не путать эти механики.
+                        const ntext = String(n.text || '').toLowerCase();
+                        if (fk === 'resist') {
+                            label = /сопротивлен/.test(ntext) ? 'Сопротивление' : 'Шанс избежать яда и тины';
+                        } else if (fk === 'pierce' && !/брон/.test(ntext)) {
+                            label = 'Пробивание';
                         }
+                        // Значение — как в тексте узла (fx × ранг), без пересчёта
+                        // в пункты характеристики: resist здесь — шанс избежать
+                        // яда/тины, pierce — процент игнорируемой брони.
+                        const amount = +fv * r;
+                        const key = 'fx:' + fk + ':' + label;
+                        const hit = map.get(key);
+                        if (hit) { hit.v += amount; hit.names.push(n.name); continue; }
+                        const unit = (fk in this.fxUnits) ? this.fxUnits[fk] : '%';
+                        const item = { label, sign: '+', suf: unit, v: amount, color: this.branchColor(bi), names: [n.name] };
+                        map.set(key, item);
+                        out.push(item);
                     }
                 });
             });
@@ -7354,10 +7399,15 @@ Object.assign(Utils, UtilsApi);
             { id: 'trinket', name: 'Амулет', icon: '📿' }
         ],
         /*
-         * Веса боевой мощи (power): Σ stat[k] × POW[k] плюс +2 за каждый
-         * уровень заточки надетых вещей — та же логика, что в карточке героя.
+         * v11.7.1: «Индекс билда» — ВНУТРЕННЯЯ оценка Legion Ultimate
+         * (Σ stat[k] × POW[k] + 2 за каждый уровень заточки). Это НЕ игровой
+         * рейтинг силы «⚔» из карточки героя: тот считает сервер по своим
+         * правилам, а в /api/me поля power обычно нет. Индекс нужен только
+         * для честного сравнения «Сейчас → Примерка».
          */
         FIT_POW: { atk: 1, mag: 1, def: 1, hp: 0.25, crit: 0.8, critDmg: 0.2, dodge: 0.8, pierce: 0.8, healPow: 0.5, luck: 0.5, resist: 0.5 },
+        /* Подписи весов — для подробного title-тултипа индекса. */
+        FIT_POW_LABELS: { atk: 'Физ. урон', mag: 'Магия', def: 'Броня', hp: 'Макс. HP', crit: 'Крит', critDmg: 'Сила крита', dodge: 'Уклонение', pierce: 'Пробивание', healPow: 'Сила лечения', luck: 'Удача', resist: 'Сопротивление' },
         /* Потолки вторичных характеристик (xstats.max из game-data.js). */
         FIT_CAPS: { crit: 50, critDmg: 200, dodge: 35, pierce: 75, healPow: 100, luck: 100 },
         /* Состояние примерки: моделируемый класс/уровень, флаг бонусов
@@ -7611,9 +7661,10 @@ Object.assign(Utils, UtilsApi);
 
         /**
          * Текущие характеристики героя из /api/me: первичные лежат в
-         * hero.stats, вторичные — в hero.xs. Мощь считается той же формулой,
-         * что и у примерки (Σ × POW + 2 за уровень заточки), иначе сравнение
-         * «Было → Стало» было бы нечестным.
+         * hero.stats, вторичные — в hero.xs. Индекс билда считается той же
+         * формулой, что и у примерки (Σ × POW + 2 за уровень заточки), иначе
+         * сравнение «Было → Стало» было бы нечестным. Это не серверный
+         * рейтинг ⚔ — см. FIT_POW и powerTooltip().
          *
          * @param {object} h hero из /api/me
          * @returns {{stats:object, power:number, penalty:number, parts:Array, critMul:number, enTotal:number}}
@@ -7642,6 +7693,55 @@ Object.assign(Utils, UtilsApi);
         },
 
         /**
+         * v11.7.1: нативный рейтинг силы героя («⚔ 488» в карточке), если
+         * сервер его прислал. В /api/me поля power обычно нет — число считает
+         * сервер и отдаёт, например, в карточке героя гильдии
+         * (/api/guilds/hero, docs/API.md). Поэтому используем его только
+         * когда оно реально есть и никогда не подменяем им индекс билда.
+         *
+         * @param {object} h hero из /api/me
+         * @returns {number} рейтинг или 0, если сервер его не передал
+         */
+        nativeHeroPower(h) {
+            const v = +(h && h.power);
+            return Number.isFinite(v) && v > 0 ? Math.round(v) : 0;
+        },
+
+        /**
+         * v11.7.1: подробная расшифровка индекса билда для title-тултипа.
+         * Показывает каждый вес, вклад заточки и итог, а также честно
+         * предупреждает, что это не игровой рейтинг ⚔.
+         *
+         * @param {object} stats характеристики
+         * @param {number} enTotal суммарная заточка надетых вещей
+         * @param {number} power посчитанный индекс
+         * @param {number} nativePower нативный рейтинг игры (0 — неизвестен)
+         * @returns {string} многострочная подсказка
+         */
+        powerTooltip(stats, enTotal, power, nativePower) {
+            const fmt = (v) => String(Math.round((+v || 0) * 10) / 10).replace('.', ',');
+            const lines = [
+                `Индекс эффективности билда: ${Math.round(+power || 0)}`,
+                'Это внутренняя оценка Legion Ultimate для сравнения вариантов, а не рейтинг ⚔ из карточки героя.',
+                '',
+                'Из чего складывается:'
+            ];
+            for (const [k, w] of Object.entries(this.FIT_POW)) {
+                const v = +(stats && stats[k]) || 0;
+                if (!v) continue;
+                lines.push(`• ${this.FIT_POW_LABELS[k] || k}: ${v} × ${String(w).replace('.', ',')} = ${fmt(v * w)}`);
+            }
+            if (+enTotal > 0) lines.push(`• Заточка: ${enTotal} ур. × 2 = ${+enTotal * 2}`);
+            lines.push('', `Итого: ${Math.round(+power || 0)}`);
+            if (+nativePower > 0) {
+                lines.push('', `Рейтинг игры ⚔: ${Math.round(+nativePower)} (пришёл с сервера)`);
+            } else {
+                lines.push('', 'Рейтинг ⚔ в карточке героя считает сервер по своей формуле; в /api/me это число не передаётся, поэтому здесь показан только индекс билда.');
+            }
+            return lines.join('\n');
+        },
+
+        /**
          * Точный расчёт характеристик «примерки»: база уровня + 5 предметов
          * на выбранной заточке + бонусы созвездия − штраф экипировки.
          *
@@ -7653,7 +7753,8 @@ Object.assign(Utils, UtilsApi);
          *    healPow 100, luck 100;
          *  - штраф экипировки (gearPenalty, максимум 50%) режет mag у
          *    mage/priest/necromancer и atk у остальных классов;
-         *  - мощь = Σ stat × POW + 2 за каждый уровень заточки.
+         *  - индекс билда = Σ stat × POW + 2 за каждый уровень заточки
+         *    (внутренняя оценка, не рейтинг ⚔ из профиля).
          *
          * @param {string} role класс, для которого считаем
          * @param {number} level уровень героя (1…50)
@@ -8499,17 +8600,24 @@ Object.assign(Utils, UtilsApi);
                     const critMul = fit ? fit.critMul : cur.critMul;
                     const skillsNote = !this.fitting.useSkills ? ''
                         : (fit && fit.skillsUsed ? ' · 🌟 созвездие учтено' : ' · 🌟 созвездие недоступно');
+                    // v11.7.1: нативный рейтинг ⚔ (если сервер его отдал) и
+                    // подробная расшифровка индекса билда для title.
+                    const nativePw = this.nativeHeroPower(h);
+                    const pwTipBefore = this.powerTooltip(cur.stats, cur.enTotal, pwBefore, nativePw);
+                    const pwTipAfter = fit ? this.powerTooltip(fit.stats, fit.enTotal, pwAfter, nativePw) : pwTipBefore;
+                    const pwTip = `Сейчас:\n${pwTipBefore}` + (fit ? `\n\nПримерка:\n${pwTipAfter}` : '');
                     sideEl.innerHTML = `<div class="hp-side-head">Характеристики</div>
                         <div class="hp-side-cols"><span>Параметр</span><span>Сейчас → Примерка</span><span>Δ</span></div>
                         ${SIDE_ROWS.map(statRow).join('')}
                         <div class="hp-side-sep"></div>
-                        <div class="hp-side-row strong"><span class="hp-side-name">Боевая мощь</span>`
-                        + `<span class="hp-side-vals">${pwBefore} → <b>${pwAfter}</b></span>${delta(pwBefore, pwAfter)}</div>
-                        <div class="hp-side-row"><span class="hp-side-name">Штраф экипировки</span>`
+                        <div class="hp-side-row strong" title="${Utils.escapeHtml(pwTip)}"><span class="hp-side-name">Индекс билда <span class="hp-side-info" aria-hidden="true">ⓘ</span></span>`
+                        + `<span class="hp-side-vals">${pwBefore} → <b>${pwAfter}</b></span>${delta(pwBefore, pwAfter)}</div>`
+                        + (nativePw ? `<div class="hp-side-row" title="Рейтинг силы героя ⚔ из карточки персонажа. Его считает сервер; на индекс билда он не влияет."><span class="hp-side-name">Рейтинг игры ⚔</span><span class="hp-side-vals">${nativePw}</span><span class="hp-side-delta same"></span></div>` : '')
+                        + `<div class="hp-side-row"><span class="hp-side-name">Штраф экипировки</span>`
                         + `<span class="hp-side-vals">${pen ? '−' + pen + '%' : 'нет'}</span><span class="hp-side-delta same"></span></div>
                         <div class="hp-side-row"><span class="hp-side-name">Множитель крита</span>`
                         + `<span class="hp-side-vals">×${critMul.toFixed(2)}</span><span class="hp-side-delta same"></span></div>
-                        <div class="hp-side-foot">Заточка: Σ +${fit ? fit.enTotal : cur.enTotal} ур. · +2 мощи за уровень${skillsNote}</div>`;
+                        <div class="hp-side-foot">Заточка: Σ +${fit ? fit.enTotal : cur.enTotal} ур. · +2 к индексу за уровень${skillsNote} · индекс ≠ ⚔ в профиле</div>`;
                 };
 
                 /**
