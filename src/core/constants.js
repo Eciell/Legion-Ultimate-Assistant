@@ -85,17 +85,23 @@
      * (по умолчанию false — выключено, включается пользователем вручную).
      *
      * citymonGatherSize — размер плашки уведомлений: 'S' / 'M' / 'L' (по умолчанию 'L').
+     *
+     * addonHighlight — подсветка ников пользователей аддона в нативном чате
+     * (modules/addon-presence.js). Ключ localStorage намеренно совпадает с
+     * LEGION_ADDON_HIGHLIGHT из 11.6.x: выбор пользователей сохраняется.
      * ------------------------------------------------------------
      */
     const DEFAULT_SETTINGS = Object.freeze({
         autoSkipMonsters: false,
         citymonGatherEnabled: false,
         citymonGatherSize: 'L',
+        addonHighlight: true,
     });
     const SETTINGS_KEYS = Object.freeze({
         autoSkipMonsters: 'LEGION_AUTO_SKIP_MONSTERS',
         citymonGatherEnabled: 'LEGION_CITYMON_GATHER_ENABLED',
         citymonGatherSize: 'LEGION_CITYMON_GATHER_SIZE',
+        addonHighlight: 'LEGION_ADDON_HIGHLIGHT',
     });
     const Settings = {
         // Есть ли такая настройка в реестре (защита от опечаток в имени).

@@ -12,7 +12,9 @@
         ENCH: {
             max: 15,
             // v11.6.5e: шансы после ребаланса (было 95/90/80/70/55/42/30/20/12/7/4/2/1/0.5/0).
-            // Индекс = текущий уровень: chance[1] — шанс шага +1 -> +2.
+            // ВАЖНО (P3-10): chance[L] — шанс шага НА уровень +L. То есть
+            // chance[1] = 100 — это шаг +0 -> +1, а chance[2] — +1 -> +2.
+            // Код renderTable/enchantChance(lv) индексирует верно — не менять.
             chance: [0, 100, 95, 90, 80, 70, 60, 50, 40, 32, 25, 20, 16, 12, 9, 6],
             // v11.7 (клиент b62dcb896a): амулет (trinket) официально входит в
             // enchant.slots и точится по общей шкале +0..+15. Список берём из
@@ -135,6 +137,21 @@
             const i = Math.min(15, +level || 0);
             const live = liveEnchantChance(i);
             return Number.isFinite(live) ? live : (this.ENCH.chance[i] || 0);
+        },
+
+        /**
+         * v11.7.1.1 (P2-07): бонус «Счастливой звезды» к шансу, %.
+         *
+         * Берётся из живой таблицы игры (enchant.star = 25), а не из
+         * захардкоженной константы: при ребалансе игра сообщит новое
+         * значение сама. Фолбэк — 25, если таблицы ещё нет.
+         *
+         * @returns {number} надбавка к шансу в процентных пунктах
+         */
+        enchantStarBonus() {
+            const live = liveEnchant();
+            const v = live ? +live.star : NaN;
+            return (Number.isFinite(v) && v > 0) ? v : 25;
         },
 
         // v11.6.5e: цена попытки в % от стоимости предмета — из живой таблицы
@@ -474,7 +491,14 @@
             if (skillsBonuses) {
                 stats.hp += Math.round(+skillsBonuses.hp || 0);
                 stats.def += Math.round(+skillsBonuses.def || 0);
-                stats.atk += Math.round(stats.atk * (+skillsBonuses.atkPct || 0) / 100);
+                const atkPct = +skillsBonuses.atkPct || 0;
+                const dmgPct = +skillsBonuses.dmgPct || 0;
+                const rangedPct = +skillsBonuses.rangedPct || 0;
+                // v11.7.1.1 (P1-02): atkPct (melee), dmgPct («весь урон») и
+                // rangedPct (урон луком) — РАЗНЫЕ множители, поэтому
+                // перемножаются, а не складываются. ranged — только лучнику.
+                stats.atk = Math.round(stats.atk * (1 + atkPct / 100) * (1 + dmgPct / 100));
+                if (role === 'archer') stats.atk = Math.round(stats.atk * (1 + rangedPct / 100));
                 stats.mag += Math.round(stats.mag * (+skillsBonuses.magPct || 0) / 100);
                 for (const k of ['crit', 'critDmg', 'dodge', 'pierce', 'healPow', 'luck', 'resist']) {
                     stats[k] += +skillsBonuses[k] || 0;
@@ -919,6 +943,8 @@
                     const hasPath = preview > curEn;
                     const starPrice = this.resourcePrice('star');
                     const spherePrice = this.resourcePrice('sphere');
+                    // v11.7.1.1: живой бонус звезды (enchant.star), фолбэк 25.
+                    const starBonus = this.enchantStarBonus();
 
                     // Компактная подпись стата для колонки «Статы»: убираем
                     // хвостовой «%» из statNames («Крит %» -> «Крит»), значение
@@ -953,8 +979,10 @@
                         let bonusPct = 0;
                         if (!isBase) {
                             chance = this.enchantChance(lv);
-                            // ⭐ даёт +25% к шансу — показываем шанс уже с надбавкой.
-                            if (useStar) chance += 25;
+                            // ⭐ даёт живой бонус (обычно +25%) к шансу —
+                            // показываем шанс уже с надбавкой, но не выше 100%.
+                            if (useStar) chance += starBonus;
+                            chance = Math.min(100, chance);
 
                             // Отмеченный усилитель входит в стоимость попытки:
                             // колонка «Попытка» показывает реальные траты шага.
@@ -970,7 +998,7 @@
                                 ? ' <span title="Цена включает ресурс с аукциона (медиана сети за 72 часа / последние 100 цен)" style="cursor:help; font-size:11px;">📈</span>'
                                 : ''}`;
 
-                            chips = `<button type="button" class="hp-mat-btn star ${useStar ? 'active' : ''}" data-lv="${lv}" title="Счастливая звезда (+25% к шансу, +${Utils.formatMoney(starPrice)})">⭐</button>`
+                            chips = `<button type="button" class="hp-mat-btn star ${useStar ? 'active' : ''}" data-lv="${lv}" title="Счастливая звезда (+${starBonus}% к шансу, +${Utils.formatMoney(starPrice)})">⭐</button>`
                                 + `<button type="button" class="hp-mat-btn sphere ${useSphere ? 'active' : ''}" data-lv="${lv}" title="Сфера сохранения (защита от поломки, +${Utils.formatMoney(spherePrice)})">🌐</button>`;
 
                             // Бонус заточки на этом уровне (GAME_DATA.ENCHANT_MULTIPLIERS, %)
@@ -1008,8 +1036,12 @@
                         let stepCost = step;
                         let chance = this.enchantChance(lv);
                         // Ресурсы выбранные кнопками ⭐/🌐 в строках таблицы.
-                        if (this.allocatedStars[lv]) { stepCost += starPrice; chance += 25; starsUsed++; }
+                        if (this.allocatedStars[lv]) { stepCost += starPrice; chance += starBonus; starsUsed++; }
                         if (this.allocatedSpheres[lv]) { stepCost += spherePrice; spheresUsed++; }
+                        // v11.7.1.1 (P2-07): шанс не может быть выше 100%.
+                        // Ограничиваем ДО матожидания: при c=95 и star=25
+                        // сумма 120 завышала ожидаемое число попыток.
+                        chance = Math.min(100, chance);
                         // 100 / chance — ожидаемое число попыток на один шаг
                         // (1/p). Сумма по пути даёт матожидание попыток на всю
                         // цель; при 0% шаг бесконечен, поэтому Infinity.
@@ -1236,6 +1268,8 @@
 
                 // Порядок строк как в нативной карточке героя: сначала основные
                 // характеристики, затем вторичные (третий элемент — единица).
+                // v11.7.1.1: resist показываем в ПУНКТАХ без «%» — skillBonuses()
+                // уже применил fromFx.resist (0.5), как клиент игры.
                 const SIDE_ROWS = [
                     ['hp', 'Макс. HP', ''], ['atk', 'Физ. урон', ''], ['mag', 'Магия', ''], ['def', 'Броня', ''],
                     ['crit', 'Крит', '%'], ['critDmg', 'Сила крита', '%'], ['dodge', 'Уклонение', '%'],

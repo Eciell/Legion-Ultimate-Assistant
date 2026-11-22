@@ -115,8 +115,9 @@
          * Модалка служебных настроек аддона (открывается из FAB-меню).
          * Обработчики кнопок навешивает UI.openSettings().
          *
-         * 11.7.0: настройки чата (7TV, перехват ленты, подсветка ников)
-         * удалены вместе с подсистемой чата — параметров у шаблона больше нет.
+         * 11.7.0: из модалки убраны настройки чата (7TV, перехват ленты).
+         * 11.7.2: подсветка ников пользователей аддона возвращена отдельным
+         * лёгким модулем modules/addon-presence.js.
          */
         settingsModal() {
             return `
@@ -137,6 +138,14 @@
                     <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
                         <span>⚔️ Боевой ассистент в походах</span>
                         <input type="checkbox" class="lg-toggle" id="modal-chk-combat-assist">
+                    </label>
+                    <!-- 11.7.2: подсветка ников пользователей аддона в нативном
+                         чате. Состояние хранит Settings.get/set('addonHighlight')
+                         (localStorage 'LEGION_ADDON_HIGHLIGHT'), CSS генерирует
+                         modules/addon-presence.js. -->
+                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
+                        <span>⚡ Подсветка ников Legion</span>
+                        <input type="checkbox" class="lg-toggle" id="modal-chk-addon-hl">
                     </label>
                     <!-- 11.7.0: автоскип боёв с монстрами (.cm-dlg). Состояние
                          ставит и сохраняет UI.openSettings() (Settings,

@@ -25,21 +25,33 @@
         /* fx-ключи -> подписи в сводке «Что дают открытые навыки».
            v11.7.1: знаки «%» и «+» в подписях НЕ дублируются — суффикс и знак
            значения добавляет statList() (item.sign/item.suf). */
-        fxNames: { melee: 'Физ. урон', magic: 'Магия', hp: 'Макс. здоровье', def: 'Броня', healPow: 'Сила лечения', healIn: 'Входящее лечение', crit: 'Шанс крита', critDmg: 'Сила крита', skel: 'Урон скелетов', skelT: 'Время скелетов', leech: 'Вампиризм', block: 'Снижение получаемого урона', dodge: 'Уклонение', lead: 'Урон по боссам', first: 'Урон в 1-й ход', dmg: 'Весь урон', pierce: 'Пробивание брони', resist: 'Шанс избежать яда и тины', healCrit: 'Шанс сильного лечения', regen: 'Регенерация', low: 'Урон при низком HP', ranged: 'Урон луком', poison: 'Отрава', steal: 'Кража', loot: 'Добыча', skelN: 'Скелетов', volley: 'Залп', shieldBlock: 'Снижение урона со щитом', trapDodge: 'Избегание ловушек', steady: 'Промах→удар', cleave: 'Замах', cleaveBoss: 'Замах по боссу', penBoss: 'Бронебой по боссу', drain: 'Вытягивание', hex: 'Проклятие', holy: 'По нежити', poisonT: 'Время отравы', abNext: 'Удар после умения', angel: 'Ангел-хранитель', backFoe: 'Урон по дальней линии', banner: 'Знамя когорты', breakHeal: 'Лечение при разбитом щите', burnChain: 'Цепной огонь', burnFoe: 'Урон по горящим', chillFoe: 'Урон по ознобу', chillProc: 'Шанс озноба', coverNb: 'Прикрытие соседа', critBleed: 'Кровотечение при крите', critBlind: 'Ослепление при крите', critBurn: 'Поджог при крите', critPierceWard: 'Крит сквозь щиты', dmgHeal: 'Лечение от урона', dodgeNext: 'Выстрел после уклонения', firstTeam: 'Урон команды в 1-й ход', guardAura: 'Аура защиты стойки', healNext: 'Удар после лечения', healRegen: 'Регенерация после лечения', healSplash: 'Всплеск лечения', highFoe: 'Урон по здоровым', highSelf: 'Урон при высоком HP', huntMark: 'Охотничья метка', killHit: 'Добивание врага', lastStand: 'Последний рубеж', lineCut: 'Защита соратников по линии', lowHeal: 'Лечение раненых', multiLow: 'Залп по раненым', overShield: 'Щит избытка лечения', phoenixHeart: 'Сердце феникса', ricochet: 'Рикошет выстрела', sameFoe: 'Пристрелка', shieldDmg: 'Урон под щитом', shieldUp: 'Прочность накладываемых щитов', startShield: 'Стартовый барьер', startWard: 'Стартовый оберег', taunt: 'Провокация', thorns: 'Шипы на щите', trap: 'Капкан', underShield: 'Защита под щитом', weakFoe: 'Урон по ослабленным', winter: 'Вечная зима' },
+        fxNames: { melee: 'Физ. урон', magic: 'Магия', hp: 'Макс. здоровье', def: 'Броня', healPow: 'Сила лечения', healIn: 'Входящее лечение', crit: 'Шанс крита', critDmg: 'Сила крита', skel: 'Урон скелетов', skelT: 'Время скелетов', leech: 'Вампиризм', block: 'Снижение получаемого урона', dodge: 'Уклонение', lead: 'Урон по боссам', first: 'Урон в 1-й ход', dmg: 'Весь урон', pierce: 'Пробивание брони', resist: 'Шанс избежать яда и тины', healCrit: 'Шанс сильного лечения', regen: 'Регенерация', low: 'Урон при низком HP', ranged: 'Урон луком', poison: 'Отрава', steal: 'Кража', loot: 'Добыча', skelN: 'Скелетов', volley: 'Залп', shieldBlock: 'Снижение урона со щитом', trapDodge: 'Избегание ловушек', steady: 'Промах→удар', cleave: 'Замах', cleaveBoss: 'Замах по боссу', penBoss: 'Бронебой по боссу', drain: 'Вытягивание', hex: 'Проклятие', holy: 'По нежити', poisonT: 'Время отравы', abNext: 'Удар после умения', angel: 'Ангел-хранитель', backFoe: 'Урон по дальней линии', banner: 'Знамя когорты', breakHeal: 'Лечение при разбитом щите', burnChain: 'Цепной огонь', burnFoe: 'Урон по горящим', chillFoe: 'Урон по ознобу', chillProc: 'Шанс озноба', coverNb: 'Прикрытие соседа', critBleed: 'Кровотечение при крите', critBlind: 'Ослепление при крите', critBurn: 'Поджог при крите', critPierceWard: 'Крит сквозь щиты', dmgHeal: 'Лечение от урона', dodgeNext: 'Выстрел после уклонения', firstTeam: 'Урон команды в 1-й ход', guardAura: 'Аура защиты стойки', healNext: 'Удар после лечения', healRegen: 'Регенерация после лечения', healSplash: 'Всплеск лечения', highFoe: 'Урон по здоровым', highSelf: 'Урон при высоком HP', huntMark: 'Охотничья метка', killHit: 'Добивание врага', lastStand: 'Последний рубеж', lineCut: 'Защита соратников по линии', lowHeal: 'Лечение раненых', multiLow: 'Залп по раненым', overShield: 'Щит избытка лечения', phoenixHeart: 'Сердце феникса', ricochet: 'Рикошет выстрела', sameFoe: 'Пристрелка', shieldDmg: 'Урон под щитом', shieldUp: 'Прочность накладываемых щитов', startShield: 'Стартовый барьер', startWard: 'Стартовый оберег', taunt: 'Провокация', thorns: 'Шипы на щите', trap: 'Капкан', underShield: 'Защита под щитом', weakFoe: 'Урон по ослабленным', winter: 'Вечная зима',
+            /* v11.7.1.1: механики Разбойника (16), Некроманта (10) и Паладина (9).
+               Покрывают 110 fx-ключей /api/skills. Условные и скелетные эффекты
+               сюда добавлены ТОЛЬКО для подписей: в MAP/skillBonuses() их нет,
+               иначе «Примерка» завышала бы базовые характеристики героя. */
+            psnProc: 'Шанс отравить обычным ударом', poisonTc: 'Шанс продлить яд на ход', psnWeak: 'Ослабление отравленных врагов', psnFoe: 'Урон по отравленным', rotHeal: 'Снижение лечения отравленных', psnCritX: 'Множитель крита яда', psnChain: 'Яд переходит на соседа при гибели', lowFoe: 'Урон по добиваемым (ниже 30% HP)', busyFoe: 'Урон по уже ходившим врагам', firstCrit: 'Первый удар в бою — всегда крит', killHeal: 'Лечение за убийство', killNext: 'Удар после убийства', critExtra: 'Шанс доп. удара при крите', critCoin: 'Шанс монет с крита (поход)', fade: 'Первый раунд не выбирают целью', dodgeHit: 'Шанс ответить после уклонения',
+            skelHpUp: 'Здоровье скелетов', skelCut: 'Защита при живом скелете', skelBurst: 'Урон при гибели скелета', startSkel: 'Скелет с начала боя', selfOver: 'Щит из избытка самолечения', deathHeal: 'Лечение за каждого павшего', darkGift: 'Доля самолечения союзнику', hexProc: 'Шанс проклясть обычным ударом', cursedFoe: 'Урон по проклятым и помеченным', curseChain: 'Проклятие переходит при гибели',
+            holyPart: 'Доля урона, становящаяся светом', selfHeal: 'Самолечение при лечении союзника', cleanse: 'Шанс снять яд и проклятие', mercyAura: 'Аура милости (урон по команде)', sacrifice: 'Жертвенное лечение союзника', coverLow: 'Прикрытие самого раненого', lowBlock: 'Защита при HP ниже половины', coverCut: 'Снижение принятого чужого урона', lightHeal: 'Лечение от ударов светом' },
 
         /* v11.7.1: fx-ключи-механики (1 = эффект включён). Это НЕ числовые
            бонусы: «Ангел-хранитель +1%» или «Последний рубеж +2%» — ложь.
            Такие узлы описываются полным текстом node.text, а в сводке
            «Что дают открытые навыки» они не участвуют. */
-        fxFlags: { angel: 1, lastStand: 1, phoenixHeart: 1, winter: 1, critPierceWard: 1, killHit: 1 },
+        fxFlags: { angel: 1, lastStand: 1, phoenixHeart: 1, winter: 1, critPierceWard: 1, killHit: 1,
+            /* v11.7.1.1: механики-флаги новых классов. mercyAura сюда НЕ
+               входит: это числовой бонус (+1% за ранг), а не «включён/нет». */
+            firstCrit: 1, fade: 1, startSkel: 1, psnChain: 1, curseChain: 1 },
 
         /* v11.7.1: единицы fx-значений для сводки. По умолчанию «%»;
-           исключения — плоские пункты, штуки и секунды (как в текстах). */
-        fxUnits: { def: '', critDmg: '', skelN: ' шт.', skelT: ' сек.' },
+           исключения — плоские пункты и штуки (как в текстах). Время
+           скелетов (skelT) меряется ХОДАМИ и склоняется по числу —
+           см. fxUnit()/pluralTurns(). */
+        fxUnits: { def: '', critDmg: '', skelN: ' шт.' },
 
         /* Категории прокачки способностей Арены (как в /api/skmap: ab.br[].next). */
         ARENA_KINDS: [['lv', 'Ступень'], ['pow', 'Мощь'], ['eff', 'Эффект'], ['dur', 'Длительность']],
-        ARENA_KIND_DEFAULT_MAX: { lv: 5, pow: 3, eff: 3, dur: 3 },
+        ARENA_KIND_DEFAULT_MAX: { lv: 5, pow: 3, eff: 3, dur: 1 },
         /* Фолбэк-шкала цены шага (когда сервер не прислал next для этой ступени). */
         ARENA_COST: { lv: [1, 3, 7, 15, 25], pow: [2, 5, 10], eff: [2, 5, 10], dur: [2, 5, 10] },
 
@@ -167,6 +179,48 @@
         isSkipFx(key) { return SKIP_FX_PREFIXES.some(p => key.indexOf(p) === 0); },
 
         /**
+         * v11.7.1.1: склонение слова «ход» для skelT («+1 ход», «+2 хода»,
+         * «+5 ходов»). В игре время скелетов измеряется ходами, а не
+         * секундами — старый fxUnits.skelT = ' сек.' врал в сводке.
+         *
+         * @param {number} value количество ходов
+         * @returns {string} 'ход' | 'хода' | 'ходов'
+         */
+        pluralTurns(value) {
+            const n = Math.abs(Math.round(+value || 0));
+            const d10 = n % 10;
+            const d100 = n % 100;
+            if (d10 === 1 && d100 !== 11) return 'ход';
+            if (d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14)) return 'хода';
+            return 'ходов';
+        },
+
+        /**
+         * v11.7.1.1: единица измерения fx для сводки/описания.
+         * skelT склоняется по итоговому значению; остальные ключи — из
+         * fxUnits, по умолчанию проценты.
+         *
+         * @param {string} key fx-ключ
+         * @param {number} value итоговое значение
+         * @returns {string} суффикс ('' | '%' | ' шт.' | ' ход' …)
+         */
+        fxUnit(key, value) {
+            if (key === 'skelT') return ' ' + this.pluralTurns(value);
+            return (key in this.fxUnits) ? this.fxUnits[key] : '%';
+        },
+
+        /** v11.7.1.1: мягкое предупреждение об неизвестном fx-ключе —
+         *  чтобы новые механики игры не терялись в сводке молча. */
+        warnUnknownFx(key, where) {
+            if (!this._fxWarned) this._fxWarned = new Set();
+            if (this._fxWarned.has(key)) return;
+            this._fxWarned.add(key);
+            try {
+                console.debug(`[LGU][BUILD SIM] неизвестный fx-ключ «${key}» (${where || 'statList'}): добавьте подпись в fxNames`);
+            } catch (err) { /* noop */ }
+        },
+
+        /**
          * Коэффициент перевода сырого fx во вторичную характеристику.
          *
          * В игре resist/pierce лежат в fx «сырыми» и переводятся в статы через
@@ -217,7 +271,7 @@
                 ? 1 + (+xd.base.critDmg / 100)
                 : 2;
             const hasText = !!node.text;
-            const rawText = hasText ? String(node.text) : this.describeFx(fx, r);
+            const rawText = hasText ? String(node.text) : this.describeFx(fx, r, node.max);
 
             let out = rawText
                 .replace(hasXs ? /×2 → ×/ : /$^/, () => `×${fmt(critBase)} → ×`)
@@ -225,20 +279,42 @@
                     if (key === 'critX') return fmt(critBase + (fx.critDmg || 0) * r / 100);
                     if (key === 'cleaveBoss') return fmt((fx.cleave || 0) * r * 0.4);
                     if (key === 'penBoss') return fmt((fx.pierce || 0) * r / 20);
+                    // v11.7.1.1: «Токсин» задаёт МНОЖИТЕЛЬ крита яда, а не
+                    // проценты: fx 0.5 на 1 ранге = ×1,5, на 2 ранге = ×2.
+                    if (key === 'psnCritX') return fmt(1 + (fx.psnCritX || 0) * r);
+                    // v11.7.1.1: на максимальном ранге яд держится всегда —
+                    // в тексте игры это «ранг 3 — всегда», поэтому 33×3 = 99
+                    // подменяем на честные 100%.
+                    if (key === 'poisonTc') {
+                        const maxRank = Math.max(1, +node.max || 1);
+                        return fmt(r >= maxRank ? 100 : (fx.poisonTc || 0) * r);
+                    }
                     if (has(key)) return fmt(fx[key] * r);
                     return match;
                 });
+
+            // v11.7.1.1: клиент с xstats живёт на базовом крите 8%, а в
+            // старых текстах узлов осталась скобка «обычно — 5%». Правим
+            // только эту пояснительную скобку, не трогая боевые «+5%».
+            if (hasXs) {
+                out = out.replace(/\(([^()]*(?:обычно|кубик)[^()]*)\)/gi, (m, body) => m.replace(/\b5\s*%/g, '8%'));
+            }
 
             // Примечания — только для эффектов, которых НЕТ в шаблоне.
             // Если {resist}/{pierce} уже подставлены, текст игры самодостаточен
             // и дублировать их «характеристиками» не нужно.
             const notes = [];
             if (hasText && has('resist') && !/\{resist\}/.test(rawText)) {
-                notes.push(`шанс избежать яда и тины +${fmt(fx.resist * r)}%`);
+                // v11.7.1.1: как в клиенте игры — в характеристику идёт
+                // fromFx.resist (обычно 0.5), то есть ПУНКТЫ без «%».
+                const scale = +this.xstatFromFx().resist;
+                notes.push(`характеристика «Сопротивление» +${fmt(fx.resist * r * (isFinite(scale) ? scale : 1))}`);
             }
             if (hasText && has('pierce') && !/\{pierce\}/.test(rawText)) {
                 const scale = +this.xstatFromFx().pierce;
-                notes.push(`характеристика «Пробивание» +${fmt(fx.pierce * r * (isFinite(scale) ? scale : 1))}%`);
+                // v11.7.1.1: как и resist — это ПУНКТЫ характеристики
+                // (fromFx 0.5), поэтому без знака «%».
+                notes.push(`характеристика «Пробивание» +${fmt(fx.pierce * r * (isFinite(scale) ? scale : 1))}`);
             }
             if (notes.length) out += ' · ' + notes.join(' · ');
 
@@ -251,16 +327,30 @@
          *
          * @param {object} fx карта эффектов узла
          * @param {number} rank ранг
+         * @param {number} [maxRank] максимум рангов узла (для poisonTc)
          * @returns {string}
          */
-        describeFx(fx, rank) {
+        describeFx(fx, rank, maxRank) {
             const r = Math.max(1, +rank || 1);
+            const mx = +maxRank || 0;
             const parts = [];
             for (const [k, v] of Object.entries(fx || {})) {
-                if (this.isSkipFx(k) || this.fxFlags[k] || !isFinite(+v) || !this.fxNames[k]) continue;
-                const unit = (k in this.fxUnits) ? this.fxUnits[k] : '%';
-                const val = Math.round(+v * r * 10) / 10;
-                parts.push(`${this.fxNames[k]} +${String(val).replace('.', ',')}${unit}`);
+                if (this.isSkipFx(k) || this.fxFlags[k] || !isFinite(+v)) continue;
+                if (!this.fxNames[k]) {
+                    this.warnUnknownFx(k, 'describeFx');
+                    continue;
+                }
+                // v11.7.1.1: на максимуме яд держится всегда — 100%, а не 99%.
+                const val = (k === 'poisonTc' && mx > 0 && r >= mx)
+                    ? 100
+                    : Math.round(+v * r * 10) / 10;
+                const txt = String(val).replace('.', ',');
+                // v11.7.1.1: psnCritX — множитель (×1,5 / ×2), не проценты.
+                if (k === 'psnCritX') {
+                    parts.push(`${this.fxNames[k]} ×${String(Math.round((1 + val) * 10) / 10).replace('.', ',')}`);
+                    continue;
+                }
+                parts.push(`${this.fxNames[k]} +${txt}${this.fxUnit(k, val)}`);
             }
             return parts.join(' · ');
         },
@@ -480,7 +570,39 @@
             return n;
         },
 
-        spFree(st) { return Math.max(0, this.spLimit() - this.spentSP(st)); },
+        /**
+         * v11.7.1.1: SP потраченные в ДРУГИХ классах. Пул очков навыков
+         * общий: free = pts − SUM(cnt по всем классам), поэтому план нельзя
+         * считать только по текущему созвездию — иначе аддон разрешал бы
+         * невозможный билд. skmap любого класса отдаёт cnt по всем 7 классам.
+         *
+         * @param {string} [cls] текущий класс (его план считает spentSP)
+         * @returns {number}
+         */
+        otherClassSpent(cls) {
+            const id = cls || this._cls;
+            const V = this.skmapCache[id];
+            const cnt = V && V.cnt;
+            if (cnt && typeof cnt === 'object') {
+                let sum = 0;
+                for (const [c, n] of Object.entries(cnt)) {
+                    if (c === id) continue;
+                    sum += Math.max(0, +n || 0);
+                }
+                return sum;
+            }
+            // Фолбэк: суммируем сохранённые ответы других классов.
+            let sum = 0;
+            for (const [c, data] of Object.entries(this.skmapCache || {})) {
+                if (c === id || !data || !data.cnt) continue;
+                sum += Math.max(0, +data.cnt[c] || 0);
+            }
+            return sum;
+        },
+
+        spFree(st) {
+            return Math.max(0, this.spLimit() - this.otherClassSpent(this._cls) - this.spentSP(st));
+        },
 
         tokenBalance() {
             const V = this.skmapCache[this._cls];
@@ -530,7 +652,15 @@
         _stepUpCost(key, kind, from) {
             const meta = this.abOf(key);
             const game = (meta && meta.up) ? (+meta.up[kind] || 0) : 0;
-            if (meta && meta.next && +meta.next[kind] > 0 && (+from || 0) === game) return +meta.next[kind];
+            // v11.7.1.1: серверный next — источник истины. Если next есть, но
+            // ключа kind в нём НЕТ, значит ступень уже на максимуме (так
+            // приходит dur=1/1 у лучника): это 0, а не повод падать в
+            // фолбэк-шкалу и завышать план.
+            if (meta && meta.next && typeof meta.next === 'object') {
+                if (!(kind in meta.next)) return 0;
+                const nextCost = +meta.next[kind] || 0;
+                if (nextCost > 0 && (+from || 0) === game) return nextCost;
+            }
             const table = this.ARENA_COST[kind] || [];
             // v11.7.1: ступень способности ('lv') начинается с 1, а pow/eff/dur
             // — с 0. Поэтому для 'lv' индекс шкалы = шаг-1, иначе первый шаг
@@ -918,9 +1048,16 @@
             // (skmap.pts) ниже этого максимума — норма, а не ошибка билда.
             E.sp.classList.toggle('over', sp > limit);
             const heroPts = +(V.pts || (this.hero && this.hero.pts) || 0);
-            E.spNote.textContent = `/ ${limit}${heroPts > 0 ? ` · у героя: ${heroPts}` : ''}`;
+            // v11.7.1.1: V.free — реально свободные SP героя (pts − SUM(cnt)).
+            // Показываем рядом с V.pts, чтобы план на максимум уровня не
+            // путался с текущим запасом.
+            const freeKnown = V && V.free != null && isFinite(+V.free);
+            const heroFree = freeKnown ? Math.max(0, +V.free) : 0;
+            E.spNote.textContent = `/ ${limit}${heroPts > 0 ? ` · у героя: ${heroPts}` : ''}`
+                + (freeKnown ? ` · свободно: ${heroFree}` : '');
             E.sp.title = `План: ${sp} из ${limit} SP (максимум уровня игры)`
-                + (heroPts > 0 ? ` · у героя сейчас ${heroPts} SP` : '');
+                + (heroPts > 0 ? ` · у героя сейчас ${heroPts} SP` : '')
+                + (freeKnown ? ` · свободно ${heroFree} SP (с учётом других классов)` : '');
 
             // Жёсткого лимита жетонов в планировщике НЕТ: остаток героя
             // (skmap.n) показываем рядом как справочный ориентир — точно так же,
@@ -1644,7 +1781,8 @@
             const out = [];
             (C.branches || []).forEach((B, bi) => {
                 (B.nodes || []).forEach((n) => {
-                    const r = Math.min(Math.max(1, +n.max || 1), +st.nodes[n.id] || 0);
+                    const nMax = Math.max(1, +n.max || 1);
+                    const r = Math.min(nMax, +st.nodes[n.id] || 0);
                     if (!r) return;
                     // v11.7.1: сводка строится по ВСЕМ fx узла, а не только по
                     // тексту, начинающемуся с «Название +N%». Так вершины
@@ -1653,8 +1791,10 @@
                         if (this.isSkipFx(fk) || this.fxFlags[fk] || !isFinite(+fv) || !+fv) continue;
                         let label = this.fxNames[fk];
                         // Неизвестный ключ не выдумываем: лучше пропустить,
-                        // чем показать «+1%» вместо описания механики.
-                        if (!label) continue;
+                        // чем показать «+1%» вместо описания механики. Но
+                        // предупреждаем в консоль, чтобы новые ключи игры
+                        // не терялись молча (v11.7.1.1).
+                        if (!label) { this.warnUnknownFx(fk, 'statList'); continue; }
                         // Ключ resist двузначный: в большинстве узлов это шанс
                         // избежать яда/тины, но в отдельных ветках — настоящая
                         // характеристика «Сопротивление». Смотрим на текст узла,
@@ -1665,15 +1805,39 @@
                         } else if (fk === 'pierce' && !/брон/.test(ntext)) {
                             label = 'Пробивание';
                         }
-                        // Значение — как в тексте узла (fx × ранг), без пересчёта
-                        // в пункты характеристики: resist здесь — шанс избежать
-                        // яда/тины, pierce — процент игнорируемой брони.
-                        const amount = +fv * r;
-                        const key = 'fx:' + fk + ':' + label;
+                        // v11.7.1.1: шанс и пункты характеристики — РАЗНЫЕ
+                        // величины. Шанс избежать яда/тины выводим сырым fx,
+                        // а «Сопротивление» — через fromFx.resist (0.5), без %.
+                        let amount = +fv * r;
+                        let unit;
+                        let sign = '+';
+                        if (fk === 'resist' && label === 'Сопротивление') {
+                            const scale = +this.xstatFromFx().resist;
+                            amount *= isFinite(scale) ? scale : 1;
+                            unit = '';
+                        } else if (fk === 'psnCritX') {
+                            // Множитель крита яда: ×1,5 на 1 ранге, ×2 на 2-м.
+                            amount = 1 + (+fv) * r;
+                            unit = '';
+                            sign = '×';
+                        } else if (fk === 'poisonTc' && r >= nMax) {
+                            // На максимальном ранге яд держится всегда: 33×3
+                            // в игре = «ранг 3 — всегда», то есть 100%, не 99%.
+                            amount = 100;
+                            unit = '%';
+                        } else {
+                            unit = this.fxUnit(fk, amount);
+                        }
+                        const key = 'fx:' + fk + ':' + label + ':' + unit
+                            + (fk === 'psnCritX' ? ':' + n.id : '');
                         const hit = map.get(key);
-                        if (hit) { hit.v += amount; hit.names.push(n.name); continue; }
-                        const unit = (fk in this.fxUnits) ? this.fxUnits[fk] : '%';
-                        const item = { label, sign: '+', suf: unit, v: amount, color: this.branchColor(bi), names: [n.name] };
+                        if (hit) {
+                            hit.v += amount;
+                            if (fk === 'skelT') hit.suf = this.fxUnit(fk, hit.v);
+                            hit.names.push(n.name);
+                            continue;
+                        }
+                        const item = { label, sign, suf: unit, v: amount, color: this.branchColor(bi), names: [n.name] };
                         map.set(key, item);
                         out.push(item);
                     }
@@ -1708,6 +1872,7 @@
          * нужен агрегат в единицах характеристик героя:
          *   hp / def          — плоские значения (fx узла);
          *   atkPct / magPct   — проценты к физ./маг. урону (fx melee / magic);
+         *   rangedPct / dmgPct — урон луком и «весь урон» (fx ranged / dmg);
          *   crit, critDmg, dodge, pierce, healPow, luck, resist — пункты.
          *
          * resist/pierce в fx лежат «сырыми», поэтому переводятся через
@@ -1726,10 +1891,13 @@
             const MAP = {
                 melee: 'atkPct', magic: 'magPct', hp: 'hp', def: 'def',
                 crit: 'crit', critDmg: 'critDmg', dodge: 'dodge', pierce: 'pierce',
-                healPow: 'healPow', luck: 'luck', resist: 'resist'
+                healPow: 'healPow', luck: 'luck', resist: 'resist',
+                // v11.7.1.1: ranged (урон луком) и dmg («весь урон») — разные
+                // множители, в примерке они перемножаются, а не складываются.
+                ranged: 'rangedPct', dmg: 'dmgPct'
             };
             const out = {
-                hp: 0, def: 0, atkPct: 0, magPct: 0,
+                hp: 0, def: 0, atkPct: 0, magPct: 0, rangedPct: 0, dmgPct: 0,
                 crit: 0, critDmg: 0, dodge: 0, pierce: 0,
                 healPow: 0, luck: 0, resist: 0
             };

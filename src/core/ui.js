@@ -213,8 +213,8 @@
             return modal;
         },
         // ⚙️ Служебные настройки аддона: уведомления о версиях, боевой
-        // ассистент и место входа в меню. Настройки чата (7TV, перехват
-        // ленты, подсветка ников) удалены в 11.7.0 вместе с подсистемой чата.
+        // ассистент, подсветка ников аддона и место входа в меню. Настройки
+        // самого чата (7TV, перехват ленты) удалены в 11.7.0.
         openSettings() {
             // Разметка модалки — в core/ui-templates.js (UITemplates.settingsModal).
             const modal = this.showModal(UITemplates.settingsModal(), { compact: true });
@@ -238,6 +238,23 @@
                 combatChk.checked = localStorage.getItem('LEGION_COMBAT_ASSIST') !== 'false';
                 combatChk.addEventListener('change', (e) => {
                     localStorage.setItem('LEGION_COMBAT_ASSIST', String(e.target.checked));
+                });
+            }
+
+            // 11.7.2: подсветка ников пользователей аддона (modules/addon-presence.js).
+            // Дефолт — включено. После клика сразу перестраиваем CSS: при
+            // выключении _applyStyles() очистит простыню и кэш, при включении —
+            // вернёт правила из уже загруженного набора /users.
+            const addonHlChk = modal.querySelector('#modal-chk-addon-hl');
+            if (addonHlChk) {
+                addonHlChk.checked = Settings.get('addonHighlight');
+                addonHlChk.addEventListener('change', (e) => {
+                    Settings.set('addonHighlight', !!e.target.checked);
+                    try {
+                        if (typeof AddonPresence !== 'undefined') AddonPresence._applyStyles();
+                    } catch (err) {
+                        dbg('[UI] подсветка ников: сбой переключения', err);
+                    }
                 });
             }
 

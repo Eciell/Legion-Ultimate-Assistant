@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Legion: Ultimate Assistant (Auction, Pocket City, Party)
 // @namespace    http://tampermonkey.net/
-// @version      11.7.1
+// @version      11.7.1.1
 // @description  QoL-аддон для Легиона: Сканер аукциона, Разведка, Планировщик, Карманный город, Пати, Поход.
 // @connect      localhost
 // @connect      127.0.0.1
@@ -112,17 +112,23 @@
      * (по умолчанию false — выключено, включается пользователем вручную).
      *
      * citymonGatherSize — размер плашки уведомлений: 'S' / 'M' / 'L' (по умолчанию 'L').
+     *
+     * addonHighlight — подсветка ников пользователей аддона в нативном чате
+     * (modules/addon-presence.js). Ключ localStorage намеренно совпадает с
+     * LEGION_ADDON_HIGHLIGHT из 11.6.x: выбор пользователей сохраняется.
      * ------------------------------------------------------------
      */
     const DEFAULT_SETTINGS = Object.freeze({
         autoSkipMonsters: false,
         citymonGatherEnabled: false,
         citymonGatherSize: 'L',
+        addonHighlight: true,
     });
     const SETTINGS_KEYS = Object.freeze({
         autoSkipMonsters: 'LEGION_AUTO_SKIP_MONSTERS',
         citymonGatherEnabled: 'LEGION_CITYMON_GATHER_ENABLED',
         citymonGatherSize: 'LEGION_CITYMON_GATHER_SIZE',
+        addonHighlight: 'LEGION_ADDON_HIGHLIGHT',
     });
     const Settings = {
         // Есть ли такая настройка в реестре (защита от опечаток в имени).
@@ -4071,8 +4077,9 @@ Object.assign(Utils, UtilsApi);
          * Модалка служебных настроек аддона (открывается из FAB-меню).
          * Обработчики кнопок навешивает UI.openSettings().
          *
-         * 11.7.0: настройки чата (7TV, перехват ленты, подсветка ников)
-         * удалены вместе с подсистемой чата — параметров у шаблона больше нет.
+         * 11.7.0: из модалки убраны настройки чата (7TV, перехват ленты).
+         * 11.7.2: подсветка ников пользователей аддона возвращена отдельным
+         * лёгким модулем modules/addon-presence.js.
          */
         settingsModal() {
             return `
@@ -4093,6 +4100,14 @@ Object.assign(Utils, UtilsApi);
                     <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
                         <span>⚔️ Боевой ассистент в походах</span>
                         <input type="checkbox" class="lg-toggle" id="modal-chk-combat-assist">
+                    </label>
+                    <!-- 11.7.2: подсветка ников пользователей аддона в нативном
+                         чате. Состояние хранит Settings.get/set('addonHighlight')
+                         (localStorage 'LEGION_ADDON_HIGHLIGHT'), CSS генерирует
+                         modules/addon-presence.js. -->
+                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
+                        <span>⚡ Подсветка ников Legion</span>
+                        <input type="checkbox" class="lg-toggle" id="modal-chk-addon-hl">
                     </label>
                     <!-- 11.7.0: автоскип боёв с монстрами (.cm-dlg). Состояние
                          ставит и сохраняет UI.openSettings() (Settings,
@@ -4616,8 +4631,8 @@ Object.assign(Utils, UtilsApi);
             return modal;
         },
         // ⚙️ Служебные настройки аддона: уведомления о версиях, боевой
-        // ассистент и место входа в меню. Настройки чата (7TV, перехват
-        // ленты, подсветка ников) удалены в 11.7.0 вместе с подсистемой чата.
+        // ассистент, подсветка ников аддона и место входа в меню. Настройки
+        // самого чата (7TV, перехват ленты) удалены в 11.7.0.
         openSettings() {
             // Разметка модалки — в core/ui-templates.js (UITemplates.settingsModal).
             const modal = this.showModal(UITemplates.settingsModal(), { compact: true });
@@ -4641,6 +4656,23 @@ Object.assign(Utils, UtilsApi);
                 combatChk.checked = localStorage.getItem('LEGION_COMBAT_ASSIST') !== 'false';
                 combatChk.addEventListener('change', (e) => {
                     localStorage.setItem('LEGION_COMBAT_ASSIST', String(e.target.checked));
+                });
+            }
+
+            // 11.7.2: подсветка ников пользователей аддона (modules/addon-presence.js).
+            // Дефолт — включено. После клика сразу перестраиваем CSS: при
+            // выключении _applyStyles() очистит простыню и кэш, при включении —
+            // вернёт правила из уже загруженного набора /users.
+            const addonHlChk = modal.querySelector('#modal-chk-addon-hl');
+            if (addonHlChk) {
+                addonHlChk.checked = Settings.get('addonHighlight');
+                addonHlChk.addEventListener('change', (e) => {
+                    Settings.set('addonHighlight', !!e.target.checked);
+                    try {
+                        if (typeof AddonPresence !== 'undefined') AddonPresence._applyStyles();
+                    } catch (err) {
+                        dbg('[UI] подсветка ников: сбой переключения', err);
+                    }
                 });
             }
 
@@ -5708,21 +5740,33 @@ Object.assign(Utils, UtilsApi);
         /* fx-ключи -> подписи в сводке «Что дают открытые навыки».
            v11.7.1: знаки «%» и «+» в подписях НЕ дублируются — суффикс и знак
            значения добавляет statList() (item.sign/item.suf). */
-        fxNames: { melee: 'Физ. урон', magic: 'Магия', hp: 'Макс. здоровье', def: 'Броня', healPow: 'Сила лечения', healIn: 'Входящее лечение', crit: 'Шанс крита', critDmg: 'Сила крита', skel: 'Урон скелетов', skelT: 'Время скелетов', leech: 'Вампиризм', block: 'Снижение получаемого урона', dodge: 'Уклонение', lead: 'Урон по боссам', first: 'Урон в 1-й ход', dmg: 'Весь урон', pierce: 'Пробивание брони', resist: 'Шанс избежать яда и тины', healCrit: 'Шанс сильного лечения', regen: 'Регенерация', low: 'Урон при низком HP', ranged: 'Урон луком', poison: 'Отрава', steal: 'Кража', loot: 'Добыча', skelN: 'Скелетов', volley: 'Залп', shieldBlock: 'Снижение урона со щитом', trapDodge: 'Избегание ловушек', steady: 'Промах→удар', cleave: 'Замах', cleaveBoss: 'Замах по боссу', penBoss: 'Бронебой по боссу', drain: 'Вытягивание', hex: 'Проклятие', holy: 'По нежити', poisonT: 'Время отравы', abNext: 'Удар после умения', angel: 'Ангел-хранитель', backFoe: 'Урон по дальней линии', banner: 'Знамя когорты', breakHeal: 'Лечение при разбитом щите', burnChain: 'Цепной огонь', burnFoe: 'Урон по горящим', chillFoe: 'Урон по ознобу', chillProc: 'Шанс озноба', coverNb: 'Прикрытие соседа', critBleed: 'Кровотечение при крите', critBlind: 'Ослепление при крите', critBurn: 'Поджог при крите', critPierceWard: 'Крит сквозь щиты', dmgHeal: 'Лечение от урона', dodgeNext: 'Выстрел после уклонения', firstTeam: 'Урон команды в 1-й ход', guardAura: 'Аура защиты стойки', healNext: 'Удар после лечения', healRegen: 'Регенерация после лечения', healSplash: 'Всплеск лечения', highFoe: 'Урон по здоровым', highSelf: 'Урон при высоком HP', huntMark: 'Охотничья метка', killHit: 'Добивание врага', lastStand: 'Последний рубеж', lineCut: 'Защита соратников по линии', lowHeal: 'Лечение раненых', multiLow: 'Залп по раненым', overShield: 'Щит избытка лечения', phoenixHeart: 'Сердце феникса', ricochet: 'Рикошет выстрела', sameFoe: 'Пристрелка', shieldDmg: 'Урон под щитом', shieldUp: 'Прочность накладываемых щитов', startShield: 'Стартовый барьер', startWard: 'Стартовый оберег', taunt: 'Провокация', thorns: 'Шипы на щите', trap: 'Капкан', underShield: 'Защита под щитом', weakFoe: 'Урон по ослабленным', winter: 'Вечная зима' },
+        fxNames: { melee: 'Физ. урон', magic: 'Магия', hp: 'Макс. здоровье', def: 'Броня', healPow: 'Сила лечения', healIn: 'Входящее лечение', crit: 'Шанс крита', critDmg: 'Сила крита', skel: 'Урон скелетов', skelT: 'Время скелетов', leech: 'Вампиризм', block: 'Снижение получаемого урона', dodge: 'Уклонение', lead: 'Урон по боссам', first: 'Урон в 1-й ход', dmg: 'Весь урон', pierce: 'Пробивание брони', resist: 'Шанс избежать яда и тины', healCrit: 'Шанс сильного лечения', regen: 'Регенерация', low: 'Урон при низком HP', ranged: 'Урон луком', poison: 'Отрава', steal: 'Кража', loot: 'Добыча', skelN: 'Скелетов', volley: 'Залп', shieldBlock: 'Снижение урона со щитом', trapDodge: 'Избегание ловушек', steady: 'Промах→удар', cleave: 'Замах', cleaveBoss: 'Замах по боссу', penBoss: 'Бронебой по боссу', drain: 'Вытягивание', hex: 'Проклятие', holy: 'По нежити', poisonT: 'Время отравы', abNext: 'Удар после умения', angel: 'Ангел-хранитель', backFoe: 'Урон по дальней линии', banner: 'Знамя когорты', breakHeal: 'Лечение при разбитом щите', burnChain: 'Цепной огонь', burnFoe: 'Урон по горящим', chillFoe: 'Урон по ознобу', chillProc: 'Шанс озноба', coverNb: 'Прикрытие соседа', critBleed: 'Кровотечение при крите', critBlind: 'Ослепление при крите', critBurn: 'Поджог при крите', critPierceWard: 'Крит сквозь щиты', dmgHeal: 'Лечение от урона', dodgeNext: 'Выстрел после уклонения', firstTeam: 'Урон команды в 1-й ход', guardAura: 'Аура защиты стойки', healNext: 'Удар после лечения', healRegen: 'Регенерация после лечения', healSplash: 'Всплеск лечения', highFoe: 'Урон по здоровым', highSelf: 'Урон при высоком HP', huntMark: 'Охотничья метка', killHit: 'Добивание врага', lastStand: 'Последний рубеж', lineCut: 'Защита соратников по линии', lowHeal: 'Лечение раненых', multiLow: 'Залп по раненым', overShield: 'Щит избытка лечения', phoenixHeart: 'Сердце феникса', ricochet: 'Рикошет выстрела', sameFoe: 'Пристрелка', shieldDmg: 'Урон под щитом', shieldUp: 'Прочность накладываемых щитов', startShield: 'Стартовый барьер', startWard: 'Стартовый оберег', taunt: 'Провокация', thorns: 'Шипы на щите', trap: 'Капкан', underShield: 'Защита под щитом', weakFoe: 'Урон по ослабленным', winter: 'Вечная зима',
+            /* v11.7.1.1: механики Разбойника (16), Некроманта (10) и Паладина (9).
+               Покрывают 110 fx-ключей /api/skills. Условные и скелетные эффекты
+               сюда добавлены ТОЛЬКО для подписей: в MAP/skillBonuses() их нет,
+               иначе «Примерка» завышала бы базовые характеристики героя. */
+            psnProc: 'Шанс отравить обычным ударом', poisonTc: 'Шанс продлить яд на ход', psnWeak: 'Ослабление отравленных врагов', psnFoe: 'Урон по отравленным', rotHeal: 'Снижение лечения отравленных', psnCritX: 'Множитель крита яда', psnChain: 'Яд переходит на соседа при гибели', lowFoe: 'Урон по добиваемым (ниже 30% HP)', busyFoe: 'Урон по уже ходившим врагам', firstCrit: 'Первый удар в бою — всегда крит', killHeal: 'Лечение за убийство', killNext: 'Удар после убийства', critExtra: 'Шанс доп. удара при крите', critCoin: 'Шанс монет с крита (поход)', fade: 'Первый раунд не выбирают целью', dodgeHit: 'Шанс ответить после уклонения',
+            skelHpUp: 'Здоровье скелетов', skelCut: 'Защита при живом скелете', skelBurst: 'Урон при гибели скелета', startSkel: 'Скелет с начала боя', selfOver: 'Щит из избытка самолечения', deathHeal: 'Лечение за каждого павшего', darkGift: 'Доля самолечения союзнику', hexProc: 'Шанс проклясть обычным ударом', cursedFoe: 'Урон по проклятым и помеченным', curseChain: 'Проклятие переходит при гибели',
+            holyPart: 'Доля урона, становящаяся светом', selfHeal: 'Самолечение при лечении союзника', cleanse: 'Шанс снять яд и проклятие', mercyAura: 'Аура милости (урон по команде)', sacrifice: 'Жертвенное лечение союзника', coverLow: 'Прикрытие самого раненого', lowBlock: 'Защита при HP ниже половины', coverCut: 'Снижение принятого чужого урона', lightHeal: 'Лечение от ударов светом' },
 
         /* v11.7.1: fx-ключи-механики (1 = эффект включён). Это НЕ числовые
            бонусы: «Ангел-хранитель +1%» или «Последний рубеж +2%» — ложь.
            Такие узлы описываются полным текстом node.text, а в сводке
            «Что дают открытые навыки» они не участвуют. */
-        fxFlags: { angel: 1, lastStand: 1, phoenixHeart: 1, winter: 1, critPierceWard: 1, killHit: 1 },
+        fxFlags: { angel: 1, lastStand: 1, phoenixHeart: 1, winter: 1, critPierceWard: 1, killHit: 1,
+            /* v11.7.1.1: механики-флаги новых классов. mercyAura сюда НЕ
+               входит: это числовой бонус (+1% за ранг), а не «включён/нет». */
+            firstCrit: 1, fade: 1, startSkel: 1, psnChain: 1, curseChain: 1 },
 
         /* v11.7.1: единицы fx-значений для сводки. По умолчанию «%»;
-           исключения — плоские пункты, штуки и секунды (как в текстах). */
-        fxUnits: { def: '', critDmg: '', skelN: ' шт.', skelT: ' сек.' },
+           исключения — плоские пункты и штуки (как в текстах). Время
+           скелетов (skelT) меряется ХОДАМИ и склоняется по числу —
+           см. fxUnit()/pluralTurns(). */
+        fxUnits: { def: '', critDmg: '', skelN: ' шт.' },
 
         /* Категории прокачки способностей Арены (как в /api/skmap: ab.br[].next). */
         ARENA_KINDS: [['lv', 'Ступень'], ['pow', 'Мощь'], ['eff', 'Эффект'], ['dur', 'Длительность']],
-        ARENA_KIND_DEFAULT_MAX: { lv: 5, pow: 3, eff: 3, dur: 3 },
+        ARENA_KIND_DEFAULT_MAX: { lv: 5, pow: 3, eff: 3, dur: 1 },
         /* Фолбэк-шкала цены шага (когда сервер не прислал next для этой ступени). */
         ARENA_COST: { lv: [1, 3, 7, 15, 25], pow: [2, 5, 10], eff: [2, 5, 10], dur: [2, 5, 10] },
 
@@ -5850,6 +5894,48 @@ Object.assign(Utils, UtilsApi);
         isSkipFx(key) { return SKIP_FX_PREFIXES.some(p => key.indexOf(p) === 0); },
 
         /**
+         * v11.7.1.1: склонение слова «ход» для skelT («+1 ход», «+2 хода»,
+         * «+5 ходов»). В игре время скелетов измеряется ходами, а не
+         * секундами — старый fxUnits.skelT = ' сек.' врал в сводке.
+         *
+         * @param {number} value количество ходов
+         * @returns {string} 'ход' | 'хода' | 'ходов'
+         */
+        pluralTurns(value) {
+            const n = Math.abs(Math.round(+value || 0));
+            const d10 = n % 10;
+            const d100 = n % 100;
+            if (d10 === 1 && d100 !== 11) return 'ход';
+            if (d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14)) return 'хода';
+            return 'ходов';
+        },
+
+        /**
+         * v11.7.1.1: единица измерения fx для сводки/описания.
+         * skelT склоняется по итоговому значению; остальные ключи — из
+         * fxUnits, по умолчанию проценты.
+         *
+         * @param {string} key fx-ключ
+         * @param {number} value итоговое значение
+         * @returns {string} суффикс ('' | '%' | ' шт.' | ' ход' …)
+         */
+        fxUnit(key, value) {
+            if (key === 'skelT') return ' ' + this.pluralTurns(value);
+            return (key in this.fxUnits) ? this.fxUnits[key] : '%';
+        },
+
+        /** v11.7.1.1: мягкое предупреждение об неизвестном fx-ключе —
+         *  чтобы новые механики игры не терялись в сводке молча. */
+        warnUnknownFx(key, where) {
+            if (!this._fxWarned) this._fxWarned = new Set();
+            if (this._fxWarned.has(key)) return;
+            this._fxWarned.add(key);
+            try {
+                console.debug(`[LGU][BUILD SIM] неизвестный fx-ключ «${key}» (${where || 'statList'}): добавьте подпись в fxNames`);
+            } catch (err) { /* noop */ }
+        },
+
+        /**
          * Коэффициент перевода сырого fx во вторичную характеристику.
          *
          * В игре resist/pierce лежат в fx «сырыми» и переводятся в статы через
@@ -5900,7 +5986,7 @@ Object.assign(Utils, UtilsApi);
                 ? 1 + (+xd.base.critDmg / 100)
                 : 2;
             const hasText = !!node.text;
-            const rawText = hasText ? String(node.text) : this.describeFx(fx, r);
+            const rawText = hasText ? String(node.text) : this.describeFx(fx, r, node.max);
 
             let out = rawText
                 .replace(hasXs ? /×2 → ×/ : /$^/, () => `×${fmt(critBase)} → ×`)
@@ -5908,20 +5994,42 @@ Object.assign(Utils, UtilsApi);
                     if (key === 'critX') return fmt(critBase + (fx.critDmg || 0) * r / 100);
                     if (key === 'cleaveBoss') return fmt((fx.cleave || 0) * r * 0.4);
                     if (key === 'penBoss') return fmt((fx.pierce || 0) * r / 20);
+                    // v11.7.1.1: «Токсин» задаёт МНОЖИТЕЛЬ крита яда, а не
+                    // проценты: fx 0.5 на 1 ранге = ×1,5, на 2 ранге = ×2.
+                    if (key === 'psnCritX') return fmt(1 + (fx.psnCritX || 0) * r);
+                    // v11.7.1.1: на максимальном ранге яд держится всегда —
+                    // в тексте игры это «ранг 3 — всегда», поэтому 33×3 = 99
+                    // подменяем на честные 100%.
+                    if (key === 'poisonTc') {
+                        const maxRank = Math.max(1, +node.max || 1);
+                        return fmt(r >= maxRank ? 100 : (fx.poisonTc || 0) * r);
+                    }
                     if (has(key)) return fmt(fx[key] * r);
                     return match;
                 });
+
+            // v11.7.1.1: клиент с xstats живёт на базовом крите 8%, а в
+            // старых текстах узлов осталась скобка «обычно — 5%». Правим
+            // только эту пояснительную скобку, не трогая боевые «+5%».
+            if (hasXs) {
+                out = out.replace(/\(([^()]*(?:обычно|кубик)[^()]*)\)/gi, (m, body) => m.replace(/\b5\s*%/g, '8%'));
+            }
 
             // Примечания — только для эффектов, которых НЕТ в шаблоне.
             // Если {resist}/{pierce} уже подставлены, текст игры самодостаточен
             // и дублировать их «характеристиками» не нужно.
             const notes = [];
             if (hasText && has('resist') && !/\{resist\}/.test(rawText)) {
-                notes.push(`шанс избежать яда и тины +${fmt(fx.resist * r)}%`);
+                // v11.7.1.1: как в клиенте игры — в характеристику идёт
+                // fromFx.resist (обычно 0.5), то есть ПУНКТЫ без «%».
+                const scale = +this.xstatFromFx().resist;
+                notes.push(`характеристика «Сопротивление» +${fmt(fx.resist * r * (isFinite(scale) ? scale : 1))}`);
             }
             if (hasText && has('pierce') && !/\{pierce\}/.test(rawText)) {
                 const scale = +this.xstatFromFx().pierce;
-                notes.push(`характеристика «Пробивание» +${fmt(fx.pierce * r * (isFinite(scale) ? scale : 1))}%`);
+                // v11.7.1.1: как и resist — это ПУНКТЫ характеристики
+                // (fromFx 0.5), поэтому без знака «%».
+                notes.push(`характеристика «Пробивание» +${fmt(fx.pierce * r * (isFinite(scale) ? scale : 1))}`);
             }
             if (notes.length) out += ' · ' + notes.join(' · ');
 
@@ -5934,16 +6042,30 @@ Object.assign(Utils, UtilsApi);
          *
          * @param {object} fx карта эффектов узла
          * @param {number} rank ранг
+         * @param {number} [maxRank] максимум рангов узла (для poisonTc)
          * @returns {string}
          */
-        describeFx(fx, rank) {
+        describeFx(fx, rank, maxRank) {
             const r = Math.max(1, +rank || 1);
+            const mx = +maxRank || 0;
             const parts = [];
             for (const [k, v] of Object.entries(fx || {})) {
-                if (this.isSkipFx(k) || this.fxFlags[k] || !isFinite(+v) || !this.fxNames[k]) continue;
-                const unit = (k in this.fxUnits) ? this.fxUnits[k] : '%';
-                const val = Math.round(+v * r * 10) / 10;
-                parts.push(`${this.fxNames[k]} +${String(val).replace('.', ',')}${unit}`);
+                if (this.isSkipFx(k) || this.fxFlags[k] || !isFinite(+v)) continue;
+                if (!this.fxNames[k]) {
+                    this.warnUnknownFx(k, 'describeFx');
+                    continue;
+                }
+                // v11.7.1.1: на максимуме яд держится всегда — 100%, а не 99%.
+                const val = (k === 'poisonTc' && mx > 0 && r >= mx)
+                    ? 100
+                    : Math.round(+v * r * 10) / 10;
+                const txt = String(val).replace('.', ',');
+                // v11.7.1.1: psnCritX — множитель (×1,5 / ×2), не проценты.
+                if (k === 'psnCritX') {
+                    parts.push(`${this.fxNames[k]} ×${String(Math.round((1 + val) * 10) / 10).replace('.', ',')}`);
+                    continue;
+                }
+                parts.push(`${this.fxNames[k]} +${txt}${this.fxUnit(k, val)}`);
             }
             return parts.join(' · ');
         },
@@ -6163,7 +6285,39 @@ Object.assign(Utils, UtilsApi);
             return n;
         },
 
-        spFree(st) { return Math.max(0, this.spLimit() - this.spentSP(st)); },
+        /**
+         * v11.7.1.1: SP потраченные в ДРУГИХ классах. Пул очков навыков
+         * общий: free = pts − SUM(cnt по всем классам), поэтому план нельзя
+         * считать только по текущему созвездию — иначе аддон разрешал бы
+         * невозможный билд. skmap любого класса отдаёт cnt по всем 7 классам.
+         *
+         * @param {string} [cls] текущий класс (его план считает spentSP)
+         * @returns {number}
+         */
+        otherClassSpent(cls) {
+            const id = cls || this._cls;
+            const V = this.skmapCache[id];
+            const cnt = V && V.cnt;
+            if (cnt && typeof cnt === 'object') {
+                let sum = 0;
+                for (const [c, n] of Object.entries(cnt)) {
+                    if (c === id) continue;
+                    sum += Math.max(0, +n || 0);
+                }
+                return sum;
+            }
+            // Фолбэк: суммируем сохранённые ответы других классов.
+            let sum = 0;
+            for (const [c, data] of Object.entries(this.skmapCache || {})) {
+                if (c === id || !data || !data.cnt) continue;
+                sum += Math.max(0, +data.cnt[c] || 0);
+            }
+            return sum;
+        },
+
+        spFree(st) {
+            return Math.max(0, this.spLimit() - this.otherClassSpent(this._cls) - this.spentSP(st));
+        },
 
         tokenBalance() {
             const V = this.skmapCache[this._cls];
@@ -6213,7 +6367,15 @@ Object.assign(Utils, UtilsApi);
         _stepUpCost(key, kind, from) {
             const meta = this.abOf(key);
             const game = (meta && meta.up) ? (+meta.up[kind] || 0) : 0;
-            if (meta && meta.next && +meta.next[kind] > 0 && (+from || 0) === game) return +meta.next[kind];
+            // v11.7.1.1: серверный next — источник истины. Если next есть, но
+            // ключа kind в нём НЕТ, значит ступень уже на максимуме (так
+            // приходит dur=1/1 у лучника): это 0, а не повод падать в
+            // фолбэк-шкалу и завышать план.
+            if (meta && meta.next && typeof meta.next === 'object') {
+                if (!(kind in meta.next)) return 0;
+                const nextCost = +meta.next[kind] || 0;
+                if (nextCost > 0 && (+from || 0) === game) return nextCost;
+            }
             const table = this.ARENA_COST[kind] || [];
             // v11.7.1: ступень способности ('lv') начинается с 1, а pow/eff/dur
             // — с 0. Поэтому для 'lv' индекс шкалы = шаг-1, иначе первый шаг
@@ -6601,9 +6763,16 @@ Object.assign(Utils, UtilsApi);
             // (skmap.pts) ниже этого максимума — норма, а не ошибка билда.
             E.sp.classList.toggle('over', sp > limit);
             const heroPts = +(V.pts || (this.hero && this.hero.pts) || 0);
-            E.spNote.textContent = `/ ${limit}${heroPts > 0 ? ` · у героя: ${heroPts}` : ''}`;
+            // v11.7.1.1: V.free — реально свободные SP героя (pts − SUM(cnt)).
+            // Показываем рядом с V.pts, чтобы план на максимум уровня не
+            // путался с текущим запасом.
+            const freeKnown = V && V.free != null && isFinite(+V.free);
+            const heroFree = freeKnown ? Math.max(0, +V.free) : 0;
+            E.spNote.textContent = `/ ${limit}${heroPts > 0 ? ` · у героя: ${heroPts}` : ''}`
+                + (freeKnown ? ` · свободно: ${heroFree}` : '');
             E.sp.title = `План: ${sp} из ${limit} SP (максимум уровня игры)`
-                + (heroPts > 0 ? ` · у героя сейчас ${heroPts} SP` : '');
+                + (heroPts > 0 ? ` · у героя сейчас ${heroPts} SP` : '')
+                + (freeKnown ? ` · свободно ${heroFree} SP (с учётом других классов)` : '');
 
             // Жёсткого лимита жетонов в планировщике НЕТ: остаток героя
             // (skmap.n) показываем рядом как справочный ориентир — точно так же,
@@ -7327,7 +7496,8 @@ Object.assign(Utils, UtilsApi);
             const out = [];
             (C.branches || []).forEach((B, bi) => {
                 (B.nodes || []).forEach((n) => {
-                    const r = Math.min(Math.max(1, +n.max || 1), +st.nodes[n.id] || 0);
+                    const nMax = Math.max(1, +n.max || 1);
+                    const r = Math.min(nMax, +st.nodes[n.id] || 0);
                     if (!r) return;
                     // v11.7.1: сводка строится по ВСЕМ fx узла, а не только по
                     // тексту, начинающемуся с «Название +N%». Так вершины
@@ -7336,8 +7506,10 @@ Object.assign(Utils, UtilsApi);
                         if (this.isSkipFx(fk) || this.fxFlags[fk] || !isFinite(+fv) || !+fv) continue;
                         let label = this.fxNames[fk];
                         // Неизвестный ключ не выдумываем: лучше пропустить,
-                        // чем показать «+1%» вместо описания механики.
-                        if (!label) continue;
+                        // чем показать «+1%» вместо описания механики. Но
+                        // предупреждаем в консоль, чтобы новые ключи игры
+                        // не терялись молча (v11.7.1.1).
+                        if (!label) { this.warnUnknownFx(fk, 'statList'); continue; }
                         // Ключ resist двузначный: в большинстве узлов это шанс
                         // избежать яда/тины, но в отдельных ветках — настоящая
                         // характеристика «Сопротивление». Смотрим на текст узла,
@@ -7348,15 +7520,39 @@ Object.assign(Utils, UtilsApi);
                         } else if (fk === 'pierce' && !/брон/.test(ntext)) {
                             label = 'Пробивание';
                         }
-                        // Значение — как в тексте узла (fx × ранг), без пересчёта
-                        // в пункты характеристики: resist здесь — шанс избежать
-                        // яда/тины, pierce — процент игнорируемой брони.
-                        const amount = +fv * r;
-                        const key = 'fx:' + fk + ':' + label;
+                        // v11.7.1.1: шанс и пункты характеристики — РАЗНЫЕ
+                        // величины. Шанс избежать яда/тины выводим сырым fx,
+                        // а «Сопротивление» — через fromFx.resist (0.5), без %.
+                        let amount = +fv * r;
+                        let unit;
+                        let sign = '+';
+                        if (fk === 'resist' && label === 'Сопротивление') {
+                            const scale = +this.xstatFromFx().resist;
+                            amount *= isFinite(scale) ? scale : 1;
+                            unit = '';
+                        } else if (fk === 'psnCritX') {
+                            // Множитель крита яда: ×1,5 на 1 ранге, ×2 на 2-м.
+                            amount = 1 + (+fv) * r;
+                            unit = '';
+                            sign = '×';
+                        } else if (fk === 'poisonTc' && r >= nMax) {
+                            // На максимальном ранге яд держится всегда: 33×3
+                            // в игре = «ранг 3 — всегда», то есть 100%, не 99%.
+                            amount = 100;
+                            unit = '%';
+                        } else {
+                            unit = this.fxUnit(fk, amount);
+                        }
+                        const key = 'fx:' + fk + ':' + label + ':' + unit
+                            + (fk === 'psnCritX' ? ':' + n.id : '');
                         const hit = map.get(key);
-                        if (hit) { hit.v += amount; hit.names.push(n.name); continue; }
-                        const unit = (fk in this.fxUnits) ? this.fxUnits[fk] : '%';
-                        const item = { label, sign: '+', suf: unit, v: amount, color: this.branchColor(bi), names: [n.name] };
+                        if (hit) {
+                            hit.v += amount;
+                            if (fk === 'skelT') hit.suf = this.fxUnit(fk, hit.v);
+                            hit.names.push(n.name);
+                            continue;
+                        }
+                        const item = { label, sign, suf: unit, v: amount, color: this.branchColor(bi), names: [n.name] };
                         map.set(key, item);
                         out.push(item);
                     }
@@ -7391,6 +7587,7 @@ Object.assign(Utils, UtilsApi);
          * нужен агрегат в единицах характеристик героя:
          *   hp / def          — плоские значения (fx узла);
          *   atkPct / magPct   — проценты к физ./маг. урону (fx melee / magic);
+         *   rangedPct / dmgPct — урон луком и «весь урон» (fx ranged / dmg);
          *   crit, critDmg, dodge, pierce, healPow, luck, resist — пункты.
          *
          * resist/pierce в fx лежат «сырыми», поэтому переводятся через
@@ -7409,10 +7606,13 @@ Object.assign(Utils, UtilsApi);
             const MAP = {
                 melee: 'atkPct', magic: 'magPct', hp: 'hp', def: 'def',
                 crit: 'crit', critDmg: 'critDmg', dodge: 'dodge', pierce: 'pierce',
-                healPow: 'healPow', luck: 'luck', resist: 'resist'
+                healPow: 'healPow', luck: 'luck', resist: 'resist',
+                // v11.7.1.1: ranged (урон луком) и dmg («весь урон») — разные
+                // множители, в примерке они перемножаются, а не складываются.
+                ranged: 'rangedPct', dmg: 'dmgPct'
             };
             const out = {
-                hp: 0, def: 0, atkPct: 0, magPct: 0,
+                hp: 0, def: 0, atkPct: 0, magPct: 0, rangedPct: 0, dmgPct: 0,
                 crit: 0, critDmg: 0, dodge: 0, pierce: 0,
                 healPow: 0, luck: 0, resist: 0
             };
@@ -7771,7 +7971,9 @@ Object.assign(Utils, UtilsApi);
         ENCH: {
             max: 15,
             // v11.6.5e: шансы после ребаланса (было 95/90/80/70/55/42/30/20/12/7/4/2/1/0.5/0).
-            // Индекс = текущий уровень: chance[1] — шанс шага +1 -> +2.
+            // ВАЖНО (P3-10): chance[L] — шанс шага НА уровень +L. То есть
+            // chance[1] = 100 — это шаг +0 -> +1, а chance[2] — +1 -> +2.
+            // Код renderTable/enchantChance(lv) индексирует верно — не менять.
             chance: [0, 100, 95, 90, 80, 70, 60, 50, 40, 32, 25, 20, 16, 12, 9, 6],
             // v11.7 (клиент b62dcb896a): амулет (trinket) официально входит в
             // enchant.slots и точится по общей шкале +0..+15. Список берём из
@@ -7894,6 +8096,21 @@ Object.assign(Utils, UtilsApi);
             const i = Math.min(15, +level || 0);
             const live = liveEnchantChance(i);
             return Number.isFinite(live) ? live : (this.ENCH.chance[i] || 0);
+        },
+
+        /**
+         * v11.7.1.1 (P2-07): бонус «Счастливой звезды» к шансу, %.
+         *
+         * Берётся из живой таблицы игры (enchant.star = 25), а не из
+         * захардкоженной константы: при ребалансе игра сообщит новое
+         * значение сама. Фолбэк — 25, если таблицы ещё нет.
+         *
+         * @returns {number} надбавка к шансу в процентных пунктах
+         */
+        enchantStarBonus() {
+            const live = liveEnchant();
+            const v = live ? +live.star : NaN;
+            return (Number.isFinite(v) && v > 0) ? v : 25;
         },
 
         // v11.6.5e: цена попытки в % от стоимости предмета — из живой таблицы
@@ -8233,7 +8450,14 @@ Object.assign(Utils, UtilsApi);
             if (skillsBonuses) {
                 stats.hp += Math.round(+skillsBonuses.hp || 0);
                 stats.def += Math.round(+skillsBonuses.def || 0);
-                stats.atk += Math.round(stats.atk * (+skillsBonuses.atkPct || 0) / 100);
+                const atkPct = +skillsBonuses.atkPct || 0;
+                const dmgPct = +skillsBonuses.dmgPct || 0;
+                const rangedPct = +skillsBonuses.rangedPct || 0;
+                // v11.7.1.1 (P1-02): atkPct (melee), dmgPct («весь урон») и
+                // rangedPct (урон луком) — РАЗНЫЕ множители, поэтому
+                // перемножаются, а не складываются. ranged — только лучнику.
+                stats.atk = Math.round(stats.atk * (1 + atkPct / 100) * (1 + dmgPct / 100));
+                if (role === 'archer') stats.atk = Math.round(stats.atk * (1 + rangedPct / 100));
                 stats.mag += Math.round(stats.mag * (+skillsBonuses.magPct || 0) / 100);
                 for (const k of ['crit', 'critDmg', 'dodge', 'pierce', 'healPow', 'luck', 'resist']) {
                     stats[k] += +skillsBonuses[k] || 0;
@@ -8678,6 +8902,8 @@ Object.assign(Utils, UtilsApi);
                     const hasPath = preview > curEn;
                     const starPrice = this.resourcePrice('star');
                     const spherePrice = this.resourcePrice('sphere');
+                    // v11.7.1.1: живой бонус звезды (enchant.star), фолбэк 25.
+                    const starBonus = this.enchantStarBonus();
 
                     // Компактная подпись стата для колонки «Статы»: убираем
                     // хвостовой «%» из statNames («Крит %» -> «Крит»), значение
@@ -8712,8 +8938,10 @@ Object.assign(Utils, UtilsApi);
                         let bonusPct = 0;
                         if (!isBase) {
                             chance = this.enchantChance(lv);
-                            // ⭐ даёт +25% к шансу — показываем шанс уже с надбавкой.
-                            if (useStar) chance += 25;
+                            // ⭐ даёт живой бонус (обычно +25%) к шансу —
+                            // показываем шанс уже с надбавкой, но не выше 100%.
+                            if (useStar) chance += starBonus;
+                            chance = Math.min(100, chance);
 
                             // Отмеченный усилитель входит в стоимость попытки:
                             // колонка «Попытка» показывает реальные траты шага.
@@ -8729,7 +8957,7 @@ Object.assign(Utils, UtilsApi);
                                 ? ' <span title="Цена включает ресурс с аукциона (медиана сети за 72 часа / последние 100 цен)" style="cursor:help; font-size:11px;">📈</span>'
                                 : ''}`;
 
-                            chips = `<button type="button" class="hp-mat-btn star ${useStar ? 'active' : ''}" data-lv="${lv}" title="Счастливая звезда (+25% к шансу, +${Utils.formatMoney(starPrice)})">⭐</button>`
+                            chips = `<button type="button" class="hp-mat-btn star ${useStar ? 'active' : ''}" data-lv="${lv}" title="Счастливая звезда (+${starBonus}% к шансу, +${Utils.formatMoney(starPrice)})">⭐</button>`
                                 + `<button type="button" class="hp-mat-btn sphere ${useSphere ? 'active' : ''}" data-lv="${lv}" title="Сфера сохранения (защита от поломки, +${Utils.formatMoney(spherePrice)})">🌐</button>`;
 
                             // Бонус заточки на этом уровне (GAME_DATA.ENCHANT_MULTIPLIERS, %)
@@ -8767,8 +8995,12 @@ Object.assign(Utils, UtilsApi);
                         let stepCost = step;
                         let chance = this.enchantChance(lv);
                         // Ресурсы выбранные кнопками ⭐/🌐 в строках таблицы.
-                        if (this.allocatedStars[lv]) { stepCost += starPrice; chance += 25; starsUsed++; }
+                        if (this.allocatedStars[lv]) { stepCost += starPrice; chance += starBonus; starsUsed++; }
                         if (this.allocatedSpheres[lv]) { stepCost += spherePrice; spheresUsed++; }
+                        // v11.7.1.1 (P2-07): шанс не может быть выше 100%.
+                        // Ограничиваем ДО матожидания: при c=95 и star=25
+                        // сумма 120 завышала ожидаемое число попыток.
+                        chance = Math.min(100, chance);
                         // 100 / chance — ожидаемое число попыток на один шаг
                         // (1/p). Сумма по пути даёт матожидание попыток на всю
                         // цель; при 0% шаг бесконечен, поэтому Infinity.
@@ -8995,6 +9227,8 @@ Object.assign(Utils, UtilsApi);
 
                 // Порядок строк как в нативной карточке героя: сначала основные
                 // характеристики, затем вторичные (третий элемент — единица).
+                // v11.7.1.1: resist показываем в ПУНКТАХ без «%» — skillBonuses()
+                // уже применил fromFx.resist (0.5), как клиент игры.
                 const SIDE_ROWS = [
                     ['hp', 'Макс. HP', ''], ['atk', 'Физ. урон', ''], ['mag', 'Магия', ''], ['def', 'Броня', ''],
                     ['crit', 'Крит', '%'], ['critDmg', 'Сила крита', '%'], ['dodge', 'Уклонение', '%'],
@@ -16449,6 +16683,346 @@ const PocketCity = (() => {
         }
     };
 
+    // ===== src/modules/addon-presence.js =====
+    // ============================================================
+    // МОДУЛЬ: ПРИСУТСТВИЕ ПОЛЬЗОВАТЕЛЕЙ АДДОНА (addon-presence.js)
+    //
+    // Вернули в 11.7.1.1 после удаления чата в 11.7.0: подсветка ников
+    // пользователей аддона в НАТИВНОМ игровом чате.
+    //
+    // Схема:
+    //   1. POST /heartbeat {login, version, clientToken} — отмечаем себя
+    //      онлайн на legion.ctrlfree.host (раз в 30 с).
+    //   2. GET /users -> {users: ["login", ...]} — список активных ников.
+    //   3. Генерируем <style id="lg-addon-hl-styles"> с правилами
+    //      b[data-nick="login" i] { text-shadow: ... currentColor }.
+    //
+    // Почему CSS, а не классы на узлах: игра перерисовывает ленту целиком
+    // (reference/LegionFrontSRC/lib/site-chat.js: chatAppend/chatRender), и
+    // классы слетали бы на каждом обновлении. Атрибутный селектор переживает
+    // перерисовку и не трогает textContent ника (по нему работает нативное
+    // контекстное меню и ответ @ник).
+    //
+    // clientToken стабилен (GM_getValue/GM_setValue): сервер резервирует ник
+    // за первым токеном на 15 минут, иначе после перезагрузки страницы
+    // отвечает 409 login_claimed и подсветка «пропадает» для самого игрока.
+    // ============================================================
+    const AddonPresence = {
+        POLL_MS: 30000,
+        CACHE_KEY: 'LEGION_ADDON_USERS_CACHE',
+        TOKEN_KEY: 'lgClientToken',
+        CACHE_TTL_MS: 60 * 60 * 1000, // 1 час, как в старом Chat
+        STYLE_ID: 'lg-addon-hl-styles',
+
+        // Ники в нижнем регистре — сервер отдаёт логины нормализованными.
+        users: new Set(),
+        _timer: null,
+        _token: '',
+        _myLogin: '',
+        _syncBusy: false,
+        _active: false,
+        _wakeHandler: null,
+
+        /** Только логин, без отображаемого user.name (сервер его не примет). */
+        _normalizeLogin(value) {
+            const login = String(value ?? '').trim().toLowerCase();
+            return /^[a-z0-9_]{1,32}$/.test(login) ? login : '';
+        },
+
+        /**
+         * Синхронные источники из page-context: ME и LG.me()/LG.hero().
+         * ME и LG живут в page-context, поэтому читаем через G (= unsafeWindow).
+         */
+        _resolveLogin() {
+            try {
+                const direct = this._normalizeLogin(G?.ME?.user?.login);
+                if (direct) return direct;
+            } catch (e) {}
+
+            try {
+                const lg = G?.LG;
+                const viaMe = (typeof lg?.me === 'function') ? lg.me()?.user?.login : '';
+                const viaHero = (typeof lg?.hero === 'function') ? lg.hero()?.login : '';
+                return this._normalizeLogin(viaMe) || this._normalizeLogin(viaHero);
+            } catch (e) {}
+
+            return '';
+        },
+
+        /**
+         * Надёжный логин текущего игрока:
+         *   1) G.ME.user.login;
+         *   2) LG.me().user.login / LG.hero().login;
+         *   3) прямой GET /c/<channel>/api/me (как Party._fetchMe).
+         *
+         * user.name сознательно не используется: это отображаемое имя, оно
+         * может не пройти серверную валидацию ^[a-z0-9_]{1,32}$.
+         */
+        async _fetchLogin() {
+            // Кэш на время сессии: сбрасывается в '' по visibilitychange/focus,
+            // чтобы смена аккаунта в той же вкладке подхватилась сразу.
+            if (this._myLogin) return this._myLogin;
+
+            const direct = this._resolveLogin();
+            if (direct) {
+                this._myLogin = direct;
+                return direct;
+            }
+
+            try {
+                const channel = String(G?.LG_CH?.login || '').trim();
+                if (!channel) return '';
+
+                const res = await fetch(`/c/${encodeURIComponent(channel)}/api/me`, {
+                    credentials: 'include',
+                    cache: 'no-store'
+                });
+                const data = await res.json().catch(() => null);
+                const login = this._normalizeLogin(data?.user?.login);
+                if (!res.ok || !login) return '';
+
+                this._myLogin = login;
+                return login;
+            } catch (e) {
+                return '';
+            }
+        },
+
+        /** Для диагностики: последний валидный логин либо пустая строка. */
+        getMyLogin() {
+            return this._myLogin || '';
+        },
+
+        /** Канал игры — не игрок: его сервисные сообщения не подсвечиваем. */
+        _channelLogin() {
+            try {
+                return String(G?.LG_CH?.login || '').trim().toLowerCase();
+            } catch (e) {
+                return '';
+            }
+        },
+
+        /**
+         * Новый clientToken. crypto.randomUUID() даёт 36 символов и проходит
+         * серверную проверку [A-Za-z0-9_-]{16,128}. Фолбэк — base36-строка.
+         */
+        _newToken() {
+            try {
+                if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+                    const uuid = crypto.randomUUID();
+                    if (typeof uuid === 'string' && uuid.length >= 16) return uuid;
+                }
+            } catch (e) {}
+            let rand = '';
+            while (rand.length < 16) rand += Math.random().toString(36).slice(2);
+            return 'lgu-' + rand;
+        },
+
+        /**
+         * Стабильный токен клиента: GM-хранилище, затем localStorage.
+         * Новый генерируется только если сохранённого нет или он короче 16.
+         */
+        getClientToken() {
+            if (this._token) return this._token;
+
+            let token = '';
+            try {
+                if (typeof GM_getValue === 'function') {
+                    token = String(GM_getValue(this.TOKEN_KEY, '') || '').trim();
+                }
+            } catch (e) {}
+            if (token.length < 16) {
+                try {
+                    token = String(localStorage.getItem(this.TOKEN_KEY) || '').trim();
+                } catch (e) {}
+            }
+            if (token.length < 16) {
+                token = this._newToken();
+                try {
+                    if (typeof GM_setValue === 'function') GM_setValue(this.TOKEN_KEY, token);
+                } catch (e) {}
+                try { localStorage.setItem(this.TOKEN_KEY, token); } catch (e) {}
+            }
+
+            this._token = token;
+            return token;
+        },
+
+        _loadCache() {
+            if (!Settings.get('addonHighlight')) return;
+            try {
+                const raw = localStorage.getItem(this.CACHE_KEY);
+                if (!raw) return;
+                const cache = JSON.parse(raw);
+                if (!Array.isArray(cache?.list)) return;
+                if ((Date.now() - Number(cache.ts || 0)) > this.CACHE_TTL_MS) return;
+
+                const next = new Set();
+                cache.list.forEach((nick) => {
+                    const key = String(nick || '').trim().toLowerCase();
+                    if (key) next.add(key);
+                });
+                if (next.size) this.users = next;
+            } catch (e) {}
+        },
+
+        _saveCache() {
+            if (!Settings.get('addonHighlight')) return;
+            try {
+                localStorage.setItem(this.CACHE_KEY, JSON.stringify({
+                    list: Array.from(this.users),
+                    ts: Date.now()
+                }));
+            } catch (e) {}
+        },
+
+        _clearCache() {
+            try { localStorage.removeItem(this.CACHE_KEY); } catch (e) {}
+        },
+
+        /**
+         * Один тик: heartbeat + users. Ошибки сети не всплывают тостом —
+         * подсветка просто остаётся на прошлом наборе/кэше.
+         */
+        async sync() {
+            if (this._syncBusy) return;
+            this._syncBusy = true;
+
+            try {
+                const login = await this._fetchLogin();
+                if (!login) return;
+
+                const version = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version)
+                    ? String(GM_info.script.version)
+                    : 'unknown';
+
+                // Party._request уже умеет GM_xmlhttpRequest + X-Legion-Key.
+                // auth:false — запрос не зависит от активной сессии пати и
+                // 401/403/404 не трактуются как «пати распалась».
+                //
+                // v11.7.2: heartbeat в собственном try/catch. 409 login_claimed
+                // или временная ошибка сети не должны блокировать GET /users —
+                // иначе один сбой heartbeat гасит подсветку до следующего тика.
+                try {
+                    await Party._request('POST', '/heartbeat', {
+                        auth: false,
+                        body: { login, version, clientToken: this.getClientToken() }
+                    });
+                } catch (e) {
+                    dbg('[PRESENCE] heartbeat не прошёл:', e && e.message ? e.message : e);
+                }
+
+                const data = await Party._request('GET', '/users', { auth: false });
+                const list = Array.isArray(data?.users) ? data.users : [];
+                const channel = this._channelLogin();
+
+                const next = new Set();
+                list.forEach((nick) => {
+                    const key = String(nick || '').trim().toLowerCase();
+                    if (!key || key === channel) return;
+                    next.add(key);
+                });
+                // Свой ник добавляем локально: heartbeat уже ушёл, а снимок
+                // /users мог быть собран сервером до нашей вставки.
+                next.add(login);
+
+                this.users = next;
+                this._saveCache();
+
+                // После stop() ответ может прийти уже «в никуда» — не
+                // воскрешаем <style> и не трогаем DOM.
+                if (!this._active) return;
+                this._applyStyles();
+            } catch (e) {
+                dbg('[PRESENCE] синхронизация не удалась:', e && e.message ? e.message : e);
+            } finally {
+                this._syncBusy = false;
+            }
+        },
+
+        /** Экранирование значения для строкового CSS-селектора. */
+        _cssAttrValue(nick) {
+            return String(nick).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        },
+
+        /**
+         * Перестраивает простыню подсветки. Цвет НЕ переопределяем: игра
+         * сама красит ники через nickColor() в site-chat.js, а text-shadow
+         * с currentColor даёт свечение ровно в родном цвете игрока.
+         */
+        _applyStyles() {
+            if (!this._active) return;
+
+            const on = Settings.get('addonHighlight');
+            let style = document.getElementById(this.STYLE_ID);
+
+            if (!on || this.users.size === 0) {
+                if (style) style.textContent = '';
+                if (!on) this._clearCache();
+                return;
+            }
+
+            if (!style) {
+                style = document.createElement('style');
+                style.id = this.STYLE_ID;
+                (document.head || document.documentElement).appendChild(style);
+            }
+
+            const selectors = [];
+            this.users.forEach((nick) => {
+                const key = String(nick || '').trim().toLowerCase();
+                if (!key) return;
+                selectors.push(`b[data-nick="${this._cssAttrValue(key)}" i]`);
+            });
+
+            style.textContent = selectors.length
+                ? `${selectors.join(',\n')} {\n    text-shadow: 0 0 4px currentColor, 0 0 10px currentColor !important;\n}\n`
+                : '';
+        },
+
+        /** Запуск: кэш -> мгновенная подсветка -> первый тик -> интервал. */
+        start() {
+            if (this._timer) return;
+            this._active = true;
+
+            // v11.7.2: при возврате на вкладку сбрасываем логин и сразу
+            // синхронизируемся — так смена аккаунта в той же вкладке
+            // подхватывается без перезагрузки страницы.
+            if (!this._wakeHandler) {
+                this._wakeHandler = () => {
+                    if (document.hidden) return;
+                    this._myLogin = '';
+                    this.sync();
+                };
+                document.addEventListener('visibilitychange', this._wakeHandler);
+                window.addEventListener('focus', this._wakeHandler);
+            }
+
+            this._loadCache();
+            this._applyStyles();
+            this.sync();
+            this._timer = setInterval(() => this.sync(), this.POLL_MS);
+        },
+
+        /** Остановка: интервал + стиль + слушатели фокуса. Кэш не трогаем. */
+        stop() {
+            this._active = false;
+            if (this._timer) {
+                clearInterval(this._timer);
+                this._timer = null;
+            }
+            if (this._wakeHandler) {
+                document.removeEventListener('visibilitychange', this._wakeHandler);
+                window.removeEventListener('focus', this._wakeHandler);
+                this._wakeHandler = null;
+            }
+            const style = document.getElementById(this.STYLE_ID);
+            if (style) style.remove();
+            this.users.clear();
+            this._syncBusy = false;
+        },
+    };
+
     // ===== src/modules/arena.js =====
     // ============================================================
     // 6.9. МОДУЛЬ: АРЕНА 5×5 (modules/arena.js)
@@ -19386,8 +19960,8 @@ const PocketCity = (() => {
     //   core/ui-templates.js -> UITemplates (HTML: FAB-меню, модалки, HUD)
     //   core/ui.js     -> UI
     //   modules/*      -> BuildSim, HeroPlanner, Auction, Players,
-    //                     PocketCity, CombatAssistant, Party, Arena,
-    //                     Miner (заглушка)
+    //                     PocketCity, CombatAssistant, Party, AddonPresence,
+    //                     Arena, Miner (заглушка)
     // 11.7.0: подсистема чата (modules/chat/*, core/utils-chat.js) удалена.
     // ============================================================
 
@@ -19600,6 +20174,10 @@ const PocketCity = (() => {
         Players.init();
         // 🎉 Пати: кнопка в FAB-меню, клиент сервера из server/ (шаг 1).
         Party.init();
+        // ⚡ Подсветка ников пользователей аддона (11.7.2): собственный
+        // лёгкий presence-модуль вместо удалённого чата. Сразу шлёт
+        // /heartbeat + /users и держит <style id="lg-addon-hl-styles">.
+        AddonPresence.start();
         // ⚔️ Боевой ассистент (11.6.2b): подсказки по механикам боссов в походе.
         //    Отдельного пункта меню нет — тумблер в «⚙️ Настройках аддона».
         CombatAssistant.init();
@@ -19641,6 +20219,7 @@ const PocketCity = (() => {
             Arena,
             GuildSummary,
             Party,
+            AddonPresence,
             DOM_IDS,
             RAND_ID,
             _booted: true,
@@ -19684,6 +20263,10 @@ const PocketCity = (() => {
                 // старый инстанс продолжал бы слушать запросы игры (/api/me,
                 // /api/qact) и слать state на наш сервер после перезапуска.
                 Party.destroy();
+                // 11.7.2: снимаем интервал /heartbeat + /users и удаляем
+                // простыню подсветки, иначе после перезапуска остались бы два
+                // поллинга и дублирующий <style>.
+                try { AddonPresence.stop(); } catch (e) {}
                 // 11.7.0: снимаем наблюдатель автоскипа боёв с монстрами и его
                 // отложенные клики, а также опрос сборов на элитных монстров
                 // (elist) с плашкой «Присоединиться» — иначе старый инстанс

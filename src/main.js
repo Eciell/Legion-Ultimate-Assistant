@@ -14,8 +14,8 @@
     //   core/ui-templates.js -> UITemplates (HTML: FAB-меню, модалки, HUD)
     //   core/ui.js     -> UI
     //   modules/*      -> BuildSim, HeroPlanner, Auction, Players,
-    //                     PocketCity, CombatAssistant, Party, Arena,
-    //                     Miner (заглушка)
+    //                     PocketCity, CombatAssistant, Party, AddonPresence,
+    //                     Arena, Miner (заглушка)
     // 11.7.0: подсистема чата (modules/chat/*, core/utils-chat.js) удалена.
     // ============================================================
 
@@ -228,6 +228,10 @@
         Players.init();
         // 🎉 Пати: кнопка в FAB-меню, клиент сервера из server/ (шаг 1).
         Party.init();
+        // ⚡ Подсветка ников пользователей аддона (11.7.2): собственный
+        // лёгкий presence-модуль вместо удалённого чата. Сразу шлёт
+        // /heartbeat + /users и держит <style id="lg-addon-hl-styles">.
+        AddonPresence.start();
         // ⚔️ Боевой ассистент (11.6.2b): подсказки по механикам боссов в походе.
         //    Отдельного пункта меню нет — тумблер в «⚙️ Настройках аддона».
         CombatAssistant.init();
@@ -269,6 +273,7 @@
             Arena,
             GuildSummary,
             Party,
+            AddonPresence,
             DOM_IDS,
             RAND_ID,
             _booted: true,
@@ -312,6 +317,10 @@
                 // старый инстанс продолжал бы слушать запросы игры (/api/me,
                 // /api/qact) и слать state на наш сервер после перезапуска.
                 Party.destroy();
+                // 11.7.2: снимаем интервал /heartbeat + /users и удаляем
+                // простыню подсветки, иначе после перезапуска остались бы два
+                // поллинга и дублирующий <style>.
+                try { AddonPresence.stop(); } catch (e) {}
                 // 11.7.0: снимаем наблюдатель автоскипа боёв с монстрами и его
                 // отложенные клики, а также опрос сборов на элитных монстров
                 // (elist) с плашкой «Присоединиться» — иначе старый инстанс
