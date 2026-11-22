@@ -1064,10 +1064,14 @@
            Палитра — как у остальных плашек аддона: тёмная панель, золотая
            рамка, золотая кнопка. Позиция: правый нижний угол.
            ============================================================ */
+        /* v11.7.0: нижний ряд круглых кнопок игры («Аддон», «Герой»,
+           «Гильдия», «Поход») занимает нижние ~95px экрана,
+           поэтому плашку держим выше него: bottom: 108px фиксирует нижний
+           край над навигацией, а сама плашка растёт вверх. */
         #lg-citymon-gather {
             position: fixed;
             right: 16px;
-            bottom: 16px;
+            bottom: 108px;
             z-index: 99999 !important;
             display: none;
             pointer-events: none;
@@ -1137,6 +1141,15 @@
         #lg-citymon-gather.lg-cm-size-s .lg-cm-gather-row { gap: 4px; }
         #lg-citymon-gather.lg-cm-size-s .lg-cm-gather-join { padding: 3px 8px; font-size: 10.5px; border-radius: 4px; }
         #lg-citymon-gather.lg-cm-size-s .lg-cm-gather-close { padding: 3px 6px; font-size: 10px; border-radius: 4px; }
+
+        /* v11.7.0: базовый отступ фиксируем для всех трёх размеров (S/M/L).
+           Модификаторы выше меняют только габариты и шрифт, но позицию не
+           переопределяют; дублируем right/bottom явно, чтобы нижний край
+           плашки в любом размере оставался строго над кнопками навигации
+           (плашка растёт вверх, а не вниз под кнопки). */
+        #lg-citymon-gather.lg-cm-size-l { right: 16px; bottom: 108px; }
+        #lg-citymon-gather.lg-cm-size-m { right: 16px; bottom: 108px; }
+        #lg-citymon-gather.lg-cm-size-s { right: 16px; bottom: 108px; }
 
         /* ============================================================
            11.6.5c: СПОСОБНОСТИ АРЕНЫ (modules/hero-planner.js)

@@ -2192,10 +2192,14 @@ Object.assign(Utils, UtilsApi);
            Палитра — как у остальных плашек аддона: тёмная панель, золотая
            рамка, золотая кнопка. Позиция: правый нижний угол.
            ============================================================ */
+        /* v11.7.0: нижний ряд круглых кнопок игры («Аддон», «Герой»,
+           «Гильдия», «Поход») занимает нижние ~95px экрана,
+           поэтому плашку держим выше него: bottom: 108px фиксирует нижний
+           край над навигацией, а сама плашка растёт вверх. */
         #lg-citymon-gather {
             position: fixed;
             right: 16px;
-            bottom: 16px;
+            bottom: 108px;
             z-index: 99999 !important;
             display: none;
             pointer-events: none;
@@ -2265,6 +2269,15 @@ Object.assign(Utils, UtilsApi);
         #lg-citymon-gather.lg-cm-size-s .lg-cm-gather-row { gap: 4px; }
         #lg-citymon-gather.lg-cm-size-s .lg-cm-gather-join { padding: 3px 8px; font-size: 10.5px; border-radius: 4px; }
         #lg-citymon-gather.lg-cm-size-s .lg-cm-gather-close { padding: 3px 6px; font-size: 10px; border-radius: 4px; }
+
+        /* v11.7.0: базовый отступ фиксируем для всех трёх размеров (S/M/L).
+           Модификаторы выше меняют только габариты и шрифт, но позицию не
+           переопределяют; дублируем right/bottom явно, чтобы нижний край
+           плашки в любом размере оставался строго над кнопками навигации
+           (плашка растёт вверх, а не вниз под кнопки). */
+        #lg-citymon-gather.lg-cm-size-l { right: 16px; bottom: 108px; }
+        #lg-citymon-gather.lg-cm-size-m { right: 16px; bottom: 108px; }
+        #lg-citymon-gather.lg-cm-size-s { right: 16px; bottom: 108px; }
 
         /* ============================================================
            11.6.5c: СПОСОБНОСТИ АРЕНЫ (modules/hero-planner.js)
@@ -13299,6 +13312,14 @@ const PocketCity = (() => {
         // запроса. 3 с гарантированно больше латентности и совпадает со старым
         // периодом опроса.
         HP_TICK_MIN_MS: 3000,
+        // v11.7.0: чат пати опрашивается СВОИМ таймером — независимо от
+        // HP-синхронизации (30 с) и запросов /api/me. Раньше опрос был
+        // привязан к _syncChatPanel() из _renderPanel(), поэтому у участника
+        // пати (не лидера) новые сообщения появлялись только после отправки
+        // своего или после сворачивания/разворачивания чата. 3.5 с —
+        // компромисс между «сообщение видно почти сразу» и нагрузкой на
+        // наш сервер (GET чата лимитером не ограничен, POST — 30/мин).
+        CHAT_POLL_MS: 3500,
         // Сервер хранит ник только в нижнем регистре (server/index.js).
         LOGIN_RE: /^[a-z0-9_]{1,32}$/,
         // Код приглашения (inviteToken) = 16 случайных байт = 32 hex-символа
@@ -13363,6 +13384,13 @@ const PocketCity = (() => {
         _chatUnread: 0,
         _chatBusy: false,
         _chatBodyEl: null,
+        // v11.7.0: свой таймер опроса чата (CHAT_POLL_MS). Живёт, только пока
+        // игрок состоит в пати, и не зависит от _hpTimer (HP — 30 с).
+        _chatPollTimer: null,
+        _chatRepoll: false,      // _pollChat() звали, пока тик был в полёте
+        _chatFocusBound: false,  // слушатели focus/visibilitychange навешены
+        _chatFocusHandler: null,
+        _chatVisibilityHandler: null,
 
         // v11.6.0g-2: инлайн-стили форм заменены классами из core/styles.js —
         // только так работают hover/focus-эффекты (inline :hover невозможен).
@@ -14455,6 +14483,9 @@ const PocketCity = (() => {
             this._chatCollapsed = !!collapsed;
             if (!this._chatCollapsed) {
                 this._chatUnread = 0;
+                // v11.7.0: развернули — сразу догружаем то, что пришло, пока
+                // панель была свёрнута (не ждём тика CHAT_POLL_MS).
+                this._pollChat();
             }
             this._applyChatCollapsedState();
         },
@@ -14503,6 +14534,11 @@ const PocketCity = (() => {
                 }
 
                 if (res && res.ok) {
+                    // v11.7.0: курсор _chatSince здесь НЕ перезаписываем: id
+                    // нашего сообщения может быть не последним (кто-то написал
+                    // параллельно), и перезапись в обход невычитанных
+                    // сообщений «съела» бы их. Лента подтягивается опросом по
+                    // since — все сообщения придут по порядку.
                     this._pollChat();
                 }
             } catch (err) {
@@ -14520,7 +14556,13 @@ const PocketCity = (() => {
         },
 
         async _pollChat() {
-            if (this._chatBusy) return;
+            if (this._chatBusy) {
+                // Тик уже в полёте. Его ответ принесёт свежие сообщения, но
+                // если запрос ушёл ДО отправки/события — попросим ещё круг,
+                // иначе лента отстала бы на CHAT_POLL_MS.
+                this._chatRepoll = true;
+                return;
+            }
             const party = this._readState();
             if (!party || !party.groupId || !party.sessionId) {
                 this._resetChat();
@@ -14528,6 +14570,10 @@ const PocketCity = (() => {
             }
             const reqPartyId = party.groupId;
             const reqSessionId = party.sessionId;
+
+            // Курсор устарел (комнату чата вычистила TTL-чистка сервера, id
+            // пошли заново с 1): после ответа перечитываем ленту с since=0.
+            let needResync = false;
 
             this._chatBusy = true;
             try {
@@ -14544,9 +14590,22 @@ const PocketCity = (() => {
                 }
 
                 const msgs = Array.isArray(res?.messages) ? res.messages : [];
-                if (msgs.length > 0) {
+                const next = Number(res?.nextSince);
+                const lastId = msgs.length ? Number(msgs[msgs.length - 1]?.id) : 0;
+
+                // v11.7.0: сервер велел пересинхронизироваться (reset) либо
+                // отдал nextSince МЕНЬШЕ нашего курсора — значит id комнаты
+                // начинаются заново. Без сброса курсора фильтр `m.id > since`
+                // навсегда отсёк бы новые сообщения (симптом «чат не
+                // обновляется у участника»).
+                if (res?.reset === true
+                    || (Number.isFinite(next) && next > 0 && next < this._chatSince)) {
+                    this._chatMessages = [];
+                    this._chatSince = 0;
+                    this._chatUnread = 0;
+                    needResync = true;
+                } else if (msgs.length > 0) {
                     const selfLogin = String(cur.login || '').toLowerCase();
-                    let addedNew = false;
                     let newForeign = 0;
 
                     const existingIds = new Set(this._chatMessages.map((m) => m.id));
@@ -14554,7 +14613,6 @@ const PocketCity = (() => {
                         if (!existingIds.has(m.id)) {
                             this._chatMessages.push(m);
                             existingIds.add(m.id);
-                            addedNew = true;
                             if (String(m.login || '').toLowerCase() !== selfLogin) {
                                 newForeign++;
                             }
@@ -14565,19 +14623,21 @@ const PocketCity = (() => {
                         this._chatMessages = this._chatMessages.slice(-50);
                     }
 
+                    // Курсор двигаем строго вперёд: сначала nextSince сервера,
+                    // иначе id последнего сообщения (страховка на битый ответ).
+                    if (Number.isFinite(next) && next > this._chatSince) {
+                        this._chatSince = next;
+                    } else if (Number.isFinite(lastId) && lastId > this._chatSince) {
+                        this._chatSince = lastId;
+                    }
+
+                    // Свёрнут — считаем непрочитанные чужие; развёрнут —
+                    // перерисовываем .party-chat-body сразу, не дожидаясь
+                    // ближайшего HP-тика (это и был баг «чат не обновляется»).
                     if (this._chatCollapsed && newForeign > 0) {
                         this._chatUnread += newForeign;
                     }
-
-                    const next = Number(res?.nextSince);
-                    if (Number.isFinite(next) && next > this._chatSince) {
-                        this._chatSince = next;
-                    }
-
-                    if (addedNew) {
-                        this._renderChatMessages();
-                    }
-                    this._applyChatCollapsedState();
+                    this._renderChatPanel();
                 }
             } catch (err) {
                 const status = Number(err?.status) || 0;
@@ -14589,7 +14649,29 @@ const PocketCity = (() => {
                 console.warn('[PARTY] чат: GET не удался:', err?.message || err);
             } finally {
                 this._chatBusy = false;
+                if (needResync || this._chatRepoll) {
+                    this._chatRepoll = false;
+                    // setTimeout, а не прямой вызов: _chatBusy уже снят,
+                    // стек свободен и повторный опрос не рекурсивен.
+                    setTimeout(() => { this._pollChat(); }, 0);
+                }
             }
+        },
+
+        /**
+         * v11.7.0: перерисовать ленту чата.
+         *
+         * Развёрнут — переписываем .party-chat-body и прокручиваем вниз;
+         * свёрнут — тело не трогаем (его не видно), обновляем только бейдж
+         * непрочитанных. Вызывается из _pollChat() на каждое новое сообщение.
+         */
+        _renderChatPanel() {
+            if (this._chatCollapsed) {
+                this._applyChatCollapsedState();
+                return;
+            }
+            this._renderChatMessages();
+            this._applyChatCollapsedState();
         },
 
         _renderChatMessages() {
@@ -14645,6 +14727,9 @@ const PocketCity = (() => {
             }
             const el = this._ensureChatPanel();
             el.style.display = 'block';
+            // v11.7.0: панель есть — таймер опроса точно нужен (на случай,
+            // если startHpSync() вышел раньше из-за живого _hpTimer).
+            this._startChatPoll();
             this._pollChat();
         },
 
@@ -14670,6 +14755,66 @@ const PocketCity = (() => {
         },
 
         /**
+         * v11.7.0: таймер опроса чата (CHAT_POLL_MS), независимый от HP-тика.
+         *
+         * Раньше лента обновлялась только из _syncChatPanel(), а её вызывал
+         * _renderPanel() на редком HP-тике (30 с) или на запросе /api/me.
+         * Поэтому у обычного участника (не лидера) новые сообщения «висели»
+         * до отправки своего или до сворачивания/разворачивания чата.
+         * Повторный вызов безопасен: второй интервал не создаётся.
+         */
+        _startChatPoll() {
+            this._bindChatFocusSync();
+            if (this._chatPollTimer) return;
+            this._chatPollTimer = setInterval(() => {
+                // Между тиками вышли из пати — гасим таймер.
+                if (!this._readState()) {
+                    this._stopChatPoll();
+                    return;
+                }
+                this._pollChat();
+            }, this.CHAT_POLL_MS);
+        },
+
+        /** v11.7.0: остановить опрос чата (выход из пати, 401, destroy). */
+        _stopChatPoll() {
+            if (this._chatPollTimer) {
+                clearInterval(this._chatPollTimer);
+                this._chatPollTimer = null;
+            }
+            this._chatRepoll = false;
+        },
+
+        /**
+         * v11.7.0: мгновенный опрос при возврате фокуса на окно/вкладку.
+         * Браузер душит setInterval в фоновой вкладке (до 1 раза в минуту),
+         * поэтому при переключении между окнами основы и твинка сообщения
+         * подтягиваются сразу, а не через CHAT_POLL_MS.
+         */
+        _bindChatFocusSync() {
+            if (this._chatFocusBound) return;
+            this._chatFocusBound = true;
+            this._chatFocusHandler = () => {
+                if (this._readState()) this._pollChat();
+            };
+            this._chatVisibilityHandler = () => {
+                if (!document.hidden && this._readState()) this._pollChat();
+            };
+            window.addEventListener('focus', this._chatFocusHandler);
+            document.addEventListener('visibilitychange', this._chatVisibilityHandler);
+        },
+
+        /** v11.7.0: снять слушатели focus/visibilitychange (destroy). */
+        _unbindChatFocusSync() {
+            if (!this._chatFocusBound) return;
+            this._chatFocusBound = false;
+            try { window.removeEventListener('focus', this._chatFocusHandler); } catch (e) {}
+            try { document.removeEventListener('visibilitychange', this._chatVisibilityHandler); } catch (e) {}
+            this._chatFocusHandler = null;
+            this._chatVisibilityHandler = null;
+        },
+
+        /**
          * Запускает синхронизацию HP: отправляем свой hp/maxHp и перерисовываем
          * общую панель из GET /party/:id/state.
          *
@@ -14691,6 +14836,12 @@ const PocketCity = (() => {
             // флаг «мёртв» после возможного destroy старого инстанса), и
             // только потом решаем, нужен ли PerformanceObserver-фолбэк.
             this._hookLiveLink();
+
+            // v11.7.0: чат опрашиваем своим таймером и ДО проверки _hpTimer —
+            // иначе участник, у которого нет своих HP-тиков (не лидер, нет
+            // запросов к игре), не увидел бы новых сообщений до отправки
+            // своего или до открытия модалки пати.
+            this._startChatPoll();
 
             if (this._hpTimer) return;
 
@@ -14946,6 +15097,8 @@ const PocketCity = (() => {
          * Остановить интервал, observer и скрыть панели (выход, 401, перезапуск).
          */
         stopHpSync() {
+            // v11.7.0: вышли из пати (или 401) — опрос чата тоже не нужен.
+            this._stopChatPoll();
             if (this._hpTimer) {
                 clearInterval(this._hpTimer);
                 this._hpTimer = null;
@@ -14982,6 +15135,9 @@ const PocketCity = (() => {
                 this._perfObserver = null;
             }
             this.stopHpSync();
+            // v11.7.0: снимаем и слушатели focus/visibilitychange — старый
+            // инстанс не должен опрашивать чат прошлой пати.
+            this._unbindChatFocusSync();
             this._unhookLiveLink();
         },
 

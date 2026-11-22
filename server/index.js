@@ -878,13 +878,28 @@ async function handleChatPost(req, partyId, server) {
 async function handleChatGet(req, partyId, url) {
     const session = authenticate(req);
     const party = requireParty(partyId);
+    // v11.7.0: читать чат может ЛЮБОЙ участник (и лидер, и обычный игрок) —
+    // проверка та же, что в POST: requireMember, без requireOwner.
     requireMember(session, party);
 
     const since = Math.max(0, parseInt(url.searchParams.get('since') || '0', 10) || 0);
 
     const room = partyChatRooms.get(party.id);
     if (!room || !room.messages.length) {
-        return json({ messages: [], nextSince: since });
+        // Комнаты ещё нет или её вычистила TTL-чистка: id начнутся заново с 1.
+        // Клиенту с курсором из старой комнаты (since > 0) курсор надо
+        // сбросить, иначе фильтр m.id > since отсёк бы все новые сообщения —
+        // именно так лента «залипала» у участника пати.
+        if (since > 0) return json({ messages: [], nextSince: 0, reset: true });
+        return json({ messages: [], nextSince: 0 });
+    }
+
+    const lastId = room.messages[room.messages.length - 1].id;
+
+    // Курсор клиента впереди последнего id комнаты — комната пересоздана и
+    // счётчик пошёл с 1. Отдаём всю ленту с reset: клиент перезапишет курсор.
+    if (since > lastId) {
+        return json({ messages: [...room.messages], nextSince: lastId, reset: true });
     }
 
     const messages = since > 0
@@ -892,7 +907,7 @@ async function handleChatGet(req, partyId, url) {
         : [...room.messages];
     const nextSince = messages.length
         ? messages[messages.length - 1].id
-        : (room.messages[room.messages.length - 1]?.id || since);
+        : lastId;
 
     return json({ messages, nextSince });
 }
