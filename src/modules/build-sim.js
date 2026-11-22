@@ -22,8 +22,10 @@
         /* Человеческие названия статов (использует hero-planner.js). */
         statNames: { hp: 'Макс. HP', atk: 'Физ. урон', mag: 'Магия', def: 'Броня', crit: 'Крит %', critDmg: 'Сила крита', dodge: 'Уклонение', pierce: 'Пробивание', healPow: 'Сила лечения', luck: 'Удача', resist: 'Сопротивление' },
 
-        /* fx-ключи -> подписи в сводке «Что дают открытые навыки». */
-        fxNames: { melee: 'Физ. урон %', magic: 'Магия %', hp: 'Макс. HP %', def: 'Броня', healPow: 'Сила лечения %', healIn: 'Вх. лечение %', crit: 'Крит %', critDmg: 'Сила крита', skel: 'Урон скелетов %', skelT: 'Время скелетов', leech: 'Вампиризм %', block: 'Снижение урона %', dodge: 'Уклонение %', lead: 'Урон по боссам %', first: 'Урон 1-й ход %', dmg: 'Весь урон %', pierce: 'Пробивание %', resist: 'Сопротивление', healCrit: 'Крит лечения %', regen: 'Регенерация %', low: 'Урон при низком HP %', ranged: 'Урон луком %', poison: 'Отрава %', steal: 'Кража %', loot: 'Добыча %', skelN: 'Скелетов +', volley: 'Залп +%', shieldBlock: 'Щит блок %', trapDodge: 'Ловушки %', steady: 'Промах→удар %', cleave: 'Замах %', cleaveBoss: 'Замах по боссу %', penBoss: 'Бронебой по боссу %', drain: 'Вытягивание %', hex: 'Проклятие +%', holy: 'По нежити +%', poisonT: 'Время отравы' },
+        /* fx-ключи -> подписи в сводке «Что дают открытые навыки».
+           v11.7.1: знаки «%» и «+» в подписях НЕ дублируются — суффикс и знак
+           значения добавляет statList() (item.sign/item.suf). */
+        fxNames: { melee: 'Физ. урон', magic: 'Магия', hp: 'Макс. HP', def: 'Броня', healPow: 'Сила лечения', healIn: 'Вх. лечение', crit: 'Крит', critDmg: 'Сила крита', skel: 'Урон скелетов', skelT: 'Время скелетов', leech: 'Вампиризм', block: 'Снижение урона', dodge: 'Уклонение', lead: 'Урон по боссам', first: 'Урон 1-й ход', dmg: 'Весь урон', pierce: 'Пробивание', resist: 'Сопротивление', healCrit: 'Крит лечения', regen: 'Регенерация', low: 'Урон при низком HP', ranged: 'Урон луком', poison: 'Отрава', steal: 'Кража', loot: 'Добыча', skelN: 'Скелетов', volley: 'Залп', shieldBlock: 'Щит блок', trapDodge: 'Ловушки', steady: 'Промах→удар', cleave: 'Замах', cleaveBoss: 'Замах по боссу', penBoss: 'Бронебой по боссу', drain: 'Вытягивание', hex: 'Проклятие', holy: 'По нежити', poisonT: 'Время отравы' },
 
         /* Категории прокачки способностей Арены (как в /api/skmap: ab.br[].next). */
         ARENA_KINDS: [['lv', 'Ступень'], ['pow', 'Мощь'], ['eff', 'Эффект'], ['dur', 'Длительность']],
@@ -478,7 +480,11 @@
             const game = (meta && meta.up) ? (+meta.up[kind] || 0) : 0;
             if (meta && meta.next && +meta.next[kind] > 0 && (+from || 0) === game) return +meta.next[kind];
             const table = this.ARENA_COST[kind] || [];
-            return +table[+from || 0] || (+from || 0) + 2;
+            // v11.7.1: ступень способности ('lv') начинается с 1, а pow/eff/dur
+            // — с 0. Поэтому для 'lv' индекс шкалы = шаг-1, иначе первый шаг
+            // (1 -> 2) брал цену второй ступени и завышал план на 1 жетон.
+            const idx = kind === 'lv' ? Math.max(0, (+from || 1) - 1) : (+from || 0);
+            return +table[idx] || (+from || 0) + 2;
         },
 
         _upPathCost(key, kind, from, to) {
@@ -1616,7 +1622,12 @@
                         const hit = map.get(key);
                         if (hit) { hit.v += amount; hit.names.push(n.name); }
                         else {
-                            const item = { label: this.fxNames[fk] || fk, sign: '+', suf: pct ? '%' : '', v: amount, color: this.branchColor(bi), names: [n.name] };
+                            // v11.7.1: подписи fxNames без «%»/«+», но если
+                            // живой ключ пришёл с хвостом знака — обрезаем его,
+                            // чтобы не получить «Крит %%».
+                            let rawLabel = String(this.fxNames[fk] || fk);
+                            if (pct === true) rawLabel = rawLabel.replace(/\s*[%+]+$/, '').trim();
+                            const item = { label: rawLabel, sign: '+', suf: pct ? '%' : '', v: amount, color: this.branchColor(bi), names: [n.name] };
                             map.set(key, item);
                             out.push(item);
                         }

@@ -1796,11 +1796,30 @@
         .auc-footer { margin-top: 8px; font-size: 12px; color: #8b7f96; text-align: right; }
 
         /* ============================================================
+           11.7.0: РУЧНАЯ ВСТАВКА В ПОЛЕ КОМАНДЫ ПОХОДА (#qSayIn)
+           Игра глушит вставку (noPaste на paste/drop/beforeinput), а слово
+           механики босса в походе (.q-nc — canvas) отдаётся с
+           user-select: none и pointer-events: none: выделить и скопировать
+           его было нельзя. !important перебивает правила site/quest.css
+           (специфичность у них такая же, поэтому без !important не выйдет).
+           Обработчики вставки дополнительно глушит перехватчик из
+           modules/combat-assistant.js (stopImmediatePropagation, БЕЗ
+           preventDefault) — нативная вставка браузера остаётся рабочей.
+           ============================================================ */
+        .q-nc, .q-ncw {
+            user-select: text !important;
+            -webkit-user-select: text !important;
+            pointer-events: auto !important;
+        }
+
+        /* ============================================================
            11.6.2b: БОЕВОЙ АССИСТЕНТ (modules/combat-assistant.js)
            Контейнер висит по центру сверху и прозрачен для мыши, чтобы не
            перекрывать нативный UI похода; кликабельны только карточка
-           подсказки (pointer-events: auto) — бейдж команды и кнопка
-           «Вставить» — и баннер сбора отряда с «Присоединиться».
+           подсказки (pointer-events: auto) — заголовок «Внимание: …» и
+           бейдж команды (v11.7.1: кнопка «Вставить» убрана). Баннер сбора
+           отряда отсюда убран в 11.7.0: сборы теперь только гильдейские,
+           на элитных монстров — см. блок ниже (.lg-cm-gather).
            ============================================================ */
         #lg-combat-assistant {
             position: fixed;
@@ -1835,7 +1854,9 @@
         }
         /* v11.7.0: команда — кликабельный бейдж (копирование в буфер). */
         .lg-combat-info { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
-        .lg-combat-hint { font-size: 12px; opacity: 0.8; }
+        /* v11.7.1: заголовок «Внимание: {что происходит}» — главный текст
+           уведомления, поэтому чуть крупнее и контрастнее. */
+        .lg-combat-hint { font-size: 13px; line-height: 1.3; color: #ffe6a8; max-width: min(520px, 88vw); }
         .lg-combat-cmd {
             background: #241d10; border: 1px dashed #ffcf6a; color: #ffcf6a;
             border-radius: 6px; padding: 4px 10px; font: bold 15px Arial;
@@ -1843,15 +1864,59 @@
         }
         .lg-combat-cmd:hover { background: #ffcf6a; color: #000; }
         .lg-combat-cmd.copied { background: #4cc95a; border-color: #4cc95a; color: #16121a; }
-        /* v11.7.0: сбор отряда — таймер и кнопка «Присоединиться». */
-        .lg-combat-gather {
-            background: rgba(18, 26, 32, 0.95); border: 2px solid #5cc8ff; color: #fff;
-            padding: 10px 16px; border-radius: 10px; display: flex; flex-direction: column;
-            gap: 6px; align-items: center; pointer-events: auto; font: bold 14px Arial;
-            box-shadow: 0 4px 14px rgba(0,0,0,0.55); min-width: 240px; text-align: center;
+        /* ============================================================
+           11.7.0: СБОР ГИЛЬДИИ НА ЭЛИТНОГО МОНСТРА (modules/pocket-city.js)
+           Плавающее уведомление о чужом открытом сборе (POST /api/citymon/act
+           { op: 'elist' }) с кнопкой «Присоединиться» (op: 'ejoin').
+           Палитра — как у остальных плашек аддона: тёмная панель, золотая
+           рамка, золотая кнопка. Ставим в левый нижний угол: по центру
+           сверху уже живут подсказки боевого ассистента, а справа — HUD
+           пати/тосты, перекрывать их нельзя.
+           ============================================================ */
+        #lg-citymon-gather {
+            position: fixed;
+            left: 20px;
+            bottom: 20px;
+            z-index: 10001;
+            display: none;
+            pointer-events: none;
         }
-        .lg-combat-gather-head { color: #9fe3ff; }
-        .lg-combat-gather-timer { font: 900 20px/1.1 Consolas, monospace; color: #ffcf6a; }
+        #lg-citymon-gather.on { display: block; }
+        .lg-cm-gather {
+            background: rgba(29, 22, 32, 0.96);
+            border: 2px solid #caa55c;
+            border-radius: 10px;
+            padding: 10px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            align-items: center;
+            pointer-events: auto;
+            font: bold 14px Arial;
+            color: #f7eadf;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+            min-width: 260px;
+            max-width: min(560px, 92vw);
+            text-align: center;
+        }
+        .lg-cm-gather-head { color: #9fe3ff; font-size: 14px; line-height: 1.3; }
+        /* Подпись с обратным отсчётом: цифры не «прыгают» (tabular-nums). */
+        .lg-cm-gather-sub { color: #b9aec6; font-size: 12px; font-weight: normal; font-variant-numeric: tabular-nums; }
+        .lg-cm-gather-row { display: flex; align-items: center; gap: 8px; }
+        .lg-cm-gather-join {
+            background: #ffcf6a; color: #16121a; border: none; padding: 6px 14px;
+            border-radius: 6px; font-weight: bold; cursor: pointer;
+            transition: transform 0.1s, filter 0.15s;
+        }
+        .lg-cm-gather-join:hover:not(:disabled) { filter: brightness(1.1); }
+        .lg-cm-gather-join:active:not(:disabled) { transform: scale(0.95); }
+        .lg-cm-gather-join:disabled { opacity: 0.55; cursor: default; }
+        .lg-cm-gather-close {
+            background: transparent; border: 1px solid #4a3b55; color: #9c8fa8;
+            border-radius: 6px; padding: 5px 10px; font: bold 13px Arial;
+            cursor: pointer; transition: color 0.15s, border-color 0.15s;
+        }
+        .lg-cm-gather-close:hover { color: #ff8fa3; border-color: #ff8fa3; }
 
         /* ============================================================
            11.6.5c: СПОСОБНОСТИ АРЕНЫ (modules/hero-planner.js)
@@ -2055,7 +2120,9 @@
         .hp-ench-right {
             flex: 1 1 60%; min-width: 0;
             max-height: calc(100vh - 350px);
-            overflow-y: auto;
+            /* v11.7.1: добавилась колонка «Статы» — на узкой модалке таблица
+               скроллится ещё и по горизонтали, а не обрезает значения. */
+            overflow: auto;
         }
         /* Узкая модалка/маленькое окно — таблица уезжает под карточку цели. */
         @media (max-width: 980px) {
@@ -2068,7 +2135,8 @@
         .custom-modal .hp-ench-table td { padding: 5px 8px; font-size: 13px; }
         .custom-modal .hp-ench-table th { cursor: default; white-space: nowrap; }
         .custom-modal .hp-ench-table th::after { content: ''; }
-        /* Строка уровня — кликабельная цель. Пройденные шаги приглушены. */
+        /* Строка уровня — кликабельный ВЫБОР уровня просмотра (v11.7.1: все
+           строки +0…+15 кликабельны, в том числе пройденные). */
         .hp-ench-table .hp-ench-row { cursor: pointer; transition: background 0.12s; }
         .hp-ench-table .hp-ench-row:hover { background: rgba(202, 165, 92, 0.08); }
         .hp-ench-table .hp-ench-row.passed { cursor: default; opacity: 0.45; }
@@ -2076,6 +2144,15 @@
         .hp-ench-table .hp-ench-row.cur { opacity: 1; background: rgba(202, 165, 92, 0.12); }
         .hp-ench-table .hp-ench-row.target { background: rgba(122, 209, 255, 0.12); }
         .hp-ench-table .hp-ench-row.target td:first-child { box-shadow: inset 2px 0 0 #7ad1ff; }
+        /* v11.7.1: строка ВЫБРАННОГО уровня просмотра (может быть и ниже
+           текущей заточки) — голубая подсветка слева. */
+        .hp-ench-table .hp-ench-row.preview { background: rgba(122, 209, 255, 0.1); }
+        .hp-ench-table .hp-ench-row.preview td:first-child { box-shadow: inset 2px 0 0 #7ad1ff; }
+        /* Колонка «Статы»: значения предмета на уровне этой строки. */
+        .custom-modal .hp-ench-table td.hp-ench-stats {
+            font-size: 11px; line-height: 1.35; color: #b9adc6;
+            min-width: 140px; font-variant-numeric: tabular-nums;
+        }
         /* Чипы усилителей (⭐ звезда / 🌐 сфера) в колонке «Усилители». */
         .hp-mats-cell { white-space: nowrap; }
         .hp-mat-chip {
@@ -2089,7 +2166,30 @@
         .hp-mat-chip.sphere { border-color: rgba(122, 209, 255, 0.45); }
         /* В режиме «Идеально» усилители не участвуют в расчёте — чипы-подсказки. */
         .hp-mat-chip.muted { cursor: default; opacity: 0.35; }
-        /* ── Шапка карточки цели: «Цель: +N» + пресеты ── */
+        /* v11.7.1: кнопки-переключатели ресурсов ⭐/🌐 в строках уровней
+           (заменили браузерные чекбоксы). Активное состояние подсвечивается:
+           звезда — золотым, сфера — голубым. */
+        .hp-mat-btn {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 24px; height: 22px; margin: 0 2px; padding: 0;
+            font: inherit; font-size: 12px; line-height: 1;
+            border-radius: 6px; border: 1px solid #4a3b55; background: #241c2b;
+            cursor: pointer; user-select: none;
+            transition: background 0.15s, border-color 0.15s, transform 0.1s;
+        }
+        .hp-mat-btn:hover { background: #352941; border-color: #6b5a7a; }
+        .hp-mat-btn:active { transform: scale(0.94); }
+        .hp-mat-btn.star:hover { border-color: rgba(202, 165, 92, 0.7); }
+        .hp-mat-btn.sphere:hover { border-color: rgba(122, 209, 255, 0.7); }
+        .hp-mat-btn.star.active {
+            background: rgba(202, 165, 92, 0.28); border-color: #caa55c;
+            box-shadow: 0 0 6px rgba(202, 165, 92, 0.45);
+        }
+        .hp-mat-btn.sphere.active {
+            background: rgba(122, 209, 255, 0.22); border-color: #7ad1ff;
+            box-shadow: 0 0 6px rgba(122, 209, 255, 0.4);
+        }
+        /* ── Шапка карточки: «Просмотр: +N» + пресеты уровней ── */
         .hp-target-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .hp-target-title { font-size: 13px; color: #d8c9a8; }
         .hp-target-title b { color: #ffcf6a; font-size: 19px; font-variant-numeric: tabular-nums; }
@@ -2103,6 +2203,10 @@
         .hp-target-preset:hover:not(:disabled) { background: #352941; border-color: #caa55c; }
         .hp-target-preset.active { background: #caa55c; border-color: #caa55c; color: #1d1620; }
         .hp-target-preset:disabled { opacity: 0.35; cursor: not-allowed; }
+        /* v11.7.1: пройденный уровень — приглушён, но КЛИКАБЕЛЕН (можно
+           посмотреть статы на уже достигнутой заточке). */
+        .hp-target-preset.done { opacity: 0.55; border-style: dashed; }
+        .hp-target-preset.done:hover { opacity: 1; }
         /* ── Секции карточки: статы и стоимость ── */
         .hp-target-section {
             display: flex; flex-direction: column; gap: 6px;
@@ -2120,6 +2224,8 @@
         .hp-stat-val { white-space: nowrap; font-variant-numeric: tabular-nums; }
         .hp-stat-val b { color: #ffcf6a; }
         .hp-stat-gain { color: #8ff2a0; font-size: 11px; }
+        /* v11.7.1: значение на текущей заточке (когда смотрим другой уровень). */
+        .hp-stat-cur { color: #9c8fa8; font-size: 11px; }
         .hp-cost-total { font-size: 20px; font-weight: bold; color: #ffcf6a; font-variant-numeric: tabular-nums; }
         .hp-cost-sub { font-size: 11px; color: #9c8fa8; line-height: 1.45; }
         .hp-cost-row { font-size: 12px; color: #d8c9a8; font-variant-numeric: tabular-nums; }
@@ -2185,6 +2291,14 @@
         }
         .hp-gear-pill.ok { color: #1d1620; background: #8ff2a0; }
         .hp-gear-pill.bad { color: #1d1620; background: #ffb3a0; }
+        /* v11.7.1: шапка выбранного предмета — мини-арт + название/статус. */
+        .hp-item-head { display: flex; align-items: flex-start; gap: 8px; }
+        .hp-item-head-art {
+            flex: none; width: 28px; height: 28px;
+            display: flex; align-items: center; justify-content: center; overflow: hidden;
+        }
+        .hp-item-head-art > svg { width: 100%; height: 100%; display: block; }
+        .hp-item-head-art > img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
 
         /* 11.6.6c: палитра компактных бейджей участников (уровень, класс,
            роль, онлайн). v11.7: игра нативно показывает уровни, классы, силу
@@ -4558,8 +4672,10 @@
         /* Человеческие названия статов (использует hero-planner.js). */
         statNames: { hp: 'Макс. HP', atk: 'Физ. урон', mag: 'Магия', def: 'Броня', crit: 'Крит %', critDmg: 'Сила крита', dodge: 'Уклонение', pierce: 'Пробивание', healPow: 'Сила лечения', luck: 'Удача', resist: 'Сопротивление' },
 
-        /* fx-ключи -> подписи в сводке «Что дают открытые навыки». */
-        fxNames: { melee: 'Физ. урон %', magic: 'Магия %', hp: 'Макс. HP %', def: 'Броня', healPow: 'Сила лечения %', healIn: 'Вх. лечение %', crit: 'Крит %', critDmg: 'Сила крита', skel: 'Урон скелетов %', skelT: 'Время скелетов', leech: 'Вампиризм %', block: 'Снижение урона %', dodge: 'Уклонение %', lead: 'Урон по боссам %', first: 'Урон 1-й ход %', dmg: 'Весь урон %', pierce: 'Пробивание %', resist: 'Сопротивление', healCrit: 'Крит лечения %', regen: 'Регенерация %', low: 'Урон при низком HP %', ranged: 'Урон луком %', poison: 'Отрава %', steal: 'Кража %', loot: 'Добыча %', skelN: 'Скелетов +', volley: 'Залп +%', shieldBlock: 'Щит блок %', trapDodge: 'Ловушки %', steady: 'Промах→удар %', cleave: 'Замах %', cleaveBoss: 'Замах по боссу %', penBoss: 'Бронебой по боссу %', drain: 'Вытягивание %', hex: 'Проклятие +%', holy: 'По нежити +%', poisonT: 'Время отравы' },
+        /* fx-ключи -> подписи в сводке «Что дают открытые навыки».
+           v11.7.1: знаки «%» и «+» в подписях НЕ дублируются — суффикс и знак
+           значения добавляет statList() (item.sign/item.suf). */
+        fxNames: { melee: 'Физ. урон', magic: 'Магия', hp: 'Макс. HP', def: 'Броня', healPow: 'Сила лечения', healIn: 'Вх. лечение', crit: 'Крит', critDmg: 'Сила крита', skel: 'Урон скелетов', skelT: 'Время скелетов', leech: 'Вампиризм', block: 'Снижение урона', dodge: 'Уклонение', lead: 'Урон по боссам', first: 'Урон 1-й ход', dmg: 'Весь урон', pierce: 'Пробивание', resist: 'Сопротивление', healCrit: 'Крит лечения', regen: 'Регенерация', low: 'Урон при низком HP', ranged: 'Урон луком', poison: 'Отрава', steal: 'Кража', loot: 'Добыча', skelN: 'Скелетов', volley: 'Залп', shieldBlock: 'Щит блок', trapDodge: 'Ловушки', steady: 'Промах→удар', cleave: 'Замах', cleaveBoss: 'Замах по боссу', penBoss: 'Бронебой по боссу', drain: 'Вытягивание', hex: 'Проклятие', holy: 'По нежити', poisonT: 'Время отравы' },
 
         /* Категории прокачки способностей Арены (как в /api/skmap: ab.br[].next). */
         ARENA_KINDS: [['lv', 'Ступень'], ['pow', 'Мощь'], ['eff', 'Эффект'], ['dur', 'Длительность']],
@@ -5014,7 +5130,11 @@
             const game = (meta && meta.up) ? (+meta.up[kind] || 0) : 0;
             if (meta && meta.next && +meta.next[kind] > 0 && (+from || 0) === game) return +meta.next[kind];
             const table = this.ARENA_COST[kind] || [];
-            return +table[+from || 0] || (+from || 0) + 2;
+            // v11.7.1: ступень способности ('lv') начинается с 1, а pow/eff/dur
+            // — с 0. Поэтому для 'lv' индекс шкалы = шаг-1, иначе первый шаг
+            // (1 -> 2) брал цену второй ступени и завышал план на 1 жетон.
+            const idx = kind === 'lv' ? Math.max(0, (+from || 1) - 1) : (+from || 0);
+            return +table[idx] || (+from || 0) + 2;
         },
 
         _upPathCost(key, kind, from, to) {
@@ -6152,7 +6272,12 @@
                         const hit = map.get(key);
                         if (hit) { hit.v += amount; hit.names.push(n.name); }
                         else {
-                            const item = { label: this.fxNames[fk] || fk, sign: '+', suf: pct ? '%' : '', v: amount, color: this.branchColor(bi), names: [n.name] };
+                            // v11.7.1: подписи fxNames без «%»/«+», но если
+                            // живой ключ пришёл с хвостом знака — обрезаем его,
+                            // чтобы не получить «Крит %%».
+                            let rawLabel = String(this.fxNames[fk] || fk);
+                            if (pct === true) rawLabel = rawLabel.replace(/\s*[%+]+$/, '').trim();
+                            const item = { label: rawLabel, sign: '+', suf: pct ? '%' : '', v: amount, color: this.branchColor(bi), names: [n.name] };
                             map.set(key, item);
                             out.push(item);
                         }
@@ -6543,6 +6668,13 @@
         // Хранится в абсолютных уровнях (+1…+15); при смене предмета цель
         // не сбрасывается — просто зажимается в допустимый диапазон.
         targetLevel: null,
+        // v11.7.1: уровень ПРОСМОТРА (0…15) отдельно от цели пути. Игрок может
+        // посмотреть статы предмета на +0, +4, +7 и т.д., даже если текущая
+        // заточка уже выше: тогда путь curEn -> previewLevel пустой (0 шагов).
+        previewLevel: null,
+        // v11.7.1: ручной ввод количества ресурсов убран — звёзды и сферы
+        // теперь выбираются кнопками ⭐/🌐 в строках уровней, а расход
+        // считается автоматически по пути curEn+1…previewLevel.
         userStars: 0,
         userSpheres: 0,
         allocatedStars: {},   // { lv: true }
@@ -6644,6 +6776,24 @@
             return Math.min(max, Math.max(min, Math.round(t)));
         },
 
+        /**
+         * v11.7.1: уровень просмотра (0…15) для карточки «Заточка».
+         *
+         * В отличие от enchantTargetLevel НЕ зажимается вперёд текущей
+         * заточки: игрок вправе посмотреть статы предмета на +0…+15.
+         * Если уровень не выбран — берём цель пути (curEn + 1).
+         *
+         * @param {number} curEn текущая заточка предмета
+         * @returns {number} уровень просмотра (0…15)
+         */
+        enchantPreviewLevel(curEn) {
+            const max = this.ENCH.max;
+            if (this.previewLevel == null) return this.enchantTargetLevel(curEn);
+            const raw = Number(this.previewLevel);
+            if (!Number.isFinite(raw)) return this.enchantTargetLevel(curEn);
+            return Math.min(max, Math.max(0, Math.round(raw)));
+        },
+
         /* ---------------------------------------------------------- */
         /* v11.6.3: штраф экипировки (gearPenalty из lib/game-data.js) */
         /* ---------------------------------------------------------- */
@@ -6718,6 +6868,11 @@
          * 11.6.5f.1: компактный статус экипировки — одна иконка рядом с
          * названием предмета вместо отдельной полосы над таблицей.
          * Полный текст живёт в title (у штрафа — со списком предметов).
+         *
+         * v11.7.1: в шапке карточки заточки больше НЕ используется — там
+         * показывается статус ВЫБРАННОГО предмета (itemIconBadge по gp),
+         * иначе плашка по надетым вещам путала при выборе вещи из сумки.
+         * Метод оставлен как публичный helper сводки штрафа.
          *
          * @param {string} role класс героя
          * @param {Array} items надетые предметы
@@ -6869,6 +7024,32 @@
                 + `<span>🌐 Сфера сохранения: ${this.priceBadge('sphere')}</span>`;
         },
 
+        /**
+         * v11.7.1: арт предмета для плитки и шапки карточки заточки.
+         *
+         * Приоритет — нативный рендер игры G.LGInventory.art(it): только он
+         * рисует сложные вещи («Нимб из мяты» и прочие легендарки), которые
+         * Utils.getItemArtHtml() подменял эмодзи-заглушкой. still() игры
+         * применяется, если доступен (как в site/inventory.js).
+         * Фолбэк — общий хелпер аддона (SVG -> иконка игры -> эмодзи).
+         *
+         * @param {object} it предмет из /api/me
+         * @returns {string} html
+         */
+        renderItemArt(it) {
+            if (!it) return '📦';
+            try {
+                const inv = G.LGInventory;
+                if (inv && typeof inv.art === 'function') {
+                    const rawSvg = inv.art(it);
+                    if (rawSvg && rawSvg.startsWith('<svg')) {
+                        return (typeof inv.still === 'function') ? inv.still(rawSvg) : rawSvg;
+                    }
+                }
+            } catch (e) {}
+            return Utils.getItemArtHtml({ i: it.id ?? it.i, name: it.name }, it);
+        },
+
         init() {
             (document.getElementById(DOM_IDS.btnBuildSim) || document.getElementById('btn-build-sim'))
                 ?.addEventListener('click', () => this.open());
@@ -6913,7 +7094,9 @@
 
                 // 11.6.5f.1: статус экипировки — маленькая иконка в шапке
                 // выбранного предмета (раньше была отдельная полоса сверху).
-                const gearIconHtml = this.gearSummaryIcon(h.role, equipped);
+                // v11.7.1: иконка считается по КОНКРЕТНОМУ предмету (gp) внутри
+                // renderTable — общая плашка по надетым вещам игрока путала
+                // (предмет из сумки мог подходить, а плашка показывала штраф).
 
                 const tabsHtml = `
                     <button class="modal-tab active" data-tab="hero-build">🛡️ Билды</button>
@@ -6927,16 +7110,13 @@
                         <div id="hp-buildsim-container" style="display:flex; flex-direction:column; flex:1; min-height:0; overflow:auto; padding-bottom:20px;"></div>
                     </div>
                     <div class="tab-content" id="tab-hero-ench" style="flex-direction:column; gap:8px;">
-                        <!-- 11.6.5f.1: строка 1 — режимы, инпуты ресурсов (только в
-                             режиме шансов) и цены ресурсов в одной полосе. -->
+                        <!-- 11.6.5f.1: строка 1 — режимы и цены ресурсов. v11.7.1:
+                             ручной ввод количества звёзд/сфер убран — ресурсы
+                             выбираются кнопками ⭐/🌐 в строках уровней. -->
                         <div class="hp-ench-topbar">
                             <div class="hp-mode-switch">
                                 <button class="hp-mode-btn ${this.strategyMode === 'ideal' ? 'active' : ''}" data-mode="ideal" style="border:none; border-radius:5px; font-weight:bold; cursor:pointer; transition:all 0.2s; background:${this.strategyMode === 'ideal' ? '#caa55c' : 'transparent'}; color:${this.strategyMode === 'ideal' ? '#1d1620' : '#aaa'};">📊 Идеально</button>
                                 <button class="hp-mode-btn ${this.strategyMode === 'expected' ? 'active' : ''}" data-mode="expected" style="border:none; border-radius:5px; font-weight:bold; cursor:pointer; transition:all 0.2s; background:${this.strategyMode === 'expected' ? '#caa55c' : 'transparent'}; color:${this.strategyMode === 'expected' ? '#1d1620' : '#aaa'};">🧠 С учётом шансов</button>
-                            </div>
-                            <div id="hp-resources-panel" class="hp-mat-inputs" style="display:${this.strategyMode === 'expected' ? 'flex' : 'none'};">
-                                <label>⭐ Звёзды: <input type="number" id="hp-input-stars" min="0" max="15" value="${this.userStars}"></label>
-                                <label>🌐 Сферы: <input type="number" id="hp-input-spheres" min="0" max="15" value="${this.userSpheres}"></label>
                             </div>
                             <!-- 11.6.2d: цены ресурсов. 📈 — медиана аука (за 72 часа /
                                  последние 100 цен), 🏪 — цена кузнеца (фолбэк).
@@ -7040,93 +7220,103 @@
 
                     const isExpected = this.strategyMode === 'expected';
                     const isExpanded = this.ENCH.max;
-                    // 11.6.5f: цель правой карточки (null -> curEn + 1).
-                    const target = this.enchantTargetLevel(curEn);
+                    // v11.7.1: уровень ПРОСМОТРА (0…15) отделён от цели пути.
+                    // preview <= curEn означает «шагов нет»: карточка просто
+                    // показывает статы предмета на выбранном уровне.
+                    const preview = this.enchantPreviewLevel(curEn);
+                    const hasPath = preview > curEn;
+                    const starPrice = this.resourcePrice('star');
+                    const spherePrice = this.resourcePrice('sphere');
 
-                    // ── Левая колонка: таблица уровней ──
-                    // Колонки «Суммарно» и «Статы после» переехали в карточку
-                    // цели: они описывают конкретную цель, а не каждый уровень.
+                    // Компактная подпись стата для колонки «Статы»: убираем
+                    // хвостовой «%» из statNames («Крит %» -> «Крит»), значение
+                    // показываем числом, как в самой игре.
+                    const shortStat = (k) => String(
+                        (typeof BuildSim !== 'undefined' && BuildSim.statNames && BuildSim.statNames[k]) || k
+                    ).replace(/\s*%$/, '');
+                    const statKeys = Object.keys(baseStats || {});
+                    // Статы предмета на произвольном уровне заточки (Math.round,
+                    // xstat-ы получают ¼ бонуса — см. enchantStat).
+                    const statsAt = (lv) => statKeys.length
+                        ? statKeys.map(k => `${shortStat(k)} ${this.enchantStat(+baseStats[k] || 0, lv, k)}`).join(' · ')
+                        : '—';
+
+                    // ── Правая колонка: таблица уровней +0…+15 ──
+                    // v11.7.1: первая строка — база +0, все строки кликабельны:
+                    // клик выбирает уровень ПРОСМОТРА (в том числе ниже текущей
+                    // заточки), а не только цель впереди.
                     let rows = '';
-                    for (let lv = 1; lv <= isExpanded; lv++) {
-                        let chance = this.enchantChance(lv);
-                        const cost = this.enchantCost(item.v, lv);
+                    for (let lv = 0; lv <= isExpanded; lv++) {
+                        const isBase = lv === 0;
                         const isCur = lv === curEn;
-                        const passed = lv <= curEn;          // шаг уже пройден
-                        const isTarget = !passed && lv === target;
+                        const isPreview = lv === preview;
 
-                        const useStar = isExpected && !!this.allocatedStars[lv];
-                        const useSphere = isExpected && !!this.allocatedSpheres[lv];
-                        // ⭐ даёт +25% к шансу — показываем шанс уже с надбавкой.
-                        if (useStar) chance += 25;
+                        // Усилители — только у шагов +1…+15 (у базы шага нет).
+                        const useStar = !isBase && !!this.allocatedStars[lv];
+                        const useSphere = !isBase && !!this.allocatedSpheres[lv];
 
-                        // Цена ресурса: медиана аука (за 72 часа / последние
-                        // 100 цен), иначе базовая цена кузнеца — фолбэк внутри
-                        // resourcePrice.
-                        const starPrice = this.resourcePrice('star');
-                        const spherePrice = this.resourcePrice('sphere');
+                        let chance = 0;
+                        let costCell = '—';
+                        let chips = '—';
+                        let bonusPct = 0;
+                        if (!isBase) {
+                            chance = this.enchantChance(lv);
+                            // ⭐ даёт +25% к шансу — показываем шанс уже с надбавкой.
+                            if (useStar) chance += 25;
 
-                        // Отмеченный усилитель входит в стоимость попытки:
-                        // колонка «Попытка» показывает реальные траты шага.
-                        const attemptCost = cost
-                            + (useStar ? starPrice : 0)
-                            + (useSphere ? spherePrice : 0);
+                            // Отмеченный усилитель входит в стоимость попытки:
+                            // колонка «Попытка» показывает реальные траты шага.
+                            const attemptCost = this.enchantCost(item.v, lv)
+                                + (useStar ? starPrice : 0)
+                                + (useSphere ? spherePrice : 0);
 
-                        // 📈 — в стоимость вошёл ресурс, купленный на ауке
-                        // (медиана сети). Тултип объясняет источник цены.
-                        const aucUsed = (useStar && this.resourceMedian('star') > 0)
-                            || (useSphere && this.resourceMedian('sphere') > 0);
-                        const costCell = `${Utils.formatMoney(attemptCost)}${aucUsed
-                            ? ' <span title="Цена включает ресурс с аукциона (медиана сети за 72 часа / последние 100 цен)" style="cursor:help; font-size:11px;">📈</span>'
-                            : ''}`;
+                            // 📈 — в стоимость вошёл ресурс, купленный на ауке
+                            // (медиана сети). Тултип объясняет источник цены.
+                            const aucUsed = (useStar && this.resourceMedian('star') > 0)
+                                || (useSphere && this.resourceMedian('sphere') > 0);
+                            costCell = `${Utils.formatMoney(attemptCost)}${aucUsed
+                                ? ' <span title="Цена включает ресурс с аукциона (медиана сети за 72 часа / последние 100 цен)" style="cursor:help; font-size:11px;">📈</span>'
+                                : ''}`;
 
-                        // Усилители: в режиме шансов — чипы с чекбоксами, в
-                        // «Идеально» — приглушённые чипы-подсказки (там
-                        // усилители не участвуют в расчёте).
-                        const chipHint = passed
-                            ? 'Шаг уже пройден'
-                            : 'Усилители учитываются в режиме «С учётом шансов»';
-                        const chips = (isExpected && !passed)
-                            ? `<label class="hp-mat-chip star" title="Счастливая звезда: +25% к шансу, +${Utils.formatMoney(starPrice)} к цене">`
-                                + `<input type="checkbox" class="hp-alloc-star" data-lv="${lv}" ${this.allocatedStars[lv] ? 'checked' : ''}>⭐</label>`
-                                + `<label class="hp-mat-chip sphere" title="Сфера сохранения: защита от поломки, +${Utils.formatMoney(spherePrice)} к цене">`
-                                + `<input type="checkbox" class="hp-alloc-sphere" data-lv="${lv}" ${this.allocatedSpheres[lv] ? 'checked' : ''}>🌐</label>`
-                            : `<span class="hp-mat-chip muted" title="${chipHint}">⭐</span>`
-                                + `<span class="hp-mat-chip muted" title="${chipHint}">🌐</span>`;
+                            chips = `<button type="button" class="hp-mat-btn star ${useStar ? 'active' : ''}" data-lv="${lv}" title="Счастливая звезда (+25% к шансу, +${Utils.formatMoney(starPrice)})">⭐</button>`
+                                + `<button type="button" class="hp-mat-btn sphere ${useSphere ? 'active' : ''}" data-lv="${lv}" title="Сфера сохранения (защита от поломки, +${Utils.formatMoney(spherePrice)})">🌐</button>`;
 
-                        // Бонус заточки на этом уровне (GAME_DATA.ENCHANT_MULTIPLIERS, %)
-                        const bonusPct = GAME_DATA.ENCHANT_MULTIPLIERS[lv] || 0;
+                            // Бонус заточки на этом уровне (GAME_DATA.ENCHANT_MULTIPLIERS, %)
+                            bonusPct = GAME_DATA.ENCHANT_MULTIPLIERS[lv] || 0;
+                        }
 
                         const rowCls = ['hp-ench-row'];
-                        if (passed) rowCls.push('passed');
                         if (isCur) rowCls.push('cur');
-                        if (isTarget) rowCls.push('target');
-                        const rowTitle = passed ? '' : ` title="Сделать целью +${lv}"`;
+                        if (isPreview) rowCls.push('preview');
 
-                        rows += `<tr class="${rowCls.join(' ')}" data-lv="${lv}"${rowTitle}>
-                            <td><b>+${lv}</b>${isCur ? ' <small style="color:#ffcf6a;">(тек.)</small>' : ''}</td>
-                            <td>${Math.min(100, chance)}%</td>
+                        rows += `<tr class="${rowCls.join(' ')}" data-lv="${lv}" title="Показать характеристики на +${lv}">
+                            <td><b>+${lv}</b>${isBase ? ' <small style="color:#9c8fa8;">(база)</small>' : ''}${isCur ? ' <small style="color:#ffcf6a;">(тек.)</small>' : ''}</td>
+                            <td>${isBase ? '—' : Math.min(100, chance) + '%'}</td>
                             <td style="color:#4cc95a; font-weight:bold;">+${bonusPct}%</td>
                             <td>${costCell}</td>
                             <td class="hp-mats-cell">${chips}</td>
+                            <td class="hp-ench-stats">${statsAt(lv)}</td>
                         </tr>`;
                     }
 
-                    // ── Правая колонка: карточка цели curEn -> target ──
+                    // ── Левая колонка: карточка уровня просмотра ──
                     // Две суммы: «идеальная» (все попытки удачны с первой) и с
                     // отмеченными усилителями. В режиме шансов показываем вторую.
-                    const starPrice = this.resourcePrice('star');
-                    const spherePrice = this.resourcePrice('sphere');
                     let costIdeal = 0;
                     let costStrat = 0;
                     let starsUsed = 0, spheresUsed = 0;
                     let attempts = 0;
-                    for (let lv = curEn + 1; lv <= target; lv++) {
+                    // v11.7.1: путь всегда вперёд (curEn+1…preview). Если
+                    // preview <= curEn, цикл не выполняется — стоимость 0,
+                    // а карточка показывает статы выбранного уровня.
+                    for (let lv = curEn + 1; lv <= preview; lv++) {
                         const step = this.enchantCost(item.v, lv);
                         costIdeal += step;
                         let stepCost = step;
                         let chance = this.enchantChance(lv);
-                        if (isExpected && this.allocatedStars[lv]) { stepCost += starPrice; chance += 25; starsUsed++; }
-                        if (isExpected && this.allocatedSpheres[lv]) { stepCost += spherePrice; spheresUsed++; }
+                        // Ресурсы выбранные кнопками ⭐/🌐 в строках таблицы.
+                        if (this.allocatedStars[lv]) { stepCost += starPrice; chance += 25; starsUsed++; }
+                        if (this.allocatedSpheres[lv]) { stepCost += spherePrice; spheresUsed++; }
                         costStrat += stepCost;
                         // 100 / chance — ожидаемое число попыток на один шаг
                         // (1/p). Сумма по пути даёт матожидание попыток на всю
@@ -7134,32 +7324,43 @@
                         attempts += chance > 0 ? 100 / chance : Infinity;
                     }
                     const costTotal = isExpected ? costStrat : costIdeal;
-                    const costExtra = Math.max(0, costStrat - costIdeal);
-                    const attemptsStr = Number.isFinite(attempts) ? Math.ceil(attempts) : '∞';
-                    const rangeText = target > curEn
-                        ? `шагов +${curEn + 1}…+${target}`
-                        : 'шагов нет (уровень максимальный)';
+                    const costResources = starsUsed * starPrice + spheresUsed * spherePrice;
+                    const attemptsStr = hasPath
+                        ? (Number.isFinite(attempts) ? Math.ceil(attempts) : '∞')
+                        : '0';
+                    const rangeText = hasPath
+                        ? `шагов +${curEn + 1}…+${preview}`
+                        : (preview === curEn
+                            ? 'шагов нет — это текущий уровень'
+                            : `шагов нет — +${preview} уже пройден`);
 
-                    // Статы предмета на целевой заточке: база -> итог, прибавка
-                    // отдельным зелёным числом.
+                    // Статы предмета на выбранном уровне: база (+0) -> итог,
+                    // прибавка отдельным зелёным числом. v11.7.1: если выбран
+                    // уровень ниже текущей заточки, дополнительно показываем
+                    // значение на текущей заточке (для сравнения).
                     const statHtml = Object.entries(baseStats).map(([k, base]) => {
                         const b = +base || 0;
-                        const fin = this.enchantStat(b, target, k);
+                        const fin = this.enchantStat(b, preview, k);
                         const gain = fin - b;
                         const name = (typeof BuildSim !== 'undefined' && BuildSim.statNames && BuildSim.statNames[k]) || k;
                         const safeName = Utils.escapeHtml(name);
+                        const curNote = preview !== curEn
+                            ? ` <span class="hp-stat-cur" title="Сейчас, на +${curEn}">(+${curEn}: ${this.enchantStat(b, curEn, k)})</span>`
+                            : '';
                         return `<div class="hp-stat-row">
                             <span class="hp-stat-name" title="${safeName}">${safeName}</span>
-                            <span class="hp-stat-val">${b} → <b>${fin}</b>${gain > 0 ? ` <span class="hp-stat-gain">+${gain}</span>` : ''}</span>
+                            <span class="hp-stat-val">${b} → <b>${fin}</b>${gain > 0 ? ` <span class="hp-stat-gain">+${gain}</span>` : ''}${curNote}</span>
                         </div>`;
                     }).join('') || '<div class="hp-cost-sub">У предмета нет характеристик.</div>';
 
-                    // Пресеты цели: уже пройденные уровни недоступны.
-                    const presets = [4, 7, 10, 15].map(t => {
-                        const done = t <= curEn;
-                        const active = t === target;
-                        return `<button type="button" class="hp-target-preset${active ? ' active' : ''}"`
-                            + ` data-target="${t}"${done ? ' disabled title="Уже пройдено"' : ` title="Цель +${t}"`}>+${t}</button>`;
+                    // Пресеты уровня просмотра. v11.7.1: пройденные уровни
+                    // больше НЕ блокируются — их можно смотреть (класс .done
+                    // лишь визуально помечает «уже пройдено»).
+                    const presets = [0, 4, 7, 10, 15].map(t => {
+                        const done = t > 0 && t <= curEn;
+                        const active = t === preview;
+                        return `<button type="button" class="hp-target-preset${active ? ' active' : ''}${done ? ' done' : ''}"`
+                            + ` data-target="${t}" title="Показать +${t}">+${t}</button>`;
                     }).join('');
 
                     // v11.6.3: штраф/фокус и привязка выбранного предмета.
@@ -7183,6 +7384,13 @@
                     const boundNote = isBoundItem(item)
                         ? `<div style="font-size:11px; color:#ffb3a0; margin-top:2px;">🔒 ${BOUND_LINE}</div>`
                         : '';
+                    // v11.7.1: галочка/предупреждение — по ВЫБРАННОМУ предмету
+                    // (gp), а не общей плашкой по надетым вещам героя.
+                    const itemIconBadge = gp.bad
+                        ? `<span class="hp-gear-pill bad" title="Не подходит классу: −${gp.pct}% ${statLabel}">⚠</span>`
+                        : `<span class="hp-gear-pill ok" title="Подходит вашему классу">✓</span>`;
+                    // Мини-арт предмета в шапке (нативный LGInventory.art).
+                    const headArt = this.renderItemArt(item);
 
                     // Клик по строке/пресету перерисовывает колонки целиком —
                     // сохраняем прокрутку списка уровней, иначе таблица прыгает
@@ -7191,28 +7399,33 @@
                     const keepScroll = outEl.scrollTop;
                     const keepTableScroll = outEl.querySelector('.hp-ench-right')?.scrollTop || 0;
                     outEl.innerHTML = `
-                        <div style="background:#26202e; border:1px solid #44374a; border-radius:6px; padding:8px 12px; margin-bottom:10px; font-size:12px; display:flex; justify-content:space-between;">
-                            <div><b style="color:#ffcf6a;">${Utils.escapeHtml(item.name)}</b>${gearIconHtml} (v: ${item.v}, тек: +${curEn})${gearNote}${boundNote}</div>
+                        <div style="background:#26202e; border:1px solid #44374a; border-radius:6px; padding:8px 12px; margin-bottom:10px; font-size:12px;">
+                            <div class="hp-item-head">
+                                <span class="hp-item-head-art">${headArt || '📦'}</span>
+                                <div>
+                                    <b style="color:#ffcf6a;">${Utils.escapeHtml(item.name)}</b>${itemIconBadge} (v: ${item.v}, тек: +${curEn})${gearNote}${boundNote}
+                                </div>
+                            </div>
                         </div>
                         <div class="hp-ench-split">
                             <!-- 11.6.5f.1: карточка цели — СЛЕВА (класс .hp-ench-left,
                                  flex 1 1 40%), таблица уровней — СПРАВА (.hp-ench-right). -->
                             <div class="hp-ench-left">
                                 <div class="hp-target-head">
-                                    <div class="hp-target-title">Цель: <b>+${target}</b></div>
+                                    <div class="hp-target-title">Просмотр: <b>+${preview}</b></div>
                                     <div class="hp-target-presets">${presets}</div>
                                 </div>
                                 <div class="hp-target-section">
-                                    <div class="hp-target-sub">Характеристики на +${target}</div>
+                                    <div class="hp-target-sub">Характеристики на +${preview}</div>
                                     <div class="hp-stat-grid">${statHtml}</div>
                                 </div>
                                 <div class="hp-target-section">
                                     <div class="hp-target-sub">Итоговая стоимость</div>
                                     <div class="hp-cost-total">${Utils.formatMoney(costTotal)}</div>
-                                    <div class="hp-cost-sub">${rangeText} · попыток: ${attemptsStr}${isExpected
-                                        ? `<br>В том числе ресурсы: ${Utils.formatMoney(costExtra)}`
+                                    <div class="hp-cost-sub">${rangeText} · попыток: ${attemptsStr}</div>
+                                    <div class="hp-cost-row">⭐ Звёзды: ${starsUsed} шт. · 🌐 Сферы: ${spheresUsed} шт.${costResources > 0
+                                        ? ` — ${Utils.formatMoney(costResources)}`
                                         : ''}</div>
-                                    ${isExpected ? `<div class="hp-cost-row">Использовано: ⭐ ${starsUsed}/${this.userStars}, 🌐 ${spheresUsed}/${this.userSpheres}</div>` : ''}
                                 </div>
                             </div>
                             <div class="hp-ench-right">
@@ -7223,6 +7436,7 @@
                                         <th>Бонус</th>
                                         <th>Попытка</th>
                                         <th>Усилители</th>
+                                        <th>Статы</th>
                                     </tr></thead>
                                     <tbody>${rows}</tbody>
                                 </table>
@@ -7236,7 +7450,7 @@
                             Расширенные статы (крит, уклонение, пробивание и пр.) получают ¼ бонуса заточки (enchK = 0.25).`
                                 : `Стоимость попытки = <code>max(priceMin, round(v × price% / 100))</code> из живой таблицы игры <code>LG_GAME_DATA.enchant</code>. Округление статов — <code>Math.round</code> (подтверждено игрой).<br>
                             <b>«Итоговая стоимость»</b> = сумма базовых стоимостей ${rangeText} (без шансов и поломок — «идеальная» стоимость).<br>
-                            Звёзды и сферы учитываются в режиме «🧠 С учётом шансов»: 📈 — медиана аукциона (за 72 часа / последние 100 цен), 🏪 — цена кузнеца.<br>
+                            Ресурсы выбираются кнопками ⭐/🌐 в строках шагов: их цена сразу входит в «Попытку», а в «Итоговую стоимость» — в режиме «🧠 С учётом шансов».<br>
                             Расширенные статы (крит, уклонение, пробивание и пр.) получают ¼ бонуса заточки (enchK = 0.25).`}
                         </div>
                     `;
@@ -7244,64 +7458,40 @@
                     const tableWrap = outEl.querySelector('.hp-ench-right');
                     if (tableWrap) tableWrap.scrollTop = keepTableScroll;
 
-                    // Обработчики чекбоксов
-                    // Лимит ресурсов считаем по ВСЕМ отмеченным уровням, а не
-                    // только по пути до цели (starsUsed/spheresUsed — счётчики
-                    // карточки, они ограничены диапазоном curEn → target).
-                    const countAllocated = (map) => Object.keys(map).filter(k => map[k]).length;
-                    if (isExpected) {
-                        outEl.querySelectorAll('.hp-alloc-star').forEach(cb => {
-                            cb.addEventListener('change', (e) => {
-                                const lv = +e.target.dataset.lv;
-                                if (e.target.checked) {
-                                    if (countAllocated(this.allocatedStars) >= this.userStars) {
-                                        e.target.checked = false;
-                                        UI.showToast('Звёзды закончились', true);
-                                        return;
-                                    }
-                                    this.allocatedStars[lv] = true;
-                                } else {
-                                    delete this.allocatedStars[lv];
-                                }
-                                renderTable();
-                            });
+                    // v11.7.1: кнопки-переключатели ресурсов ⭐/🌐. Всплытие
+                    // гасим, иначе клик по кнопке сменил бы уровень просмотра.
+                    outEl.querySelectorAll('.hp-mat-btn').forEach(btn => {
+                        btn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            const lv = +btn.dataset.lv;
+                            if (!Number.isFinite(lv) || lv < 1) return;
+                            const map = btn.classList.contains('star') ? this.allocatedStars : this.allocatedSpheres;
+                            if (map[lv]) delete map[lv];
+                            else map[lv] = true;
+                            renderTable();
                         });
-                        outEl.querySelectorAll('.hp-alloc-sphere').forEach(cb => {
-                            cb.addEventListener('change', (e) => {
-                                const lv = +e.target.dataset.lv;
-                                if (e.target.checked) {
-                                    if (countAllocated(this.allocatedSpheres) >= this.userSpheres) {
-                                        e.target.checked = false;
-                                        UI.showToast('Сферы закончились', true);
-                                        return;
-                                    }
-                                    this.allocatedSpheres[lv] = true;
-                                } else {
-                                    delete this.allocatedSpheres[lv];
-                                }
-                                renderTable();
-                            });
-                        });
-                    }
+                    });
 
-                    // 11.6.5f: клик по строке уровня делает его целью правой
-                    // карточки. Пройденные шаги целью быть не могут, а клик по
-                    // чипу усилителя целью не считается.
+                    // v11.7.1: клик по любой строке +0…+15 выбирает уровень
+                    // ПРОСМОТРА (в том числе ниже текущей заточки), а не только
+                    // цель впереди. targetLevel держим синхронным.
                     outEl.querySelectorAll('.hp-ench-row').forEach(tr => {
                         tr.addEventListener('click', (e) => {
-                            if (e.target.closest('input, label')) return;
+                            if (e.target.closest('button, input, label')) return;
                             const lv = +tr.dataset.lv;
-                            if (!Number.isFinite(lv) || lv <= curEn) return;
+                            if (!Number.isFinite(lv) || lv < 0) return;
+                            this.previewLevel = lv;
                             this.targetLevel = lv;
                             renderTable();
                         });
                     });
 
-                    // Кнопки-пресеты цели (+4/+7/+10/+15).
+                    // Пресеты уровня просмотра (+0/+4/+7/+10/+15).
                     outEl.querySelectorAll('.hp-target-preset').forEach(btn => {
                         btn.addEventListener('click', () => {
                             const lv = +btn.dataset.target;
-                            if (!Number.isFinite(lv) || lv <= curEn) return;
+                            if (!Number.isFinite(lv) || lv < 0) return;
+                            this.previewLevel = lv;
                             this.targetLevel = lv;
                             renderTable();
                         });
@@ -7344,8 +7534,10 @@
 
                     gridEl.innerHTML = locData.items.map(it => {
                         const isSel = it.uid === selectedItem?.uid;
-                        // Используем хелпер арта из утилит
-                        const art = Utils.getItemArtHtml({ i: it.id ?? it.i, name: it.name }, it);
+                        // v11.7.1: арт берём нативным рендером игры
+                        // (LGInventory.art) — он рисует и легендарки вроде
+                        // «Нимба из мяты», которые раньше падали в эмодзи.
+                        const art = this.renderItemArt(it);
                         const border = isSel ? '2px solid #caa55c' : '1px solid #44374a';
                         const bg = isSel ? 'rgba(202,165,92,0.15)' : '#1e1724';
                         // v11.6.3: 🔒 — легендарка привязана (не передаётся),
@@ -7419,36 +7611,10 @@
                         e.currentTarget.style.background = '#caa55c';
                         e.currentTarget.style.color = '#1d1620';
 
-                        const resPanel = document.getElementById('hp-resources-panel');
-                        if (resPanel) resPanel.style.display = this.strategyMode === 'expected' ? 'flex' : 'none';
+                        // v11.7.1: панели ручного ввода ресурсов больше нет —
+                        // режим влияет только на расчёт (см. renderTable).
                         renderTable();
                     });
-                });
-
-                document.getElementById('hp-input-stars')?.addEventListener('input', (e) => {
-                    this.userStars = Math.max(0, Math.min(15, +e.target.value || 0));
-                    // Очищаем лишние галочки, если количество уменьшилось
-                    let count = 0;
-                    for (let lv = 15; lv >= 1; lv--) {
-                        if (this.allocatedStars[lv]) {
-                            count++;
-                            if (count > this.userStars) delete this.allocatedStars[lv];
-                        }
-                    }
-                    renderTable();
-                });
-
-                document.getElementById('hp-input-spheres')?.addEventListener('input', (e) => {
-                    this.userSpheres = Math.max(0, Math.min(15, +e.target.value || 0));
-                    // Очищаем лишние галочки, если количество уменьшилось
-                    let count = 0;
-                    for (let lv = 15; lv >= 1; lv--) {
-                        if (this.allocatedSpheres[lv]) {
-                            count++;
-                            if (count > this.userSpheres) delete this.allocatedSpheres[lv];
-                        }
-                    }
-                    renderTable();
                 });
 
                 renderGrid();
@@ -10649,6 +10815,10 @@ const Players = {
     // окно игры LGGuilds.open({ big: true }) из любой локации. Фолбэк — клик по
     // нативной кнопке входа (#gu-hud [data-gu="guild"] / .cy-hud .gl-entry).
     // Доступность считаем по флагу героя ME.hero.gu (см. isGuildLocked).
+    //
+    // v11.7.0: фоновый мониторинг сборов гильдии на элитных монстров
+    // (POST /api/citymon/act { op: 'elist' }) и плашка «Присоединиться»
+    // (op: 'ejoin'). Запросы — Utils.fetchApi, патчей window.fetch/LGMine нет.
     // ============================================================
     const PocketCity = {
         // Ожидание готовности города (v11.6.4c). Два этапа:
@@ -10673,6 +10843,27 @@ const Players = {
         _monsterRaf: 0,
         // Отложенные клики: гасятся в stopMonsterAutoSkip() / destroy().
         _monsterTimers: new Set(),
+
+        // ---------------- 11.7.0: сборы гильдии на элитных монстров ----------------
+        // Фоновый опрос POST /api/citymon/act { op: 'elist' }: ищем чужое
+        // открытое лобби, в котором игрок ещё не состоит, и показываем
+        // плавающее уведомление с кнопкой «Присоединиться» (op: 'ejoin').
+        // Всё через Utils.fetchApi (контекст игры либо обычный fetch);
+        // window.fetch / LGMine не патчатся.
+        CITYMON_POLL_MS: 18000,
+        // 429 / rate_limited у игры общий на все API — после отказа молчим
+        // минуту, иначе опрос сам себя загонит в новый лимит.
+        CITYMON_PAUSE_MS: 60000,
+        CITYMON_TICK_MS: 1000,
+        _citymonPollTimer: null,
+        _citymonTickTimer: null,
+        _citymonBusy: false,
+        _citymonPausedUntil: 0,
+        _citymonLobby: null,
+        // id лобби, скрытые игроком вручную (кнопка «✕») — до перезагрузки.
+        _citymonDismissed: new Set(),
+        _citymonEl: null,
+        _citymonVisibility: null,
 
         // Модалка со списком зданий: карточка -> нативное здание игры.
         open() {
@@ -11139,20 +11330,298 @@ const Players = {
             PocketCity._monsterTimers.add(timer);
         },
 
+        // ============================================================
+        // 6.5.y. СБОРЫ ГИЛЬДИИ НА ЭЛИТНЫХ МОНСТРОВ (v11.7.0)
+        //
+        // Раньше баннер «Идёт сбор в поход» жил в боевом ассистенте и
+        // реагировал на q.gather — то есть только когда игрок уже в походе.
+        // Теперь уведомление относится к сборам гильдии на элитных монстров
+        // и работает из любой локации: опрос POST /api/citymon/act
+        // { op: 'elist' } раз в 18 с, вступление — { op: 'ejoin', id }.
+        // Никаких патчей window.fetch / LGMine: только Utils.fetchApi.
+        // ============================================================
+
+        /**
+         * Доступен ли раздел элитных монстров: флаг cm у героя
+         * (/api/me -> ME.hero.cm). Без него запросы впустую жгут лимит.
+         */
+        canWatchCityMon() {
+            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
+            const me = pageWin.ME;
+            const hero = me && me.hero;
+            return !!(hero && hero.cm);
+        },
+
+        /**
+         * Запуск фонового мониторинга (init() из main.js). Идемпотентно:
+         * повторный вызов не плодит второй интервал и слушатель вкладки.
+         */
+        startCityMonWatch() {
+            if (PocketCity._citymonPollTimer) return;
+            PocketCity._citymonVisibility = () => {
+                // Вернулись на вкладку — не ждём очередные 18 секунд.
+                if (!document.hidden) PocketCity.pollCityMonLobbies();
+            };
+            document.addEventListener('visibilitychange', PocketCity._citymonVisibility);
+            PocketCity._citymonPollTimer = setInterval(() => PocketCity.pollCityMonLobbies(), PocketCity.CITYMON_POLL_MS);
+            // Первая проверка сразу: сбор мог идти ещё до запуска аддона.
+            PocketCity.pollCityMonLobbies();
+        },
+
+        /** Остановка мониторинга: интервалы, слушатель вкладки, баннер, DOM. */
+        stopCityMonWatch() {
+            if (PocketCity._citymonPollTimer) {
+                clearInterval(PocketCity._citymonPollTimer);
+                PocketCity._citymonPollTimer = null;
+            }
+            if (PocketCity._citymonVisibility) {
+                document.removeEventListener('visibilitychange', PocketCity._citymonVisibility);
+                PocketCity._citymonVisibility = null;
+            }
+            PocketCity.hideCityMonGather();
+            if (PocketCity._citymonEl) {
+                try { PocketCity._citymonEl.remove(); } catch (e) {}
+                PocketCity._citymonEl = null;
+            }
+            PocketCity._citymonPausedUntil = 0;
+            PocketCity._citymonBusy = false;
+        },
+
+        /** 429 / rate_limited — общий лимит API игры, значит пауза. */
+        isCityMonRateLimited(res) {
+            if (!res) return false;
+            if (res.status === 429) return true;
+            const code = res.error || (res.body && (res.body.error || res.body.err));
+            return code === 'rate_limited';
+        },
+
+        /**
+         * Один цикл опроса elist.
+         *
+         * @param {boolean} force переопрос после ejoin/ошибки: игнорирует
+         *   паузу по 429, но не скрытую вкладку и не отсутствие доступа
+         */
+        async pollCityMonLobbies(force = false) {
+            // Свёрнутая вкладка — не опрашиваем (условие ТЗ 11.7.0).
+            if (document.hidden) return;
+            if (!PocketCity.canWatchCityMon()) {
+                PocketCity.hideCityMonGather();
+                return;
+            }
+            if (PocketCity._citymonBusy) return;
+            if (!force && Date.now() < PocketCity._citymonPausedUntil) return;
+
+            PocketCity._citymonBusy = true;
+            let res = null;
+            try {
+                res = (typeof Utils !== 'undefined' && typeof Utils.fetchApi === 'function')
+                    ? await Utils.fetchApi('/api/citymon/act', { op: 'elist' })
+                    : null;
+            } catch (e) {
+                dbg('citymon elist error:', e);
+            } finally {
+                PocketCity._citymonBusy = false;
+            }
+
+            if (PocketCity.isCityMonRateLimited(res)) {
+                PocketCity._citymonPausedUntil = Date.now() + PocketCity.CITYMON_PAUSE_MS;
+                dbg('citymon: 429/rate_limited — пауза 60 с');
+                return;
+            }
+            if (!res || !res.ok) return; // сеть/сервер: баннер не трогаем
+
+            const lobby = PocketCity.findCityMonLobby(res);
+            if (lobby) PocketCity.showCityMonGather(lobby);
+            else PocketCity.hideCityMonGather();
+        },
+
+        /**
+         * Первое подходящее открытое лобби: не моё, не истекло, есть места,
+         * игрок не скрывал его вручную (✕).
+         *
+         * @param {object} res ответ /api/citymon/act: { ok, mine, list[] }
+         * @returns {object|null} лобби L из list
+         */
+        findCityMonLobby(res) {
+            if (!res || res.mine) return null; // уже состою в каком-то сборе
+            const list = Array.isArray(res.list) ? res.list : [];
+            const now = Date.now();
+            for (const L of list) {
+                if (!L || L.st !== 'open' || L.mine) continue;
+                if (PocketCity._citymonDismissed.has(L.id)) continue;
+                if (!(L.until > now)) continue;
+                const members = Array.isArray(L.members) ? L.members.length : 0;
+                if (members >= (+L.max || 5)) continue;
+                return L;
+            }
+            return null;
+        },
+
         /**
          * init() из boot() в main.js: поднимаем автоскип, если тумблер был
-         * включён в прошлой сессии (настройка хранится в localStorage).
+         * включён в прошлой сессии (настройка хранится в localStorage),
+         * и запускаем фоновый мониторинг сборов на элитных монстров.
          */
         init() {
             if (Settings.get('autoSkipMonsters')) PocketCity.startMonsterAutoSkip();
+            PocketCity.startCityMonWatch();
+        },
+
+        /**
+         * Плавающее уведомление о чужом сборе (плашка в стиле аддона).
+         *
+         * Перерисовываем только при смене лобби: у того же L.id текст
+         * подписи обновляет секундный тик, кнопки остаются живыми (иначе
+         * слетала бы блокировка «Вступаем...» и фокус).
+         */
+        showCityMonGather(lobby) {
+            if (!lobby || !document.body) return;
+            const esc = (s) => (typeof Utils !== 'undefined' && Utils.escapeHtml ? Utils.escapeHtml(s) : String(s == null ? '' : s));
+
+            let el = PocketCity._citymonEl;
+            if (!el || !el.isConnected) {
+                el = document.createElement('div');
+                el.id = 'lg-citymon-gather';
+                document.body.appendChild(el);
+                PocketCity._citymonEl = el;
+            }
+            el.classList.add('on');
+
+            const sameLobby = !!PocketCity._citymonLobby && PocketCity._citymonLobby.id === lobby.id;
+            PocketCity._citymonLobby = lobby;
+
+            if (sameLobby && el.querySelector('.lg-cm-gather')) {
+                PocketCity.updateCityMonCaption();
+                return;
+            }
+
+            el.innerHTML = `
+                <div class="lg-cm-gather">
+                    <div class="lg-cm-gather-head">📯 Сбор на элитного: ${esc(lobby.name)} (ур. ${esc(lobby.lvl == null ? '?' : lobby.lvl)}${lobby.tier ? ' ☠' : ''})</div>
+                    <div class="lg-cm-gather-sub"></div>
+                    <div class="lg-cm-gather-row">
+                        <button type="button" class="lg-cm-gather-join">Присоединиться</button>
+                        <button type="button" class="lg-cm-gather-close" title="Скрыть уведомление">✕</button>
+                    </div>
+                </div>
+            `;
+
+            const joinBtn = el.querySelector('.lg-cm-gather-join');
+            if (joinBtn) joinBtn.addEventListener('click', () => PocketCity.joinCityMonLobby(joinBtn));
+
+            const closeBtn = el.querySelector('.lg-cm-gather-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', () => {
+                    const cur = PocketCity._citymonLobby;
+                    // Скрываем точечно: остальные сборы продолжат всплывать.
+                    if (cur && cur.id != null) PocketCity._citymonDismissed.add(cur.id);
+                    PocketCity.hideCityMonGather();
+                });
+            }
+
+            PocketCity.updateCityMonCaption();
+            // Живой обратный отсчёт: правим только текст подписи.
+            if (!PocketCity._citymonTickTimer) {
+                PocketCity._citymonTickTimer = setInterval(() => PocketCity.updateCityMonCaption(), PocketCity.CITYMON_TICK_MS);
+            }
+        },
+
+        /** Подпись баннера: состав, лидер и MM:SS до конца сбора. */
+        cityMonCaption(lobby) {
+            const L = lobby || PocketCity._citymonLobby;
+            if (!L) return '';
+            const members = Array.isArray(L.members) ? L.members.length : 0;
+            const max = +L.max || 5;
+            const left = Math.max(0, (+L.until || 0) - Date.now());
+            // ceil: на последней секунде показываем 00:01, а не 00:00 раньше времени.
+            const total = Math.ceil(left / 1000);
+            const mm = String(Math.floor(total / 60)).padStart(2, '0');
+            const ss = String(total % 60).padStart(2, '0');
+            return `Отряд: ${members}/${max} · Лидер: ${L.leader || '—'} · ${mm}:${ss}`;
+        },
+
+        /** Обновляет только текст подписи (кнопки и их состояние не трогаем). */
+        updateCityMonCaption() {
+            const el = PocketCity._citymonEl;
+            if (!el) return;
+            const sub = el.querySelector('.lg-cm-gather-sub');
+            if (!sub) return;
+            sub.textContent = PocketCity.cityMonCaption();
+        },
+
+        /** Прячет плашку и гасит секундный отсчёт (лобби забываем). */
+        hideCityMonGather() {
+            PocketCity._citymonLobby = null;
+            if (PocketCity._citymonTickTimer) {
+                clearInterval(PocketCity._citymonTickTimer);
+                PocketCity._citymonTickTimer = null;
+            }
+            const el = PocketCity._citymonEl;
+            if (!el) return;
+            el.classList.remove('on');
+            el.innerHTML = '';
+        },
+
+        /**
+         * Вступление в сбор: POST /api/citymon/act { op: 'ejoin', id }.
+         *
+         * Кнопка блокируется на время запроса («Вступаем...»), результат —
+         * тостом. В обоих случаях список перечитываем (elist): после успеха
+         * своё лобби уже mine, после ошибки сбор мог закрыться/заполниться.
+         */
+        async joinCityMonLobby(btn) {
+            if (!btn || btn.disabled) return;
+            const lobby = PocketCity._citymonLobby;
+            if (!lobby) return;
+
+            const label = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Вступаем...';
+
+            const toast = (msg, isError) => {
+                if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, !!isError);
+            };
+
+            let res = null;
+            try {
+                res = (typeof Utils !== 'undefined' && typeof Utils.fetchApi === 'function')
+                    ? await Utils.fetchApi('/api/citymon/act', { op: 'ejoin', id: lobby.id })
+                    : null;
+            } catch (e) {
+                dbg('citymon ejoin error:', e);
+            }
+
+            if (res && res.ok) {
+                toast(`Вы вступили в сбор на «${lobby.name}»!`, false);
+                // Плашку гасим сразу, а список перечитываем — возможно,
+                // открылся следующий сбор.
+                PocketCity.hideCityMonGather();
+                PocketCity.pollCityMonLobbies(true);
+                return;
+            }
+
+            if (PocketCity.isCityMonRateLimited(res)) {
+                PocketCity._citymonPausedUntil = Date.now() + PocketCity.CITYMON_PAUSE_MS;
+            }
+            const errText = (res && (res.error || (res.body && (res.body.error || res.body.err)))) || '';
+            toast(errText || 'Не удалось вступить', true);
+
+            // Пока шёл запрос, плашку могли скрыть/перерисовать.
+            if (btn.isConnected) {
+                btn.disabled = false;
+                btn.textContent = label || 'Присоединиться';
+            }
+            PocketCity.pollCityMonLobbies(true);
         },
 
         /**
          * destroy() из shutdown() в main.js: снимаем наблюдатель и таймеры,
          * иначе старый инстанс кликал бы по кнопкам после перезапуска скрипта.
+         * v11.7.0: заодно гасим мониторинг сборов на элитных монстров.
          */
         destroy() {
             PocketCity.stopMonsterAutoSkip();
+            PocketCity.stopCityMonWatch();
             if (PocketCity._closeWatch) {
                 try { PocketCity._closeWatch(); } catch (e) {}
                 PocketCity._closeWatch = null;
@@ -11168,12 +11637,21 @@ const Players = {
     // читает состояние похода штатным геттером игры LGQuest._view()
     // (структура — docs/API.md, раздел «Объект состояния похода»).
     // Вывод — поверх экрана: предупреждение «ничего не пиши» без кнопок либо
-    // кликабельный бейдж с командой и кнопкой «Вставить».
+    // кликабельный бейдж с командой (v11.7.1: кнопка «Вставить» убрана —
+    // клик по самому слову копирует его в буфер).
     //
     // v11.7.0: автоотправки POST /api/qsay здесь нет и не было — аддон только
     // копирует команду в буфер и/или подставляет её в #qSayIn нативным
-    // сеттером (обход noPaste). Отправляет игрок сам по Enter. Тот же тик
-    // показывает баннер сбора отряда с кнопкой «Присоединиться» (qact join).
+    // сеттером. Отправляет игрок сам по Enter.
+    //
+    // v11.7.0: игра ставит noPaste на поле команды похода, поэтому модуль
+    // дополнительно вешает capture-перехватчик (paste/beforeinput/drop) и
+    // глушит ТОЛЬКО игровые обработчики — нативная вставка Ctrl+V и
+    // «ПКМ → Вставить» остаются рабочими.
+    //
+    // Баннер сбора в поход (q.gather) отсюда убран: уведомление о сборах
+    // теперь живёт в modules/pocket-city.js и относится к элитным монстрам
+    // (elist/ejoin), см. PocketCity.startCityMonWatch().
     //
     // Подключается после core/ui.js и modules/pocket-city.js (SHARED_MODULES
     // в build.js). Игровые объекты берём из G (core/constants.js — это
@@ -11184,6 +11662,8 @@ const Players = {
         _timer: null,
         // Подпись текущей отрисовки: защита от мерцания на каждом тике.
         _currentState: null,
+        // v11.7.0: capture-обработчики вставки в #qSayIn (снимаются в destroy).
+        _pasteGuards: null,
 
         init() {
             // Повторный init (перезапуск скрипта) не должен плодить таймеры.
@@ -11191,6 +11671,7 @@ const Players = {
             this._el = document.createElement('div');
             this._el.id = 'lg-combat-assistant';
             document.body.appendChild(this._el);
+            this._bindPasteGuards();
             this._timer = setInterval(() => this._tick(), 1000);
         },
 
@@ -11199,6 +11680,7 @@ const Players = {
         destroy() {
             if (this._timer) clearInterval(this._timer);
             this._timer = null;
+            this._unbindPasteGuards();
             if (this._el && this._el.parentNode) this._el.parentNode.removeChild(this._el);
             this._el = null;
             this._currentState = null;
@@ -11226,14 +11708,6 @@ const Players = {
                     return;
                 }
 
-                // 11.7.0: сбор отряда. Баннер с кнопкой «Присоединиться» видят
-                // все, кто ещё не в отряде; как только party станет 'in'/'q'
-                // или истечёт таймер — баннер уходит сам.
-                if (this._gatherActive(q)) {
-                    this._renderGather(q);
-                    return;
-                }
-
                 // Подсказки нужны только полноправному участнику похода:
                 // party = 'q' (очередь), 'ghost' (призрак), 'out' — не наш бой.
                 if (q.party !== 'in') {
@@ -11248,103 +11722,53 @@ const Players = {
         },
 
         /**
-         * Идёт ли сбор отряда и мы ещё не внутри.
+         * v11.7.0: поле команды похода? Игра вешает noPaste именно на него:
+         * id — #qSayIn (site/quest.js), класс — .q-sayi (фолбэк, если id
+         * переименуют). Проверяем оба признака.
+         */
+        _isQuestInput(el) {
+            return !!el && (el.id === 'qSayIn' || !!(el.classList && el.classList.contains('q-sayi')));
+        },
+
+        /**
+         * Capture-перехват вставки в #qSayIn (v11.7.0).
          *
-         * Условия из ТЗ 11.7.0: фаза `gather` с живым таймером (или q.k ===
-         * 'gather' без таймера) и party не 'in'/'q'/'ghost'.
+         * Игра гасит paste/drop и beforeinput(insertFromPaste|Drop) на самом
+         * поле, а игроку нужны штатные Ctrl+V и «ПКМ → Вставить». Слушатели
+         * висят на window в фазе перехвата — то есть срабатывают РАНЬШЕ
+         * обработчиков документа/поля — и глушат только их
+         * (stopImmediatePropagation). preventDefault НЕ вызываем: иначе
+         * браузер не вставит текст из буфера сам.
+         *
+         * window.fetch / LGMine здесь не патчатся: только DOM-события.
          */
-        _gatherActive(q) {
-            if (!q) return false;
-            if (q.party === 'in' || q.party === 'q' || q.party === 'ghost') return false;
-            const until = +(q.gather && q.gather.until) || 0;
-            if (until > Date.now()) return true;
-            // k === 'gather' без until — «сбор идёт», обратного отсчёта нет.
-            return (q.k === 'gather' || q.kind === 'gather') && !until;
-        },
-
-        /**
-         * Баннер сбора с таймером MM:SS и кнопкой «Присоединиться».
-         * Перерисовывается только при смене фазы/дедлайна, а текст таймера
-         * обновляется каждый тик — кнопку при этом не пересоздаём.
-         */
-        _renderGather(q) {
-            if (!this._el) return;
-            const until = +(q.gather && q.gather.until) || 0;
-            const hw = !!(q.gather && q.gather.hw);
-            const sign = `gather|${until}|${hw}|${q.k || q.kind || ''}`;
-
-            if (this._currentState !== sign) {
-                this._currentState = sign;
-                this._el.innerHTML = `
-                    <div class="lg-combat-gather">
-                        <div class="lg-combat-gather-head">${hw ? '🌀 Сбор у портала Изнанки' : '⚔️ Идёт сбор в поход'}</div>
-                        <div class="lg-combat-gather-timer" id="lg-gather-timer">--:--</div>
-                        <button type="button" class="lg-combat-btn" id="lg-gather-join">Присоединиться</button>
-                    </div>
-                `;
-                const btn = this._el.querySelector('#lg-gather-join');
-                if (btn) btn.addEventListener('click', () => this._joinQuest(btn));
-            }
-
-            this._updateGatherTimer(until);
-        },
-
-        /** Обратный отсчёт MM:SS до q.gather.until. */
-        _updateGatherTimer(until) {
-            if (!this._el) return;
-            const el = this._el.querySelector('#lg-gather-timer');
-            if (!el) return;
-            if (!until) {
-                el.textContent = 'сбор идёт';
-                return;
-            }
-            const left = Math.max(0, until - Date.now());
-            // ceil: на последней секунде показываем 00:01, а не 00:00 раньше времени.
-            const total = Math.ceil(left / 1000);
-            const mm = String(Math.floor(total / 60)).padStart(2, '0');
-            const ss = String(total % 60).padStart(2, '0');
-            el.textContent = `${mm}:${ss}`;
-        },
-
-        /**
-         * Вступление в отряд: POST /api/qact { k: 'join' } через Utils.fetchApi.
-         * Кнопка блокируется на время запроса, результат — тостом.
-         * Автоотправки команд в чат здесь нет: только действие игры qact.
-         */
-        async _joinQuest(btn) {
-            if (!btn || btn.disabled) return;
-            const label = btn.textContent;
-            btn.disabled = true;
-            btn.textContent = 'Вступаем...';
-
-            const toast = (msg, isError) => {
-                if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, !!isError);
+        _bindPasteGuards() {
+            if (this._pasteGuards) return;
+            const onPasteCapture = (e) => {
+                if (this._isQuestInput(e.target)) e.stopImmediatePropagation();
             };
+            const onBeforeInputCapture = (e) => {
+                // inputType бывает только у InputEvent; если поля нет —
+                // ветка не срабатывает, и вставку ловит обработчик paste.
+                if (this._isQuestInput(e.target) &&
+                    /^insertFrom(Paste|Drop|PasteAsQuotation)$/.test(e.inputType || '')) {
+                    e.stopImmediatePropagation();
+                }
+            };
+            this._pasteGuards = { onPasteCapture, onBeforeInputCapture };
+            window.addEventListener('paste', onPasteCapture, true);
+            window.addEventListener('beforeinput', onBeforeInputCapture, true);
+            window.addEventListener('drop', onPasteCapture, true);
+        },
 
-            let ok = false;
-            let errText = '';
-            try {
-                const res = (typeof Utils !== 'undefined' && typeof Utils.fetchApi === 'function')
-                    ? await Utils.fetchApi('/api/qact', { k: 'join' })
-                    : null;
-                ok = !!res && res.ok !== false;
-                errText = (res && (res.body?.error || res.body?.err || res.error)) || '';
-            } catch (e) {
-                errText = (e && e.message) || '';
-            }
-
-            if (ok) {
-                toast('✅ Заявка на вступление отправлена', false);
-                // Баннер уходит сразу: следующий тик увидит party === 'in'/'q'.
-                this._clear();
-                return;
-            }
-
-            toast(`Не удалось вступить: ${errText || 'ошибка сервера'}`, true);
-            if (btn.isConnected) {
-                btn.disabled = false;
-                btn.textContent = label || 'Присоединиться';
-            }
+        /** Снимаем все три слушателя (destroy / перезапуск скрипта). */
+        _unbindPasteGuards() {
+            if (!this._pasteGuards) return;
+            const { onPasteCapture, onBeforeInputCapture } = this._pasteGuards;
+            window.removeEventListener('paste', onPasteCapture, true);
+            window.removeEventListener('beforeinput', onBeforeInputCapture, true);
+            window.removeEventListener('drop', onPasteCapture, true);
+            this._pasteGuards = null;
         },
 
         /**
@@ -11388,12 +11812,50 @@ const Players = {
          */
         _evaluate(q) {
             const res = this._evaluateCore(q);
+            // v11.7.1: информативный заголовок «Внимание: …». Если ветка не
+            // задала what сама — описываем ситуацию по состоянию похода
+            // (телеграф, ловушка, событие, площадка, механика босса).
+            if (res && res.action === 'COMMAND' && !res.what) res.what = this._situationText(q);
             const warn = this._weaknessHint(q);
             if (!warn) return res;
             if (res && res.action === 'IDLE') return this._isDead(q) ? res : { action: 'NOTE', text: warn };
             if (!res) return { action: 'NOTE', text: warn };
             res.hint = res.hint ? `${warn} · ${res.hint}` : warn;
             return res;
+        },
+
+        /**
+         * v11.7.1: человеческое описание происходящего для заголовка
+         * «Внимание: …» — чтобы игрок сразу видел суть угрозы.
+         *
+         * Источники (docs/API.md, «Объект состояния похода»):
+         *   b.tele.text / b.tele.word — слово телеграфа;
+         *   tr.name — ловушка, ev.name — событие, pz.kind — площадка;
+         *   bg.mech.name / .text / .id — механика босса.
+         *
+         * @param {object} q состояние похода из LGQuest._view()
+         * @returns {string} '' — описание не нашлось
+         */
+        _situationText(q) {
+            const b = (q && q.b) || null;
+            const tele = b && b.tele;
+            if (tele) {
+                const t = String(tele.text || tele.word || '').trim();
+                if (t) return `телеграф: «${t}»`;
+            }
+            const tr = q && q.tr;
+            if (tr && tr.name) return `ловушка «${tr.name}»`;
+            const ev = q && q.ev;
+            if (ev && ev.name) return `событие «${ev.name}»`;
+            const pz = q && q.pz;
+            if (pz && pz.kind) return `площадка: ${pz.kind}`;
+            const M = q && q.bg && q.bg.mech;
+            if (M) {
+                const nm = String(M.name || M.text || '').trim();
+                if (nm) return nm;
+                if (M.id) return `механика ${M.id}`;
+            }
+            return '';
         },
 
         /**
@@ -11438,7 +11900,7 @@ const Players = {
             if (q.bg && q.bg.hw && q.bg.hw.lan && Array.isArray(q.bg.hw.lan.lit)) {
                 const offIdx = q.bg.hw.lan.lit.map((v, i) => (v ? 0 : i + 1)).filter(Boolean);
                 if (offIdx.length > 0) {
-                    return { action: 'COMMAND', text: `зажечь ${offIdx[0]}`, hint: 'Погас фонарь' };
+                    return { action: 'COMMAND', text: `зажечь ${offIdx[0]}`, hint: 'Погас фонарь', what: 'погас фонарь — нужно зажечь' };
                 }
             }
 
@@ -11458,7 +11920,7 @@ const Players = {
                     const reachable = neighbours.length ? safe.filter(z => neighbours.includes(z)) : safe;
                     const target = reachable.length ? reachable[0] : safe[0];
                     if (target) {
-                        return { action: 'COMMAND', text: `прыжок ${target}`, hint: 'Укус волка! Прыгай' };
+                        return { action: 'COMMAND', text: `прыжок ${target}`, hint: 'Укус волка! Прыгай', what: 'укус волка — уходи с площадки' };
                     }
                 }
             }
@@ -11476,7 +11938,7 @@ const Players = {
                     const openWingIdx = wingsZ.findIndex((z, i) => (W.got?.[i] || 0) < (W.need?.[i] || 0));
                     const target = openWingIdx >= 0 ? (wingsZ[openWingIdx] || [])[0] : null;
                     if (target) {
-                        return { action: 'COMMAND', text: `прыжок ${target}`, hint: 'Крыло закрыто! Смени позицию' };
+                        return { action: 'COMMAND', text: `прыжок ${target}`, hint: 'Крыло закрыто! Смени позицию', what: 'квота крыла набрана — смени позицию' };
                     }
                 }
             }
@@ -11487,20 +11949,26 @@ const Players = {
             if (q.bg && Array.isArray(q.bg.adds)) {
                 const alive = q.bg.adds.filter(a => Array.isArray(a) && a[2] > 0);
                 const siege = alive.find(a => !(+a[1] > 0));
-                if (siege) return { action: 'COMMAND', text: `удар ${siege[0]}`, hint: 'Цель осады' };
+                if (siege) return { action: 'COMMAND', text: `удар ${siege[0]}`, hint: 'Цель осады', what: `цель осады — ${siege[0]}` };
                 const mob = alive.find(a => +a[1] > 0);
-                if (mob) return { action: 'COMMAND', text: `удар ${mob[0]} 1`, hint: 'Убей приспешника' };
+                if (mob) return { action: 'COMMAND', text: `удар ${mob[0]} 1`, hint: 'Убей приспешника', what: `приспешник — ${mob[0]}` };
             }
 
             // 8. Телеграф в обычном бою: слово парирования (b.tele.word).
             //    'tele2' в текущем клиенте не встречается, оставлен на всякий случай.
             if (q.b && (q.b.st === 'tele' || q.b.st === 'tele2') && q.b.tele && q.b.tele.word) {
-                return { action: 'COMMAND', text: q.b.tele.word, hint: 'Ответ на телеграф' };
+                // v11.7.1: заголовок уведомления — суть происходящего.
+                // tele.text (расшифровка игры) приоритетнее самого слова.
+                const teleText = String(q.b.tele.text || '').trim();
+                const what = teleText
+                    ? `телеграф: ${teleText}`
+                    : `ответ на телеграф: ${q.b.tele.word}`;
+                return { action: 'COMMAND', text: q.b.tele.word, hint: 'Ответ на телеграф', what };
             }
 
             // 9. Напоминание о своём ходе (b.turn пуст — ход в раунде не сделан).
             if (q.b && q.b.st === 'party' && !q.b.turn) {
-                return { action: 'COMMAND', text: 'удар', hint: 'Твой ход' };
+                return { action: 'COMMAND', text: 'удар', hint: 'Твой ход', what: 'твой ход — нужна команда' };
             }
 
             return { action: 'IDLE' };
@@ -11549,6 +12017,11 @@ const Players = {
          * он же нужен кнопке «❤» в модуле пати. Автоотправки нет: игрок жмёт
          * Enter сам.
          *
+         * v11.7.1: кнопка «Вставить» из уведомления убрана (остался только
+         * клик по слову = копирование), поэтому метод пока НЕ вызывается из
+         * UI. Оставлен для консольной отладки и возможного возврата кнопки —
+         * удаление согласовывать с владельцем проекта.
+         *
          * @returns {boolean} true — текст оказался в поле ввода
          */
         _insert(text) {
@@ -11590,33 +12063,30 @@ const Players = {
             }
 
             if (res.action === 'COMMAND') {
+                const cmd = String(res.text == null ? '' : res.text);
+                // v11.7.1: заголовок — «Внимание: {что происходит}», а не
+                // общее «Ответ на телеграф». what задаёт _evaluateCore /
+                // _situationText, hint остаётся запасным вариантом.
+                const what = String(res.what || res.hint || 'нужна команда');
                 // Не перерисовывать, если состояние не изменилось.
-                const sign = `${res.hint || ''}|${res.text}`;
+                const sign = `cmd|${what}|${cmd}`;
                 if (this._currentState === sign) return;
                 this._currentState = sign;
 
-                const cmd = String(res.text == null ? '' : res.text);
-                // Команда — кликабельный бейдж (копирование в буфер) и кнопка
-                // «Вставить» (нативный сеттер #qSayIn). Автоотправки нет.
+                // Команда — единственный кликабельный элемент: по клику слово
+                // копируется в буфер («Скопировано ✓»). Кнопки «Вставить»
+                // больше нет, автоотправки тоже нет.
                 this._el.innerHTML = `
                     <div class="lg-combat-suggest">
                         <div class="lg-combat-info">
-                            <div class="lg-combat-hint">${esc(res.hint || '')}</div>
+                            <div class="lg-combat-hint">Внимание: ${esc(what)}</div>
                             <button type="button" class="lg-combat-cmd" data-copy-cmd="${esc(cmd)}" title="Нажми, чтобы скопировать">${esc(cmd)}</button>
                         </div>
-                        <button type="button" class="lg-combat-btn" data-insert-cmd="${esc(cmd)}">Вставить</button>
                     </div>
                 `;
 
                 const copyBtn = this._el.querySelector('[data-copy-cmd]');
                 if (copyBtn) copyBtn.addEventListener('click', () => this._copyCmd(copyBtn, cmd));
-
-                const insertBtn = this._el.querySelector('[data-insert-cmd]');
-                if (insertBtn) insertBtn.addEventListener('click', () => {
-                    if (!this._insert(cmd) && typeof UI !== 'undefined' && UI.showToast) {
-                        UI.showToast('Поле команды похода не найдено', true);
-                    }
-                });
             }
         }
     };
@@ -16784,7 +17254,9 @@ const Players = {
         GuildSummary.init();
         // 🏰 Карманный город: init() поднимает автоскип боёв с монстрами
         //    (тумблер «⏭️ Автоскип боёв с монстрами» в настройках), если он
-        //    был включён в прошлой сессии. Клики — только нативные, по .cm-dlg.
+        //    был включён в прошлой сессии, и запускает мониторинг сборов
+        //    гильдии на элитных монстров (elist/ejoin, v11.7.0).
+        //    Клики — только нативные, по .cm-dlg.
         PocketCity.init();
 
         // 🔔 Проверка обновлений: через 8 с после старта, чтобы не мешать
@@ -16852,8 +17324,10 @@ const Players = {
                 // /api/qact) и слать state на наш сервер после перезапуска.
                 Party.destroy();
                 // 11.7.0: снимаем наблюдатель автоскипа боёв с монстрами и его
-                // отложенные клики — иначе старый инстанс продолжал бы нажимать
-                // «Пропустить» в окне .cm-dlg после перезапуска скрипта.
+                // отложенные клики, а также опрос сборов на элитных монстров
+                // (elist) с плашкой «Присоединиться» — иначе старый инстанс
+                // продолжал бы нажимать «Пропустить» в окне .cm-dlg и слать
+                // запросы после перезапуска скрипта.
                 try { PocketCity.destroy?.(); } catch (e) {}
                 document.querySelectorAll('.' + DOM_IDS.customModal + ', .sim-card, .float-btns, .' + DOM_IDS.fabWrap + ', #' + DOM_IDS.playerHud + ', .custom-modal, .legion-fab-wrap, #legion-player-hud').forEach(el => el.remove());
                 legionApi._booted = false;

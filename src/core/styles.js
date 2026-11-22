@@ -710,11 +710,30 @@
         .auc-footer { margin-top: 8px; font-size: 12px; color: #8b7f96; text-align: right; }
 
         /* ============================================================
+           11.7.0: РУЧНАЯ ВСТАВКА В ПОЛЕ КОМАНДЫ ПОХОДА (#qSayIn)
+           Игра глушит вставку (noPaste на paste/drop/beforeinput), а слово
+           механики босса в походе (.q-nc — canvas) отдаётся с
+           user-select: none и pointer-events: none: выделить и скопировать
+           его было нельзя. !important перебивает правила site/quest.css
+           (специфичность у них такая же, поэтому без !important не выйдет).
+           Обработчики вставки дополнительно глушит перехватчик из
+           modules/combat-assistant.js (stopImmediatePropagation, БЕЗ
+           preventDefault) — нативная вставка браузера остаётся рабочей.
+           ============================================================ */
+        .q-nc, .q-ncw {
+            user-select: text !important;
+            -webkit-user-select: text !important;
+            pointer-events: auto !important;
+        }
+
+        /* ============================================================
            11.6.2b: БОЕВОЙ АССИСТЕНТ (modules/combat-assistant.js)
            Контейнер висит по центру сверху и прозрачен для мыши, чтобы не
            перекрывать нативный UI похода; кликабельны только карточка
-           подсказки (pointer-events: auto) — бейдж команды и кнопка
-           «Вставить» — и баннер сбора отряда с «Присоединиться».
+           подсказки (pointer-events: auto) — заголовок «Внимание: …» и
+           бейдж команды (v11.7.1: кнопка «Вставить» убрана). Баннер сбора
+           отряда отсюда убран в 11.7.0: сборы теперь только гильдейские,
+           на элитных монстров — см. блок ниже (.lg-cm-gather).
            ============================================================ */
         #lg-combat-assistant {
             position: fixed;
@@ -749,7 +768,9 @@
         }
         /* v11.7.0: команда — кликабельный бейдж (копирование в буфер). */
         .lg-combat-info { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
-        .lg-combat-hint { font-size: 12px; opacity: 0.8; }
+        /* v11.7.1: заголовок «Внимание: {что происходит}» — главный текст
+           уведомления, поэтому чуть крупнее и контрастнее. */
+        .lg-combat-hint { font-size: 13px; line-height: 1.3; color: #ffe6a8; max-width: min(520px, 88vw); }
         .lg-combat-cmd {
             background: #241d10; border: 1px dashed #ffcf6a; color: #ffcf6a;
             border-radius: 6px; padding: 4px 10px; font: bold 15px Arial;
@@ -757,15 +778,59 @@
         }
         .lg-combat-cmd:hover { background: #ffcf6a; color: #000; }
         .lg-combat-cmd.copied { background: #4cc95a; border-color: #4cc95a; color: #16121a; }
-        /* v11.7.0: сбор отряда — таймер и кнопка «Присоединиться». */
-        .lg-combat-gather {
-            background: rgba(18, 26, 32, 0.95); border: 2px solid #5cc8ff; color: #fff;
-            padding: 10px 16px; border-radius: 10px; display: flex; flex-direction: column;
-            gap: 6px; align-items: center; pointer-events: auto; font: bold 14px Arial;
-            box-shadow: 0 4px 14px rgba(0,0,0,0.55); min-width: 240px; text-align: center;
+        /* ============================================================
+           11.7.0: СБОР ГИЛЬДИИ НА ЭЛИТНОГО МОНСТРА (modules/pocket-city.js)
+           Плавающее уведомление о чужом открытом сборе (POST /api/citymon/act
+           { op: 'elist' }) с кнопкой «Присоединиться» (op: 'ejoin').
+           Палитра — как у остальных плашек аддона: тёмная панель, золотая
+           рамка, золотая кнопка. Ставим в левый нижний угол: по центру
+           сверху уже живут подсказки боевого ассистента, а справа — HUD
+           пати/тосты, перекрывать их нельзя.
+           ============================================================ */
+        #lg-citymon-gather {
+            position: fixed;
+            left: 20px;
+            bottom: 20px;
+            z-index: 10001;
+            display: none;
+            pointer-events: none;
         }
-        .lg-combat-gather-head { color: #9fe3ff; }
-        .lg-combat-gather-timer { font: 900 20px/1.1 Consolas, monospace; color: #ffcf6a; }
+        #lg-citymon-gather.on { display: block; }
+        .lg-cm-gather {
+            background: rgba(29, 22, 32, 0.96);
+            border: 2px solid #caa55c;
+            border-radius: 10px;
+            padding: 10px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            align-items: center;
+            pointer-events: auto;
+            font: bold 14px Arial;
+            color: #f7eadf;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+            min-width: 260px;
+            max-width: min(560px, 92vw);
+            text-align: center;
+        }
+        .lg-cm-gather-head { color: #9fe3ff; font-size: 14px; line-height: 1.3; }
+        /* Подпись с обратным отсчётом: цифры не «прыгают» (tabular-nums). */
+        .lg-cm-gather-sub { color: #b9aec6; font-size: 12px; font-weight: normal; font-variant-numeric: tabular-nums; }
+        .lg-cm-gather-row { display: flex; align-items: center; gap: 8px; }
+        .lg-cm-gather-join {
+            background: #ffcf6a; color: #16121a; border: none; padding: 6px 14px;
+            border-radius: 6px; font-weight: bold; cursor: pointer;
+            transition: transform 0.1s, filter 0.15s;
+        }
+        .lg-cm-gather-join:hover:not(:disabled) { filter: brightness(1.1); }
+        .lg-cm-gather-join:active:not(:disabled) { transform: scale(0.95); }
+        .lg-cm-gather-join:disabled { opacity: 0.55; cursor: default; }
+        .lg-cm-gather-close {
+            background: transparent; border: 1px solid #4a3b55; color: #9c8fa8;
+            border-radius: 6px; padding: 5px 10px; font: bold 13px Arial;
+            cursor: pointer; transition: color 0.15s, border-color 0.15s;
+        }
+        .lg-cm-gather-close:hover { color: #ff8fa3; border-color: #ff8fa3; }
 
         /* ============================================================
            11.6.5c: СПОСОБНОСТИ АРЕНЫ (modules/hero-planner.js)
@@ -969,7 +1034,9 @@
         .hp-ench-right {
             flex: 1 1 60%; min-width: 0;
             max-height: calc(100vh - 350px);
-            overflow-y: auto;
+            /* v11.7.1: добавилась колонка «Статы» — на узкой модалке таблица
+               скроллится ещё и по горизонтали, а не обрезает значения. */
+            overflow: auto;
         }
         /* Узкая модалка/маленькое окно — таблица уезжает под карточку цели. */
         @media (max-width: 980px) {
@@ -982,7 +1049,8 @@
         .custom-modal .hp-ench-table td { padding: 5px 8px; font-size: 13px; }
         .custom-modal .hp-ench-table th { cursor: default; white-space: nowrap; }
         .custom-modal .hp-ench-table th::after { content: ''; }
-        /* Строка уровня — кликабельная цель. Пройденные шаги приглушены. */
+        /* Строка уровня — кликабельный ВЫБОР уровня просмотра (v11.7.1: все
+           строки +0…+15 кликабельны, в том числе пройденные). */
         .hp-ench-table .hp-ench-row { cursor: pointer; transition: background 0.12s; }
         .hp-ench-table .hp-ench-row:hover { background: rgba(202, 165, 92, 0.08); }
         .hp-ench-table .hp-ench-row.passed { cursor: default; opacity: 0.45; }
@@ -990,6 +1058,15 @@
         .hp-ench-table .hp-ench-row.cur { opacity: 1; background: rgba(202, 165, 92, 0.12); }
         .hp-ench-table .hp-ench-row.target { background: rgba(122, 209, 255, 0.12); }
         .hp-ench-table .hp-ench-row.target td:first-child { box-shadow: inset 2px 0 0 #7ad1ff; }
+        /* v11.7.1: строка ВЫБРАННОГО уровня просмотра (может быть и ниже
+           текущей заточки) — голубая подсветка слева. */
+        .hp-ench-table .hp-ench-row.preview { background: rgba(122, 209, 255, 0.1); }
+        .hp-ench-table .hp-ench-row.preview td:first-child { box-shadow: inset 2px 0 0 #7ad1ff; }
+        /* Колонка «Статы»: значения предмета на уровне этой строки. */
+        .custom-modal .hp-ench-table td.hp-ench-stats {
+            font-size: 11px; line-height: 1.35; color: #b9adc6;
+            min-width: 140px; font-variant-numeric: tabular-nums;
+        }
         /* Чипы усилителей (⭐ звезда / 🌐 сфера) в колонке «Усилители». */
         .hp-mats-cell { white-space: nowrap; }
         .hp-mat-chip {
@@ -1003,7 +1080,30 @@
         .hp-mat-chip.sphere { border-color: rgba(122, 209, 255, 0.45); }
         /* В режиме «Идеально» усилители не участвуют в расчёте — чипы-подсказки. */
         .hp-mat-chip.muted { cursor: default; opacity: 0.35; }
-        /* ── Шапка карточки цели: «Цель: +N» + пресеты ── */
+        /* v11.7.1: кнопки-переключатели ресурсов ⭐/🌐 в строках уровней
+           (заменили браузерные чекбоксы). Активное состояние подсвечивается:
+           звезда — золотым, сфера — голубым. */
+        .hp-mat-btn {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 24px; height: 22px; margin: 0 2px; padding: 0;
+            font: inherit; font-size: 12px; line-height: 1;
+            border-radius: 6px; border: 1px solid #4a3b55; background: #241c2b;
+            cursor: pointer; user-select: none;
+            transition: background 0.15s, border-color 0.15s, transform 0.1s;
+        }
+        .hp-mat-btn:hover { background: #352941; border-color: #6b5a7a; }
+        .hp-mat-btn:active { transform: scale(0.94); }
+        .hp-mat-btn.star:hover { border-color: rgba(202, 165, 92, 0.7); }
+        .hp-mat-btn.sphere:hover { border-color: rgba(122, 209, 255, 0.7); }
+        .hp-mat-btn.star.active {
+            background: rgba(202, 165, 92, 0.28); border-color: #caa55c;
+            box-shadow: 0 0 6px rgba(202, 165, 92, 0.45);
+        }
+        .hp-mat-btn.sphere.active {
+            background: rgba(122, 209, 255, 0.22); border-color: #7ad1ff;
+            box-shadow: 0 0 6px rgba(122, 209, 255, 0.4);
+        }
+        /* ── Шапка карточки: «Просмотр: +N» + пресеты уровней ── */
         .hp-target-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .hp-target-title { font-size: 13px; color: #d8c9a8; }
         .hp-target-title b { color: #ffcf6a; font-size: 19px; font-variant-numeric: tabular-nums; }
@@ -1017,6 +1117,10 @@
         .hp-target-preset:hover:not(:disabled) { background: #352941; border-color: #caa55c; }
         .hp-target-preset.active { background: #caa55c; border-color: #caa55c; color: #1d1620; }
         .hp-target-preset:disabled { opacity: 0.35; cursor: not-allowed; }
+        /* v11.7.1: пройденный уровень — приглушён, но КЛИКАБЕЛЕН (можно
+           посмотреть статы на уже достигнутой заточке). */
+        .hp-target-preset.done { opacity: 0.55; border-style: dashed; }
+        .hp-target-preset.done:hover { opacity: 1; }
         /* ── Секции карточки: статы и стоимость ── */
         .hp-target-section {
             display: flex; flex-direction: column; gap: 6px;
@@ -1034,6 +1138,8 @@
         .hp-stat-val { white-space: nowrap; font-variant-numeric: tabular-nums; }
         .hp-stat-val b { color: #ffcf6a; }
         .hp-stat-gain { color: #8ff2a0; font-size: 11px; }
+        /* v11.7.1: значение на текущей заточке (когда смотрим другой уровень). */
+        .hp-stat-cur { color: #9c8fa8; font-size: 11px; }
         .hp-cost-total { font-size: 20px; font-weight: bold; color: #ffcf6a; font-variant-numeric: tabular-nums; }
         .hp-cost-sub { font-size: 11px; color: #9c8fa8; line-height: 1.45; }
         .hp-cost-row { font-size: 12px; color: #d8c9a8; font-variant-numeric: tabular-nums; }
@@ -1099,6 +1205,14 @@
         }
         .hp-gear-pill.ok { color: #1d1620; background: #8ff2a0; }
         .hp-gear-pill.bad { color: #1d1620; background: #ffb3a0; }
+        /* v11.7.1: шапка выбранного предмета — мини-арт + название/статус. */
+        .hp-item-head { display: flex; align-items: flex-start; gap: 8px; }
+        .hp-item-head-art {
+            flex: none; width: 28px; height: 28px;
+            display: flex; align-items: center; justify-content: center; overflow: hidden;
+        }
+        .hp-item-head-art > svg { width: 100%; height: 100%; display: block; }
+        .hp-item-head-art > img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
 
         /* 11.6.6c: палитра компактных бейджей участников (уровень, класс,
            роль, онлайн). v11.7: игра нативно показывает уровни, классы, силу

@@ -42,6 +42,13 @@
         // Хранится в абсолютных уровнях (+1…+15); при смене предмета цель
         // не сбрасывается — просто зажимается в допустимый диапазон.
         targetLevel: null,
+        // v11.7.1: уровень ПРОСМОТРА (0…15) отдельно от цели пути. Игрок может
+        // посмотреть статы предмета на +0, +4, +7 и т.д., даже если текущая
+        // заточка уже выше: тогда путь curEn -> previewLevel пустой (0 шагов).
+        previewLevel: null,
+        // v11.7.1: ручной ввод количества ресурсов убран — звёзды и сферы
+        // теперь выбираются кнопками ⭐/🌐 в строках уровней, а расход
+        // считается автоматически по пути curEn+1…previewLevel.
         userStars: 0,
         userSpheres: 0,
         allocatedStars: {},   // { lv: true }
@@ -143,6 +150,24 @@
             return Math.min(max, Math.max(min, Math.round(t)));
         },
 
+        /**
+         * v11.7.1: уровень просмотра (0…15) для карточки «Заточка».
+         *
+         * В отличие от enchantTargetLevel НЕ зажимается вперёд текущей
+         * заточки: игрок вправе посмотреть статы предмета на +0…+15.
+         * Если уровень не выбран — берём цель пути (curEn + 1).
+         *
+         * @param {number} curEn текущая заточка предмета
+         * @returns {number} уровень просмотра (0…15)
+         */
+        enchantPreviewLevel(curEn) {
+            const max = this.ENCH.max;
+            if (this.previewLevel == null) return this.enchantTargetLevel(curEn);
+            const raw = Number(this.previewLevel);
+            if (!Number.isFinite(raw)) return this.enchantTargetLevel(curEn);
+            return Math.min(max, Math.max(0, Math.round(raw)));
+        },
+
         /* ---------------------------------------------------------- */
         /* v11.6.3: штраф экипировки (gearPenalty из lib/game-data.js) */
         /* ---------------------------------------------------------- */
@@ -217,6 +242,11 @@
          * 11.6.5f.1: компактный статус экипировки — одна иконка рядом с
          * названием предмета вместо отдельной полосы над таблицей.
          * Полный текст живёт в title (у штрафа — со списком предметов).
+         *
+         * v11.7.1: в шапке карточки заточки больше НЕ используется — там
+         * показывается статус ВЫБРАННОГО предмета (itemIconBadge по gp),
+         * иначе плашка по надетым вещам путала при выборе вещи из сумки.
+         * Метод оставлен как публичный helper сводки штрафа.
          *
          * @param {string} role класс героя
          * @param {Array} items надетые предметы
@@ -368,6 +398,32 @@
                 + `<span>🌐 Сфера сохранения: ${this.priceBadge('sphere')}</span>`;
         },
 
+        /**
+         * v11.7.1: арт предмета для плитки и шапки карточки заточки.
+         *
+         * Приоритет — нативный рендер игры G.LGInventory.art(it): только он
+         * рисует сложные вещи («Нимб из мяты» и прочие легендарки), которые
+         * Utils.getItemArtHtml() подменял эмодзи-заглушкой. still() игры
+         * применяется, если доступен (как в site/inventory.js).
+         * Фолбэк — общий хелпер аддона (SVG -> иконка игры -> эмодзи).
+         *
+         * @param {object} it предмет из /api/me
+         * @returns {string} html
+         */
+        renderItemArt(it) {
+            if (!it) return '📦';
+            try {
+                const inv = G.LGInventory;
+                if (inv && typeof inv.art === 'function') {
+                    const rawSvg = inv.art(it);
+                    if (rawSvg && rawSvg.startsWith('<svg')) {
+                        return (typeof inv.still === 'function') ? inv.still(rawSvg) : rawSvg;
+                    }
+                }
+            } catch (e) {}
+            return Utils.getItemArtHtml({ i: it.id ?? it.i, name: it.name }, it);
+        },
+
         init() {
             (document.getElementById(DOM_IDS.btnBuildSim) || document.getElementById('btn-build-sim'))
                 ?.addEventListener('click', () => this.open());
@@ -412,7 +468,9 @@
 
                 // 11.6.5f.1: статус экипировки — маленькая иконка в шапке
                 // выбранного предмета (раньше была отдельная полоса сверху).
-                const gearIconHtml = this.gearSummaryIcon(h.role, equipped);
+                // v11.7.1: иконка считается по КОНКРЕТНОМУ предмету (gp) внутри
+                // renderTable — общая плашка по надетым вещам игрока путала
+                // (предмет из сумки мог подходить, а плашка показывала штраф).
 
                 const tabsHtml = `
                     <button class="modal-tab active" data-tab="hero-build">🛡️ Билды</button>
@@ -426,16 +484,13 @@
                         <div id="hp-buildsim-container" style="display:flex; flex-direction:column; flex:1; min-height:0; overflow:auto; padding-bottom:20px;"></div>
                     </div>
                     <div class="tab-content" id="tab-hero-ench" style="flex-direction:column; gap:8px;">
-                        <!-- 11.6.5f.1: строка 1 — режимы, инпуты ресурсов (только в
-                             режиме шансов) и цены ресурсов в одной полосе. -->
+                        <!-- 11.6.5f.1: строка 1 — режимы и цены ресурсов. v11.7.1:
+                             ручной ввод количества звёзд/сфер убран — ресурсы
+                             выбираются кнопками ⭐/🌐 в строках уровней. -->
                         <div class="hp-ench-topbar">
                             <div class="hp-mode-switch">
                                 <button class="hp-mode-btn ${this.strategyMode === 'ideal' ? 'active' : ''}" data-mode="ideal" style="border:none; border-radius:5px; font-weight:bold; cursor:pointer; transition:all 0.2s; background:${this.strategyMode === 'ideal' ? '#caa55c' : 'transparent'}; color:${this.strategyMode === 'ideal' ? '#1d1620' : '#aaa'};">📊 Идеально</button>
                                 <button class="hp-mode-btn ${this.strategyMode === 'expected' ? 'active' : ''}" data-mode="expected" style="border:none; border-radius:5px; font-weight:bold; cursor:pointer; transition:all 0.2s; background:${this.strategyMode === 'expected' ? '#caa55c' : 'transparent'}; color:${this.strategyMode === 'expected' ? '#1d1620' : '#aaa'};">🧠 С учётом шансов</button>
-                            </div>
-                            <div id="hp-resources-panel" class="hp-mat-inputs" style="display:${this.strategyMode === 'expected' ? 'flex' : 'none'};">
-                                <label>⭐ Звёзды: <input type="number" id="hp-input-stars" min="0" max="15" value="${this.userStars}"></label>
-                                <label>🌐 Сферы: <input type="number" id="hp-input-spheres" min="0" max="15" value="${this.userSpheres}"></label>
                             </div>
                             <!-- 11.6.2d: цены ресурсов. 📈 — медиана аука (за 72 часа /
                                  последние 100 цен), 🏪 — цена кузнеца (фолбэк).
@@ -539,93 +594,103 @@
 
                     const isExpected = this.strategyMode === 'expected';
                     const isExpanded = this.ENCH.max;
-                    // 11.6.5f: цель правой карточки (null -> curEn + 1).
-                    const target = this.enchantTargetLevel(curEn);
+                    // v11.7.1: уровень ПРОСМОТРА (0…15) отделён от цели пути.
+                    // preview <= curEn означает «шагов нет»: карточка просто
+                    // показывает статы предмета на выбранном уровне.
+                    const preview = this.enchantPreviewLevel(curEn);
+                    const hasPath = preview > curEn;
+                    const starPrice = this.resourcePrice('star');
+                    const spherePrice = this.resourcePrice('sphere');
 
-                    // ── Левая колонка: таблица уровней ──
-                    // Колонки «Суммарно» и «Статы после» переехали в карточку
-                    // цели: они описывают конкретную цель, а не каждый уровень.
+                    // Компактная подпись стата для колонки «Статы»: убираем
+                    // хвостовой «%» из statNames («Крит %» -> «Крит»), значение
+                    // показываем числом, как в самой игре.
+                    const shortStat = (k) => String(
+                        (typeof BuildSim !== 'undefined' && BuildSim.statNames && BuildSim.statNames[k]) || k
+                    ).replace(/\s*%$/, '');
+                    const statKeys = Object.keys(baseStats || {});
+                    // Статы предмета на произвольном уровне заточки (Math.round,
+                    // xstat-ы получают ¼ бонуса — см. enchantStat).
+                    const statsAt = (lv) => statKeys.length
+                        ? statKeys.map(k => `${shortStat(k)} ${this.enchantStat(+baseStats[k] || 0, lv, k)}`).join(' · ')
+                        : '—';
+
+                    // ── Правая колонка: таблица уровней +0…+15 ──
+                    // v11.7.1: первая строка — база +0, все строки кликабельны:
+                    // клик выбирает уровень ПРОСМОТРА (в том числе ниже текущей
+                    // заточки), а не только цель впереди.
                     let rows = '';
-                    for (let lv = 1; lv <= isExpanded; lv++) {
-                        let chance = this.enchantChance(lv);
-                        const cost = this.enchantCost(item.v, lv);
+                    for (let lv = 0; lv <= isExpanded; lv++) {
+                        const isBase = lv === 0;
                         const isCur = lv === curEn;
-                        const passed = lv <= curEn;          // шаг уже пройден
-                        const isTarget = !passed && lv === target;
+                        const isPreview = lv === preview;
 
-                        const useStar = isExpected && !!this.allocatedStars[lv];
-                        const useSphere = isExpected && !!this.allocatedSpheres[lv];
-                        // ⭐ даёт +25% к шансу — показываем шанс уже с надбавкой.
-                        if (useStar) chance += 25;
+                        // Усилители — только у шагов +1…+15 (у базы шага нет).
+                        const useStar = !isBase && !!this.allocatedStars[lv];
+                        const useSphere = !isBase && !!this.allocatedSpheres[lv];
 
-                        // Цена ресурса: медиана аука (за 72 часа / последние
-                        // 100 цен), иначе базовая цена кузнеца — фолбэк внутри
-                        // resourcePrice.
-                        const starPrice = this.resourcePrice('star');
-                        const spherePrice = this.resourcePrice('sphere');
+                        let chance = 0;
+                        let costCell = '—';
+                        let chips = '—';
+                        let bonusPct = 0;
+                        if (!isBase) {
+                            chance = this.enchantChance(lv);
+                            // ⭐ даёт +25% к шансу — показываем шанс уже с надбавкой.
+                            if (useStar) chance += 25;
 
-                        // Отмеченный усилитель входит в стоимость попытки:
-                        // колонка «Попытка» показывает реальные траты шага.
-                        const attemptCost = cost
-                            + (useStar ? starPrice : 0)
-                            + (useSphere ? spherePrice : 0);
+                            // Отмеченный усилитель входит в стоимость попытки:
+                            // колонка «Попытка» показывает реальные траты шага.
+                            const attemptCost = this.enchantCost(item.v, lv)
+                                + (useStar ? starPrice : 0)
+                                + (useSphere ? spherePrice : 0);
 
-                        // 📈 — в стоимость вошёл ресурс, купленный на ауке
-                        // (медиана сети). Тултип объясняет источник цены.
-                        const aucUsed = (useStar && this.resourceMedian('star') > 0)
-                            || (useSphere && this.resourceMedian('sphere') > 0);
-                        const costCell = `${Utils.formatMoney(attemptCost)}${aucUsed
-                            ? ' <span title="Цена включает ресурс с аукциона (медиана сети за 72 часа / последние 100 цен)" style="cursor:help; font-size:11px;">📈</span>'
-                            : ''}`;
+                            // 📈 — в стоимость вошёл ресурс, купленный на ауке
+                            // (медиана сети). Тултип объясняет источник цены.
+                            const aucUsed = (useStar && this.resourceMedian('star') > 0)
+                                || (useSphere && this.resourceMedian('sphere') > 0);
+                            costCell = `${Utils.formatMoney(attemptCost)}${aucUsed
+                                ? ' <span title="Цена включает ресурс с аукциона (медиана сети за 72 часа / последние 100 цен)" style="cursor:help; font-size:11px;">📈</span>'
+                                : ''}`;
 
-                        // Усилители: в режиме шансов — чипы с чекбоксами, в
-                        // «Идеально» — приглушённые чипы-подсказки (там
-                        // усилители не участвуют в расчёте).
-                        const chipHint = passed
-                            ? 'Шаг уже пройден'
-                            : 'Усилители учитываются в режиме «С учётом шансов»';
-                        const chips = (isExpected && !passed)
-                            ? `<label class="hp-mat-chip star" title="Счастливая звезда: +25% к шансу, +${Utils.formatMoney(starPrice)} к цене">`
-                                + `<input type="checkbox" class="hp-alloc-star" data-lv="${lv}" ${this.allocatedStars[lv] ? 'checked' : ''}>⭐</label>`
-                                + `<label class="hp-mat-chip sphere" title="Сфера сохранения: защита от поломки, +${Utils.formatMoney(spherePrice)} к цене">`
-                                + `<input type="checkbox" class="hp-alloc-sphere" data-lv="${lv}" ${this.allocatedSpheres[lv] ? 'checked' : ''}>🌐</label>`
-                            : `<span class="hp-mat-chip muted" title="${chipHint}">⭐</span>`
-                                + `<span class="hp-mat-chip muted" title="${chipHint}">🌐</span>`;
+                            chips = `<button type="button" class="hp-mat-btn star ${useStar ? 'active' : ''}" data-lv="${lv}" title="Счастливая звезда (+25% к шансу, +${Utils.formatMoney(starPrice)})">⭐</button>`
+                                + `<button type="button" class="hp-mat-btn sphere ${useSphere ? 'active' : ''}" data-lv="${lv}" title="Сфера сохранения (защита от поломки, +${Utils.formatMoney(spherePrice)})">🌐</button>`;
 
-                        // Бонус заточки на этом уровне (GAME_DATA.ENCHANT_MULTIPLIERS, %)
-                        const bonusPct = GAME_DATA.ENCHANT_MULTIPLIERS[lv] || 0;
+                            // Бонус заточки на этом уровне (GAME_DATA.ENCHANT_MULTIPLIERS, %)
+                            bonusPct = GAME_DATA.ENCHANT_MULTIPLIERS[lv] || 0;
+                        }
 
                         const rowCls = ['hp-ench-row'];
-                        if (passed) rowCls.push('passed');
                         if (isCur) rowCls.push('cur');
-                        if (isTarget) rowCls.push('target');
-                        const rowTitle = passed ? '' : ` title="Сделать целью +${lv}"`;
+                        if (isPreview) rowCls.push('preview');
 
-                        rows += `<tr class="${rowCls.join(' ')}" data-lv="${lv}"${rowTitle}>
-                            <td><b>+${lv}</b>${isCur ? ' <small style="color:#ffcf6a;">(тек.)</small>' : ''}</td>
-                            <td>${Math.min(100, chance)}%</td>
+                        rows += `<tr class="${rowCls.join(' ')}" data-lv="${lv}" title="Показать характеристики на +${lv}">
+                            <td><b>+${lv}</b>${isBase ? ' <small style="color:#9c8fa8;">(база)</small>' : ''}${isCur ? ' <small style="color:#ffcf6a;">(тек.)</small>' : ''}</td>
+                            <td>${isBase ? '—' : Math.min(100, chance) + '%'}</td>
                             <td style="color:#4cc95a; font-weight:bold;">+${bonusPct}%</td>
                             <td>${costCell}</td>
                             <td class="hp-mats-cell">${chips}</td>
+                            <td class="hp-ench-stats">${statsAt(lv)}</td>
                         </tr>`;
                     }
 
-                    // ── Правая колонка: карточка цели curEn -> target ──
+                    // ── Левая колонка: карточка уровня просмотра ──
                     // Две суммы: «идеальная» (все попытки удачны с первой) и с
                     // отмеченными усилителями. В режиме шансов показываем вторую.
-                    const starPrice = this.resourcePrice('star');
-                    const spherePrice = this.resourcePrice('sphere');
                     let costIdeal = 0;
                     let costStrat = 0;
                     let starsUsed = 0, spheresUsed = 0;
                     let attempts = 0;
-                    for (let lv = curEn + 1; lv <= target; lv++) {
+                    // v11.7.1: путь всегда вперёд (curEn+1…preview). Если
+                    // preview <= curEn, цикл не выполняется — стоимость 0,
+                    // а карточка показывает статы выбранного уровня.
+                    for (let lv = curEn + 1; lv <= preview; lv++) {
                         const step = this.enchantCost(item.v, lv);
                         costIdeal += step;
                         let stepCost = step;
                         let chance = this.enchantChance(lv);
-                        if (isExpected && this.allocatedStars[lv]) { stepCost += starPrice; chance += 25; starsUsed++; }
-                        if (isExpected && this.allocatedSpheres[lv]) { stepCost += spherePrice; spheresUsed++; }
+                        // Ресурсы выбранные кнопками ⭐/🌐 в строках таблицы.
+                        if (this.allocatedStars[lv]) { stepCost += starPrice; chance += 25; starsUsed++; }
+                        if (this.allocatedSpheres[lv]) { stepCost += spherePrice; spheresUsed++; }
                         costStrat += stepCost;
                         // 100 / chance — ожидаемое число попыток на один шаг
                         // (1/p). Сумма по пути даёт матожидание попыток на всю
@@ -633,32 +698,43 @@
                         attempts += chance > 0 ? 100 / chance : Infinity;
                     }
                     const costTotal = isExpected ? costStrat : costIdeal;
-                    const costExtra = Math.max(0, costStrat - costIdeal);
-                    const attemptsStr = Number.isFinite(attempts) ? Math.ceil(attempts) : '∞';
-                    const rangeText = target > curEn
-                        ? `шагов +${curEn + 1}…+${target}`
-                        : 'шагов нет (уровень максимальный)';
+                    const costResources = starsUsed * starPrice + spheresUsed * spherePrice;
+                    const attemptsStr = hasPath
+                        ? (Number.isFinite(attempts) ? Math.ceil(attempts) : '∞')
+                        : '0';
+                    const rangeText = hasPath
+                        ? `шагов +${curEn + 1}…+${preview}`
+                        : (preview === curEn
+                            ? 'шагов нет — это текущий уровень'
+                            : `шагов нет — +${preview} уже пройден`);
 
-                    // Статы предмета на целевой заточке: база -> итог, прибавка
-                    // отдельным зелёным числом.
+                    // Статы предмета на выбранном уровне: база (+0) -> итог,
+                    // прибавка отдельным зелёным числом. v11.7.1: если выбран
+                    // уровень ниже текущей заточки, дополнительно показываем
+                    // значение на текущей заточке (для сравнения).
                     const statHtml = Object.entries(baseStats).map(([k, base]) => {
                         const b = +base || 0;
-                        const fin = this.enchantStat(b, target, k);
+                        const fin = this.enchantStat(b, preview, k);
                         const gain = fin - b;
                         const name = (typeof BuildSim !== 'undefined' && BuildSim.statNames && BuildSim.statNames[k]) || k;
                         const safeName = Utils.escapeHtml(name);
+                        const curNote = preview !== curEn
+                            ? ` <span class="hp-stat-cur" title="Сейчас, на +${curEn}">(+${curEn}: ${this.enchantStat(b, curEn, k)})</span>`
+                            : '';
                         return `<div class="hp-stat-row">
                             <span class="hp-stat-name" title="${safeName}">${safeName}</span>
-                            <span class="hp-stat-val">${b} → <b>${fin}</b>${gain > 0 ? ` <span class="hp-stat-gain">+${gain}</span>` : ''}</span>
+                            <span class="hp-stat-val">${b} → <b>${fin}</b>${gain > 0 ? ` <span class="hp-stat-gain">+${gain}</span>` : ''}${curNote}</span>
                         </div>`;
                     }).join('') || '<div class="hp-cost-sub">У предмета нет характеристик.</div>';
 
-                    // Пресеты цели: уже пройденные уровни недоступны.
-                    const presets = [4, 7, 10, 15].map(t => {
-                        const done = t <= curEn;
-                        const active = t === target;
-                        return `<button type="button" class="hp-target-preset${active ? ' active' : ''}"`
-                            + ` data-target="${t}"${done ? ' disabled title="Уже пройдено"' : ` title="Цель +${t}"`}>+${t}</button>`;
+                    // Пресеты уровня просмотра. v11.7.1: пройденные уровни
+                    // больше НЕ блокируются — их можно смотреть (класс .done
+                    // лишь визуально помечает «уже пройдено»).
+                    const presets = [0, 4, 7, 10, 15].map(t => {
+                        const done = t > 0 && t <= curEn;
+                        const active = t === preview;
+                        return `<button type="button" class="hp-target-preset${active ? ' active' : ''}${done ? ' done' : ''}"`
+                            + ` data-target="${t}" title="Показать +${t}">+${t}</button>`;
                     }).join('');
 
                     // v11.6.3: штраф/фокус и привязка выбранного предмета.
@@ -682,6 +758,13 @@
                     const boundNote = isBoundItem(item)
                         ? `<div style="font-size:11px; color:#ffb3a0; margin-top:2px;">🔒 ${BOUND_LINE}</div>`
                         : '';
+                    // v11.7.1: галочка/предупреждение — по ВЫБРАННОМУ предмету
+                    // (gp), а не общей плашкой по надетым вещам героя.
+                    const itemIconBadge = gp.bad
+                        ? `<span class="hp-gear-pill bad" title="Не подходит классу: −${gp.pct}% ${statLabel}">⚠</span>`
+                        : `<span class="hp-gear-pill ok" title="Подходит вашему классу">✓</span>`;
+                    // Мини-арт предмета в шапке (нативный LGInventory.art).
+                    const headArt = this.renderItemArt(item);
 
                     // Клик по строке/пресету перерисовывает колонки целиком —
                     // сохраняем прокрутку списка уровней, иначе таблица прыгает
@@ -690,28 +773,33 @@
                     const keepScroll = outEl.scrollTop;
                     const keepTableScroll = outEl.querySelector('.hp-ench-right')?.scrollTop || 0;
                     outEl.innerHTML = `
-                        <div style="background:#26202e; border:1px solid #44374a; border-radius:6px; padding:8px 12px; margin-bottom:10px; font-size:12px; display:flex; justify-content:space-between;">
-                            <div><b style="color:#ffcf6a;">${Utils.escapeHtml(item.name)}</b>${gearIconHtml} (v: ${item.v}, тек: +${curEn})${gearNote}${boundNote}</div>
+                        <div style="background:#26202e; border:1px solid #44374a; border-radius:6px; padding:8px 12px; margin-bottom:10px; font-size:12px;">
+                            <div class="hp-item-head">
+                                <span class="hp-item-head-art">${headArt || '📦'}</span>
+                                <div>
+                                    <b style="color:#ffcf6a;">${Utils.escapeHtml(item.name)}</b>${itemIconBadge} (v: ${item.v}, тек: +${curEn})${gearNote}${boundNote}
+                                </div>
+                            </div>
                         </div>
                         <div class="hp-ench-split">
                             <!-- 11.6.5f.1: карточка цели — СЛЕВА (класс .hp-ench-left,
                                  flex 1 1 40%), таблица уровней — СПРАВА (.hp-ench-right). -->
                             <div class="hp-ench-left">
                                 <div class="hp-target-head">
-                                    <div class="hp-target-title">Цель: <b>+${target}</b></div>
+                                    <div class="hp-target-title">Просмотр: <b>+${preview}</b></div>
                                     <div class="hp-target-presets">${presets}</div>
                                 </div>
                                 <div class="hp-target-section">
-                                    <div class="hp-target-sub">Характеристики на +${target}</div>
+                                    <div class="hp-target-sub">Характеристики на +${preview}</div>
                                     <div class="hp-stat-grid">${statHtml}</div>
                                 </div>
                                 <div class="hp-target-section">
                                     <div class="hp-target-sub">Итоговая стоимость</div>
                                     <div class="hp-cost-total">${Utils.formatMoney(costTotal)}</div>
-                                    <div class="hp-cost-sub">${rangeText} · попыток: ${attemptsStr}${isExpected
-                                        ? `<br>В том числе ресурсы: ${Utils.formatMoney(costExtra)}`
+                                    <div class="hp-cost-sub">${rangeText} · попыток: ${attemptsStr}</div>
+                                    <div class="hp-cost-row">⭐ Звёзды: ${starsUsed} шт. · 🌐 Сферы: ${spheresUsed} шт.${costResources > 0
+                                        ? ` — ${Utils.formatMoney(costResources)}`
                                         : ''}</div>
-                                    ${isExpected ? `<div class="hp-cost-row">Использовано: ⭐ ${starsUsed}/${this.userStars}, 🌐 ${spheresUsed}/${this.userSpheres}</div>` : ''}
                                 </div>
                             </div>
                             <div class="hp-ench-right">
@@ -722,6 +810,7 @@
                                         <th>Бонус</th>
                                         <th>Попытка</th>
                                         <th>Усилители</th>
+                                        <th>Статы</th>
                                     </tr></thead>
                                     <tbody>${rows}</tbody>
                                 </table>
@@ -735,7 +824,7 @@
                             Расширенные статы (крит, уклонение, пробивание и пр.) получают ¼ бонуса заточки (enchK = 0.25).`
                                 : `Стоимость попытки = <code>max(priceMin, round(v × price% / 100))</code> из живой таблицы игры <code>LG_GAME_DATA.enchant</code>. Округление статов — <code>Math.round</code> (подтверждено игрой).<br>
                             <b>«Итоговая стоимость»</b> = сумма базовых стоимостей ${rangeText} (без шансов и поломок — «идеальная» стоимость).<br>
-                            Звёзды и сферы учитываются в режиме «🧠 С учётом шансов»: 📈 — медиана аукциона (за 72 часа / последние 100 цен), 🏪 — цена кузнеца.<br>
+                            Ресурсы выбираются кнопками ⭐/🌐 в строках шагов: их цена сразу входит в «Попытку», а в «Итоговую стоимость» — в режиме «🧠 С учётом шансов».<br>
                             Расширенные статы (крит, уклонение, пробивание и пр.) получают ¼ бонуса заточки (enchK = 0.25).`}
                         </div>
                     `;
@@ -743,64 +832,40 @@
                     const tableWrap = outEl.querySelector('.hp-ench-right');
                     if (tableWrap) tableWrap.scrollTop = keepTableScroll;
 
-                    // Обработчики чекбоксов
-                    // Лимит ресурсов считаем по ВСЕМ отмеченным уровням, а не
-                    // только по пути до цели (starsUsed/spheresUsed — счётчики
-                    // карточки, они ограничены диапазоном curEn → target).
-                    const countAllocated = (map) => Object.keys(map).filter(k => map[k]).length;
-                    if (isExpected) {
-                        outEl.querySelectorAll('.hp-alloc-star').forEach(cb => {
-                            cb.addEventListener('change', (e) => {
-                                const lv = +e.target.dataset.lv;
-                                if (e.target.checked) {
-                                    if (countAllocated(this.allocatedStars) >= this.userStars) {
-                                        e.target.checked = false;
-                                        UI.showToast('Звёзды закончились', true);
-                                        return;
-                                    }
-                                    this.allocatedStars[lv] = true;
-                                } else {
-                                    delete this.allocatedStars[lv];
-                                }
-                                renderTable();
-                            });
+                    // v11.7.1: кнопки-переключатели ресурсов ⭐/🌐. Всплытие
+                    // гасим, иначе клик по кнопке сменил бы уровень просмотра.
+                    outEl.querySelectorAll('.hp-mat-btn').forEach(btn => {
+                        btn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            const lv = +btn.dataset.lv;
+                            if (!Number.isFinite(lv) || lv < 1) return;
+                            const map = btn.classList.contains('star') ? this.allocatedStars : this.allocatedSpheres;
+                            if (map[lv]) delete map[lv];
+                            else map[lv] = true;
+                            renderTable();
                         });
-                        outEl.querySelectorAll('.hp-alloc-sphere').forEach(cb => {
-                            cb.addEventListener('change', (e) => {
-                                const lv = +e.target.dataset.lv;
-                                if (e.target.checked) {
-                                    if (countAllocated(this.allocatedSpheres) >= this.userSpheres) {
-                                        e.target.checked = false;
-                                        UI.showToast('Сферы закончились', true);
-                                        return;
-                                    }
-                                    this.allocatedSpheres[lv] = true;
-                                } else {
-                                    delete this.allocatedSpheres[lv];
-                                }
-                                renderTable();
-                            });
-                        });
-                    }
+                    });
 
-                    // 11.6.5f: клик по строке уровня делает его целью правой
-                    // карточки. Пройденные шаги целью быть не могут, а клик по
-                    // чипу усилителя целью не считается.
+                    // v11.7.1: клик по любой строке +0…+15 выбирает уровень
+                    // ПРОСМОТРА (в том числе ниже текущей заточки), а не только
+                    // цель впереди. targetLevel держим синхронным.
                     outEl.querySelectorAll('.hp-ench-row').forEach(tr => {
                         tr.addEventListener('click', (e) => {
-                            if (e.target.closest('input, label')) return;
+                            if (e.target.closest('button, input, label')) return;
                             const lv = +tr.dataset.lv;
-                            if (!Number.isFinite(lv) || lv <= curEn) return;
+                            if (!Number.isFinite(lv) || lv < 0) return;
+                            this.previewLevel = lv;
                             this.targetLevel = lv;
                             renderTable();
                         });
                     });
 
-                    // Кнопки-пресеты цели (+4/+7/+10/+15).
+                    // Пресеты уровня просмотра (+0/+4/+7/+10/+15).
                     outEl.querySelectorAll('.hp-target-preset').forEach(btn => {
                         btn.addEventListener('click', () => {
                             const lv = +btn.dataset.target;
-                            if (!Number.isFinite(lv) || lv <= curEn) return;
+                            if (!Number.isFinite(lv) || lv < 0) return;
+                            this.previewLevel = lv;
                             this.targetLevel = lv;
                             renderTable();
                         });
@@ -843,8 +908,10 @@
 
                     gridEl.innerHTML = locData.items.map(it => {
                         const isSel = it.uid === selectedItem?.uid;
-                        // Используем хелпер арта из утилит
-                        const art = Utils.getItemArtHtml({ i: it.id ?? it.i, name: it.name }, it);
+                        // v11.7.1: арт берём нативным рендером игры
+                        // (LGInventory.art) — он рисует и легендарки вроде
+                        // «Нимба из мяты», которые раньше падали в эмодзи.
+                        const art = this.renderItemArt(it);
                         const border = isSel ? '2px solid #caa55c' : '1px solid #44374a';
                         const bg = isSel ? 'rgba(202,165,92,0.15)' : '#1e1724';
                         // v11.6.3: 🔒 — легендарка привязана (не передаётся),
@@ -918,36 +985,10 @@
                         e.currentTarget.style.background = '#caa55c';
                         e.currentTarget.style.color = '#1d1620';
 
-                        const resPanel = document.getElementById('hp-resources-panel');
-                        if (resPanel) resPanel.style.display = this.strategyMode === 'expected' ? 'flex' : 'none';
+                        // v11.7.1: панели ручного ввода ресурсов больше нет —
+                        // режим влияет только на расчёт (см. renderTable).
                         renderTable();
                     });
-                });
-
-                document.getElementById('hp-input-stars')?.addEventListener('input', (e) => {
-                    this.userStars = Math.max(0, Math.min(15, +e.target.value || 0));
-                    // Очищаем лишние галочки, если количество уменьшилось
-                    let count = 0;
-                    for (let lv = 15; lv >= 1; lv--) {
-                        if (this.allocatedStars[lv]) {
-                            count++;
-                            if (count > this.userStars) delete this.allocatedStars[lv];
-                        }
-                    }
-                    renderTable();
-                });
-
-                document.getElementById('hp-input-spheres')?.addEventListener('input', (e) => {
-                    this.userSpheres = Math.max(0, Math.min(15, +e.target.value || 0));
-                    // Очищаем лишние галочки, если количество уменьшилось
-                    let count = 0;
-                    for (let lv = 15; lv >= 1; lv--) {
-                        if (this.allocatedSpheres[lv]) {
-                            count++;
-                            if (count > this.userSpheres) delete this.allocatedSpheres[lv];
-                        }
-                    }
-                    renderTable();
                 });
 
                 renderGrid();

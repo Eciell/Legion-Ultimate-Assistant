@@ -23,6 +23,10 @@
     // окно игры LGGuilds.open({ big: true }) из любой локации. Фолбэк — клик по
     // нативной кнопке входа (#gu-hud [data-gu="guild"] / .cy-hud .gl-entry).
     // Доступность считаем по флагу героя ME.hero.gu (см. isGuildLocked).
+    //
+    // v11.7.0: фоновый мониторинг сборов гильдии на элитных монстров
+    // (POST /api/citymon/act { op: 'elist' }) и плашка «Присоединиться»
+    // (op: 'ejoin'). Запросы — Utils.fetchApi, патчей window.fetch/LGMine нет.
     // ============================================================
     const PocketCity = {
         // Ожидание готовности города (v11.6.4c). Два этапа:
@@ -47,6 +51,27 @@
         _monsterRaf: 0,
         // Отложенные клики: гасятся в stopMonsterAutoSkip() / destroy().
         _monsterTimers: new Set(),
+
+        // ---------------- 11.7.0: сборы гильдии на элитных монстров ----------------
+        // Фоновый опрос POST /api/citymon/act { op: 'elist' }: ищем чужое
+        // открытое лобби, в котором игрок ещё не состоит, и показываем
+        // плавающее уведомление с кнопкой «Присоединиться» (op: 'ejoin').
+        // Всё через Utils.fetchApi (контекст игры либо обычный fetch);
+        // window.fetch / LGMine не патчатся.
+        CITYMON_POLL_MS: 18000,
+        // 429 / rate_limited у игры общий на все API — после отказа молчим
+        // минуту, иначе опрос сам себя загонит в новый лимит.
+        CITYMON_PAUSE_MS: 60000,
+        CITYMON_TICK_MS: 1000,
+        _citymonPollTimer: null,
+        _citymonTickTimer: null,
+        _citymonBusy: false,
+        _citymonPausedUntil: 0,
+        _citymonLobby: null,
+        // id лобби, скрытые игроком вручную (кнопка «✕») — до перезагрузки.
+        _citymonDismissed: new Set(),
+        _citymonEl: null,
+        _citymonVisibility: null,
 
         // Модалка со списком зданий: карточка -> нативное здание игры.
         open() {
@@ -513,20 +538,298 @@
             PocketCity._monsterTimers.add(timer);
         },
 
+        // ============================================================
+        // 6.5.y. СБОРЫ ГИЛЬДИИ НА ЭЛИТНЫХ МОНСТРОВ (v11.7.0)
+        //
+        // Раньше баннер «Идёт сбор в поход» жил в боевом ассистенте и
+        // реагировал на q.gather — то есть только когда игрок уже в походе.
+        // Теперь уведомление относится к сборам гильдии на элитных монстров
+        // и работает из любой локации: опрос POST /api/citymon/act
+        // { op: 'elist' } раз в 18 с, вступление — { op: 'ejoin', id }.
+        // Никаких патчей window.fetch / LGMine: только Utils.fetchApi.
+        // ============================================================
+
+        /**
+         * Доступен ли раздел элитных монстров: флаг cm у героя
+         * (/api/me -> ME.hero.cm). Без него запросы впустую жгут лимит.
+         */
+        canWatchCityMon() {
+            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
+            const me = pageWin.ME;
+            const hero = me && me.hero;
+            return !!(hero && hero.cm);
+        },
+
+        /**
+         * Запуск фонового мониторинга (init() из main.js). Идемпотентно:
+         * повторный вызов не плодит второй интервал и слушатель вкладки.
+         */
+        startCityMonWatch() {
+            if (PocketCity._citymonPollTimer) return;
+            PocketCity._citymonVisibility = () => {
+                // Вернулись на вкладку — не ждём очередные 18 секунд.
+                if (!document.hidden) PocketCity.pollCityMonLobbies();
+            };
+            document.addEventListener('visibilitychange', PocketCity._citymonVisibility);
+            PocketCity._citymonPollTimer = setInterval(() => PocketCity.pollCityMonLobbies(), PocketCity.CITYMON_POLL_MS);
+            // Первая проверка сразу: сбор мог идти ещё до запуска аддона.
+            PocketCity.pollCityMonLobbies();
+        },
+
+        /** Остановка мониторинга: интервалы, слушатель вкладки, баннер, DOM. */
+        stopCityMonWatch() {
+            if (PocketCity._citymonPollTimer) {
+                clearInterval(PocketCity._citymonPollTimer);
+                PocketCity._citymonPollTimer = null;
+            }
+            if (PocketCity._citymonVisibility) {
+                document.removeEventListener('visibilitychange', PocketCity._citymonVisibility);
+                PocketCity._citymonVisibility = null;
+            }
+            PocketCity.hideCityMonGather();
+            if (PocketCity._citymonEl) {
+                try { PocketCity._citymonEl.remove(); } catch (e) {}
+                PocketCity._citymonEl = null;
+            }
+            PocketCity._citymonPausedUntil = 0;
+            PocketCity._citymonBusy = false;
+        },
+
+        /** 429 / rate_limited — общий лимит API игры, значит пауза. */
+        isCityMonRateLimited(res) {
+            if (!res) return false;
+            if (res.status === 429) return true;
+            const code = res.error || (res.body && (res.body.error || res.body.err));
+            return code === 'rate_limited';
+        },
+
+        /**
+         * Один цикл опроса elist.
+         *
+         * @param {boolean} force переопрос после ejoin/ошибки: игнорирует
+         *   паузу по 429, но не скрытую вкладку и не отсутствие доступа
+         */
+        async pollCityMonLobbies(force = false) {
+            // Свёрнутая вкладка — не опрашиваем (условие ТЗ 11.7.0).
+            if (document.hidden) return;
+            if (!PocketCity.canWatchCityMon()) {
+                PocketCity.hideCityMonGather();
+                return;
+            }
+            if (PocketCity._citymonBusy) return;
+            if (!force && Date.now() < PocketCity._citymonPausedUntil) return;
+
+            PocketCity._citymonBusy = true;
+            let res = null;
+            try {
+                res = (typeof Utils !== 'undefined' && typeof Utils.fetchApi === 'function')
+                    ? await Utils.fetchApi('/api/citymon/act', { op: 'elist' })
+                    : null;
+            } catch (e) {
+                dbg('citymon elist error:', e);
+            } finally {
+                PocketCity._citymonBusy = false;
+            }
+
+            if (PocketCity.isCityMonRateLimited(res)) {
+                PocketCity._citymonPausedUntil = Date.now() + PocketCity.CITYMON_PAUSE_MS;
+                dbg('citymon: 429/rate_limited — пауза 60 с');
+                return;
+            }
+            if (!res || !res.ok) return; // сеть/сервер: баннер не трогаем
+
+            const lobby = PocketCity.findCityMonLobby(res);
+            if (lobby) PocketCity.showCityMonGather(lobby);
+            else PocketCity.hideCityMonGather();
+        },
+
+        /**
+         * Первое подходящее открытое лобби: не моё, не истекло, есть места,
+         * игрок не скрывал его вручную (✕).
+         *
+         * @param {object} res ответ /api/citymon/act: { ok, mine, list[] }
+         * @returns {object|null} лобби L из list
+         */
+        findCityMonLobby(res) {
+            if (!res || res.mine) return null; // уже состою в каком-то сборе
+            const list = Array.isArray(res.list) ? res.list : [];
+            const now = Date.now();
+            for (const L of list) {
+                if (!L || L.st !== 'open' || L.mine) continue;
+                if (PocketCity._citymonDismissed.has(L.id)) continue;
+                if (!(L.until > now)) continue;
+                const members = Array.isArray(L.members) ? L.members.length : 0;
+                if (members >= (+L.max || 5)) continue;
+                return L;
+            }
+            return null;
+        },
+
         /**
          * init() из boot() в main.js: поднимаем автоскип, если тумблер был
-         * включён в прошлой сессии (настройка хранится в localStorage).
+         * включён в прошлой сессии (настройка хранится в localStorage),
+         * и запускаем фоновый мониторинг сборов на элитных монстров.
          */
         init() {
             if (Settings.get('autoSkipMonsters')) PocketCity.startMonsterAutoSkip();
+            PocketCity.startCityMonWatch();
+        },
+
+        /**
+         * Плавающее уведомление о чужом сборе (плашка в стиле аддона).
+         *
+         * Перерисовываем только при смене лобби: у того же L.id текст
+         * подписи обновляет секундный тик, кнопки остаются живыми (иначе
+         * слетала бы блокировка «Вступаем...» и фокус).
+         */
+        showCityMonGather(lobby) {
+            if (!lobby || !document.body) return;
+            const esc = (s) => (typeof Utils !== 'undefined' && Utils.escapeHtml ? Utils.escapeHtml(s) : String(s == null ? '' : s));
+
+            let el = PocketCity._citymonEl;
+            if (!el || !el.isConnected) {
+                el = document.createElement('div');
+                el.id = 'lg-citymon-gather';
+                document.body.appendChild(el);
+                PocketCity._citymonEl = el;
+            }
+            el.classList.add('on');
+
+            const sameLobby = !!PocketCity._citymonLobby && PocketCity._citymonLobby.id === lobby.id;
+            PocketCity._citymonLobby = lobby;
+
+            if (sameLobby && el.querySelector('.lg-cm-gather')) {
+                PocketCity.updateCityMonCaption();
+                return;
+            }
+
+            el.innerHTML = `
+                <div class="lg-cm-gather">
+                    <div class="lg-cm-gather-head">📯 Сбор на элитного: ${esc(lobby.name)} (ур. ${esc(lobby.lvl == null ? '?' : lobby.lvl)}${lobby.tier ? ' ☠' : ''})</div>
+                    <div class="lg-cm-gather-sub"></div>
+                    <div class="lg-cm-gather-row">
+                        <button type="button" class="lg-cm-gather-join">Присоединиться</button>
+                        <button type="button" class="lg-cm-gather-close" title="Скрыть уведомление">✕</button>
+                    </div>
+                </div>
+            `;
+
+            const joinBtn = el.querySelector('.lg-cm-gather-join');
+            if (joinBtn) joinBtn.addEventListener('click', () => PocketCity.joinCityMonLobby(joinBtn));
+
+            const closeBtn = el.querySelector('.lg-cm-gather-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', () => {
+                    const cur = PocketCity._citymonLobby;
+                    // Скрываем точечно: остальные сборы продолжат всплывать.
+                    if (cur && cur.id != null) PocketCity._citymonDismissed.add(cur.id);
+                    PocketCity.hideCityMonGather();
+                });
+            }
+
+            PocketCity.updateCityMonCaption();
+            // Живой обратный отсчёт: правим только текст подписи.
+            if (!PocketCity._citymonTickTimer) {
+                PocketCity._citymonTickTimer = setInterval(() => PocketCity.updateCityMonCaption(), PocketCity.CITYMON_TICK_MS);
+            }
+        },
+
+        /** Подпись баннера: состав, лидер и MM:SS до конца сбора. */
+        cityMonCaption(lobby) {
+            const L = lobby || PocketCity._citymonLobby;
+            if (!L) return '';
+            const members = Array.isArray(L.members) ? L.members.length : 0;
+            const max = +L.max || 5;
+            const left = Math.max(0, (+L.until || 0) - Date.now());
+            // ceil: на последней секунде показываем 00:01, а не 00:00 раньше времени.
+            const total = Math.ceil(left / 1000);
+            const mm = String(Math.floor(total / 60)).padStart(2, '0');
+            const ss = String(total % 60).padStart(2, '0');
+            return `Отряд: ${members}/${max} · Лидер: ${L.leader || '—'} · ${mm}:${ss}`;
+        },
+
+        /** Обновляет только текст подписи (кнопки и их состояние не трогаем). */
+        updateCityMonCaption() {
+            const el = PocketCity._citymonEl;
+            if (!el) return;
+            const sub = el.querySelector('.lg-cm-gather-sub');
+            if (!sub) return;
+            sub.textContent = PocketCity.cityMonCaption();
+        },
+
+        /** Прячет плашку и гасит секундный отсчёт (лобби забываем). */
+        hideCityMonGather() {
+            PocketCity._citymonLobby = null;
+            if (PocketCity._citymonTickTimer) {
+                clearInterval(PocketCity._citymonTickTimer);
+                PocketCity._citymonTickTimer = null;
+            }
+            const el = PocketCity._citymonEl;
+            if (!el) return;
+            el.classList.remove('on');
+            el.innerHTML = '';
+        },
+
+        /**
+         * Вступление в сбор: POST /api/citymon/act { op: 'ejoin', id }.
+         *
+         * Кнопка блокируется на время запроса («Вступаем...»), результат —
+         * тостом. В обоих случаях список перечитываем (elist): после успеха
+         * своё лобби уже mine, после ошибки сбор мог закрыться/заполниться.
+         */
+        async joinCityMonLobby(btn) {
+            if (!btn || btn.disabled) return;
+            const lobby = PocketCity._citymonLobby;
+            if (!lobby) return;
+
+            const label = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Вступаем...';
+
+            const toast = (msg, isError) => {
+                if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, !!isError);
+            };
+
+            let res = null;
+            try {
+                res = (typeof Utils !== 'undefined' && typeof Utils.fetchApi === 'function')
+                    ? await Utils.fetchApi('/api/citymon/act', { op: 'ejoin', id: lobby.id })
+                    : null;
+            } catch (e) {
+                dbg('citymon ejoin error:', e);
+            }
+
+            if (res && res.ok) {
+                toast(`Вы вступили в сбор на «${lobby.name}»!`, false);
+                // Плашку гасим сразу, а список перечитываем — возможно,
+                // открылся следующий сбор.
+                PocketCity.hideCityMonGather();
+                PocketCity.pollCityMonLobbies(true);
+                return;
+            }
+
+            if (PocketCity.isCityMonRateLimited(res)) {
+                PocketCity._citymonPausedUntil = Date.now() + PocketCity.CITYMON_PAUSE_MS;
+            }
+            const errText = (res && (res.error || (res.body && (res.body.error || res.body.err)))) || '';
+            toast(errText || 'Не удалось вступить', true);
+
+            // Пока шёл запрос, плашку могли скрыть/перерисовать.
+            if (btn.isConnected) {
+                btn.disabled = false;
+                btn.textContent = label || 'Присоединиться';
+            }
+            PocketCity.pollCityMonLobbies(true);
         },
 
         /**
          * destroy() из shutdown() в main.js: снимаем наблюдатель и таймеры,
          * иначе старый инстанс кликал бы по кнопкам после перезапуска скрипта.
+         * v11.7.0: заодно гасим мониторинг сборов на элитных монстров.
          */
         destroy() {
             PocketCity.stopMonsterAutoSkip();
+            PocketCity.stopCityMonWatch();
             if (PocketCity._closeWatch) {
                 try { PocketCity._closeWatch(); } catch (e) {}
                 PocketCity._closeWatch = null;

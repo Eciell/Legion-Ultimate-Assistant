@@ -5,12 +5,21 @@
     // читает состояние похода штатным геттером игры LGQuest._view()
     // (структура — docs/API.md, раздел «Объект состояния похода»).
     // Вывод — поверх экрана: предупреждение «ничего не пиши» без кнопок либо
-    // кликабельный бейдж с командой и кнопкой «Вставить».
+    // кликабельный бейдж с командой (v11.7.1: кнопка «Вставить» убрана —
+    // клик по самому слову копирует его в буфер).
     //
     // v11.7.0: автоотправки POST /api/qsay здесь нет и не было — аддон только
     // копирует команду в буфер и/или подставляет её в #qSayIn нативным
-    // сеттером (обход noPaste). Отправляет игрок сам по Enter. Тот же тик
-    // показывает баннер сбора отряда с кнопкой «Присоединиться» (qact join).
+    // сеттером. Отправляет игрок сам по Enter.
+    //
+    // v11.7.0: игра ставит noPaste на поле команды похода, поэтому модуль
+    // дополнительно вешает capture-перехватчик (paste/beforeinput/drop) и
+    // глушит ТОЛЬКО игровые обработчики — нативная вставка Ctrl+V и
+    // «ПКМ → Вставить» остаются рабочими.
+    //
+    // Баннер сбора в поход (q.gather) отсюда убран: уведомление о сборах
+    // теперь живёт в modules/pocket-city.js и относится к элитным монстрам
+    // (elist/ejoin), см. PocketCity.startCityMonWatch().
     //
     // Подключается после core/ui.js и modules/pocket-city.js (SHARED_MODULES
     // в build.js). Игровые объекты берём из G (core/constants.js — это
@@ -21,6 +30,8 @@
         _timer: null,
         // Подпись текущей отрисовки: защита от мерцания на каждом тике.
         _currentState: null,
+        // v11.7.0: capture-обработчики вставки в #qSayIn (снимаются в destroy).
+        _pasteGuards: null,
 
         init() {
             // Повторный init (перезапуск скрипта) не должен плодить таймеры.
@@ -28,6 +39,7 @@
             this._el = document.createElement('div');
             this._el.id = 'lg-combat-assistant';
             document.body.appendChild(this._el);
+            this._bindPasteGuards();
             this._timer = setInterval(() => this._tick(), 1000);
         },
 
@@ -36,6 +48,7 @@
         destroy() {
             if (this._timer) clearInterval(this._timer);
             this._timer = null;
+            this._unbindPasteGuards();
             if (this._el && this._el.parentNode) this._el.parentNode.removeChild(this._el);
             this._el = null;
             this._currentState = null;
@@ -63,14 +76,6 @@
                     return;
                 }
 
-                // 11.7.0: сбор отряда. Баннер с кнопкой «Присоединиться» видят
-                // все, кто ещё не в отряде; как только party станет 'in'/'q'
-                // или истечёт таймер — баннер уходит сам.
-                if (this._gatherActive(q)) {
-                    this._renderGather(q);
-                    return;
-                }
-
                 // Подсказки нужны только полноправному участнику похода:
                 // party = 'q' (очередь), 'ghost' (призрак), 'out' — не наш бой.
                 if (q.party !== 'in') {
@@ -85,103 +90,53 @@
         },
 
         /**
-         * Идёт ли сбор отряда и мы ещё не внутри.
+         * v11.7.0: поле команды похода? Игра вешает noPaste именно на него:
+         * id — #qSayIn (site/quest.js), класс — .q-sayi (фолбэк, если id
+         * переименуют). Проверяем оба признака.
+         */
+        _isQuestInput(el) {
+            return !!el && (el.id === 'qSayIn' || !!(el.classList && el.classList.contains('q-sayi')));
+        },
+
+        /**
+         * Capture-перехват вставки в #qSayIn (v11.7.0).
          *
-         * Условия из ТЗ 11.7.0: фаза `gather` с живым таймером (или q.k ===
-         * 'gather' без таймера) и party не 'in'/'q'/'ghost'.
+         * Игра гасит paste/drop и beforeinput(insertFromPaste|Drop) на самом
+         * поле, а игроку нужны штатные Ctrl+V и «ПКМ → Вставить». Слушатели
+         * висят на window в фазе перехвата — то есть срабатывают РАНЬШЕ
+         * обработчиков документа/поля — и глушат только их
+         * (stopImmediatePropagation). preventDefault НЕ вызываем: иначе
+         * браузер не вставит текст из буфера сам.
+         *
+         * window.fetch / LGMine здесь не патчатся: только DOM-события.
          */
-        _gatherActive(q) {
-            if (!q) return false;
-            if (q.party === 'in' || q.party === 'q' || q.party === 'ghost') return false;
-            const until = +(q.gather && q.gather.until) || 0;
-            if (until > Date.now()) return true;
-            // k === 'gather' без until — «сбор идёт», обратного отсчёта нет.
-            return (q.k === 'gather' || q.kind === 'gather') && !until;
-        },
-
-        /**
-         * Баннер сбора с таймером MM:SS и кнопкой «Присоединиться».
-         * Перерисовывается только при смене фазы/дедлайна, а текст таймера
-         * обновляется каждый тик — кнопку при этом не пересоздаём.
-         */
-        _renderGather(q) {
-            if (!this._el) return;
-            const until = +(q.gather && q.gather.until) || 0;
-            const hw = !!(q.gather && q.gather.hw);
-            const sign = `gather|${until}|${hw}|${q.k || q.kind || ''}`;
-
-            if (this._currentState !== sign) {
-                this._currentState = sign;
-                this._el.innerHTML = `
-                    <div class="lg-combat-gather">
-                        <div class="lg-combat-gather-head">${hw ? '🌀 Сбор у портала Изнанки' : '⚔️ Идёт сбор в поход'}</div>
-                        <div class="lg-combat-gather-timer" id="lg-gather-timer">--:--</div>
-                        <button type="button" class="lg-combat-btn" id="lg-gather-join">Присоединиться</button>
-                    </div>
-                `;
-                const btn = this._el.querySelector('#lg-gather-join');
-                if (btn) btn.addEventListener('click', () => this._joinQuest(btn));
-            }
-
-            this._updateGatherTimer(until);
-        },
-
-        /** Обратный отсчёт MM:SS до q.gather.until. */
-        _updateGatherTimer(until) {
-            if (!this._el) return;
-            const el = this._el.querySelector('#lg-gather-timer');
-            if (!el) return;
-            if (!until) {
-                el.textContent = 'сбор идёт';
-                return;
-            }
-            const left = Math.max(0, until - Date.now());
-            // ceil: на последней секунде показываем 00:01, а не 00:00 раньше времени.
-            const total = Math.ceil(left / 1000);
-            const mm = String(Math.floor(total / 60)).padStart(2, '0');
-            const ss = String(total % 60).padStart(2, '0');
-            el.textContent = `${mm}:${ss}`;
-        },
-
-        /**
-         * Вступление в отряд: POST /api/qact { k: 'join' } через Utils.fetchApi.
-         * Кнопка блокируется на время запроса, результат — тостом.
-         * Автоотправки команд в чат здесь нет: только действие игры qact.
-         */
-        async _joinQuest(btn) {
-            if (!btn || btn.disabled) return;
-            const label = btn.textContent;
-            btn.disabled = true;
-            btn.textContent = 'Вступаем...';
-
-            const toast = (msg, isError) => {
-                if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, !!isError);
+        _bindPasteGuards() {
+            if (this._pasteGuards) return;
+            const onPasteCapture = (e) => {
+                if (this._isQuestInput(e.target)) e.stopImmediatePropagation();
             };
+            const onBeforeInputCapture = (e) => {
+                // inputType бывает только у InputEvent; если поля нет —
+                // ветка не срабатывает, и вставку ловит обработчик paste.
+                if (this._isQuestInput(e.target) &&
+                    /^insertFrom(Paste|Drop|PasteAsQuotation)$/.test(e.inputType || '')) {
+                    e.stopImmediatePropagation();
+                }
+            };
+            this._pasteGuards = { onPasteCapture, onBeforeInputCapture };
+            window.addEventListener('paste', onPasteCapture, true);
+            window.addEventListener('beforeinput', onBeforeInputCapture, true);
+            window.addEventListener('drop', onPasteCapture, true);
+        },
 
-            let ok = false;
-            let errText = '';
-            try {
-                const res = (typeof Utils !== 'undefined' && typeof Utils.fetchApi === 'function')
-                    ? await Utils.fetchApi('/api/qact', { k: 'join' })
-                    : null;
-                ok = !!res && res.ok !== false;
-                errText = (res && (res.body?.error || res.body?.err || res.error)) || '';
-            } catch (e) {
-                errText = (e && e.message) || '';
-            }
-
-            if (ok) {
-                toast('✅ Заявка на вступление отправлена', false);
-                // Баннер уходит сразу: следующий тик увидит party === 'in'/'q'.
-                this._clear();
-                return;
-            }
-
-            toast(`Не удалось вступить: ${errText || 'ошибка сервера'}`, true);
-            if (btn.isConnected) {
-                btn.disabled = false;
-                btn.textContent = label || 'Присоединиться';
-            }
+        /** Снимаем все три слушателя (destroy / перезапуск скрипта). */
+        _unbindPasteGuards() {
+            if (!this._pasteGuards) return;
+            const { onPasteCapture, onBeforeInputCapture } = this._pasteGuards;
+            window.removeEventListener('paste', onPasteCapture, true);
+            window.removeEventListener('beforeinput', onBeforeInputCapture, true);
+            window.removeEventListener('drop', onPasteCapture, true);
+            this._pasteGuards = null;
         },
 
         /**
@@ -225,12 +180,50 @@
          */
         _evaluate(q) {
             const res = this._evaluateCore(q);
+            // v11.7.1: информативный заголовок «Внимание: …». Если ветка не
+            // задала what сама — описываем ситуацию по состоянию похода
+            // (телеграф, ловушка, событие, площадка, механика босса).
+            if (res && res.action === 'COMMAND' && !res.what) res.what = this._situationText(q);
             const warn = this._weaknessHint(q);
             if (!warn) return res;
             if (res && res.action === 'IDLE') return this._isDead(q) ? res : { action: 'NOTE', text: warn };
             if (!res) return { action: 'NOTE', text: warn };
             res.hint = res.hint ? `${warn} · ${res.hint}` : warn;
             return res;
+        },
+
+        /**
+         * v11.7.1: человеческое описание происходящего для заголовка
+         * «Внимание: …» — чтобы игрок сразу видел суть угрозы.
+         *
+         * Источники (docs/API.md, «Объект состояния похода»):
+         *   b.tele.text / b.tele.word — слово телеграфа;
+         *   tr.name — ловушка, ev.name — событие, pz.kind — площадка;
+         *   bg.mech.name / .text / .id — механика босса.
+         *
+         * @param {object} q состояние похода из LGQuest._view()
+         * @returns {string} '' — описание не нашлось
+         */
+        _situationText(q) {
+            const b = (q && q.b) || null;
+            const tele = b && b.tele;
+            if (tele) {
+                const t = String(tele.text || tele.word || '').trim();
+                if (t) return `телеграф: «${t}»`;
+            }
+            const tr = q && q.tr;
+            if (tr && tr.name) return `ловушка «${tr.name}»`;
+            const ev = q && q.ev;
+            if (ev && ev.name) return `событие «${ev.name}»`;
+            const pz = q && q.pz;
+            if (pz && pz.kind) return `площадка: ${pz.kind}`;
+            const M = q && q.bg && q.bg.mech;
+            if (M) {
+                const nm = String(M.name || M.text || '').trim();
+                if (nm) return nm;
+                if (M.id) return `механика ${M.id}`;
+            }
+            return '';
         },
 
         /**
@@ -275,7 +268,7 @@
             if (q.bg && q.bg.hw && q.bg.hw.lan && Array.isArray(q.bg.hw.lan.lit)) {
                 const offIdx = q.bg.hw.lan.lit.map((v, i) => (v ? 0 : i + 1)).filter(Boolean);
                 if (offIdx.length > 0) {
-                    return { action: 'COMMAND', text: `зажечь ${offIdx[0]}`, hint: 'Погас фонарь' };
+                    return { action: 'COMMAND', text: `зажечь ${offIdx[0]}`, hint: 'Погас фонарь', what: 'погас фонарь — нужно зажечь' };
                 }
             }
 
@@ -295,7 +288,7 @@
                     const reachable = neighbours.length ? safe.filter(z => neighbours.includes(z)) : safe;
                     const target = reachable.length ? reachable[0] : safe[0];
                     if (target) {
-                        return { action: 'COMMAND', text: `прыжок ${target}`, hint: 'Укус волка! Прыгай' };
+                        return { action: 'COMMAND', text: `прыжок ${target}`, hint: 'Укус волка! Прыгай', what: 'укус волка — уходи с площадки' };
                     }
                 }
             }
@@ -313,7 +306,7 @@
                     const openWingIdx = wingsZ.findIndex((z, i) => (W.got?.[i] || 0) < (W.need?.[i] || 0));
                     const target = openWingIdx >= 0 ? (wingsZ[openWingIdx] || [])[0] : null;
                     if (target) {
-                        return { action: 'COMMAND', text: `прыжок ${target}`, hint: 'Крыло закрыто! Смени позицию' };
+                        return { action: 'COMMAND', text: `прыжок ${target}`, hint: 'Крыло закрыто! Смени позицию', what: 'квота крыла набрана — смени позицию' };
                     }
                 }
             }
@@ -324,20 +317,26 @@
             if (q.bg && Array.isArray(q.bg.adds)) {
                 const alive = q.bg.adds.filter(a => Array.isArray(a) && a[2] > 0);
                 const siege = alive.find(a => !(+a[1] > 0));
-                if (siege) return { action: 'COMMAND', text: `удар ${siege[0]}`, hint: 'Цель осады' };
+                if (siege) return { action: 'COMMAND', text: `удар ${siege[0]}`, hint: 'Цель осады', what: `цель осады — ${siege[0]}` };
                 const mob = alive.find(a => +a[1] > 0);
-                if (mob) return { action: 'COMMAND', text: `удар ${mob[0]} 1`, hint: 'Убей приспешника' };
+                if (mob) return { action: 'COMMAND', text: `удар ${mob[0]} 1`, hint: 'Убей приспешника', what: `приспешник — ${mob[0]}` };
             }
 
             // 8. Телеграф в обычном бою: слово парирования (b.tele.word).
             //    'tele2' в текущем клиенте не встречается, оставлен на всякий случай.
             if (q.b && (q.b.st === 'tele' || q.b.st === 'tele2') && q.b.tele && q.b.tele.word) {
-                return { action: 'COMMAND', text: q.b.tele.word, hint: 'Ответ на телеграф' };
+                // v11.7.1: заголовок уведомления — суть происходящего.
+                // tele.text (расшифровка игры) приоритетнее самого слова.
+                const teleText = String(q.b.tele.text || '').trim();
+                const what = teleText
+                    ? `телеграф: ${teleText}`
+                    : `ответ на телеграф: ${q.b.tele.word}`;
+                return { action: 'COMMAND', text: q.b.tele.word, hint: 'Ответ на телеграф', what };
             }
 
             // 9. Напоминание о своём ходе (b.turn пуст — ход в раунде не сделан).
             if (q.b && q.b.st === 'party' && !q.b.turn) {
-                return { action: 'COMMAND', text: 'удар', hint: 'Твой ход' };
+                return { action: 'COMMAND', text: 'удар', hint: 'Твой ход', what: 'твой ход — нужна команда' };
             }
 
             return { action: 'IDLE' };
@@ -386,6 +385,11 @@
          * он же нужен кнопке «❤» в модуле пати. Автоотправки нет: игрок жмёт
          * Enter сам.
          *
+         * v11.7.1: кнопка «Вставить» из уведомления убрана (остался только
+         * клик по слову = копирование), поэтому метод пока НЕ вызывается из
+         * UI. Оставлен для консольной отладки и возможного возврата кнопки —
+         * удаление согласовывать с владельцем проекта.
+         *
          * @returns {boolean} true — текст оказался в поле ввода
          */
         _insert(text) {
@@ -427,33 +431,30 @@
             }
 
             if (res.action === 'COMMAND') {
+                const cmd = String(res.text == null ? '' : res.text);
+                // v11.7.1: заголовок — «Внимание: {что происходит}», а не
+                // общее «Ответ на телеграф». what задаёт _evaluateCore /
+                // _situationText, hint остаётся запасным вариантом.
+                const what = String(res.what || res.hint || 'нужна команда');
                 // Не перерисовывать, если состояние не изменилось.
-                const sign = `${res.hint || ''}|${res.text}`;
+                const sign = `cmd|${what}|${cmd}`;
                 if (this._currentState === sign) return;
                 this._currentState = sign;
 
-                const cmd = String(res.text == null ? '' : res.text);
-                // Команда — кликабельный бейдж (копирование в буфер) и кнопка
-                // «Вставить» (нативный сеттер #qSayIn). Автоотправки нет.
+                // Команда — единственный кликабельный элемент: по клику слово
+                // копируется в буфер («Скопировано ✓»). Кнопки «Вставить»
+                // больше нет, автоотправки тоже нет.
                 this._el.innerHTML = `
                     <div class="lg-combat-suggest">
                         <div class="lg-combat-info">
-                            <div class="lg-combat-hint">${esc(res.hint || '')}</div>
+                            <div class="lg-combat-hint">Внимание: ${esc(what)}</div>
                             <button type="button" class="lg-combat-cmd" data-copy-cmd="${esc(cmd)}" title="Нажми, чтобы скопировать">${esc(cmd)}</button>
                         </div>
-                        <button type="button" class="lg-combat-btn" data-insert-cmd="${esc(cmd)}">Вставить</button>
                     </div>
                 `;
 
                 const copyBtn = this._el.querySelector('[data-copy-cmd]');
                 if (copyBtn) copyBtn.addEventListener('click', () => this._copyCmd(copyBtn, cmd));
-
-                const insertBtn = this._el.querySelector('[data-insert-cmd]');
-                if (insertBtn) insertBtn.addEventListener('click', () => {
-                    if (!this._insert(cmd) && typeof UI !== 'undefined' && UI.showToast) {
-                        UI.showToast('Поле команды похода не найдено', true);
-                    }
-                });
             }
         }
     };
