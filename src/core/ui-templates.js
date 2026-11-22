@@ -111,6 +111,20 @@
                         <input type="checkbox" class="lg-toggle" id="modal-chk-auto-skip-monsters">
                     </label>
                     <div style="font-size:10px; color:#888; line-height:1.3; margin:-2px 2px 0;">Автоматически нажимает «Пропустить» / «Пропустить всё» в окне боя с обычными и элитными монстрами</div>
+                    <!-- 11.7.0: уведомления о сборах гильдии на элитных монстров -->
+                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
+                        <span>📯 Уведомления о сборах на элитных монстров</span>
+                        <input type="checkbox" class="lg-toggle" id="modal-chk-citymon-gather">
+                    </label>
+                    <div style="font-size:10px; color:#888; line-height:1.3; margin:-2px 2px 0;">Плавающее уведомление о чужих сборах гильдии с кнопкой «Присоединиться»</div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:8px 10px; border-radius:6px; margin-top: 6px;">
+                        <span style="font-size:12px; color:#ddd;">Размер плашки сбора</span>
+                        <div class="lg-cm-size-picker" style="display:flex; gap:4px;">
+                            <button type="button" class="lg-cm-size-btn" data-size="S" style="background:#2a2035; border:1px solid #4a3b55; color:#bbb; border-radius:4px; padding:3px 10px; font-size:11px; font-weight:bold; cursor:pointer;">S</button>
+                            <button type="button" class="lg-cm-size-btn" data-size="M" style="background:#2a2035; border:1px solid #4a3b55; color:#bbb; border-radius:4px; padding:3px 10px; font-size:11px; font-weight:bold; cursor:pointer;">M</button>
+                            <button type="button" class="lg-cm-size-btn" data-size="L" style="background:#2a2035; border:1px solid #4a3b55; color:#bbb; border-radius:4px; padding:3px 10px; font-size:11px; font-weight:bold; cursor:pointer;">L</button>
+                        </div>
+                    </div>
                     <!-- ПАТЧ 11.6.5h: куда девать вход в меню — в нативный бар
                          города или оставить плавающую FAB. Состояние ставит
                          и сохраняет UI.openSettings() (localStorage

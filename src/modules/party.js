@@ -136,6 +136,15 @@
         _logReady: false,    // первичная загрузка (limit=100) выполнена
         _logBodyEl: null,    // .party-log-body — кэш, чтобы не искать каждый тик
 
+        // Чат пати (v11.7.0): панель и оперативное состояние
+        CHAT_PANEL_ID: `${RAND_ID}-party-chat-panel`,
+        _chatMessages: [],
+        _chatSince: 0,
+        _chatCollapsed: false,
+        _chatUnread: 0,
+        _chatBusy: false,
+        _chatBodyEl: null,
+
         // v11.6.0g-2: инлайн-стили форм заменены классами из core/styles.js —
         // только так работают hover/focus-эффекты (inline :hover невозможен).
         // Кнопка «❤»: pointer-events:auto обязателен, сама панель —
@@ -194,6 +203,10 @@
         },
 
         _writeState(party, isOwner) {
+            const prev = this._readState();
+            if (!party || (prev && prev.groupId !== party.groupId)) {
+                this._resetChat();
+            }
             this._gmSet(this.STATE_KEY, party);
             this._gmSet(this.OWNER_KEY, !!isOwner);
             // В пати появились/обновились данные — поднимаем HP-синхронизацию.
@@ -857,19 +870,19 @@
                     && rawHp < rawMax;
                 const healBtn = showHeal
                     ? `<button type="button" class="${this.HEAL_BTN_CLASS}" data-party-heal="${login}"`
-                        + ' title="Вставить команду лечения в чат">❤</button>'
+                        + ' title="Скопировать команду лечения">❤</button>'
                     : '';
 
-                return `<div style="margin-bottom:6px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-                        <span style="color:#ffcf6a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${login}:</span>
-                        <span style="display:flex; align-items:center; gap:4px; white-space:nowrap;">
-                            <span style="color:#ccc;">${hp}/${rawMax}</span>
+                return `<div class="party-member-row">
+                    <div class="party-member-info">
+                        <span class="party-member-name">${login}:</span>
+                        <span class="party-member-hp-val">
+                            <span class="party-hp-num">${hp}/${rawMax}</span>
                             ${healBtn}
                         </span>
                     </div>
-                    <div style="height:3px; margin-top:2px; border-radius:2px; background:#2a2030;">
-                        <div style="height:3px; width:${pct.toFixed(1)}%; border-radius:2px; background:${color};"></div>
+                    <div class="party-hp-track">
+                        <div class="party-hp-fill" style="width:${pct.toFixed(1)}%; background:${color};"></div>
                     </div>
                 </div>`;
             }).join('');
@@ -889,10 +902,13 @@
             // Позиция из хранилища применяется на каждом рендере (п.4).
             this._applyHudPosition();
 
-            // Журнал — сосед по HUD-контейнеру; его видимость и догрузку
+            // Журнал и чат — соседи по HUD-контейнеру; их видимость и догрузку
             // синхронизируем на каждом тике (v11.6.6: кроме быстрых
             // перерисовок из _patchSelfHp, иначе каждое `me` = GET журнала).
-            if (!opts.skipLog) this._syncLogPanel();
+            if (!opts.skipLog) {
+                this._syncLogPanel();
+                this._syncChatPanel();
+            }
         },
 
         /* ---------------------------------------------------------- */
@@ -1098,6 +1114,244 @@
             const d = new Date(Number.isFinite(value) ? value : Date.now());
             if (Number.isNaN(d.getTime())) return '--:--';
             return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        },
+
+        /* ---------------------------------------------------------- */
+        /* Чат пати в RAM (v11.7.0)                                    */
+        /* ---------------------------------------------------------- */
+
+        /**
+         * Панель чата пати создаётся лениво внутри HUD-контейнера под журналом.
+         */
+        _ensureChatPanel() {
+            const hud = this._ensureHud();
+            let el = document.getElementById(this.CHAT_PANEL_ID);
+            if (el && el.isConnected) {
+                if (el.parentElement !== hud) hud.appendChild(el);
+                this._chatBodyEl = el.querySelector('.party-chat-body');
+                this._bindHudDrag(el.querySelector('.party-chat-head'));
+                return el;
+            }
+
+            el = document.createElement('div');
+            el.id = this.CHAT_PANEL_ID;
+            el.className = 'party-chat-panel';
+
+            el.innerHTML = `
+                <div class="party-chat-head party-drag-handle" title="Перетащить панель">
+                    <div class="party-chat-title">
+                        <span>💬 ЧАТ ПАТИ</span>
+                        <span class="party-chat-badge" style="display:none;"></span>
+                    </div>
+                    <button type="button" class="party-chat-toggle" title="Свернуть/развернуть чат">−</button>
+                </div>
+                <div class="party-chat-content">
+                    <div class="party-chat-body">
+                        <div class="party-chat-empty">Сообщений пока нет</div>
+                    </div>
+                    <form class="party-chat-form">
+                        <input type="text" class="party-chat-input" placeholder="Сообщение..." maxlength="300" autocomplete="off" />
+                        <button type="submit" class="party-chat-send" title="Отправить">➤</button>
+                    </form>
+                </div>
+            `;
+            hud.appendChild(el);
+
+            const toggleBtn = el.querySelector('.party-chat-toggle');
+            toggleBtn?.addEventListener('click', () => {
+                this._setChatCollapsed(!this._chatCollapsed);
+            });
+
+            const form = el.querySelector('.party-chat-form');
+            const input = el.querySelector('.party-chat-input');
+            if (input) {
+                // Предотвращение срабатывания горячих клавиш игры
+                const stopEv = (e) => e.stopPropagation();
+                input.addEventListener('keydown', stopEv);
+                input.addEventListener('keyup', stopEv);
+                input.addEventListener('keypress', stopEv);
+            }
+            if (form && input) {
+                form.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const text = input.value.trim();
+                    if (!text) return;
+                    input.value = '';
+                    await this._sendChatMessage(text);
+                });
+            }
+
+            this._bindHudDrag(el.querySelector('.party-chat-head'));
+            this._chatBodyEl = el.querySelector('.party-chat-body');
+            this._applyChatCollapsedState();
+            return el;
+        },
+
+        _setChatCollapsed(collapsed) {
+            this._chatCollapsed = !!collapsed;
+            if (!this._chatCollapsed) {
+                this._chatUnread = 0;
+            }
+            this._applyChatCollapsedState();
+        },
+
+        _applyChatCollapsedState() {
+            const el = document.getElementById(this.CHAT_PANEL_ID);
+            if (!el) return;
+            const content = el.querySelector('.party-chat-content');
+            const toggleBtn = el.querySelector('.party-chat-toggle');
+            const badge = el.querySelector('.party-chat-badge');
+            if (content) content.style.display = this._chatCollapsed ? 'none' : 'flex';
+            if (toggleBtn) toggleBtn.textContent = this._chatCollapsed ? '+' : '−';
+            if (badge) {
+                if (this._chatCollapsed && this._chatUnread > 0) {
+                    badge.textContent = `+${this._chatUnread}`;
+                    badge.style.display = 'inline-block';
+                } else {
+                    badge.style.display = 'none';
+                }
+            }
+            if (!this._chatCollapsed) {
+                this._scrollChatToBottom();
+            }
+        },
+
+        async _sendChatMessage(text) {
+            const party = this._readState();
+            if (!party) return;
+            try {
+                const res = await this._request(
+                    'POST',
+                    `/party/${encodeURIComponent(party.groupId)}/chat`,
+                    { body: { text } }
+                );
+                if (res && res.ok) {
+                    this._pollChat();
+                }
+            } catch (err) {
+                console.warn('[PARTY] чат: ошибка отправки', err);
+                if (typeof UI !== 'undefined' && UI.showToast) {
+                    UI.showToast(err?.message || 'Не удалось отправить сообщение', true);
+                }
+            }
+        },
+
+        async _pollChat() {
+            if (this._chatBusy) return;
+            const party = this._readState();
+            if (!party) return;
+
+            this._chatBusy = true;
+            try {
+                const query = this._chatSince > 0 ? `?since=${this._chatSince}` : '';
+                const res = await this._request(
+                    'GET',
+                    `/party/${encodeURIComponent(party.groupId)}/chat${query}`
+                );
+
+                const cur = this._readState();
+                if (!cur || cur.groupId !== party.groupId) return;
+
+                const msgs = Array.isArray(res?.messages) ? res.messages : [];
+                if (msgs.length > 0) {
+                    const selfLogin = String(cur.login || '').toLowerCase();
+                    let addedNew = false;
+                    let newForeign = 0;
+
+                    const existingIds = new Set(this._chatMessages.map((m) => m.id));
+                    for (const m of msgs) {
+                        if (!existingIds.has(m.id)) {
+                            this._chatMessages.push(m);
+                            existingIds.add(m.id);
+                            addedNew = true;
+                            if (String(m.login || '').toLowerCase() !== selfLogin) {
+                                newForeign++;
+                            }
+                        }
+                    }
+
+                    if (this._chatMessages.length > 50) {
+                        this._chatMessages = this._chatMessages.slice(-50);
+                    }
+
+                    if (this._chatCollapsed && newForeign > 0) {
+                        this._chatUnread += newForeign;
+                    }
+
+                    const next = Number(res?.nextSince);
+                    if (Number.isFinite(next) && next > this._chatSince) {
+                        this._chatSince = next;
+                    }
+
+                    if (addedNew) {
+                        this._renderChatMessages();
+                    }
+                    this._applyChatCollapsedState();
+                }
+            } catch (err) {
+                console.warn('[PARTY] чат: GET не удался:', err?.message || err);
+            } finally {
+                this._chatBusy = false;
+            }
+        },
+
+        _renderChatMessages() {
+            const el = this._ensureChatPanel();
+            const body = el.querySelector('.party-chat-body');
+            if (!body) return;
+
+            if (!this._chatMessages.length) {
+                body.innerHTML = '<div class="party-chat-empty">Сообщений пока нет</div>';
+                return;
+            }
+
+            const selfLogin = String(this._readState()?.login || '').toLowerCase();
+            const esc = (s) => (typeof Utils !== 'undefined' && Utils.escapeHtml ? Utils.escapeHtml(s) : String(s || ''));
+
+            body.innerHTML = this._chatMessages.map((m) => {
+                const isSelf = String(m.login || '').toLowerCase() === selfLogin;
+                const d = new Date(m.at || Date.now());
+                const hh = String(d.getHours()).padStart(2, '0');
+                const mm = String(d.getMinutes()).padStart(2, '0');
+                const timeStr = `${hh}:${mm}`;
+                const loginCls = isSelf ? 'party-chat-nick party-chat-self' : 'party-chat-nick';
+                return `
+                    <div class="party-chat-msg ${isSelf ? 'is-self' : ''}">
+                        <span class="party-chat-time">${timeStr}</span>
+                        <span class="${loginCls}">${esc(m.login)}:</span>
+                        <span class="party-chat-text">${m.text || ''}</span>
+                    </div>
+                `;
+            }).join('');
+
+            this._scrollChatToBottom();
+        },
+
+        _scrollChatToBottom() {
+            const body = this._chatBodyEl || document.querySelector('.party-chat-body');
+            if (body) {
+                body.scrollTop = body.scrollHeight;
+            }
+        },
+
+        _syncChatPanel() {
+            if (!this._readState()) return;
+            const el = this._ensureChatPanel();
+            el.style.display = 'block';
+            this._pollChat();
+        },
+
+        _hideChatPanel() {
+            const el = document.getElementById(this.CHAT_PANEL_ID);
+            if (el) el.style.display = 'none';
+        },
+
+        _resetChat() {
+            this._chatMessages = [];
+            this._chatSince = 0;
+            this._chatUnread = 0;
+            this._chatBusy = false;
+            this._hideChatPanel();
         },
 
         /**
@@ -1390,6 +1644,8 @@
             this._hidePanel();
             // leave/401: журнал прошлой пати очищается и прячется.
             this._hideLogPanel();
+            // leave/401: чат прошлой пати очищается и прячется.
+            this._resetChat();
         },
 
         /**
@@ -1581,38 +1837,40 @@
         /* ---------------------------------------------------------- */
 
         /**
-         * «Лечение» союзника: вставляем команду похода в поле чата.
+         * «Лечение» союзника: копируем команду похода «лечить @ник» в буфер обмена.
          *
-         * v11.6.2b.1: прямой POST /c/<канал>/api/qact {k:'b',a:'sk',w:'лечение'}
-         * убран. Игра сама разбирает текстовую команду «лечить @ник» (qsay),
-         * а ручной запрос дублировал действие (кулдаун / двойной хил) и мог
-         * разойтись с состоянием стрима. Теперь кнопка «❤» только подставляет
-         * текст — отправляет игрок по Enter, как любую команду похода.
+         * v11.7.0: заменено с автовставки на надёжное копирование в буфер (как в боевом ассистенте).
          *
          * @param {string} targetLogin ник цели из data-party-heal
-         * @param {HTMLButtonElement|null} button кнопка (возвращается в исходный вид)
+         * @param {HTMLButtonElement|null} button кнопка (кратковременно меняется на «✓»)
          */
         _healMember(targetLogin, button) {
             const target = String(targetLogin || '').trim();
             if (!target) return;
 
             const healCommand = `лечить @${target}`;
-            // Поля может не быть (не в походе / чат похода скрыт) — сообщаем
-            // игроку, что вставлять некуда (v11.7.0: автокопирования в буфер
-            // больше нет, команду можно скопировать кликом по бейджу
-            // боевого ассистента).
-            const inserted = Utils.insertToQuestChat(healCommand);
-            if (inserted) {
-                UI.showToast(`Текст «${healCommand}» вставлен в чат. Нажмите Enter.`, false);
-            } else {
-                UI.showToast('Поле команды похода не найдено', true);
-            }
+            const ok = typeof Utils !== 'undefined' && typeof Utils.copyText === 'function'
+                ? Utils.copyText(healCommand)
+                : false;
 
-            // Кнопку возвращаем в исходный вид: busy-рендер («...») остался
-            // только от версий с запросом, панель перерисовывается по событиям.
-            if (button && button.isConnected) {
-                button.disabled = false;
-                button.textContent = '❤';
+            if (ok) {
+                if (typeof UI !== 'undefined' && typeof UI.showToast === 'function') {
+                    UI.showToast(`Команда «${healCommand}» скопирована!`, false);
+                }
+                if (button && button.isConnected) {
+                    button.classList.add('copied');
+                    button.textContent = '✓';
+                    setTimeout(() => {
+                        if (button && button.isConnected) {
+                            button.classList.remove('copied');
+                            button.textContent = '❤';
+                        }
+                    }, 1200);
+                }
+            } else {
+                if (typeof UI !== 'undefined' && typeof UI.showToast === 'function') {
+                    UI.showToast(`Не удалось скопировать: ${healCommand}`, true);
+                }
             }
         },
 

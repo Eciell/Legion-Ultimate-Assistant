@@ -311,8 +311,12 @@
         // Публикуем API в page-context: при @grant песочница скрывает window от
         // консоли и других скриптов, unsafeWindow — нет. Дублируем в window, чтобы
         // внутренние ссылки (hooks.js) работали в обоих режимах.
+        // v11.7.0: также экспортируем legionApi в unsafeWindow/G для удобной отладки из консоли.
         try { LG_ROOT.__LEGION__ = legionApi; } catch (e) {}
         try { window.__LEGION__ = legionApi; } catch (e) {}
+        try { LG_ROOT.legionApi = legionApi; } catch (e) {}
+        try { window.legionApi = legionApi; } catch (e) {}
+        try { if (typeof G !== 'undefined' && G) G.legionApi = legionApi; } catch (e) {}
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

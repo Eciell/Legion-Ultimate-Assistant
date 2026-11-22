@@ -261,6 +261,55 @@
                 });
             }
 
+            // 11.7.0: уведомления о сборах гильдии на элитных монстров
+            const citymonGatherChk = modal.querySelector('#modal-chk-citymon-gather');
+            if (citymonGatherChk) {
+                citymonGatherChk.checked = Settings.get('citymonGatherEnabled');
+                citymonGatherChk.addEventListener('change', (e) => {
+                    const isEnabled = !!e.target.checked;
+                    Settings.set('citymonGatherEnabled', isEnabled);
+                    try {
+                        if (typeof PocketCity !== 'undefined') {
+                            if (isEnabled) {
+                                PocketCity.startCityMonWatch();
+                                PocketCity.pollCityMonLobbies(true);
+                            } else {
+                                PocketCity.hideCityMonGather();
+                            }
+                        }
+                    } catch (err) {
+                        dbg('[UI] сборы гильдии: сбой переключения', err);
+                    }
+                });
+            }
+
+            // 11.7.0: размер плашки сбора (S / M / L)
+            const currentGatherSize = Settings.get('citymonGatherSize') || 'L';
+            const gatherSizeBtns = modal.querySelectorAll('.lg-cm-size-btn');
+            const updateActiveGatherSizeBtn = (val) => {
+                gatherSizeBtns.forEach(btn => {
+                    const active = (btn.dataset.size || '').toUpperCase() === (val || '').toUpperCase();
+                    btn.style.background = active ? '#ffcf6a' : '#2a2035';
+                    btn.style.color = active ? '#16121a' : '#bbb';
+                    btn.style.borderColor = active ? '#ffcf6a' : '#4a3b55';
+                });
+            };
+            updateActiveGatherSizeBtn(currentGatherSize);
+            gatherSizeBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const newSize = (btn.dataset.size || 'L').toUpperCase();
+                    Settings.set('citymonGatherSize', newSize);
+                    updateActiveGatherSizeBtn(newSize);
+                    try {
+                        if (typeof PocketCity !== 'undefined' && typeof PocketCity.applyGatherSize === 'function') {
+                            PocketCity.applyGatherSize(newSize);
+                        }
+                    } catch (err) {
+                        dbg('[UI] сборы гильдии: сбой смены размера', err);
+                    }
+                });
+            });
+
             // ПАТЧ 11.6.5h / h.1: тумблер «📌 Кнопка аддона в нижнем меню игры».
             // Порядок операций важен: сначала применяем выключение к DOM, потом
             // пишем в хранилище, и только затем пересчитываем режим. Так выбор

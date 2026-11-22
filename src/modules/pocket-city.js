@@ -1,33 +1,9 @@
-    // ============================================================
-    // 6.5. МОДУЛЬ: КАРМАННЫЙ ГОРОД (modules/pocket-city.js)
-    //
-    // Прямой доступ к официальным зданиям игры из любой локации.
-    // Вынесено из core/ui.js (v11.6.0, этап 3): UI остаётся фабрикой
-    // модалок/HUD, а вся логика «нативных» зданий живёт здесь.
-    // Разметку отдаёт UITemplates.pocketCityModal(), окно — UI.showModal().
-    //
-    // Подключается после core/ui.js (SHARED_MODULES в build.js): методы
-    // зовут UI/UITemplates по вызову, на этапе загрузки зависимостей нет.
-    //
-    // v11.6.4c: перед открытием здания ждём не просто появления LGCity,
-    // а реальной готовности города (состояние S и .cy-room) — иначе первый
-    // клик терялся: LGCity.panel(id) до LGCity.open(el, CX) — молчаливый no-op.
-    //
-    // v11.6.4d: после закрытия здания возвращаем игрока туда, откуда он пришёл.
-    // Шахта в игре — не вкладка, а оверлей `.mn` (body.mn-on) поверх «Города»,
-    // поэтому её запоминаем отдельно, чат LGChatOne перевешиваем обратно в шахту,
-    // а городской слой гасим через LGCity.sleep() (как это делает openMine).
-    //
-    // v11.6.6f: карточка «Гильдия» в Карманном Городе. Гильдии — не здание
-    // города (LGCity.panel('guild') не существует), поэтому открываем нативное
-    // окно игры LGGuilds.open({ big: true }) из любой локации. Фолбэк — клик по
-    // нативной кнопке входа (#gu-hud [data-gu="guild"] / .cy-hud .gl-entry).
-    // Доступность считаем по флагу героя ME.hero.gu (см. isGuildLocked).
-    //
-    // v11.7.0: фоновый мониторинг сборов гильдии на элитных монстров
-    // (POST /api/citymon/act { op: 'elist' }) и плашка «Присоединиться»
-    // (op: 'ejoin'). Запросы — Utils.fetchApi, патчей window.fetch/LGMine нет.
-    // ============================================================
+// ============================================================
+// 6.5. МОДУЛЬ: КАРМАННЫЙ ГОРОД (modules/pocket-city.js)
+// ============================================================
+const PocketCity = (() => {
+    const G = (typeof unsafeWindow !== 'undefined' && unsafeWindow) || window;
+
     const PocketCity = {
         // Ожидание готовности города (v11.6.4c). Два этапа:
         //   1) city.js грузится лениво по клику на вкладку «Город»;
@@ -550,14 +526,21 @@
         // ============================================================
 
         /**
-         * Доступен ли раздел элитных монстров: флаг cm у героя
-         * (/api/me -> ME.hero.cm). Без него запросы впустую жгут лимит.
+         * Доступен ли раздел элитных монстров:
+         * v11.7.0: надёжный резолв через unsafeWindow/window и LG/ME.
+         * Опрос запускается для любого авторизованного героя сразу после
+         * загрузки страницы либо при наличии игровых модулей LGCityMon/LGGuilds
+         * при условии, что настройка citymonGatherEnabled включена (по умолчанию false).
          */
         canWatchCityMon() {
-            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
-            const me = pageWin.ME;
-            const hero = me && me.hero;
-            return !!(hero && hero.cm);
+            if (typeof Settings !== 'undefined' && !Settings.get('citymonGatherEnabled')) return false;
+            const win = (typeof unsafeWindow !== 'undefined' && unsafeWindow) || window;
+            const lg = win.LG || window.LG;
+            const hero = (typeof lg?.hero === 'function' ? lg.hero() : null)
+                || (typeof lg?.me === 'function' ? lg.me()?.hero : null)
+                || win.ME?.hero;
+            if (hero && typeof hero === 'object' && Object.keys(hero).length > 0) return true;
+            return Boolean(win.LGCityMon || win.LGGuilds);
         },
 
         /**
@@ -612,6 +595,10 @@
         async pollCityMonLobbies(force = false) {
             // Свёрнутая вкладка — не опрашиваем (условие ТЗ 11.7.0).
             if (document.hidden) return;
+            if (typeof Settings !== 'undefined' && !Settings.get('citymonGatherEnabled')) {
+                PocketCity.hideCityMonGather();
+                return;
+            }
             if (!PocketCity.canWatchCityMon()) {
                 PocketCity.hideCityMonGather();
                 return;
@@ -620,11 +607,22 @@
             if (!force && Date.now() < PocketCity._citymonPausedUntil) return;
 
             PocketCity._citymonBusy = true;
+            const win = (typeof unsafeWindow !== 'undefined' && unsafeWindow) || window;
             let res = null;
             try {
-                res = (typeof Utils !== 'undefined' && typeof Utils.fetchApi === 'function')
-                    ? await Utils.fetchApi('/api/citymon/act', { op: 'elist' })
-                    : null;
+                if (typeof Utils !== 'undefined' && typeof Utils.fetchApi === 'function') {
+                    res = await Utils.fetchApi('/api/citymon/act', { op: 'elist' });
+                } else if (typeof win.fetch === 'function') {
+                    const url = (win.LG_BASE || '') + '/api/citymon/act';
+                    const r = await win.fetch(url, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ op: 'elist' })
+                    });
+                    const d = await r.json().catch(() => null);
+                    res = { ok: r.ok && (d ? d.ok !== false : true), status: r.status, body: d, data: d, ...(d && typeof d === 'object' && !Array.isArray(d) ? d : {}) };
+                }
             } catch (e) {
                 dbg('citymon elist error:', e);
             } finally {
@@ -636,7 +634,22 @@
                 dbg('citymon: 429/rate_limited — пауза 60 с');
                 return;
             }
-            if (!res || !res.ok) return; // сеть/сервер: баннер не трогаем
+
+            const data = (res && typeof res === 'object') ? (res.body || res.data || res) : {};
+            const isOk = Boolean(res?.ok ?? data?.ok);
+            if (!res || !isOk) return; // сеть/сервер: баннер не трогаем
+
+            // v11.7.0: игрок не состоит в гильдии — пауза на 5 минут,
+            // чтобы не делать лишних запросов для игроков без гильдии.
+            // res.guild может быть объектом { gid, name } при наличии гильдии.
+            const guild = res.guild !== undefined ? res.guild : (data.guild !== undefined ? data.guild : undefined);
+            const isNoGuild = guild === false || guild === null || (guild && typeof guild === 'object' && 'gid' in guild && !guild.gid);
+            if (isNoGuild) {
+                this._citymonPausedUntil = Date.now() + 300000;
+                PocketCity._citymonPausedUntil = this._citymonPausedUntil;
+                PocketCity.hideCityMonGather();
+                return;
+            }
 
             const lobby = PocketCity.findCityMonLobby(res);
             if (lobby) PocketCity.showCityMonGather(lobby);
@@ -651,13 +664,17 @@
          * @returns {object|null} лобби L из list
          */
         findCityMonLobby(res) {
-            if (!res || res.mine) return null; // уже состою в каком-то сборе
-            const list = Array.isArray(res.list) ? res.list : [];
+            if (!res) return null;
+            const data = (res && typeof res === 'object') ? (res.body || res.data || res) : {};
+            if (res.mine || data.mine) return null; // уже состою в каком-то сборе
+            const list = Array.isArray(res.list) ? res.list : (Array.isArray(data.list) ? data.list : []);
             const now = Date.now();
             for (const L of list) {
                 if (!L || L.st !== 'open' || L.mine) continue;
                 if (PocketCity._citymonDismissed.has(L.id)) continue;
-                if (!(L.until > now)) continue;
+                // v11.7.0: until может приходить в секундах (< 1e12) или миллисекундах
+                const untilMs = (L.until && +L.until < 1e12) ? +L.until * 1000 : (+L.until || 0);
+                if (untilMs <= now) continue;
                 const members = Array.isArray(L.members) ? L.members.length : 0;
                 if (members >= (+L.max || 5)) continue;
                 return L;
@@ -666,13 +683,25 @@
         },
 
         /**
+         * v11.7.0: применение класса размера плашки уведомления (S / M / L).
+         */
+        applyGatherSize(size) {
+            const s = (size || (typeof Settings !== 'undefined' ? Settings.get('citymonGatherSize') : null) || 'L').toLowerCase();
+            const el = PocketCity._citymonEl || document.getElementById('lg-citymon-gather');
+            if (el) {
+                el.classList.remove('lg-cm-size-s', 'lg-cm-size-m', 'lg-cm-size-l');
+                el.classList.add(`lg-cm-size-${s}`);
+            }
+        },
+
+        /**
          * init() из boot() в main.js: поднимаем автоскип, если тумблер был
          * включён в прошлой сессии (настройка хранится в localStorage),
-         * и запускаем фоновый мониторинг сборов на элитных монстров.
+         * и запускаем фоновый мониторинг сборов на элитных монстров (если включено).
          */
         init() {
             if (Settings.get('autoSkipMonsters')) PocketCity.startMonsterAutoSkip();
-            PocketCity.startCityMonWatch();
+            if (Settings.get('citymonGatherEnabled')) PocketCity.startCityMonWatch();
         },
 
         /**
@@ -694,6 +723,7 @@
                 PocketCity._citymonEl = el;
             }
             el.classList.add('on');
+            PocketCity.applyGatherSize();
 
             const sameLobby = !!PocketCity._citymonLobby && PocketCity._citymonLobby.id === lobby.id;
             PocketCity._citymonLobby = lobby;
@@ -740,7 +770,8 @@
             if (!L) return '';
             const members = Array.isArray(L.members) ? L.members.length : 0;
             const max = +L.max || 5;
-            const left = Math.max(0, (+L.until || 0) - Date.now());
+            const untilMs = (L.until && +L.until < 1e12) ? +L.until * 1000 : (+L.until || 0);
+            const left = Math.max(0, untilMs - Date.now());
             // ceil: на последней секунде показываем 00:01, а не 00:00 раньше времени.
             const total = Math.ceil(left / 1000);
             const mm = String(Math.floor(total / 60)).padStart(2, '0');
@@ -790,16 +821,30 @@
                 if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, !!isError);
             };
 
+            const win = (typeof unsafeWindow !== 'undefined' && unsafeWindow) || window;
             let res = null;
             try {
-                res = (typeof Utils !== 'undefined' && typeof Utils.fetchApi === 'function')
-                    ? await Utils.fetchApi('/api/citymon/act', { op: 'ejoin', id: lobby.id })
-                    : null;
+                if (typeof Utils !== 'undefined' && typeof Utils.fetchApi === 'function') {
+                    res = await Utils.fetchApi('/api/citymon/act', { op: 'ejoin', id: lobby.id });
+                } else if (typeof win.fetch === 'function') {
+                    const url = (win.LG_BASE || '') + '/api/citymon/act';
+                    const r = await win.fetch(url, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ op: 'ejoin', id: lobby.id })
+                    });
+                    const d = await r.json().catch(() => null);
+                    res = { ok: r.ok && (d ? d.ok !== false : true), status: r.status, body: d, data: d, ...(d && typeof d === 'object' && !Array.isArray(d) ? d : {}) };
+                }
             } catch (e) {
                 dbg('citymon ejoin error:', e);
             }
 
-            if (res && res.ok) {
+            const data = (res && typeof res === 'object') ? (res.body || res.data || res) : {};
+            const isOk = Boolean(res?.ok ?? data?.ok);
+
+            if (res && isOk) {
                 toast(`Вы вступили в сбор на «${lobby.name}»!`, false);
                 // Плашку гасим сразу, а список перечитываем — возможно,
                 // открылся следующий сбор.
@@ -811,7 +856,7 @@
             if (PocketCity.isCityMonRateLimited(res)) {
                 PocketCity._citymonPausedUntil = Date.now() + PocketCity.CITYMON_PAUSE_MS;
             }
-            const errText = (res && (res.error || (res.body && (res.body.error || res.body.err)))) || '';
+            const errText = (res && (res.error || (res.body && (res.body.error || res.body.err)) || (res.data && (res.data.error || res.data.err)))) || '';
             toast(errText || 'Не удалось вступить', true);
 
             // Пока шёл запрос, плашку могли скрыть/перерисовать.
@@ -836,3 +881,6 @@
             }
         }
     };
+
+    return PocketCity;
+})();

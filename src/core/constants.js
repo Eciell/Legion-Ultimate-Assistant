@@ -65,7 +65,7 @@
      * 4. hero -> { name, class, stats, mn: mines, items }
      * ------------------------------------------------------------
      */
-    const API_BASE = window.LG_BASE || (location.pathname.match(/^\/c\/[^/]+/)?.[0] || '');
+    const API_BASE = (G && G.LG_BASE) || window.LG_BASE || (location.pathname.match(/^\/c\/[^/]+/)?.[0] || '');
     const MAX_POINTS = 50;
 
     /*
@@ -80,20 +80,29 @@
      * autoSkipMonsters — автоскип боёв с обычными и элитными монстрами.
      * Наблюдатель и клики по нативным кнопкам .cm-dlg живут в
      * modules/pocket-city.js (PocketCity.startMonsterAutoSkip / init).
+     *
+     * citymonGatherEnabled — уведомления о сборах гильдии на элитных монстров
+     * (по умолчанию false — выключено, включается пользователем вручную).
+     *
+     * citymonGatherSize — размер плашки уведомлений: 'S' / 'M' / 'L' (по умолчанию 'L').
      * ------------------------------------------------------------
      */
     const DEFAULT_SETTINGS = Object.freeze({
         autoSkipMonsters: false,
+        citymonGatherEnabled: false,
+        citymonGatherSize: 'L',
     });
     const SETTINGS_KEYS = Object.freeze({
         autoSkipMonsters: 'LEGION_AUTO_SKIP_MONSTERS',
+        citymonGatherEnabled: 'LEGION_CITYMON_GATHER_ENABLED',
+        citymonGatherSize: 'LEGION_CITYMON_GATHER_SIZE',
     });
     const Settings = {
         // Есть ли такая настройка в реестре (защита от опечаток в имени).
         has(name) {
             return Object.prototype.hasOwnProperty.call(SETTINGS_KEYS, name);
         },
-        // Чтение флага: нет ключа (или он пуст) — значение по умолчанию.
+        // Чтение настройки: нет ключа (или он пуст) — значение по умолчанию.
         // Исключение доступа (приватный режим / заблокированное хранилище)
         // тоже даёт дефолт, чтобы UI не падал.
         get(name) {
@@ -103,16 +112,19 @@
             if (!Settings.has(name)) return def;
             try {
                 const raw = localStorage.getItem(SETTINGS_KEYS[name]);
-                return (raw === null || raw === '') ? def : raw === 'true';
+                if (raw === null || raw === '') return def;
+                if (typeof def === 'boolean') return raw === 'true';
+                return raw;
             } catch (e) {
                 return def;
             }
         },
-        // Запись флага строкой 'true'/'false' (как остальные ключи аддона).
+        // Запись настройки: boolean сохраняется 'true'/'false', string — строкой.
         set(name, value) {
             if (!Settings.has(name)) return false;
             try {
-                localStorage.setItem(SETTINGS_KEYS[name], value ? 'true' : 'false');
+                const val = typeof value === 'boolean' ? (value ? 'true' : 'false') : String(value);
+                localStorage.setItem(SETTINGS_KEYS[name], val);
                 return true;
             } catch (e) {
                 dbg('[Settings] не удалось сохранить настройку', name, e);

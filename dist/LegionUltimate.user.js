@@ -92,7 +92,7 @@
      * 4. hero -> { name, class, stats, mn: mines, items }
      * ------------------------------------------------------------
      */
-    const API_BASE = window.LG_BASE || (location.pathname.match(/^\/c\/[^/]+/)?.[0] || '');
+    const API_BASE = (G && G.LG_BASE) || window.LG_BASE || (location.pathname.match(/^\/c\/[^/]+/)?.[0] || '');
     const MAX_POINTS = 50;
 
     /*
@@ -107,20 +107,29 @@
      * autoSkipMonsters — автоскип боёв с обычными и элитными монстрами.
      * Наблюдатель и клики по нативным кнопкам .cm-dlg живут в
      * modules/pocket-city.js (PocketCity.startMonsterAutoSkip / init).
+     *
+     * citymonGatherEnabled — уведомления о сборах гильдии на элитных монстров
+     * (по умолчанию false — выключено, включается пользователем вручную).
+     *
+     * citymonGatherSize — размер плашки уведомлений: 'S' / 'M' / 'L' (по умолчанию 'L').
      * ------------------------------------------------------------
      */
     const DEFAULT_SETTINGS = Object.freeze({
         autoSkipMonsters: false,
+        citymonGatherEnabled: false,
+        citymonGatherSize: 'L',
     });
     const SETTINGS_KEYS = Object.freeze({
         autoSkipMonsters: 'LEGION_AUTO_SKIP_MONSTERS',
+        citymonGatherEnabled: 'LEGION_CITYMON_GATHER_ENABLED',
+        citymonGatherSize: 'LEGION_CITYMON_GATHER_SIZE',
     });
     const Settings = {
         // Есть ли такая настройка в реестре (защита от опечаток в имени).
         has(name) {
             return Object.prototype.hasOwnProperty.call(SETTINGS_KEYS, name);
         },
-        // Чтение флага: нет ключа (или он пуст) — значение по умолчанию.
+        // Чтение настройки: нет ключа (или он пуст) — значение по умолчанию.
         // Исключение доступа (приватный режим / заблокированное хранилище)
         // тоже даёт дефолт, чтобы UI не падал.
         get(name) {
@@ -130,16 +139,19 @@
             if (!Settings.has(name)) return def;
             try {
                 const raw = localStorage.getItem(SETTINGS_KEYS[name]);
-                return (raw === null || raw === '') ? def : raw === 'true';
+                if (raw === null || raw === '') return def;
+                if (typeof def === 'boolean') return raw === 'true';
+                return raw;
             } catch (e) {
                 return def;
             }
         },
-        // Запись флага строкой 'true'/'false' (как остальные ключи аддона).
+        // Запись настройки: boolean сохраняется 'true'/'false', string — строкой.
         set(name, value) {
             if (!Settings.has(name)) return false;
             try {
-                localStorage.setItem(SETTINGS_KEYS[name], value ? 'true' : 'false');
+                const val = typeof value === 'boolean' ? (value ? 'true' : 'false') : String(value);
+                localStorage.setItem(SETTINGS_KEYS[name], val);
                 return true;
             } catch (e) {
                 dbg('[Settings] не удалось сохранить настройку', name, e);
@@ -446,33 +458,54 @@
     Object.assign(Utils, UtilsFormat);
 
     // ===== src/core/utils-api.js =====
-    // ============================================================
-    // 0.3. СЕТЕВОЙ СЛОЙ (core/utils-api.js)
-    // apiPath добавляет префикс /c/<канал>/ (см. docs/API.md),
-    // fetchApi ходит через нативные контексты игры с фолбэком на fetch.
-    // ============================================================
-    const UtilsApi = {
+// ============================================================
+// 0.3. СЕТЕВОЙ СЛОЙ (core/utils-api.js)
+// ============================================================
+const UtilsApi = (() => {
+    const G = (typeof unsafeWindow !== 'undefined' && unsafeWindow) || window;
+
+    return {
         apiPath(p) {
-            if (!p) return API_BASE;
+            const win = (typeof unsafeWindow !== 'undefined' && unsafeWindow) || G;
+            const base = (win && win.LG_BASE) || (typeof location !== 'undefined' ? location.pathname.match(/^\/c\/[^/]+/)?.[0] : '') || API_BASE || '';
+            if (!p) return base;
             if (p.startsWith('/c/')) return p;
-            return API_BASE + (p.startsWith('/') ? p : '/' + p);
+            return base + (p.startsWith('/') ? p : '/' + p);
         },
         async fetchApi(path, body, signal) {
-            // Те же правила, что и в getItemArtSvg: после @grant объекты игры
-            // живут только в unsafeWindow.
-            const G = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-            // 11.6.4b: __lgMineContext / __lgCityContext больше не заполняются —
-            // хуки LGMine.open и LGCity.open сняты ради античита шахты.
-            // Остаётся контекст аукциона (hookAuc.render) и текущий экранный
-            // контекст игры G.X (у него есть api()). Если ни того, ни другого
-            // нет — уходим в обычный fetch ниже (Utils.apiPath соберёт URL).
+            // Поддержка обоих форматов:
+            // 1) Utils.fetchApi(path, payload, signal) — payload как тело POST-запроса
+            // 2) Utils.fetchApi(path, { method, headers, body, signal }) — явные опции fetch
+            let method = 'GET';
+            let headers = {};
+            let requestBody = undefined;
+            let reqSignal = signal;
+
+            const isOptionsObj = body && typeof body === 'object' && ('method' in body || 'body' in body || 'headers' in body);
+            if (isOptionsObj) {
+                method = body.method || (body.body ? 'POST' : 'GET');
+                headers = Object.assign({}, body.headers);
+                requestBody = typeof body.body === 'object' ? JSON.stringify(body.body) : body.body;
+                if (body.signal) reqSignal = body.signal;
+            } else if (body !== undefined && body !== null) {
+                method = 'POST';
+                headers = { 'Content-Type': 'application/json' };
+                requestBody = typeof body === 'string' ? body : JSON.stringify(body);
+            }
+
+            // Нативные контексты игры
             const nativeCtx = G.__lgAucContext || G.X;
             if (nativeCtx && typeof nativeCtx.api === 'function') {
                 try {
-                    const bodyObj = body ? (typeof body === 'string' ? JSON.parse(body) : body) : undefined;
-                    const res = await (bodyObj !== undefined ? nativeCtx.api(path, bodyObj) : nativeCtx.api(path));
+                    let nativePayload = undefined;
+                    if (isOptionsObj) {
+                        nativePayload = body.body ? (typeof body.body === 'string' ? JSON.parse(body.body) : body.body) : undefined;
+                    } else if (body !== undefined && body !== null) {
+                        nativePayload = typeof body === 'string' ? JSON.parse(body) : body;
+                    }
+                    const res = await (nativePayload !== undefined ? nativeCtx.api(path, nativePayload) : nativeCtx.api(path));
                     if (res) {
-                        const result = { ok: true, body: res, status: 200 };
+                        const result = { ok: true, body: res, data: res, status: 200 };
                         if (typeof res === 'object' && !Array.isArray(res)) Object.assign(result, res);
                         return result;
                     }
@@ -481,19 +514,27 @@
 
             const url = this.apiPath(path);
             const opts = { credentials: 'same-origin', cache: 'no-store' };
-            if (signal) opts.signal = signal;
-            if (body) {
-                opts.method = 'POST';
-                opts.headers = { 'Content-Type': 'application/json' };
-                opts.body = JSON.stringify(body);
+            if (reqSignal) opts.signal = reqSignal;
+            if (method) opts.method = method;
+            if (Object.keys(headers).length) opts.headers = headers;
+            if (requestBody !== undefined) {
+                opts.body = requestBody;
+                if (!opts.headers) opts.headers = {};
+                if (!opts.headers['Content-Type']) opts.headers['Content-Type'] = 'application/json';
             }
+
             try {
-                const res = await fetch(url, opts);
+                // v11.7.0: используем win.fetch (пропатченный страницей fetch с префиксом канала)
+                // с фолбэком на нативный fetch песочницы Tampermonkey.
+                const win = (typeof unsafeWindow !== 'undefined' && unsafeWindow) || G;
+                const fetchFn = (win && typeof win.fetch === 'function') ? win.fetch.bind(win) : fetch;
+                const res = await fetchFn(url, opts);
                 const data = await res.json().catch(() => null);
                 const result = {
                     status: res.status,
                     ok: res.ok && (data ? data.ok !== false : true),
-                    body: data
+                    body: data,
+                    data: data
                 };
                 if (data && typeof data === 'object' && !Array.isArray(data)) {
                     Object.assign(result, data);
@@ -505,7 +546,8 @@
             }
         },
     };
-    Object.assign(Utils, UtilsApi);
+})();
+Object.assign(Utils, UtilsApi);
 
     // ===== src/core/utils-art.js =====
     // ============================================================
@@ -1588,24 +1630,303 @@
         .party-error { color: #ff8fa3; font-size: 12px; line-height: 1.35; }
         .party-error:empty { display: none; }
 
-        /* HUD пати: HP-панель и журнал в одном контейнере, перетаскивание
-           за заголовки. Контейнер и панели — pointer-events:none, чтобы не
-           перехватывать клики по игре; интерактивные узлы возвращают auto. */
-        .party-hud-container { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; align-items: stretch; box-sizing: border-box; pointer-events: none; }
-        .party-panel, .party-log-panel { display: none; position: relative; box-sizing: border-box; min-width: 150px; max-width: 260px; background: rgba(20, 16, 26, 0.92); border: 1px solid #3a3040; border-radius: 10px; padding: 8px 10px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); font: 12px/1.4 system-ui, "Segoe UI", sans-serif; color: #e8e8ea; pointer-events: none; }
-        .party-drag-handle { pointer-events: auto; cursor: grab; user-select: none; -webkit-user-select: none; touch-action: none; }
-        .party-drag-handle:active, .party-hud-container.party-dragging .party-drag-handle { cursor: grabbing; }
-        .party-panel-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #c9b184; margin-bottom: 6px; }
-        .party-log-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-        .party-log-body { pointer-events: auto; max-height: 150px; overflow-y: auto; margin-top: 6px; }
-        .party-log-body::-webkit-scrollbar { width: 6px; }
-        .party-log-body::-webkit-scrollbar-thumb { background: #44374a; border-radius: 4px; }
+        /* ============================================================
+           HUD ПАТИ (modules/party.js): карточки HP, журнала и чата (v11.7.0)
+           ============================================================ */
+        .party-hud-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: stretch;
+            width: 276px;
+            box-sizing: border-box;
+            pointer-events: none;
+        }
+        .party-panel, .party-log-panel, .party-chat-panel {
+            display: none;
+            position: relative;
+            box-sizing: border-box;
+            width: 276px;
+            background: rgba(18, 15, 24, 0.94);
+            border: 1px solid rgba(202, 165, 92, 0.35);
+            border-radius: 10px;
+            padding: 8px 10px;
+            box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+            font: 12px/1.4 system-ui, "Segoe UI", sans-serif;
+            color: #e8e8ea;
+            pointer-events: none;
+        }
+        .party-drag-handle {
+            pointer-events: auto;
+            cursor: grab;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+        }
+        .party-drag-handle:active,
+        .party-hud-container.party-dragging .party-drag-handle {
+            cursor: grabbing;
+        }
+
+        /* Карточка HP */
+        .party-panel-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 10px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #c9b184;
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+        .party-member-row {
+            padding: 3px 4px;
+            border-radius: 6px;
+            margin-bottom: 4px;
+            transition: background 0.15s ease;
+            border-bottom: 1px dashed rgba(255, 255, 255, 0.06);
+        }
+        .party-member-row:hover {
+            background: rgba(255, 255, 255, 0.04);
+        }
+        .party-member-row:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+        }
+        .party-member-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+        }
+        .party-member-name {
+            color: #ffcf6a;
+            font-weight: bold;
+            font-size: 11.5px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .party-member-hp-val {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            white-space: nowrap;
+        }
+        .party-hp-num {
+            color: #d8c9a8;
+            font-size: 11px;
+            font-variant-numeric: tabular-nums;
+        }
+        .party-hp-track {
+            height: 5px;
+            margin-top: 3px;
+            border-radius: 3px;
+            background: #251d2c;
+            overflow: hidden;
+        }
+        .party-hp-fill {
+            height: 5px;
+            border-radius: 3px;
+            transition: width 0.25s ease, background 0.2s ease;
+        }
+
+        /* Кнопка лечения */
+        .party-heal-btn {
+            pointer-events: auto;
+            flex: none;
+            padding: 1px 6px;
+            background: #1c2b22;
+            border: 1px solid #4ade80;
+            color: #4ade80;
+            border-radius: 4px;
+            font-size: 10.5px;
+            line-height: 14px;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s, transform 0.1s;
+        }
+        .party-heal-btn:hover:not(:disabled) {
+            background: #4ade80;
+            color: #120f18;
+            transform: scale(1.05);
+        }
+        .party-heal-btn.copied {
+            background: #ffcf6a !important;
+            border-color: #ffcf6a !important;
+            color: #120f18 !important;
+            font-weight: bold;
+        }
+        .party-heal-btn:disabled {
+            opacity: 0.5;
+            cursor: default;
+        }
+
+        /* Карточка Журнала */
+        .party-log-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 10px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #c9b184;
+            font-weight: bold;
+        }
+        .party-log-body {
+            pointer-events: auto;
+            max-height: 150px;
+            overflow-y: auto;
+            margin-top: 6px;
+        }
+        .party-log-body::-webkit-scrollbar { width: 4px; }
+        .party-log-body::-webkit-scrollbar-thumb { background: #44374a; border-radius: 3px; }
         .party-log-body::-webkit-scrollbar-thumb:hover { background: #caa55c; }
-        .party-log-toggle { pointer-events: auto; background: none; border: none; padding: 0 2px; color: #ffcf6a; cursor: pointer; font-size: 12px; line-height: 1; }
+        .party-log-toggle {
+            pointer-events: auto;
+            background: none;
+            border: none;
+            padding: 0 4px;
+            color: #ffcf6a;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            line-height: 1;
+        }
         .party-log-toggle:hover { color: #fff; }
-        .party-heal-btn { pointer-events: auto; flex: none; padding: 0 5px; background: #22352a; border: 1px solid #5fd987; color: #5fd987; border-radius: 4px; font-size: 10px; line-height: 15px; cursor: pointer; transition: background 0.15s, color 0.15s; }
-        .party-heal-btn:hover:not(:disabled) { background: #5fd987; color: #16121a; }
-        .party-heal-btn:disabled { opacity: 0.6; cursor: default; }
+
+        /* Карточка Чата пати */
+        .party-chat-panel {
+            flex-direction: column;
+        }
+        .party-chat-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .party-chat-title {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 10px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #c9b184;
+            font-weight: bold;
+        }
+        .party-chat-badge {
+            background: #e03e52;
+            color: #fff;
+            border-radius: 8px;
+            padding: 0 5px;
+            font-size: 9px;
+            font-weight: bold;
+            line-height: 13px;
+        }
+        .party-chat-toggle {
+            pointer-events: auto;
+            background: none;
+            border: none;
+            padding: 0 4px;
+            color: #ffcf6a;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            line-height: 1;
+        }
+        .party-chat-toggle:hover { color: #fff; }
+        .party-chat-content {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-top: 6px;
+        }
+        .party-chat-body {
+            pointer-events: auto;
+            max-height: 140px;
+            min-height: 50px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding-right: 2px;
+        }
+        .party-chat-body::-webkit-scrollbar { width: 4px; }
+        .party-chat-body::-webkit-scrollbar-thumb { background: #44374a; border-radius: 3px; }
+        .party-chat-body::-webkit-scrollbar-thumb:hover { background: #caa55c; }
+        .party-chat-empty {
+            color: #777;
+            font-style: italic;
+            font-size: 11px;
+            text-align: center;
+            padding: 10px 0;
+        }
+        .party-chat-msg {
+            font-size: 11px;
+            line-height: 1.35;
+            word-break: break-word;
+        }
+        .party-chat-time {
+            color: #7f7389;
+            font-size: 9.5px;
+            margin-right: 4px;
+            font-variant-numeric: tabular-nums;
+        }
+        .party-chat-nick {
+            color: #ffcf6a;
+            font-weight: bold;
+            margin-right: 4px;
+        }
+        .party-chat-nick.party-chat-self {
+            color: #8ff2a0;
+        }
+        .party-chat-text {
+            color: #ece5f0;
+        }
+        .party-chat-form {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            pointer-events: auto;
+            margin-top: 2px;
+        }
+        .party-chat-input {
+            flex: 1 1 auto;
+            min-width: 0;
+            background: #120d17;
+            border: 1px solid #3d2f44;
+            border-radius: 5px;
+            padding: 4px 7px;
+            font-size: 11px;
+            color: #fff;
+            outline: none;
+            box-sizing: border-box;
+        }
+        .party-chat-input:focus {
+            border-color: #caa55c;
+        }
+        .party-chat-send {
+            flex: none;
+            background: #caa55c;
+            border: none;
+            color: #120f18;
+            border-radius: 5px;
+            padding: 4px 8px;
+            font-size: 10px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: filter 0.15s;
+        }
+        .party-chat-send:hover {
+            filter: brightness(1.15);
+        }
 
         /* ============================================================
            ПЛАНИРОВЩИК БИЛДОВ — СКРОЛЛ ДЕРЕВА + ГРАНИЦЫ МОДАЛКИ (v11.6.3b)
@@ -1869,19 +2190,17 @@
            Плавающее уведомление о чужом открытом сборе (POST /api/citymon/act
            { op: 'elist' }) с кнопкой «Присоединиться» (op: 'ejoin').
            Палитра — как у остальных плашек аддона: тёмная панель, золотая
-           рамка, золотая кнопка. Ставим в левый нижний угол: по центру
-           сверху уже живут подсказки боевого ассистента, а справа — HUD
-           пати/тосты, перекрывать их нельзя.
+           рамка, золотая кнопка. Позиция: правый нижний угол.
            ============================================================ */
         #lg-citymon-gather {
             position: fixed;
-            left: 20px;
-            bottom: 20px;
-            z-index: 10001;
+            right: 16px;
+            bottom: 16px;
+            z-index: 99999 !important;
             display: none;
             pointer-events: none;
         }
-        #lg-citymon-gather.on { display: block; }
+        #lg-citymon-gather.on { display: block !important; }
         .lg-cm-gather {
             background: rgba(29, 22, 32, 0.96);
             border: 2px solid #caa55c;
@@ -1905,7 +2224,7 @@
         .lg-cm-gather-row { display: flex; align-items: center; gap: 8px; }
         .lg-cm-gather-join {
             background: #ffcf6a; color: #16121a; border: none; padding: 6px 14px;
-            border-radius: 6px; font-weight: bold; cursor: pointer;
+            border-radius: 6px; font-weight: bold; font-size: 13px; cursor: pointer;
             transition: transform 0.1s, filter 0.15s;
         }
         .lg-cm-gather-join:hover:not(:disabled) { filter: brightness(1.1); }
@@ -1917,6 +2236,35 @@
             cursor: pointer; transition: color 0.15s, border-color 0.15s;
         }
         .lg-cm-gather-close:hover { color: #ff8fa3; border-color: #ff8fa3; }
+
+        /* Размер M (~82-85% от L) */
+        #lg-citymon-gather.lg-cm-size-m .lg-cm-gather {
+            padding: 7px 11px;
+            gap: 4px;
+            border-radius: 8px;
+            min-width: 220px;
+            max-width: min(460px, 92vw);
+        }
+        #lg-citymon-gather.lg-cm-size-m .lg-cm-gather-head { font-size: 12.5px; line-height: 1.25; }
+        #lg-citymon-gather.lg-cm-size-m .lg-cm-gather-sub { font-size: 11px; }
+        #lg-citymon-gather.lg-cm-size-m .lg-cm-gather-row { gap: 6px; }
+        #lg-citymon-gather.lg-cm-size-m .lg-cm-gather-join { padding: 4px 11px; font-size: 11.5px; border-radius: 5px; }
+        #lg-citymon-gather.lg-cm-size-m .lg-cm-gather-close { padding: 4px 8px; font-size: 11.5px; border-radius: 5px; }
+
+        /* Размер S (~68-72% от L, мини-плашка) */
+        #lg-citymon-gather.lg-cm-size-s .lg-cm-gather {
+            padding: 5px 8px;
+            gap: 3px;
+            border-radius: 6px;
+            border-width: 1.5px;
+            min-width: 180px;
+            max-width: min(360px, 92vw);
+        }
+        #lg-citymon-gather.lg-cm-size-s .lg-cm-gather-head { font-size: 11px; line-height: 1.2; }
+        #lg-citymon-gather.lg-cm-size-s .lg-cm-gather-sub { font-size: 10px; line-height: 1.2; }
+        #lg-citymon-gather.lg-cm-size-s .lg-cm-gather-row { gap: 4px; }
+        #lg-citymon-gather.lg-cm-size-s .lg-cm-gather-join { padding: 3px 8px; font-size: 10.5px; border-radius: 4px; }
+        #lg-citymon-gather.lg-cm-size-s .lg-cm-gather-close { padding: 3px 6px; font-size: 10px; border-radius: 4px; }
 
         /* ============================================================
            11.6.5c: СПОСОБНОСТИ АРЕНЫ (modules/hero-planner.js)
@@ -2114,25 +2462,36 @@
             background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px;
             padding: 10px 12px;
         }
-        /* Таблица уровней: свой скролл, чтобы 15 строк не растягивали модалку.
-           Отступ 350px — это h2, табы, две компактные строки верха
-           (topbar + суббар), баннер предмета и сноска под сплитом. */
+        /* Таблица уровней: без вертикального скроллбара, чтобы 16 строк помещались в окне. */
         .hp-ench-right {
-            flex: 1 1 60%; min-width: 0;
-            max-height: calc(100vh - 350px);
-            /* v11.7.1: добавилась колонка «Статы» — на узкой модалке таблица
-               скроллится ещё и по горизонтали, а не обрезает значения. */
-            overflow: auto;
+            flex: 1 1 auto; min-width: 0;
+            overflow-x: auto;
+            overflow-y: visible;
         }
         /* Узкая модалка/маленькое окно — таблица уезжает под карточку цели. */
         @media (max-width: 980px) {
             .hp-ench-split { flex-direction: column; }
-            .hp-ench-left, .hp-ench-right { flex: 1 1 auto; width: 100%; min-width: 0; }
+            .hp-ench-left, .hp-ench-right, .hp-ench-rightcol { flex: 1 1 auto; width: 100%; min-width: 0; }
         }
         /* Таблица уровней: компактнее общих правил .custom-modal th/td и без
-           псевдоэлемента сортировки «↕» (здесь сортировки нет). */
+           псевдоэлемента сортировки «↕» (здесь сортировки нет). Запрещаем
+           вертикальное растяжение таблицы и строк (без пустых зазоров). */
+        .custom-modal .hp-ench-table {
+            height: auto !important;
+            align-self: start;
+            border-collapse: collapse;
+        }
+        .hp-ench-table tbody,
+        .hp-ench-table tr {
+            height: auto !important;
+        }
         .custom-modal .hp-ench-table th,
-        .custom-modal .hp-ench-table td { padding: 5px 8px; font-size: 13px; }
+        .custom-modal .hp-ench-table td {
+            padding: 3px 8px !important;
+            line-height: 1.2 !important;
+            height: auto !important;
+            font-size: 12px;
+        }
         .custom-modal .hp-ench-table th { cursor: default; white-space: nowrap; }
         .custom-modal .hp-ench-table th::after { content: ''; }
         /* Строка уровня — кликабельный ВЫБОР уровня просмотра (v11.7.1: все
@@ -2299,6 +2658,180 @@
         }
         .hp-item-head-art > svg { width: 100%; height: 100%; display: block; }
         .hp-item-head-art > img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+
+        /* ============================================================
+           v11.7.0: ПЛАНИРОВЩИК ГЕРОЯ — ОКНО И БОКОВАЯ ПАНЕЛЬ СТАТОВ
+           Модалка — min(1520px, 96vw) и не выше 92vh. Вкладки «Билды»
+           и «Заточка» занимают 100% ширины. Двухколоночная сетка 1fr 320px
+           с панелью характеристик рендерится строго внутри «Примерки».
+           !important обязателен: общее правило некомпактных модалок
+           задаёт width/height с !important.
+           ============================================================ */
+        .custom-modal.hp-planner-modal {
+            width: min(1520px, 96vw) !important;
+            max-height: 92vh !important;
+        }
+        /* v11.7.0: двухколоночная сетка строго внутри вкладки «Примерка» */
+        .hp-fit-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 320px;
+            gap: 12px;
+            flex: 1 1 auto;
+            min-height: 0;
+            width: 100%;
+        }
+        .hp-fit-main {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-height: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        #tab-hero-fit.active {
+            display: flex !important;
+            flex-direction: column !important;
+            flex: 1 1 auto !important;
+            min-height: 0 !important;
+            max-height: 100% !important;
+            overflow: hidden !important;
+        }
+        /* Узкое окно — панель характеристик уезжает под слоты примерки */
+        @media (max-width: 1100px) {
+            .hp-fit-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; overflow-y: auto; }
+            .hp-fit-layout > .hp-side { max-height: 40vh; }
+        }
+
+        /* Бейдж ТЕСТ на кнопке вкладки и внутри вкладки «Примерка» */
+        .hp-test-badge {
+            display: inline-block;
+            padding: 1px 5px;
+            font-size: 10px;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            line-height: 1.2;
+            border-radius: 4px;
+            background: rgba(255, 107, 107, 0.2);
+            color: #ff6b6b;
+            border: 1px solid rgba(255, 107, 107, 0.6);
+            vertical-align: middle;
+            margin-left: 5px;
+            text-transform: uppercase;
+        }
+        .modal-tab.active .hp-test-badge {
+            background: #1d1620;
+            color: #ff6b6b;
+            border-color: #ff6b6b;
+        }
+        .hp-fit-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 2px;
+        }
+        .hp-fit-title {
+            font-size: 14px;
+            font-weight: bold;
+            color: #ffcf6a;
+        }
+
+        /* ── Постоянная панель характеристик ── */
+        .hp-side {
+            display: flex; flex-direction: column; gap: 2px;
+            min-height: 0; overflow-y: auto;
+            background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px;
+            padding: 10px 12px; font-size: 12px;
+        }
+        .hp-side-head {
+            font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px;
+            color: #ffcf6a; font-weight: bold; margin-bottom: 4px;
+        }
+        .hp-side-cols,
+        .hp-side-row {
+            display: grid; grid-template-columns: 1fr auto 46px;
+            align-items: baseline; gap: 6px;
+        }
+        .hp-side-cols {
+            font-size: 10px; color: #7f7389; text-transform: uppercase;
+            letter-spacing: 0.3px; border-bottom: 1px solid #33283d; padding-bottom: 4px;
+        }
+        .hp-side-cols span:nth-child(2),
+        .hp-side-cols span:nth-child(3) { text-align: right; }
+        .hp-side-row {
+            padding: 2px 0; color: #d8c9a8;
+            border-bottom: 1px dashed rgba(255, 255, 255, 0.04);
+        }
+        .hp-side-row.strong { color: #f7eadf; font-weight: bold; }
+        .hp-side-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .hp-side-vals { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .hp-side-vals b { color: #ffcf6a; }
+        .hp-side-delta { text-align: right; font-weight: bold; font-variant-numeric: tabular-nums; }
+        .hp-side-delta.up { color: #8ff2a0; }
+        .hp-side-delta.down { color: #ff9a8a; }
+        .hp-side-delta.same { color: #6f6380; }
+        .hp-side-sep { border-top: 1px solid #44374a; margin: 5px 0 3px; }
+        .hp-side-foot { margin-top: 6px; font-size: 10px; color: #8b7f96; line-height: 1.4; }
+
+        /* ── Вкладка «👗 Примерка» ── */
+        .hp-fit-top {
+            display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap;
+            background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px;
+            padding: 6px 10px;
+        }
+        .hp-fit-field {
+            display: flex; align-items: center; gap: 6px;
+            font-size: 12px; color: #d8c9a8; white-space: nowrap;
+        }
+        .hp-fit-field select,
+        .hp-fit-field input {
+            background: #111; border: 1px solid #555; color: #fff;
+            padding: 3px 6px; border-radius: 4px; font-weight: bold; font-size: 12px;
+        }
+        .hp-fit-field input { width: 58px; text-align: center; }
+        .hp-fit-chk {
+            display: flex; align-items: center; gap: 5px;
+            font-size: 12px; color: #d8c9a8; cursor: pointer;
+        }
+        .hp-fit-rows { display: flex; flex-direction: column; gap: 6px; }
+        .hp-fit-row {
+            display: grid; grid-template-columns: 132px minmax(0, 1fr) 76px;
+            align-items: center; gap: 8px;
+            background: #1e1724; border: 1px solid #3d2f44; border-radius: 6px;
+            padding: 5px 8px;
+        }
+        .hp-fit-slot { font-size: 12px; color: #d8c9a8; white-space: nowrap; }
+        .hp-fit-row select {
+            min-width: 0; width: 100%;
+            background: #241c2b; border: 1px solid #44374a; color: #e8dfd0;
+            border-radius: 4px; padding: 3px 6px; font-size: 12px;
+        }
+        .hp-fit-row select:focus { outline: none; border-color: #caa55c; }
+        .hp-fit-en { font-variant-numeric: tabular-nums; text-align: center; }
+
+        /* ── Компактная «Заточка»: справка справа снизу ── */
+        .hp-cost-min { font-size: 11px; color: #8ff2a0; font-variant-numeric: tabular-nums; }
+        .hp-ench-rightcol {
+            flex: 1 1 60%; min-width: 0; min-height: 0;
+            display: flex; flex-direction: column; gap: 6px;
+            align-self: start;
+        }
+        /* v11.7.0: без вертикального скроллбара — таблица +0…+15 и справка помещаются целиком */
+        .hp-ench-rightcol > .hp-ench-right {
+            flex: 0 0 auto;
+            max-height: none;
+            overflow-x: auto;
+            overflow-y: visible;
+        }
+        .hp-ench-hint {
+            flex: none;
+            background: #1e1724; border: 1px solid #3d2f44; border-radius: 6px;
+            padding: 6px 9px; font-size: 10px; line-height: 1.45; color: #8b7f96;
+        }
+        .hp-ench-hint code { color: #d8c9a8; }
+        .hp-ench-hint-prices {
+            display: flex; flex-wrap: wrap; gap: 4px 14px;
+            margin-bottom: 3px; font-size: 11px; color: #ccc;
+        }
 
         /* 11.6.6c: палитра компактных бейджей участников (уровень, класс,
            роль, онлайн). v11.7: игра нативно показывает уровни, классы, силу
@@ -3337,6 +3870,20 @@
                         <input type="checkbox" class="lg-toggle" id="modal-chk-auto-skip-monsters">
                     </label>
                     <div style="font-size:10px; color:#888; line-height:1.3; margin:-2px 2px 0;">Автоматически нажимает «Пропустить» / «Пропустить всё» в окне боя с обычными и элитными монстрами</div>
+                    <!-- 11.7.0: уведомления о сборах гильдии на элитных монстров -->
+                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
+                        <span>📯 Уведомления о сборах на элитных монстров</span>
+                        <input type="checkbox" class="lg-toggle" id="modal-chk-citymon-gather">
+                    </label>
+                    <div style="font-size:10px; color:#888; line-height:1.3; margin:-2px 2px 0;">Плавающее уведомление о чужих сборах гильдии с кнопкой «Присоединиться»</div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:8px 10px; border-radius:6px; margin-top: 6px;">
+                        <span style="font-size:12px; color:#ddd;">Размер плашки сбора</span>
+                        <div class="lg-cm-size-picker" style="display:flex; gap:4px;">
+                            <button type="button" class="lg-cm-size-btn" data-size="S" style="background:#2a2035; border:1px solid #4a3b55; color:#bbb; border-radius:4px; padding:3px 10px; font-size:11px; font-weight:bold; cursor:pointer;">S</button>
+                            <button type="button" class="lg-cm-size-btn" data-size="M" style="background:#2a2035; border:1px solid #4a3b55; color:#bbb; border-radius:4px; padding:3px 10px; font-size:11px; font-weight:bold; cursor:pointer;">M</button>
+                            <button type="button" class="lg-cm-size-btn" data-size="L" style="background:#2a2035; border:1px solid #4a3b55; color:#bbb; border-radius:4px; padding:3px 10px; font-size:11px; font-weight:bold; cursor:pointer;">L</button>
+                        </div>
+                    </div>
                     <!-- ПАТЧ 11.6.5h: куда девать вход в меню — в нативный бар
                          города или оставить плавающую FAB. Состояние ставит
                          и сохраняет UI.openSettings() (localStorage
@@ -3869,6 +4416,55 @@
                     Settings.set('autoSkipMonsters', isEnabled);
                 });
             }
+
+            // 11.7.0: уведомления о сборах гильдии на элитных монстров
+            const citymonGatherChk = modal.querySelector('#modal-chk-citymon-gather');
+            if (citymonGatherChk) {
+                citymonGatherChk.checked = Settings.get('citymonGatherEnabled');
+                citymonGatherChk.addEventListener('change', (e) => {
+                    const isEnabled = !!e.target.checked;
+                    Settings.set('citymonGatherEnabled', isEnabled);
+                    try {
+                        if (typeof PocketCity !== 'undefined') {
+                            if (isEnabled) {
+                                PocketCity.startCityMonWatch();
+                                PocketCity.pollCityMonLobbies(true);
+                            } else {
+                                PocketCity.hideCityMonGather();
+                            }
+                        }
+                    } catch (err) {
+                        dbg('[UI] сборы гильдии: сбой переключения', err);
+                    }
+                });
+            }
+
+            // 11.7.0: размер плашки сбора (S / M / L)
+            const currentGatherSize = Settings.get('citymonGatherSize') || 'L';
+            const gatherSizeBtns = modal.querySelectorAll('.lg-cm-size-btn');
+            const updateActiveGatherSizeBtn = (val) => {
+                gatherSizeBtns.forEach(btn => {
+                    const active = (btn.dataset.size || '').toUpperCase() === (val || '').toUpperCase();
+                    btn.style.background = active ? '#ffcf6a' : '#2a2035';
+                    btn.style.color = active ? '#16121a' : '#bbb';
+                    btn.style.borderColor = active ? '#ffcf6a' : '#4a3b55';
+                });
+            };
+            updateActiveGatherSizeBtn(currentGatherSize);
+            gatherSizeBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const newSize = (btn.dataset.size || 'L').toUpperCase();
+                    Settings.set('citymonGatherSize', newSize);
+                    updateActiveGatherSizeBtn(newSize);
+                    try {
+                        if (typeof PocketCity !== 'undefined' && typeof PocketCity.applyGatherSize === 'function') {
+                            PocketCity.applyGatherSize(newSize);
+                        }
+                    } catch (err) {
+                        dbg('[UI] сборы гильдии: сбой смены размера', err);
+                    }
+                });
+            });
 
             // ПАТЧ 11.6.5h / h.1: тумблер «📌 Кнопка аддона в нижнем меню игры».
             // Порядок операций важен: сначала применяем выключение к DOM, потом
@@ -4675,7 +5271,7 @@
         /* fx-ключи -> подписи в сводке «Что дают открытые навыки».
            v11.7.1: знаки «%» и «+» в подписях НЕ дублируются — суффикс и знак
            значения добавляет statList() (item.sign/item.suf). */
-        fxNames: { melee: 'Физ. урон', magic: 'Магия', hp: 'Макс. HP', def: 'Броня', healPow: 'Сила лечения', healIn: 'Вх. лечение', crit: 'Крит', critDmg: 'Сила крита', skel: 'Урон скелетов', skelT: 'Время скелетов', leech: 'Вампиризм', block: 'Снижение урона', dodge: 'Уклонение', lead: 'Урон по боссам', first: 'Урон 1-й ход', dmg: 'Весь урон', pierce: 'Пробивание', resist: 'Сопротивление', healCrit: 'Крит лечения', regen: 'Регенерация', low: 'Урон при низком HP', ranged: 'Урон луком', poison: 'Отрава', steal: 'Кража', loot: 'Добыча', skelN: 'Скелетов', volley: 'Залп', shieldBlock: 'Щит блок', trapDodge: 'Ловушки', steady: 'Промах→удар', cleave: 'Замах', cleaveBoss: 'Замах по боссу', penBoss: 'Бронебой по боссу', drain: 'Вытягивание', hex: 'Проклятие', holy: 'По нежити', poisonT: 'Время отравы' },
+        fxNames: { melee: 'Физ. урон', magic: 'Магия', hp: 'Макс. HP', def: 'Броня', healPow: 'Сила лечения', healIn: 'Вх. лечение', crit: 'Крит', critDmg: 'Сила крита', skel: 'Урон скелетов', skelT: 'Время скелетов', leech: 'Вампиризм', block: 'Снижение урона', dodge: 'Уклонение', lead: 'Урон по боссам', first: 'Урон 1-й ход', dmg: 'Весь урон', pierce: 'Пробивание', resist: 'Сопротивление', healCrit: 'Крит лечения', regen: 'Регенерация', low: 'Урон при низком HP', ranged: 'Урон луком', poison: 'Отрава', steal: 'Кража', loot: 'Добыча', skelN: 'Скелетов', volley: 'Залп', shieldBlock: 'Щит блок', trapDodge: 'Ловушки', steady: 'Промах→удар', cleave: 'Замах', cleaveBoss: 'Замах по боссу', penBoss: 'Бронебой по боссу', drain: 'Вытягивание', hex: 'Проклятие', holy: 'По нежити', poisonT: 'Время отравы', abNext: 'Удар после умения', angel: 'Ангел-хранитель', backFoe: 'Урон по дальней линии', banner: 'Знамя когорты', breakHeal: 'Лечение при разбитом щите', burnChain: 'Цепной огонь', burnFoe: 'Урон по горящим', chillFoe: 'Урон по ознобу', chillProc: 'Шанс озноба', coverNb: 'Прикрытие соседа', critBleed: 'Кровотечение при крите', critBlind: 'Ослепление при крите', critBurn: 'Поджог при крите', critPierceWard: 'Крит сквозь щиты', dmgHeal: 'Лечение от урона', dodgeNext: 'Выстрел после уклонения', firstTeam: 'Урон команды в 1-й ход', guardAura: 'Аура защиты стойки', healNext: 'Удар после лечения', healRegen: 'Регенерация после лечения', healSplash: 'Всплеск лечения', highFoe: 'Урон по здоровым', highSelf: 'Урон при высоком HP', huntMark: 'Охотничья метка', killHit: 'Добивание врага', lastStand: 'Последний рубеж', lineCut: 'Защита соратников по линии', lowHeal: 'Лечение раненых', multiLow: 'Залп по раненым', overShield: 'Щит избытка лечения', phoenixHeart: 'Сердце феникса', ricochet: 'Рикошет выстрела', sameFoe: 'Пристрелка', shieldDmg: 'Урон под щитом', shieldUp: 'Прочность накладываемых щитов', startShield: 'Стартовый барьер', startWard: 'Стартовый оберег', taunt: 'Провокация', thorns: 'Шипы на щите', trap: 'Капкан', underShield: 'Защита под щитом', weakFoe: 'Урон по ослабленным', winter: 'Вечная зима' },
 
         /* Категории прокачки способностей Арены (как в /api/skmap: ab.br[].next). */
         ARENA_KINDS: [['lv', 'Ступень'], ['pow', 'Мощь'], ['eff', 'Эффект'], ['dur', 'Длительность']],
@@ -4843,20 +5439,22 @@
                 if (key === 'cleaveBoss') return fmt((fx.cleave || 0) * r * 0.4);
                 if (key === 'penBoss') return fmt((fx.pierce || 0) * r / 20);
                 if (key === 'critX') return fmt(2 + (fx.critDmg || 0) * r / 100);
-                // resist/pierce: сырой fx -> характеристика через fromFx.
-                if (key === 'resist' || key === 'pierce') return fmt((fx[key] || 0) * r * scaleOf(key));
+                // v11.7.0: {resist}/{pierce} в тексте — БАЗОВЫЙ ШАНС срабатывания
+                // умения (например, «10%»), поэтому fx умножается ТОЛЬКО на ранг:
+                // fromFx (0.5) применяется лишь к примечаниям о характеристиках.
                 if (fx[key] !== undefined) return fmt(fx[key] * r);
                 return match;
             });
 
-            // Игра дописывает вторичные статы, даже если в тексте узла нет
-            // плейсхолдера: «Физ. урон +5 · Сопротивление +30».
+            // v11.7.0: примечания добавляются ВСЕГДА, когда в fx есть resist/
+            // pierce: игра дописывает вторичные статы даже без плейсхолдера
+            // в тексте («Физ. урон +5 · характеристика «Сопротивление» +30»).
             const notes = [];
-            if (fx.resist !== undefined && !/\{resist\}/.test(rawText)) {
-                notes.push(`Сопротивление +${fmt(fx.resist * r * scaleOf('resist'))}`);
+            if (fx.resist !== undefined) {
+                notes.push(`характеристика «Сопротивление» +${fmt(fx.resist * r * scaleOf('resist'))}`);
             }
-            if (fx.pierce !== undefined && !/\{pierce\}/.test(rawText)) {
-                notes.push(`Пробивание +${fmt(fx.pierce * r * scaleOf('pierce'))}%`);
+            if (fx.pierce !== undefined) {
+                notes.push(`характеристика «Пробивание» +${fmt(fx.pierce * r * scaleOf('pierce'))}%`);
             }
             if (notes.length) out += ' · ' + notes.join(' · ');
 
@@ -6305,6 +6903,56 @@
                 </div>${body}`;
         },
 
+        /**
+         * v11.7.0: числовые бонусы открытых узлов созвездия — для вкладки
+         * «👗 Примерка» планировщика героя.
+         *
+         * statList() собирает ТЕКСТОВУЮ сводку («Физ. урон +15%»), а здесь
+         * нужен агрегат в единицах характеристик героя:
+         *   hp / def          — плоские значения (fx узла);
+         *   atkPct / magPct   — проценты к физ./маг. урону (fx melee / magic);
+         *   crit, critDmg, dodge, pierce, healPow, luck, resist — пункты.
+         *
+         * resist/pierce в fx лежат «сырыми», поэтому переводятся через
+         * fromFx (обычно 0.5) — так же, как в игре и в примечаниях
+         * formatNodeText(). Пропускаются служебные ключи (ctl_/act_/cd_).
+         *
+         * @returns {object|null} null — созвездие не загружено или пусто
+         */
+        skillBonuses() {
+            const C = this.clsData();
+            if (!C || !this._cls) return null;
+            const st = this.state();
+            const fromFx = this.xstatFromFx();
+            // fx-ключ -> поле агрегата. Всё остальное (урон по боссам, залпы,
+            // лечение и т.п.) на статы героя напрямую не влияет и опускается.
+            const MAP = {
+                melee: 'atkPct', magic: 'magPct', hp: 'hp', def: 'def',
+                crit: 'crit', critDmg: 'critDmg', dodge: 'dodge', pierce: 'pierce',
+                healPow: 'healPow', luck: 'luck', resist: 'resist'
+            };
+            const out = {
+                hp: 0, def: 0, atkPct: 0, magPct: 0,
+                crit: 0, critDmg: 0, dodge: 0, pierce: 0,
+                healPow: 0, luck: 0, resist: 0
+            };
+            let any = false;
+            (C.branches || []).forEach((B) => {
+                (B.nodes || []).forEach((n) => {
+                    const r = Math.min(Math.max(1, +n.max || 1), +st.nodes[n.id] || 0);
+                    if (!r) return;
+                    for (const [fk, fv] of Object.entries(n.fx || {})) {
+                        const key = MAP[fk];
+                        if (!key || this.isSkipFx(fk) || !isFinite(+fv)) continue;
+                        const scale = isFinite(+fromFx[fk]) ? +fromFx[fk] : 1;
+                        out[key] += (+fv) * r * scale;
+                        any = true;
+                    }
+                });
+            });
+            return any ? out : null;
+        },
+
         /* ------------------------------------------------------------
          * Вкладка «Экипировка» (статы героя + сравнение с сумкой)
          * ---------------------------------------------------------- */
@@ -6662,7 +7310,9 @@
         },
 
         // ── Режим «С учётом шансов» (стратегии) ──────────────────
-        strategyMode: 'ideal', // 'ideal' | 'expected'
+        // v11.7.0: переключатель 📊/🧠 удалён — «Итоговая стоимость» всегда
+        // ожидаемая, поэтому поле оставлено только для совместимости.
+        strategyMode: 'expected', // 'ideal' | 'expected'
         // 11.6.5f: цель заточки (+N) для правой карточки Split-view.
         // null — не выбрана: берём следующий уровень (enchantTargetLevel).
         // Хранится в абсолютных уровнях (+1…+15); при смене предмета цель
@@ -6679,6 +7329,27 @@
         userSpheres: 0,
         allocatedStars: {},   // { lv: true }
         allocatedSpheres: {}, // { lv: true }
+
+        // ── v11.7.0: вкладка «👗 Примерка» ───────────────────────
+        // Пять слотов экипировки в порядке нативной карточки героя
+        // (helmet, weapon, shield, armor, trinket).
+        FITTING_SLOTS: [
+            { id: 'helmet', name: 'Шлем', icon: '⛑' },
+            { id: 'weapon', name: 'Оружие', icon: '⚔️' },
+            { id: 'shield', name: 'Щит/оффхенд', icon: '🛡' },
+            { id: 'armor', name: 'Броня', icon: '🥋' },
+            { id: 'trinket', name: 'Амулет', icon: '📿' }
+        ],
+        /*
+         * Веса боевой мощи (power): Σ stat[k] × POW[k] плюс +2 за каждый
+         * уровень заточки надетых вещей — та же логика, что в карточке героя.
+         */
+        FIT_POW: { atk: 1, mag: 1, def: 1, hp: 0.25, crit: 0.8, critDmg: 0.2, dodge: 0.8, pierce: 0.8, healPow: 0.5, luck: 0.5, resist: 0.5 },
+        /* Потолки вторичных характеристик (xstats.max из game-data.js). */
+        FIT_CAPS: { crit: 50, critDmg: 200, dodge: 35, pierce: 75, healPow: 100, luck: 100 },
+        /* Состояние примерки: моделируемый класс/уровень, флаг бонусов
+           созвездия и выбор по слотам { slotId: { uid, en } }. */
+        fitting: { role: '', level: 1, useSkills: false, slots: {} },
 
         // Стоимость ресурсов (из 05_Mechanics.md). v11.6.5e: ребаланс — 100/300.
         // Это фолбэк: живая цена кузнеца читается из enchant.coins
@@ -6862,6 +7533,238 @@
                 parts.push({ item: it, pct: r.pct });
             }
             return { pct: Math.min(GAME_DATA.GEAR_PEN_CAP, pct), parts };
+        },
+
+        /* ---------------------------------------------------------- */
+        /* v11.7.0: РАСЧЁТ «ПРИМЕРКИ» (вкладка 👗 Примерка)            */
+        /* ---------------------------------------------------------- */
+
+        /**
+         * Базовые характеристики героя по уровню (1…50).
+         *
+         * Источник — живая таблица игры G.LGGameData.levelRow(lvl) (строка
+         * уровней: hp/atk/mag/def). Если таблицы ещё нет (run-at
+         * document-start, урезанная сборка), берём фолбэк аддона:
+         *   hp = 15 + 5×lvl, atk/mag = ceil(lvl×0.42), def = floor(lvl×0.24).
+         *
+         * @param {number} level уровень героя
+         * @returns {{hp:number, atk:number, mag:number, def:number}}
+         */
+        levelBaseStats(level) {
+            const lvl = Math.min(50, Math.max(1, Math.round(+level || 1)));
+            const fallback = {
+                hp: 15 + 5 * lvl,
+                atk: Math.ceil(lvl * 0.42),
+                mag: Math.ceil(lvl * 0.42),
+                def: Math.floor(lvl * 0.24)
+            };
+            let row = null;
+            try {
+                const gd = (typeof G !== 'undefined' && G) ? G.LGGameData : null;
+                if (gd && typeof gd.levelRow === 'function') row = gd.levelRow(lvl);
+            } catch (e) { row = null; }
+            // Формат строки уровня может отличаться — берём только числовые
+            // поля объекта, всё остальное закрывает фолбэк.
+            const pick = (k) => {
+                const v = (row && !Array.isArray(row)) ? +row[k] : NaN;
+                return (Number.isFinite(v) && v > 0) ? v : fallback[k];
+            };
+            return { hp: pick('hp'), atk: pick('atk'), mag: pick('mag'), def: pick('def') };
+        },
+
+        /**
+         * Статы предмета на +0 (без заточки).
+         *
+         * Приоритет — stats0 из /api/me (точные базы игры). Если его нет —
+         * обратный вычет заточки: xstat-ы (crit, dodge, pierce…) теряют
+         * ¼ бонуса, поэтому считаем через enchantBase, а не общим делителем.
+         *
+         * @param {object} item предмет из /api/me
+         * @param {number} [curEn] текущая заточка (по умолчанию item.en)
+         * @returns {object} { statKey: baseValue }
+         */
+        itemBaseStats(item, curEn) {
+            if (!item) return {};
+            if (item.stats0 && Object.keys(item.stats0).length) return item.stats0;
+            const en = (curEn === undefined)
+                ? +(item.en ?? item.e ?? item.enchant ?? 0)
+                : curEn;
+            const out = {};
+            for (const [k, v] of Object.entries(item.stats || {})) {
+                out[k] = this.enchantBase(+v || 0, en, k);
+            }
+            return out;
+        },
+
+        /**
+         * Текущие характеристики героя из /api/me: первичные лежат в
+         * hero.stats, вторичные — в hero.xs. Мощь считается той же формулой,
+         * что и у примерки (Σ × POW + 2 за уровень заточки), иначе сравнение
+         * «Было → Стало» было бы нечестным.
+         *
+         * @param {object} h hero из /api/me
+         * @returns {{stats:object, power:number, penalty:number, parts:Array, critMul:number, enTotal:number}}
+         */
+        heroCurrentStats(h) {
+            const items = (h && Array.isArray(h.items)) ? h.items.filter(x => x && x.on) : [];
+            const src = Object.assign({}, (h && h.stats) || {}, (h && h.xs) || {});
+            const stats = {};
+            for (const k of Object.keys(this.FIT_POW)) {
+                const v = +src[k];
+                stats[k] = Number.isFinite(v) ? Math.round(v) : 0;
+            }
+            let enTotal = 0;
+            for (const it of items) enTotal += Math.min(15, Math.max(0, Math.round(+(it.en ?? it.e ?? 0))));
+            let power = 0;
+            for (const [k, w] of Object.entries(this.FIT_POW)) power += (stats[k] || 0) * w;
+            const gp = this.gearPenaltyTotal(h && h.role, items);
+            return {
+                stats,
+                power: Math.round(power + 2 * enTotal),
+                penalty: gp.pct,
+                parts: gp.parts,
+                critMul: 1 + (stats.critDmg || 0) / 100,
+                enTotal
+            };
+        },
+
+        /**
+         * Точный расчёт характеристик «примерки»: база уровня + 5 предметов
+         * на выбранной заточке + бонусы созвездия − штраф экипировки.
+         *
+         * Формулы (совпадают с игрой, app.js:1393 enchStatsN):
+         *  - первичные статы предмета: round(base × (1 + bonus/100));
+         *  - вторичные (XSTAT_KEYS): round(base × (1 + bonus×0.25/100)) —
+         *    enchK = 0.25, иначе крит/уклонение завышались бы вчетверо;
+         *  - потолки вторичных: crit 50, critDmg 200, dodge 35, pierce 75,
+         *    healPow 100, luck 100;
+         *  - штраф экипировки (gearPenalty, максимум 50%) режет mag у
+         *    mage/priest/necromancer и atk у остальных классов;
+         *  - мощь = Σ stat × POW + 2 за каждый уровень заточки.
+         *
+         * @param {string} role класс, для которого считаем
+         * @param {number} level уровень героя (1…50)
+         * @param {Array<{item:object, en:number}>} equippedItems до 5 записей
+         * @param {object|null} skillsBonuses агрегат BuildSim.skillBonuses()
+         * @returns {object} { stats, power, penalty, parts, critMul, enTotal, skillsUsed }
+         */
+        calculateFittingStats(role, level, equippedItems, skillsBonuses) {
+            const base = this.levelBaseStats(level);
+            // Классовый модификатор HP: маг хрупче, разбойник крепче.
+            const hpMod = role === 'mage' ? -12 : (role === 'rogue' ? 10 : 0);
+            const stats = {
+                hp: base.hp + hpMod,
+                atk: base.atk,
+                mag: base.mag,
+                def: base.def,
+                // Базовые вторичные статы героя (xstats.base из game-data.js).
+                crit: 8,
+                critDmg: 50,
+                dodge: 0,
+                pierce: 0,
+                healPow: 0,
+                luck: 0,
+                resist: 0
+            };
+
+            const entries = (Array.isArray(equippedItems) ? equippedItems : [])
+                .filter(e => e && e.item)
+                .map(e => ({ item: e.item, en: Math.min(15, Math.max(0, Math.round(+e.en || 0))) }));
+            const items = entries.map(e => e.item);
+
+            let enTotal = 0;
+            for (const { item, en } of entries) {
+                enTotal += en;
+                const bonus = GAME_DATA.ENCHANT_MULTIPLIERS[en] || 0;
+                const bases = this.itemBaseStats(item);
+                for (const [k, raw] of Object.entries(bases || {})) {
+                    const v = +raw || 0;
+                    if (!v || !(k in stats)) continue;
+                    const pct = GAME_DATA.XSTAT_KEYS.has(k)
+                        ? bonus * GAME_DATA.ENCHANT_K
+                        : bonus;
+                    stats[k] += Math.round(v * (1 + pct / 100));
+                }
+            }
+
+            // Бонусы открытого созвездия: hp/def — плоско, урон — процентом
+            // от уже собранного пула, вторичные — пунктами.
+            if (skillsBonuses) {
+                stats.hp += Math.round(+skillsBonuses.hp || 0);
+                stats.def += Math.round(+skillsBonuses.def || 0);
+                stats.atk += Math.round(stats.atk * (+skillsBonuses.atkPct || 0) / 100);
+                stats.mag += Math.round(stats.mag * (+skillsBonuses.magPct || 0) / 100);
+                for (const k of ['crit', 'critDmg', 'dodge', 'pierce', 'healPow', 'luck', 'resist']) {
+                    stats[k] += +skillsBonuses[k] || 0;
+                }
+            }
+
+            // Штраф чужой экипировки: у магов режет магию, у остальных физурон.
+            const gp = this.gearPenaltyTotal(role, items);
+            if (gp.pct > 0) {
+                const key = ['mage', 'priest', 'necromancer'].includes(role) ? 'mag' : 'atk';
+                stats[key] = Math.round(stats[key] * (1 - gp.pct / 100));
+            }
+
+            for (const k of Object.keys(stats)) stats[k] = Math.round(stats[k] || 0);
+            for (const [k, cap] of Object.entries(this.FIT_CAPS)) {
+                if (stats[k] > cap) stats[k] = cap;
+            }
+
+            let power = 0;
+            for (const [k, w] of Object.entries(this.FIT_POW)) power += (stats[k] || 0) * w;
+
+            return {
+                stats,
+                power: Math.round(power + 2 * enTotal),
+                penalty: gp.pct,
+                parts: gp.parts,
+                critMul: 1 + (stats.critDmg || 0) / 100,
+                enTotal,
+                skillsUsed: !!skillsBonuses
+            };
+        },
+
+        /**
+         * Выбор примерки -> записи { item, en } для calculateFittingStats().
+         * Предметы ищутся в общем пуле (надетое + сумка + склад): uid
+         * уникален за счёт префиксов eq-/bg-/st- из open().
+         *
+         * @param {Array} pool предметы всех локаций
+         * @returns {Array<{item:object, en:number}>}
+         */
+        fittingEntries(pool) {
+            const out = [];
+            for (const slot of this.FITTING_SLOTS) {
+                const sel = this.fitting.slots[slot.id];
+                if (!sel || !sel.uid) continue;
+                const item = (Array.isArray(pool) ? pool : []).find(x => String(x.uid) === String(sel.uid));
+                if (!item) continue;
+                out.push({ item, en: Math.min(15, Math.max(0, Math.round(+sel.en || 0))) });
+            }
+            return out;
+        },
+
+        /**
+         * Результат примерки для текущего состояния (класс, уровень, слоты,
+         * чекбокс «Учитывать бонусы созвездия навыков»).
+         *
+         * @param {object} h hero из /api/me (фолбэк класса/уровня)
+         * @param {Array} pool предметы всех локаций
+         * @returns {object} результат calculateFittingStats()
+         */
+        fittingResult(h, pool) {
+            const role = this.fitting.role || (h && h.role) || '';
+            const level = this.fitting.level || (h && h.level) || 1;
+            let skills = null;
+            if (this.fitting.useSkills) {
+                try {
+                    if (typeof BuildSim !== 'undefined' && BuildSim && typeof BuildSim.skillBonuses === 'function') {
+                        skills = BuildSim.skillBonuses();
+                    }
+                } catch (e) { skills = null; }
+            }
+            return this.calculateFittingStats(role, level, this.fittingEntries(pool), skills);
         },
 
         /**
@@ -7101,30 +8004,25 @@
                 const tabsHtml = `
                     <button class="modal-tab active" data-tab="hero-build">🛡️ Билды</button>
                     <button class="modal-tab" data-tab="hero-ench">⚒️ Заточка</button>
+                    <button class="modal-tab" data-tab="hero-fit">👗 Примерка <span class="hp-test-badge">ТЕСТ</span></button>
                 `;
 
-                // .tab-content.active — это display:flex (строка), поэтому обеим
-                // вкладкам задаём колонку: табы и плитка сверху, таблица снизу.
+                // v11.7.0: вкладки «Билды» и «Заточка» занимают 100% ширины
+                // модального окна. Двухколоночная сетка (1fr 320px) с панелью
+                // «Характеристики» рендерится строго внутри вкладки «Примерка».
                 const contentHtml = `
                     <div class="tab-content active" id="tab-hero-build" style="flex-direction:column; gap:0;">
                         <div id="hp-buildsim-container" style="display:flex; flex-direction:column; flex:1; min-height:0; overflow:auto; padding-bottom:20px;"></div>
                     </div>
                     <div class="tab-content" id="tab-hero-ench" style="flex-direction:column; gap:8px;">
-                        <!-- 11.6.5f.1: строка 1 — режимы и цены ресурсов. v11.7.1:
-                             ручной ввод количества звёзд/сфер убран — ресурсы
-                             выбираются кнопками ⭐/🌐 в строках уровней. -->
-                        <div class="hp-ench-topbar">
-                            <div class="hp-mode-switch">
-                                <button class="hp-mode-btn ${this.strategyMode === 'ideal' ? 'active' : ''}" data-mode="ideal" style="border:none; border-radius:5px; font-weight:bold; cursor:pointer; transition:all 0.2s; background:${this.strategyMode === 'ideal' ? '#caa55c' : 'transparent'}; color:${this.strategyMode === 'ideal' ? '#1d1620' : '#aaa'};">📊 Идеально</button>
-                                <button class="hp-mode-btn ${this.strategyMode === 'expected' ? 'active' : ''}" data-mode="expected" style="border:none; border-radius:5px; font-weight:bold; cursor:pointer; transition:all 0.2s; background:${this.strategyMode === 'expected' ? '#caa55c' : 'transparent'}; color:${this.strategyMode === 'expected' ? '#1d1620' : '#aaa'};">🧠 С учётом шансов</button>
-                            </div>
-                            <!-- 11.6.2d: цены ресурсов. 📈 — медиана аука (за 72 часа /
-                                 последние 100 цен), 🏪 — цена кузнеца (фолбэк).
-                                 Содержимое обновляет renderTable после ответа сервера. -->
-                            <div id="hp-mats-price" class="hp-mat-prices">${this.matsPriceHtml()}</div>
-                        </div>
+                        <!-- v11.7.0: верхняя полоса переключателя режимов и
+                             ценники ⭐/🌐 убраны — кукла слотов и таблица
+                             +0…+15 начинаются сразу под шапкой вкладок.
+                             Стоимость попытки сразу считается ожидаемой, а
+                             цены ресурсов и справка живут справа снизу
+                             (см. renderTable). -->
 
-                        <!-- 11.6.5f.1: строка 2 — локации и плитка предметов рядом.
+                        <!-- 11.6.5f.1: локации и плитка предметов рядом.
                              Статус экипировки (бывшая полоса «✓ Снаряжение подходит»)
                              теперь иконка рядом с названием предмета — см. renderTable. -->
                         <div class="hp-ench-subbar">
@@ -7143,18 +8041,48 @@
                             <div style="color:#888; text-align:center; padding:20px;">Выберите предмет.</div>
                         </div>
                     </div>
+                    <div class="tab-content" id="tab-hero-fit" style="flex-direction:column; gap:10px;">
+                        <div class="hp-fit-layout">
+                            <div class="hp-fit-main">
+                                <div class="hp-fit-head">
+                                    <span class="hp-fit-title">👗 Примерка экипировки <span class="hp-test-badge">ТЕСТ</span></span>
+                                </div>
+                                <!-- v11.7.0: примерка набора экипировки. Класс и уровень
+                                     можно смоделировать, заточка каждого слота — +0…+15. -->
+                                <div class="hp-fit-top">
+                                    <label class="hp-fit-field">Класс
+                                        <select id="hp-fit-role">${Object.entries(GAME_DATA.CLASS_NAMES).map(([id, nm]) => `<option value="${id}">${Utils.escapeHtml(nm)}</option>`).join('')}</select>
+                                    </label>
+                                    <label class="hp-fit-field">Уровень
+                                        <input id="hp-fit-level" type="number" min="1" max="50" step="1">
+                                    </label>
+                                    <label class="hp-fit-chk" title="Прибавить бонусы открытых узлов созвездия из вкладки «Билды»">
+                                        <input id="hp-fit-skills" type="checkbox"> учитывать созвездие
+                                    </label>
+                                    <button type="button" class="hp-arena-btn" id="hp-fit-reset" title="Вернуть текущие вещи героя">↺ К текущим вещам</button>
+                                </div>
+                                <div id="hp-fit-rows" class="hp-fit-rows"></div>
+                                <div id="hp-fit-foot" class="hp-cost-note">Класс и уровень можно моделировать независимо от героя: заточка выбирается для каждого слота, «↺ К текущим вещам» возвращает надетое. Сравнение с текущими характеристиками — в панели справа.</div>
+                            </div>
+                            <!-- v11.7.0: боковая панель характеристик и сравнения «Текущий герой → Примерка». -->
+                            <aside class="hp-side" id="hp-side"></aside>
+                        </div>
+                    </div>
                 `;
 
                 const modal = UI.showModal(`
                     <h2>⚙️ Планировщик Героя (${Utils.escapeHtml(h.name || '')}) <button class="custom-close" id="custom-close-btn">✖</button></h2>
                     <div class="modal-tabs">${tabsHtml}</div>
                     ${contentHtml}
-                `);
+                `, { customClass: 'hp-planner-modal' });
 
                 // Переключение табов. Скоупим на собственный нав-бар HeroPlanner:
                 // после BuildSim.mount() внутри #tab-hero-build появляются свои
                 // .modal-tab/.tab-content, и глобальные селекторы сбросили бы их.
                 const ownTabs = modal?.querySelector('.modal-tabs');
+                // v11.7.0: собственные вкладки HeroPlanner — прямые потомки
+                // модалки с классом .tab-content (вкладки BuildSim внутри
+                // #tab-hero-build не затрагиваются).
                 const ownContents = () => Array.from(modal?.children || []).filter(el => el.classList.contains('tab-content'));
                 // 11.6.2d: при входе на вкладку «Заточка» подтягиваем цены
                 // звёзды/сферы с аукциона. Реальная реализация — ниже, после
@@ -7190,12 +8118,6 @@
                 const renderTable = () => {
                     if (!outEl) return;
 
-                    // 11.6.2d: после ответа /market/medians цены ресурсов могли
-                    // смениться — обновляем строку под переключателем режимов
-                    // (она живёт вне outEl, поэтому перерисовывается отдельно).
-                    const matsEl = document.getElementById('hp-mats-price');
-                    if (matsEl) matsEl.innerHTML = this.matsPriceHtml();
-
                     const item = selectedItem;
                     if (!item) {
                         outEl.innerHTML = `<div style="color:#888; text-align:center; padding:20px;">В этой локации нет предметов для заточки.</div>`;
@@ -7204,21 +8126,9 @@
 
                     const curEn = +(item.en ?? item.e ?? item.enchant ?? 0);
 
-                    // ПРИОРИТЕТ: stats0 (точные базы из игры). Если нет — вычисляем обратным вычетом.
-                    let baseStats = {};
-                    const hasStats0 = item.stats0 && Object.keys(item.stats0).length > 0;
-                    if (hasStats0) {
-                        baseStats = item.stats0;
-                    } else {
-                        // Обратный вычет заточки. Для xstat-ов (crit, dodge, pierce…)
-                        // эффективный процент вчетверо меньше (enchK=0.25), поэтому
-                        // считаем через enchantBase, а не общим делителем.
-                        for (const [k, v] of Object.entries(item.stats || {})) {
-                            baseStats[k] = this.enchantBase(v, curEn, k);
-                        }
-                    }
-
-                    const isExpected = this.strategyMode === 'expected';
+                    // ПРИОРИТЕТ: stats0 (точные базы из игры), иначе обратный
+                    // вычет заточки — см. HeroPlanner.itemBaseStats().
+                    const baseStats = this.itemBaseStats(item, curEn);
                     const isExpanded = this.ENCH.max;
                     // v11.7.1: уровень ПРОСМОТРА (0…15) отделён от цели пути.
                     // preview <= curEn означает «шагов нет»: карточка просто
@@ -7300,10 +8210,11 @@
                     }
 
                     // ── Левая колонка: карточка уровня просмотра ──
-                    // Две суммы: «идеальная» (все попытки удачны с первой) и с
-                    // отмеченными усилителями. В режиме шансов показываем вторую.
+                    // v11.7.0: переключателя режимов больше нет — «Итоговая
+                    // стоимость» сразу считается ОЖИДАЕМОЙ (с учётом шансов и
+                    // отмеченных ⭐/🌐), а минимум без промахов идёт подписью.
                     let costIdeal = 0;
-                    let costStrat = 0;
+                    let costExpected = 0;
                     let starsUsed = 0, spheresUsed = 0;
                     let attempts = 0;
                     // v11.7.1: путь всегда вперёд (curEn+1…preview). Если
@@ -7317,13 +8228,15 @@
                         // Ресурсы выбранные кнопками ⭐/🌐 в строках таблицы.
                         if (this.allocatedStars[lv]) { stepCost += starPrice; chance += 25; starsUsed++; }
                         if (this.allocatedSpheres[lv]) { stepCost += spherePrice; spheresUsed++; }
-                        costStrat += stepCost;
                         // 100 / chance — ожидаемое число попыток на один шаг
                         // (1/p). Сумма по пути даёт матожидание попыток на всю
                         // цель; при 0% шаг бесконечен, поэтому Infinity.
                         attempts += chance > 0 ? 100 / chance : Infinity;
+                        costExpected += chance > 0 ? stepCost * (100 / chance) : Infinity;
                     }
-                    const costTotal = isExpected ? costStrat : costIdeal;
+                    const costTotalRaw = costExpected;
+                    const costTotal = Number.isFinite(costTotalRaw) ? Utils.formatMoney(costTotalRaw) : '∞';
+                    const costMin = Number.isFinite(costIdeal) ? Utils.formatMoney(costIdeal) : '∞';
                     const costResources = starsUsed * starPrice + spheresUsed * spherePrice;
                     const attemptsStr = hasPath
                         ? (Number.isFinite(attempts) ? Math.ceil(attempts) : '∞')
@@ -7420,38 +8333,38 @@
                                     <div class="hp-stat-grid">${statHtml}</div>
                                 </div>
                                 <div class="hp-target-section">
-                                    <div class="hp-target-sub">Итоговая стоимость</div>
-                                    <div class="hp-cost-total">${Utils.formatMoney(costTotal)}</div>
+                                    <div class="hp-target-sub">Итоговая стоимость (ожидаемо)</div>
+                                    <div class="hp-cost-total">${costTotal}</div>
+                                    <div class="hp-cost-min">Минимум без промахов: ${costMin}</div>
                                     <div class="hp-cost-sub">${rangeText} · попыток: ${attemptsStr}</div>
                                     <div class="hp-cost-row">⭐ Звёзды: ${starsUsed} шт. · 🌐 Сферы: ${spheresUsed} шт.${costResources > 0
                                         ? ` — ${Utils.formatMoney(costResources)}`
                                         : ''}</div>
                                 </div>
                             </div>
-                            <div class="hp-ench-right">
-                                <table class="hp-ench-table">
-                                    <thead><tr>
-                                        <th>Уровень</th>
-                                        <th>Шанс</th>
-                                        <th>Бонус</th>
-                                        <th>Попытка</th>
-                                        <th>Усилители</th>
-                                        <th>Статы</th>
-                                    </tr></thead>
-                                    <tbody>${rows}</tbody>
-                                </table>
+                            <div class="hp-ench-rightcol">
+                                <div class="hp-ench-right">
+                                    <table class="hp-ench-table">
+                                        <thead><tr>
+                                            <th>Уровень</th>
+                                            <th>Шанс</th>
+                                            <th>Бонус</th>
+                                            <th>Попытка</th>
+                                            <th>Усилители</th>
+                                            <th>Статы</th>
+                                        </tr></thead>
+                                        <tbody>${rows}</tbody>
+                                    </table>
+                                </div>
+                                <!-- v11.7.0: компактная справка справа снизу под
+                                     таблицей +0…+15 (вместо полосы нотации). -->
+                                <div class="hp-ench-hint">
+                                    <div class="hp-ench-hint-prices">${this.matsPriceHtml()}</div>
+                                    <div>Попытка = <code>max(priceMin, round(v × price% / 100))</code> из живой таблицы <code>LG_GAME_DATA.enchant</code>.</div>
+                                    <div>«Ожидаемо» = стоимость шагов ${rangeText} с ⭐/🌐 × матожидание попыток (100 / шанс).</div>
+                                    <div>Вторичные статы (крит, уклонение, пробивание…) получают ¼ бонуса заточки (enchK = 0.25).</div>
+                                </div>
                             </div>
-                        </div>
-                        <div class="hp-cost-note">
-                            ${isExpected
-                                ? `⭐ Звезда: +25% к шансу, +${Utils.formatMoney(starPrice)} к цене. 🌐 Сфера: защита от поломки, +${Utils.formatMoney(spherePrice)} к цене.<br>
-                            Цены ресурсов: 📈 — медиана аукциона (за 72 часа / последние 100 цен), 🏪 — базовая цена кузнеца (аукцион не отвечает).<br>
-                            <b>«Итоговая стоимость»</b> = стоимость ${rangeText} с выбранными усилителями; «попыток» — матожидание с учётом шансов.<br>
-                            Расширенные статы (крит, уклонение, пробивание и пр.) получают ¼ бонуса заточки (enchK = 0.25).`
-                                : `Стоимость попытки = <code>max(priceMin, round(v × price% / 100))</code> из живой таблицы игры <code>LG_GAME_DATA.enchant</code>. Округление статов — <code>Math.round</code> (подтверждено игрой).<br>
-                            <b>«Итоговая стоимость»</b> = сумма базовых стоимостей ${rangeText} (без шансов и поломок — «идеальная» стоимость).<br>
-                            Ресурсы выбираются кнопками ⭐/🌐 в строках шагов: их цена сразу входит в «Попытку», а в «Итоговую стоимость» — в режиме «🧠 С учётом шансов».<br>
-                            Расширенные статы (крит, уклонение, пробивание и пр.) получают ¼ бонуса заточки (enchK = 0.25).`}
                         </div>
                     `;
                     outEl.scrollTop = keepScroll;
@@ -7498,6 +8411,176 @@
                     });
                 };
 
+                // ============================================================
+                // v11.7.0: ВКЛАДКА «👗 ПРИМЕРКА» + ПАНЕЛЬ СТАТОВ
+                //
+                // Пул примерки — надетое, сумка и склад: uid уникальны за счёт
+                // префиксов eq-/bg-/st- из mapItems(), поэтому поиск по строке
+                // безопасен.
+                // ============================================================
+                const fitPool = [];
+                for (const key of ['equipped', 'bag', 'storage']) {
+                    for (const it of locations[key].items) fitPool.push(it);
+                }
+                const sideEl = document.getElementById('hp-side');
+
+                // Примерка стартует с ТЕКУЩИХ вещей героя: игрок сразу видит
+                // нулевую дельту и меняет только то, что хочет примерить.
+                const initFitting = () => {
+                    this.fitting = {
+                        role: h.role || '',
+                        level: Math.min(50, Math.max(1, +h.level || 1)),
+                        useSkills: false,
+                        slots: {}
+                    };
+                    for (const slot of this.FITTING_SLOTS) {
+                        const it = equipped.find(x => x.slot === slot.id) || null;
+                        this.fitting.slots[slot.id] = {
+                            uid: it ? String(it.uid) : '',
+                            en: it ? Math.min(15, Math.max(0, Math.round(+(it.en ?? it.e ?? 0)))) : 0
+                        };
+                    }
+                    const roleSel = document.getElementById('hp-fit-role');
+                    if (roleSel) roleSel.value = this.fitting.role;
+                    const lvlInp = document.getElementById('hp-fit-level');
+                    if (lvlInp) lvlInp.value = String(this.fitting.level);
+                    const chk = document.getElementById('hp-fit-skills');
+                    if (chk) chk.checked = false;
+                };
+
+                // Порядок строк как в нативной карточке героя: сначала основные
+                // характеристики, затем вторичные (третий элемент — единица).
+                const SIDE_ROWS = [
+                    ['hp', 'Макс. HP', ''], ['atk', 'Физ. урон', ''], ['mag', 'Магия', ''], ['def', 'Броня', ''],
+                    ['crit', 'Крит', '%'], ['critDmg', 'Сила крита', '%'], ['dodge', 'Уклонение', '%'],
+                    ['pierce', 'Пробивание', '%'], ['healPow', 'Сила лечения', '%'],
+                    ['luck', 'Удача', '%'], ['resist', 'Сопротивление', '']
+                ];
+
+                /**
+                 * Постоянная правая панель: «Текущий герой → Примерка» по всем
+                 * характеристикам + боевая мощь, штраф экипировки и множитель
+                 * крита (1 + critDmg/100). Δ: +N зелёным, −N красным.
+                 */
+                const renderSide = () => {
+                    if (!sideEl) return;
+                    const cur = this.heroCurrentStats(h);
+                    let fit = null;
+                    try { fit = this.fittingResult(h, fitPool); } catch (e) { fit = null; }
+                    const delta = (before, after) => {
+                        const d = Math.round((after - before) * 10) / 10;
+                        const cls = d > 0 ? 'up' : (d < 0 ? 'down' : 'same');
+                        const txt = d > 0 ? `+${d}` : (d < 0 ? `−${Math.abs(d)}` : '±0');
+                        return `<span class="hp-side-delta ${cls}">${txt}</span>`;
+                    };
+                    const statRow = ([k, label, suf]) => {
+                        const before = +(cur.stats[k] || 0);
+                        const after = fit ? +(fit.stats[k] || 0) : before;
+                        return `<div class="hp-side-row"><span class="hp-side-name">${label}</span>`
+                            + `<span class="hp-side-vals">${before}${suf} → <b>${after}${suf}</b></span>`
+                            + delta(before, after) + '</div>';
+                    };
+                    const pwBefore = cur.power;
+                    const pwAfter = fit ? fit.power : pwBefore;
+                    const pen = fit ? fit.penalty : cur.penalty;
+                    const critMul = fit ? fit.critMul : cur.critMul;
+                    const skillsNote = !this.fitting.useSkills ? ''
+                        : (fit && fit.skillsUsed ? ' · 🌟 созвездие учтено' : ' · 🌟 созвездие недоступно');
+                    sideEl.innerHTML = `<div class="hp-side-head">Характеристики</div>
+                        <div class="hp-side-cols"><span>Параметр</span><span>Сейчас → Примерка</span><span>Δ</span></div>
+                        ${SIDE_ROWS.map(statRow).join('')}
+                        <div class="hp-side-sep"></div>
+                        <div class="hp-side-row strong"><span class="hp-side-name">Боевая мощь</span>`
+                        + `<span class="hp-side-vals">${pwBefore} → <b>${pwAfter}</b></span>${delta(pwBefore, pwAfter)}</div>
+                        <div class="hp-side-row"><span class="hp-side-name">Штраф экипировки</span>`
+                        + `<span class="hp-side-vals">${pen ? '−' + pen + '%' : 'нет'}</span><span class="hp-side-delta same"></span></div>
+                        <div class="hp-side-row"><span class="hp-side-name">Множитель крита</span>`
+                        + `<span class="hp-side-vals">×${critMul.toFixed(2)}</span><span class="hp-side-delta same"></span></div>
+                        <div class="hp-side-foot">Заточка: Σ +${fit ? fit.enTotal : cur.enTotal} ур. · +2 мощи за уровень${skillsNote}</div>`;
+                };
+
+                /**
+                 * Строки примерки: слот -> предмет (optgroup по локациям) и
+                 * уровень заточки +0…+15. Любое изменение сразу обновляет
+                 * боковую панель, таблица заточки не перерисовывается.
+                 */
+                const renderFit = () => {
+                    const rowsEl = document.getElementById('hp-fit-rows');
+                    if (!rowsEl) return;
+                    rowsEl.innerHTML = this.FITTING_SLOTS.map(slot => {
+                        const sel = this.fitting.slots[slot.id] || { uid: '', en: 0 };
+                        const groups = ['equipped', 'bag', 'storage'].map(key => {
+                            const list = locations[key].items.filter(it => it.slot === slot.id);
+                            if (!list.length) return '';
+                            const opts = list.map(it => {
+                                const on = String(it.uid) === String(sel.uid) ? ' selected' : '';
+                                const en = +(it.en ?? it.e ?? 0);
+                                const label = `${it.name || '—'}${en > 0 ? ` +${en}` : ''} · ${Utils.formatMoney(it.v || 0)}`;
+                                return `<option value="${Utils.escapeHtml(String(it.uid))}"${on}>${Utils.escapeHtml(label)}</option>`;
+                            }).join('');
+                            return `<optgroup label="${Utils.escapeHtml(locations[key].name)}">${opts}</optgroup>`;
+                        }).join('');
+                        const enOpts = Array.from({ length: 16 }, (_, i) =>
+                            `<option value="${i}"${i === (+sel.en || 0) ? ' selected' : ''}>+${i}</option>`).join('');
+                        const chosen = fitPool.find(x => String(x.uid) === String(sel.uid));
+                        const gp = chosen ? this.gearPenaltyFor(this.fitting.role, chosen) : null;
+                        const warn = (gp && gp.bad)
+                            ? `<span class="hp-gear-pill bad" title="Не для класса: −${gp.pct}%">⚠</span>`
+                            : '';
+                        return `<div class="hp-fit-row">
+                            <span class="hp-fit-slot">${slot.icon} ${slot.name}${warn}</span>
+                            <select class="hp-fit-item" data-slot="${slot.id}" title="Предмет из надетого, сумки или склада">
+                                <option value="">— пусто —</option>${groups}
+                            </select>
+                            <select class="hp-fit-en" data-slot="${slot.id}" title="Уровень заточки (0…15)">${enOpts}</select>
+                        </div>`;
+                    }).join('');
+
+                    rowsEl.querySelectorAll('.hp-fit-item').forEach(el => {
+                        el.addEventListener('change', () => {
+                            const slot = el.dataset.slot;
+                            if (!this.fitting.slots[slot]) this.fitting.slots[slot] = { uid: '', en: 0 };
+                            this.fitting.slots[slot].uid = el.value;
+                            // Перерисовка нужна ради ⚠ «не для класса» у слота.
+                            renderFit();
+                            renderSide();
+                        });
+                    });
+                    rowsEl.querySelectorAll('.hp-fit-en').forEach(el => {
+                        el.addEventListener('change', () => {
+                            const slot = el.dataset.slot;
+                            if (!this.fitting.slots[slot]) this.fitting.slots[slot] = { uid: '', en: 0 };
+                            this.fitting.slots[slot].en = Math.min(15, Math.max(0, +el.value || 0));
+                            renderSide();
+                        });
+                    });
+                };
+
+                // ── Управление примеркой: класс, уровень, созвездие, сброс ──
+                document.getElementById('hp-fit-role')?.addEventListener('change', (e) => {
+                    this.fitting.role = e.target.value || h.role || '';
+                    renderFit();   // ⚠ «не для класса» зависит от класса
+                    renderSide();
+                });
+                document.getElementById('hp-fit-level')?.addEventListener('input', (e) => {
+                    const lv = Math.min(50, Math.max(1, Math.round(+e.target.value || 1)));
+                    this.fitting.level = lv;
+                    renderSide();
+                });
+                // blur возвращает зажатую границу (1…50), если ввели 0 или 99.
+                document.getElementById('hp-fit-level')?.addEventListener('blur', (e) => {
+                    e.target.value = String(this.fitting.level);
+                });
+                document.getElementById('hp-fit-skills')?.addEventListener('change', (e) => {
+                    this.fitting.useSkills = !!e.target.checked;
+                    renderSide();
+                });
+                document.getElementById('hp-fit-reset')?.addEventListener('click', () => {
+                    initFitting();
+                    renderFit();
+                    renderSide();
+                });
+
                 // 11.6.2d: при входе на вкладку «Заточка» тянем цены звёзды и
                 // сферы с аукциона и перерисовываем таблицу. Пока ответа нет (или
                 // если сервер молчит) в UI стоят базовые цены кузнеца.
@@ -7511,9 +8594,10 @@
                     });
                 };
 
-                // initialTab: 'build' (по умолчанию) | 'ench'; 'arena' уже
-                // нормализован в 'build'. «Билды» активны в разметке изначально.
+                // initialTab: 'build' (по умолчанию) | 'fit' | 'ench'; 'arena'
+                // уже нормализован в 'build'. «Билды» активны в разметке сразу.
                 if (wanted === 'ench' || wanted === 'hero-ench') activateTab('hero-ench');
+                else if (wanted === 'fit' || wanted === 'hero-fit') activateTab('hero-fit');
 
                 // Рендер плитки предметов
                 const renderGrid = () => {
@@ -7596,27 +8680,13 @@
                     });
                 });
 
-                // Обработка переключателя режимов
-                modal?.querySelectorAll('.hp-mode-btn').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
-                        this.strategyMode = e.currentTarget.dataset.mode;
+                // v11.7.0: переключатель «📊 Идеально / 🧠 С учётом шансов»
+                // удалён — «Итоговая стоимость» всегда ожидаемая (renderTable),
+                // поэтому обработчиков .hp-mode-btn больше нет.
 
-                        // Обновляем визуал кнопок
-                        modal.querySelectorAll('.hp-mode-btn').forEach(b => {
-                            b.classList.remove('active');
-                            b.style.background = 'transparent';
-                            b.style.color = '#aaa';
-                        });
-                        e.currentTarget.classList.add('active');
-                        e.currentTarget.style.background = '#caa55c';
-                        e.currentTarget.style.color = '#1d1620';
-
-                        // v11.7.1: панели ручного ввода ресурсов больше нет —
-                        // режим влияет только на расчёт (см. renderTable).
-                        renderTable();
-                    });
-                });
-
+                initFitting();
+                renderFit();
+                renderSide();
                 renderGrid();
                 renderTable();
 
@@ -10790,36 +11860,12 @@ const Players = {
     };
 
     // ===== src/modules/pocket-city.js =====
-    // ============================================================
-    // 6.5. МОДУЛЬ: КАРМАННЫЙ ГОРОД (modules/pocket-city.js)
-    //
-    // Прямой доступ к официальным зданиям игры из любой локации.
-    // Вынесено из core/ui.js (v11.6.0, этап 3): UI остаётся фабрикой
-    // модалок/HUD, а вся логика «нативных» зданий живёт здесь.
-    // Разметку отдаёт UITemplates.pocketCityModal(), окно — UI.showModal().
-    //
-    // Подключается после core/ui.js (SHARED_MODULES в build.js): методы
-    // зовут UI/UITemplates по вызову, на этапе загрузки зависимостей нет.
-    //
-    // v11.6.4c: перед открытием здания ждём не просто появления LGCity,
-    // а реальной готовности города (состояние S и .cy-room) — иначе первый
-    // клик терялся: LGCity.panel(id) до LGCity.open(el, CX) — молчаливый no-op.
-    //
-    // v11.6.4d: после закрытия здания возвращаем игрока туда, откуда он пришёл.
-    // Шахта в игре — не вкладка, а оверлей `.mn` (body.mn-on) поверх «Города»,
-    // поэтому её запоминаем отдельно, чат LGChatOne перевешиваем обратно в шахту,
-    // а городской слой гасим через LGCity.sleep() (как это делает openMine).
-    //
-    // v11.6.6f: карточка «Гильдия» в Карманном Городе. Гильдии — не здание
-    // города (LGCity.panel('guild') не существует), поэтому открываем нативное
-    // окно игры LGGuilds.open({ big: true }) из любой локации. Фолбэк — клик по
-    // нативной кнопке входа (#gu-hud [data-gu="guild"] / .cy-hud .gl-entry).
-    // Доступность считаем по флагу героя ME.hero.gu (см. isGuildLocked).
-    //
-    // v11.7.0: фоновый мониторинг сборов гильдии на элитных монстров
-    // (POST /api/citymon/act { op: 'elist' }) и плашка «Присоединиться»
-    // (op: 'ejoin'). Запросы — Utils.fetchApi, патчей window.fetch/LGMine нет.
-    // ============================================================
+// ============================================================
+// 6.5. МОДУЛЬ: КАРМАННЫЙ ГОРОД (modules/pocket-city.js)
+// ============================================================
+const PocketCity = (() => {
+    const G = (typeof unsafeWindow !== 'undefined' && unsafeWindow) || window;
+
     const PocketCity = {
         // Ожидание готовности города (v11.6.4c). Два этапа:
         //   1) city.js грузится лениво по клику на вкладку «Город»;
@@ -11342,14 +12388,21 @@ const Players = {
         // ============================================================
 
         /**
-         * Доступен ли раздел элитных монстров: флаг cm у героя
-         * (/api/me -> ME.hero.cm). Без него запросы впустую жгут лимит.
+         * Доступен ли раздел элитных монстров:
+         * v11.7.0: надёжный резолв через unsafeWindow/window и LG/ME.
+         * Опрос запускается для любого авторизованного героя сразу после
+         * загрузки страницы либо при наличии игровых модулей LGCityMon/LGGuilds
+         * при условии, что настройка citymonGatherEnabled включена (по умолчанию false).
          */
         canWatchCityMon() {
-            const pageWin = (typeof G !== 'undefined' && G) ? G : window;
-            const me = pageWin.ME;
-            const hero = me && me.hero;
-            return !!(hero && hero.cm);
+            if (typeof Settings !== 'undefined' && !Settings.get('citymonGatherEnabled')) return false;
+            const win = (typeof unsafeWindow !== 'undefined' && unsafeWindow) || window;
+            const lg = win.LG || window.LG;
+            const hero = (typeof lg?.hero === 'function' ? lg.hero() : null)
+                || (typeof lg?.me === 'function' ? lg.me()?.hero : null)
+                || win.ME?.hero;
+            if (hero && typeof hero === 'object' && Object.keys(hero).length > 0) return true;
+            return Boolean(win.LGCityMon || win.LGGuilds);
         },
 
         /**
@@ -11404,6 +12457,10 @@ const Players = {
         async pollCityMonLobbies(force = false) {
             // Свёрнутая вкладка — не опрашиваем (условие ТЗ 11.7.0).
             if (document.hidden) return;
+            if (typeof Settings !== 'undefined' && !Settings.get('citymonGatherEnabled')) {
+                PocketCity.hideCityMonGather();
+                return;
+            }
             if (!PocketCity.canWatchCityMon()) {
                 PocketCity.hideCityMonGather();
                 return;
@@ -11412,11 +12469,22 @@ const Players = {
             if (!force && Date.now() < PocketCity._citymonPausedUntil) return;
 
             PocketCity._citymonBusy = true;
+            const win = (typeof unsafeWindow !== 'undefined' && unsafeWindow) || window;
             let res = null;
             try {
-                res = (typeof Utils !== 'undefined' && typeof Utils.fetchApi === 'function')
-                    ? await Utils.fetchApi('/api/citymon/act', { op: 'elist' })
-                    : null;
+                if (typeof Utils !== 'undefined' && typeof Utils.fetchApi === 'function') {
+                    res = await Utils.fetchApi('/api/citymon/act', { op: 'elist' });
+                } else if (typeof win.fetch === 'function') {
+                    const url = (win.LG_BASE || '') + '/api/citymon/act';
+                    const r = await win.fetch(url, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ op: 'elist' })
+                    });
+                    const d = await r.json().catch(() => null);
+                    res = { ok: r.ok && (d ? d.ok !== false : true), status: r.status, body: d, data: d, ...(d && typeof d === 'object' && !Array.isArray(d) ? d : {}) };
+                }
             } catch (e) {
                 dbg('citymon elist error:', e);
             } finally {
@@ -11428,7 +12496,22 @@ const Players = {
                 dbg('citymon: 429/rate_limited — пауза 60 с');
                 return;
             }
-            if (!res || !res.ok) return; // сеть/сервер: баннер не трогаем
+
+            const data = (res && typeof res === 'object') ? (res.body || res.data || res) : {};
+            const isOk = Boolean(res?.ok ?? data?.ok);
+            if (!res || !isOk) return; // сеть/сервер: баннер не трогаем
+
+            // v11.7.0: игрок не состоит в гильдии — пауза на 5 минут,
+            // чтобы не делать лишних запросов для игроков без гильдии.
+            // res.guild может быть объектом { gid, name } при наличии гильдии.
+            const guild = res.guild !== undefined ? res.guild : (data.guild !== undefined ? data.guild : undefined);
+            const isNoGuild = guild === false || guild === null || (guild && typeof guild === 'object' && 'gid' in guild && !guild.gid);
+            if (isNoGuild) {
+                this._citymonPausedUntil = Date.now() + 300000;
+                PocketCity._citymonPausedUntil = this._citymonPausedUntil;
+                PocketCity.hideCityMonGather();
+                return;
+            }
 
             const lobby = PocketCity.findCityMonLobby(res);
             if (lobby) PocketCity.showCityMonGather(lobby);
@@ -11443,13 +12526,17 @@ const Players = {
          * @returns {object|null} лобби L из list
          */
         findCityMonLobby(res) {
-            if (!res || res.mine) return null; // уже состою в каком-то сборе
-            const list = Array.isArray(res.list) ? res.list : [];
+            if (!res) return null;
+            const data = (res && typeof res === 'object') ? (res.body || res.data || res) : {};
+            if (res.mine || data.mine) return null; // уже состою в каком-то сборе
+            const list = Array.isArray(res.list) ? res.list : (Array.isArray(data.list) ? data.list : []);
             const now = Date.now();
             for (const L of list) {
                 if (!L || L.st !== 'open' || L.mine) continue;
                 if (PocketCity._citymonDismissed.has(L.id)) continue;
-                if (!(L.until > now)) continue;
+                // v11.7.0: until может приходить в секундах (< 1e12) или миллисекундах
+                const untilMs = (L.until && +L.until < 1e12) ? +L.until * 1000 : (+L.until || 0);
+                if (untilMs <= now) continue;
                 const members = Array.isArray(L.members) ? L.members.length : 0;
                 if (members >= (+L.max || 5)) continue;
                 return L;
@@ -11458,13 +12545,25 @@ const Players = {
         },
 
         /**
+         * v11.7.0: применение класса размера плашки уведомления (S / M / L).
+         */
+        applyGatherSize(size) {
+            const s = (size || (typeof Settings !== 'undefined' ? Settings.get('citymonGatherSize') : null) || 'L').toLowerCase();
+            const el = PocketCity._citymonEl || document.getElementById('lg-citymon-gather');
+            if (el) {
+                el.classList.remove('lg-cm-size-s', 'lg-cm-size-m', 'lg-cm-size-l');
+                el.classList.add(`lg-cm-size-${s}`);
+            }
+        },
+
+        /**
          * init() из boot() в main.js: поднимаем автоскип, если тумблер был
          * включён в прошлой сессии (настройка хранится в localStorage),
-         * и запускаем фоновый мониторинг сборов на элитных монстров.
+         * и запускаем фоновый мониторинг сборов на элитных монстров (если включено).
          */
         init() {
             if (Settings.get('autoSkipMonsters')) PocketCity.startMonsterAutoSkip();
-            PocketCity.startCityMonWatch();
+            if (Settings.get('citymonGatherEnabled')) PocketCity.startCityMonWatch();
         },
 
         /**
@@ -11486,6 +12585,7 @@ const Players = {
                 PocketCity._citymonEl = el;
             }
             el.classList.add('on');
+            PocketCity.applyGatherSize();
 
             const sameLobby = !!PocketCity._citymonLobby && PocketCity._citymonLobby.id === lobby.id;
             PocketCity._citymonLobby = lobby;
@@ -11532,7 +12632,8 @@ const Players = {
             if (!L) return '';
             const members = Array.isArray(L.members) ? L.members.length : 0;
             const max = +L.max || 5;
-            const left = Math.max(0, (+L.until || 0) - Date.now());
+            const untilMs = (L.until && +L.until < 1e12) ? +L.until * 1000 : (+L.until || 0);
+            const left = Math.max(0, untilMs - Date.now());
             // ceil: на последней секунде показываем 00:01, а не 00:00 раньше времени.
             const total = Math.ceil(left / 1000);
             const mm = String(Math.floor(total / 60)).padStart(2, '0');
@@ -11582,16 +12683,30 @@ const Players = {
                 if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, !!isError);
             };
 
+            const win = (typeof unsafeWindow !== 'undefined' && unsafeWindow) || window;
             let res = null;
             try {
-                res = (typeof Utils !== 'undefined' && typeof Utils.fetchApi === 'function')
-                    ? await Utils.fetchApi('/api/citymon/act', { op: 'ejoin', id: lobby.id })
-                    : null;
+                if (typeof Utils !== 'undefined' && typeof Utils.fetchApi === 'function') {
+                    res = await Utils.fetchApi('/api/citymon/act', { op: 'ejoin', id: lobby.id });
+                } else if (typeof win.fetch === 'function') {
+                    const url = (win.LG_BASE || '') + '/api/citymon/act';
+                    const r = await win.fetch(url, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ op: 'ejoin', id: lobby.id })
+                    });
+                    const d = await r.json().catch(() => null);
+                    res = { ok: r.ok && (d ? d.ok !== false : true), status: r.status, body: d, data: d, ...(d && typeof d === 'object' && !Array.isArray(d) ? d : {}) };
+                }
             } catch (e) {
                 dbg('citymon ejoin error:', e);
             }
 
-            if (res && res.ok) {
+            const data = (res && typeof res === 'object') ? (res.body || res.data || res) : {};
+            const isOk = Boolean(res?.ok ?? data?.ok);
+
+            if (res && isOk) {
                 toast(`Вы вступили в сбор на «${lobby.name}»!`, false);
                 // Плашку гасим сразу, а список перечитываем — возможно,
                 // открылся следующий сбор.
@@ -11603,7 +12718,7 @@ const Players = {
             if (PocketCity.isCityMonRateLimited(res)) {
                 PocketCity._citymonPausedUntil = Date.now() + PocketCity.CITYMON_PAUSE_MS;
             }
-            const errText = (res && (res.error || (res.body && (res.body.error || res.body.err)))) || '';
+            const errText = (res && (res.error || (res.body && (res.body.error || res.body.err)) || (res.data && (res.data.error || res.data.err)))) || '';
             toast(errText || 'Не удалось вступить', true);
 
             // Пока шёл запрос, плашку могли скрыть/перерисовать.
@@ -11628,6 +12743,9 @@ const Players = {
             }
         }
     };
+
+    return PocketCity;
+})();
 
     // ===== src/modules/combat-assistant.js =====
     // ============================================================
@@ -12237,6 +13355,15 @@ const Players = {
         _logReady: false,    // первичная загрузка (limit=100) выполнена
         _logBodyEl: null,    // .party-log-body — кэш, чтобы не искать каждый тик
 
+        // Чат пати (v11.7.0): панель и оперативное состояние
+        CHAT_PANEL_ID: `${RAND_ID}-party-chat-panel`,
+        _chatMessages: [],
+        _chatSince: 0,
+        _chatCollapsed: false,
+        _chatUnread: 0,
+        _chatBusy: false,
+        _chatBodyEl: null,
+
         // v11.6.0g-2: инлайн-стили форм заменены классами из core/styles.js —
         // только так работают hover/focus-эффекты (inline :hover невозможен).
         // Кнопка «❤»: pointer-events:auto обязателен, сама панель —
@@ -12295,6 +13422,10 @@ const Players = {
         },
 
         _writeState(party, isOwner) {
+            const prev = this._readState();
+            if (!party || (prev && prev.groupId !== party.groupId)) {
+                this._resetChat();
+            }
             this._gmSet(this.STATE_KEY, party);
             this._gmSet(this.OWNER_KEY, !!isOwner);
             // В пати появились/обновились данные — поднимаем HP-синхронизацию.
@@ -12958,19 +14089,19 @@ const Players = {
                     && rawHp < rawMax;
                 const healBtn = showHeal
                     ? `<button type="button" class="${this.HEAL_BTN_CLASS}" data-party-heal="${login}"`
-                        + ' title="Вставить команду лечения в чат">❤</button>'
+                        + ' title="Скопировать команду лечения">❤</button>'
                     : '';
 
-                return `<div style="margin-bottom:6px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-                        <span style="color:#ffcf6a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${login}:</span>
-                        <span style="display:flex; align-items:center; gap:4px; white-space:nowrap;">
-                            <span style="color:#ccc;">${hp}/${rawMax}</span>
+                return `<div class="party-member-row">
+                    <div class="party-member-info">
+                        <span class="party-member-name">${login}:</span>
+                        <span class="party-member-hp-val">
+                            <span class="party-hp-num">${hp}/${rawMax}</span>
                             ${healBtn}
                         </span>
                     </div>
-                    <div style="height:3px; margin-top:2px; border-radius:2px; background:#2a2030;">
-                        <div style="height:3px; width:${pct.toFixed(1)}%; border-radius:2px; background:${color};"></div>
+                    <div class="party-hp-track">
+                        <div class="party-hp-fill" style="width:${pct.toFixed(1)}%; background:${color};"></div>
                     </div>
                 </div>`;
             }).join('');
@@ -12990,10 +14121,13 @@ const Players = {
             // Позиция из хранилища применяется на каждом рендере (п.4).
             this._applyHudPosition();
 
-            // Журнал — сосед по HUD-контейнеру; его видимость и догрузку
+            // Журнал и чат — соседи по HUD-контейнеру; их видимость и догрузку
             // синхронизируем на каждом тике (v11.6.6: кроме быстрых
             // перерисовок из _patchSelfHp, иначе каждое `me` = GET журнала).
-            if (!opts.skipLog) this._syncLogPanel();
+            if (!opts.skipLog) {
+                this._syncLogPanel();
+                this._syncChatPanel();
+            }
         },
 
         /* ---------------------------------------------------------- */
@@ -13199,6 +14333,244 @@ const Players = {
             const d = new Date(Number.isFinite(value) ? value : Date.now());
             if (Number.isNaN(d.getTime())) return '--:--';
             return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        },
+
+        /* ---------------------------------------------------------- */
+        /* Чат пати в RAM (v11.7.0)                                    */
+        /* ---------------------------------------------------------- */
+
+        /**
+         * Панель чата пати создаётся лениво внутри HUD-контейнера под журналом.
+         */
+        _ensureChatPanel() {
+            const hud = this._ensureHud();
+            let el = document.getElementById(this.CHAT_PANEL_ID);
+            if (el && el.isConnected) {
+                if (el.parentElement !== hud) hud.appendChild(el);
+                this._chatBodyEl = el.querySelector('.party-chat-body');
+                this._bindHudDrag(el.querySelector('.party-chat-head'));
+                return el;
+            }
+
+            el = document.createElement('div');
+            el.id = this.CHAT_PANEL_ID;
+            el.className = 'party-chat-panel';
+
+            el.innerHTML = `
+                <div class="party-chat-head party-drag-handle" title="Перетащить панель">
+                    <div class="party-chat-title">
+                        <span>💬 ЧАТ ПАТИ</span>
+                        <span class="party-chat-badge" style="display:none;"></span>
+                    </div>
+                    <button type="button" class="party-chat-toggle" title="Свернуть/развернуть чат">−</button>
+                </div>
+                <div class="party-chat-content">
+                    <div class="party-chat-body">
+                        <div class="party-chat-empty">Сообщений пока нет</div>
+                    </div>
+                    <form class="party-chat-form">
+                        <input type="text" class="party-chat-input" placeholder="Сообщение..." maxlength="300" autocomplete="off" />
+                        <button type="submit" class="party-chat-send" title="Отправить">➤</button>
+                    </form>
+                </div>
+            `;
+            hud.appendChild(el);
+
+            const toggleBtn = el.querySelector('.party-chat-toggle');
+            toggleBtn?.addEventListener('click', () => {
+                this._setChatCollapsed(!this._chatCollapsed);
+            });
+
+            const form = el.querySelector('.party-chat-form');
+            const input = el.querySelector('.party-chat-input');
+            if (input) {
+                // Предотвращение срабатывания горячих клавиш игры
+                const stopEv = (e) => e.stopPropagation();
+                input.addEventListener('keydown', stopEv);
+                input.addEventListener('keyup', stopEv);
+                input.addEventListener('keypress', stopEv);
+            }
+            if (form && input) {
+                form.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const text = input.value.trim();
+                    if (!text) return;
+                    input.value = '';
+                    await this._sendChatMessage(text);
+                });
+            }
+
+            this._bindHudDrag(el.querySelector('.party-chat-head'));
+            this._chatBodyEl = el.querySelector('.party-chat-body');
+            this._applyChatCollapsedState();
+            return el;
+        },
+
+        _setChatCollapsed(collapsed) {
+            this._chatCollapsed = !!collapsed;
+            if (!this._chatCollapsed) {
+                this._chatUnread = 0;
+            }
+            this._applyChatCollapsedState();
+        },
+
+        _applyChatCollapsedState() {
+            const el = document.getElementById(this.CHAT_PANEL_ID);
+            if (!el) return;
+            const content = el.querySelector('.party-chat-content');
+            const toggleBtn = el.querySelector('.party-chat-toggle');
+            const badge = el.querySelector('.party-chat-badge');
+            if (content) content.style.display = this._chatCollapsed ? 'none' : 'flex';
+            if (toggleBtn) toggleBtn.textContent = this._chatCollapsed ? '+' : '−';
+            if (badge) {
+                if (this._chatCollapsed && this._chatUnread > 0) {
+                    badge.textContent = `+${this._chatUnread}`;
+                    badge.style.display = 'inline-block';
+                } else {
+                    badge.style.display = 'none';
+                }
+            }
+            if (!this._chatCollapsed) {
+                this._scrollChatToBottom();
+            }
+        },
+
+        async _sendChatMessage(text) {
+            const party = this._readState();
+            if (!party) return;
+            try {
+                const res = await this._request(
+                    'POST',
+                    `/party/${encodeURIComponent(party.groupId)}/chat`,
+                    { body: { text } }
+                );
+                if (res && res.ok) {
+                    this._pollChat();
+                }
+            } catch (err) {
+                console.warn('[PARTY] чат: ошибка отправки', err);
+                if (typeof UI !== 'undefined' && UI.showToast) {
+                    UI.showToast(err?.message || 'Не удалось отправить сообщение', true);
+                }
+            }
+        },
+
+        async _pollChat() {
+            if (this._chatBusy) return;
+            const party = this._readState();
+            if (!party) return;
+
+            this._chatBusy = true;
+            try {
+                const query = this._chatSince > 0 ? `?since=${this._chatSince}` : '';
+                const res = await this._request(
+                    'GET',
+                    `/party/${encodeURIComponent(party.groupId)}/chat${query}`
+                );
+
+                const cur = this._readState();
+                if (!cur || cur.groupId !== party.groupId) return;
+
+                const msgs = Array.isArray(res?.messages) ? res.messages : [];
+                if (msgs.length > 0) {
+                    const selfLogin = String(cur.login || '').toLowerCase();
+                    let addedNew = false;
+                    let newForeign = 0;
+
+                    const existingIds = new Set(this._chatMessages.map((m) => m.id));
+                    for (const m of msgs) {
+                        if (!existingIds.has(m.id)) {
+                            this._chatMessages.push(m);
+                            existingIds.add(m.id);
+                            addedNew = true;
+                            if (String(m.login || '').toLowerCase() !== selfLogin) {
+                                newForeign++;
+                            }
+                        }
+                    }
+
+                    if (this._chatMessages.length > 50) {
+                        this._chatMessages = this._chatMessages.slice(-50);
+                    }
+
+                    if (this._chatCollapsed && newForeign > 0) {
+                        this._chatUnread += newForeign;
+                    }
+
+                    const next = Number(res?.nextSince);
+                    if (Number.isFinite(next) && next > this._chatSince) {
+                        this._chatSince = next;
+                    }
+
+                    if (addedNew) {
+                        this._renderChatMessages();
+                    }
+                    this._applyChatCollapsedState();
+                }
+            } catch (err) {
+                console.warn('[PARTY] чат: GET не удался:', err?.message || err);
+            } finally {
+                this._chatBusy = false;
+            }
+        },
+
+        _renderChatMessages() {
+            const el = this._ensureChatPanel();
+            const body = el.querySelector('.party-chat-body');
+            if (!body) return;
+
+            if (!this._chatMessages.length) {
+                body.innerHTML = '<div class="party-chat-empty">Сообщений пока нет</div>';
+                return;
+            }
+
+            const selfLogin = String(this._readState()?.login || '').toLowerCase();
+            const esc = (s) => (typeof Utils !== 'undefined' && Utils.escapeHtml ? Utils.escapeHtml(s) : String(s || ''));
+
+            body.innerHTML = this._chatMessages.map((m) => {
+                const isSelf = String(m.login || '').toLowerCase() === selfLogin;
+                const d = new Date(m.at || Date.now());
+                const hh = String(d.getHours()).padStart(2, '0');
+                const mm = String(d.getMinutes()).padStart(2, '0');
+                const timeStr = `${hh}:${mm}`;
+                const loginCls = isSelf ? 'party-chat-nick party-chat-self' : 'party-chat-nick';
+                return `
+                    <div class="party-chat-msg ${isSelf ? 'is-self' : ''}">
+                        <span class="party-chat-time">${timeStr}</span>
+                        <span class="${loginCls}">${esc(m.login)}:</span>
+                        <span class="party-chat-text">${m.text || ''}</span>
+                    </div>
+                `;
+            }).join('');
+
+            this._scrollChatToBottom();
+        },
+
+        _scrollChatToBottom() {
+            const body = this._chatBodyEl || document.querySelector('.party-chat-body');
+            if (body) {
+                body.scrollTop = body.scrollHeight;
+            }
+        },
+
+        _syncChatPanel() {
+            if (!this._readState()) return;
+            const el = this._ensureChatPanel();
+            el.style.display = 'block';
+            this._pollChat();
+        },
+
+        _hideChatPanel() {
+            const el = document.getElementById(this.CHAT_PANEL_ID);
+            if (el) el.style.display = 'none';
+        },
+
+        _resetChat() {
+            this._chatMessages = [];
+            this._chatSince = 0;
+            this._chatUnread = 0;
+            this._chatBusy = false;
+            this._hideChatPanel();
         },
 
         /**
@@ -13491,6 +14863,8 @@ const Players = {
             this._hidePanel();
             // leave/401: журнал прошлой пати очищается и прячется.
             this._hideLogPanel();
+            // leave/401: чат прошлой пати очищается и прячется.
+            this._resetChat();
         },
 
         /**
@@ -13682,38 +15056,40 @@ const Players = {
         /* ---------------------------------------------------------- */
 
         /**
-         * «Лечение» союзника: вставляем команду похода в поле чата.
+         * «Лечение» союзника: копируем команду похода «лечить @ник» в буфер обмена.
          *
-         * v11.6.2b.1: прямой POST /c/<канал>/api/qact {k:'b',a:'sk',w:'лечение'}
-         * убран. Игра сама разбирает текстовую команду «лечить @ник» (qsay),
-         * а ручной запрос дублировал действие (кулдаун / двойной хил) и мог
-         * разойтись с состоянием стрима. Теперь кнопка «❤» только подставляет
-         * текст — отправляет игрок по Enter, как любую команду похода.
+         * v11.7.0: заменено с автовставки на надёжное копирование в буфер (как в боевом ассистенте).
          *
          * @param {string} targetLogin ник цели из data-party-heal
-         * @param {HTMLButtonElement|null} button кнопка (возвращается в исходный вид)
+         * @param {HTMLButtonElement|null} button кнопка (кратковременно меняется на «✓»)
          */
         _healMember(targetLogin, button) {
             const target = String(targetLogin || '').trim();
             if (!target) return;
 
             const healCommand = `лечить @${target}`;
-            // Поля может не быть (не в походе / чат похода скрыт) — сообщаем
-            // игроку, что вставлять некуда (v11.7.0: автокопирования в буфер
-            // больше нет, команду можно скопировать кликом по бейджу
-            // боевого ассистента).
-            const inserted = Utils.insertToQuestChat(healCommand);
-            if (inserted) {
-                UI.showToast(`Текст «${healCommand}» вставлен в чат. Нажмите Enter.`, false);
-            } else {
-                UI.showToast('Поле команды похода не найдено', true);
-            }
+            const ok = typeof Utils !== 'undefined' && typeof Utils.copyText === 'function'
+                ? Utils.copyText(healCommand)
+                : false;
 
-            // Кнопку возвращаем в исходный вид: busy-рендер («...») остался
-            // только от версий с запросом, панель перерисовывается по событиям.
-            if (button && button.isConnected) {
-                button.disabled = false;
-                button.textContent = '❤';
+            if (ok) {
+                if (typeof UI !== 'undefined' && typeof UI.showToast === 'function') {
+                    UI.showToast(`Команда «${healCommand}» скопирована!`, false);
+                }
+                if (button && button.isConnected) {
+                    button.classList.add('copied');
+                    button.textContent = '✓';
+                    setTimeout(() => {
+                        if (button && button.isConnected) {
+                            button.classList.remove('copied');
+                            button.textContent = '❤';
+                        }
+                    }, 1200);
+                }
+            } else {
+                if (typeof UI !== 'undefined' && typeof UI.showToast === 'function') {
+                    UI.showToast(`Не удалось скопировать: ${healCommand}`, true);
+                }
             }
         },
 
@@ -17337,8 +18713,12 @@ const Players = {
         // Публикуем API в page-context: при @grant песочница скрывает window от
         // консоли и других скриптов, unsafeWindow — нет. Дублируем в window, чтобы
         // внутренние ссылки (hooks.js) работали в обоих режимах.
+        // v11.7.0: также экспортируем legionApi в unsafeWindow/G для удобной отладки из консоли.
         try { LG_ROOT.__LEGION__ = legionApi; } catch (e) {}
         try { window.__LEGION__ = legionApi; } catch (e) {}
+        try { LG_ROOT.legionApi = legionApi; } catch (e) {}
+        try { window.legionApi = legionApi; } catch (e) {}
+        try { if (typeof G !== 'undefined' && G) G.legionApi = legionApi; } catch (e) {}
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

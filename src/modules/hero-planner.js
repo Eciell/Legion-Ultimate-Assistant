@@ -36,7 +36,9 @@
         },
 
         // ── Режим «С учётом шансов» (стратегии) ──────────────────
-        strategyMode: 'ideal', // 'ideal' | 'expected'
+        // v11.7.0: переключатель 📊/🧠 удалён — «Итоговая стоимость» всегда
+        // ожидаемая, поэтому поле оставлено только для совместимости.
+        strategyMode: 'expected', // 'ideal' | 'expected'
         // 11.6.5f: цель заточки (+N) для правой карточки Split-view.
         // null — не выбрана: берём следующий уровень (enchantTargetLevel).
         // Хранится в абсолютных уровнях (+1…+15); при смене предмета цель
@@ -53,6 +55,27 @@
         userSpheres: 0,
         allocatedStars: {},   // { lv: true }
         allocatedSpheres: {}, // { lv: true }
+
+        // ── v11.7.0: вкладка «👗 Примерка» ───────────────────────
+        // Пять слотов экипировки в порядке нативной карточки героя
+        // (helmet, weapon, shield, armor, trinket).
+        FITTING_SLOTS: [
+            { id: 'helmet', name: 'Шлем', icon: '⛑' },
+            { id: 'weapon', name: 'Оружие', icon: '⚔️' },
+            { id: 'shield', name: 'Щит/оффхенд', icon: '🛡' },
+            { id: 'armor', name: 'Броня', icon: '🥋' },
+            { id: 'trinket', name: 'Амулет', icon: '📿' }
+        ],
+        /*
+         * Веса боевой мощи (power): Σ stat[k] × POW[k] плюс +2 за каждый
+         * уровень заточки надетых вещей — та же логика, что в карточке героя.
+         */
+        FIT_POW: { atk: 1, mag: 1, def: 1, hp: 0.25, crit: 0.8, critDmg: 0.2, dodge: 0.8, pierce: 0.8, healPow: 0.5, luck: 0.5, resist: 0.5 },
+        /* Потолки вторичных характеристик (xstats.max из game-data.js). */
+        FIT_CAPS: { crit: 50, critDmg: 200, dodge: 35, pierce: 75, healPow: 100, luck: 100 },
+        /* Состояние примерки: моделируемый класс/уровень, флаг бонусов
+           созвездия и выбор по слотам { slotId: { uid, en } }. */
+        fitting: { role: '', level: 1, useSkills: false, slots: {} },
 
         // Стоимость ресурсов (из 05_Mechanics.md). v11.6.5e: ребаланс — 100/300.
         // Это фолбэк: живая цена кузнеца читается из enchant.coins
@@ -236,6 +259,238 @@
                 parts.push({ item: it, pct: r.pct });
             }
             return { pct: Math.min(GAME_DATA.GEAR_PEN_CAP, pct), parts };
+        },
+
+        /* ---------------------------------------------------------- */
+        /* v11.7.0: РАСЧЁТ «ПРИМЕРКИ» (вкладка 👗 Примерка)            */
+        /* ---------------------------------------------------------- */
+
+        /**
+         * Базовые характеристики героя по уровню (1…50).
+         *
+         * Источник — живая таблица игры G.LGGameData.levelRow(lvl) (строка
+         * уровней: hp/atk/mag/def). Если таблицы ещё нет (run-at
+         * document-start, урезанная сборка), берём фолбэк аддона:
+         *   hp = 15 + 5×lvl, atk/mag = ceil(lvl×0.42), def = floor(lvl×0.24).
+         *
+         * @param {number} level уровень героя
+         * @returns {{hp:number, atk:number, mag:number, def:number}}
+         */
+        levelBaseStats(level) {
+            const lvl = Math.min(50, Math.max(1, Math.round(+level || 1)));
+            const fallback = {
+                hp: 15 + 5 * lvl,
+                atk: Math.ceil(lvl * 0.42),
+                mag: Math.ceil(lvl * 0.42),
+                def: Math.floor(lvl * 0.24)
+            };
+            let row = null;
+            try {
+                const gd = (typeof G !== 'undefined' && G) ? G.LGGameData : null;
+                if (gd && typeof gd.levelRow === 'function') row = gd.levelRow(lvl);
+            } catch (e) { row = null; }
+            // Формат строки уровня может отличаться — берём только числовые
+            // поля объекта, всё остальное закрывает фолбэк.
+            const pick = (k) => {
+                const v = (row && !Array.isArray(row)) ? +row[k] : NaN;
+                return (Number.isFinite(v) && v > 0) ? v : fallback[k];
+            };
+            return { hp: pick('hp'), atk: pick('atk'), mag: pick('mag'), def: pick('def') };
+        },
+
+        /**
+         * Статы предмета на +0 (без заточки).
+         *
+         * Приоритет — stats0 из /api/me (точные базы игры). Если его нет —
+         * обратный вычет заточки: xstat-ы (crit, dodge, pierce…) теряют
+         * ¼ бонуса, поэтому считаем через enchantBase, а не общим делителем.
+         *
+         * @param {object} item предмет из /api/me
+         * @param {number} [curEn] текущая заточка (по умолчанию item.en)
+         * @returns {object} { statKey: baseValue }
+         */
+        itemBaseStats(item, curEn) {
+            if (!item) return {};
+            if (item.stats0 && Object.keys(item.stats0).length) return item.stats0;
+            const en = (curEn === undefined)
+                ? +(item.en ?? item.e ?? item.enchant ?? 0)
+                : curEn;
+            const out = {};
+            for (const [k, v] of Object.entries(item.stats || {})) {
+                out[k] = this.enchantBase(+v || 0, en, k);
+            }
+            return out;
+        },
+
+        /**
+         * Текущие характеристики героя из /api/me: первичные лежат в
+         * hero.stats, вторичные — в hero.xs. Мощь считается той же формулой,
+         * что и у примерки (Σ × POW + 2 за уровень заточки), иначе сравнение
+         * «Было → Стало» было бы нечестным.
+         *
+         * @param {object} h hero из /api/me
+         * @returns {{stats:object, power:number, penalty:number, parts:Array, critMul:number, enTotal:number}}
+         */
+        heroCurrentStats(h) {
+            const items = (h && Array.isArray(h.items)) ? h.items.filter(x => x && x.on) : [];
+            const src = Object.assign({}, (h && h.stats) || {}, (h && h.xs) || {});
+            const stats = {};
+            for (const k of Object.keys(this.FIT_POW)) {
+                const v = +src[k];
+                stats[k] = Number.isFinite(v) ? Math.round(v) : 0;
+            }
+            let enTotal = 0;
+            for (const it of items) enTotal += Math.min(15, Math.max(0, Math.round(+(it.en ?? it.e ?? 0))));
+            let power = 0;
+            for (const [k, w] of Object.entries(this.FIT_POW)) power += (stats[k] || 0) * w;
+            const gp = this.gearPenaltyTotal(h && h.role, items);
+            return {
+                stats,
+                power: Math.round(power + 2 * enTotal),
+                penalty: gp.pct,
+                parts: gp.parts,
+                critMul: 1 + (stats.critDmg || 0) / 100,
+                enTotal
+            };
+        },
+
+        /**
+         * Точный расчёт характеристик «примерки»: база уровня + 5 предметов
+         * на выбранной заточке + бонусы созвездия − штраф экипировки.
+         *
+         * Формулы (совпадают с игрой, app.js:1393 enchStatsN):
+         *  - первичные статы предмета: round(base × (1 + bonus/100));
+         *  - вторичные (XSTAT_KEYS): round(base × (1 + bonus×0.25/100)) —
+         *    enchK = 0.25, иначе крит/уклонение завышались бы вчетверо;
+         *  - потолки вторичных: crit 50, critDmg 200, dodge 35, pierce 75,
+         *    healPow 100, luck 100;
+         *  - штраф экипировки (gearPenalty, максимум 50%) режет mag у
+         *    mage/priest/necromancer и atk у остальных классов;
+         *  - мощь = Σ stat × POW + 2 за каждый уровень заточки.
+         *
+         * @param {string} role класс, для которого считаем
+         * @param {number} level уровень героя (1…50)
+         * @param {Array<{item:object, en:number}>} equippedItems до 5 записей
+         * @param {object|null} skillsBonuses агрегат BuildSim.skillBonuses()
+         * @returns {object} { stats, power, penalty, parts, critMul, enTotal, skillsUsed }
+         */
+        calculateFittingStats(role, level, equippedItems, skillsBonuses) {
+            const base = this.levelBaseStats(level);
+            // Классовый модификатор HP: маг хрупче, разбойник крепче.
+            const hpMod = role === 'mage' ? -12 : (role === 'rogue' ? 10 : 0);
+            const stats = {
+                hp: base.hp + hpMod,
+                atk: base.atk,
+                mag: base.mag,
+                def: base.def,
+                // Базовые вторичные статы героя (xstats.base из game-data.js).
+                crit: 8,
+                critDmg: 50,
+                dodge: 0,
+                pierce: 0,
+                healPow: 0,
+                luck: 0,
+                resist: 0
+            };
+
+            const entries = (Array.isArray(equippedItems) ? equippedItems : [])
+                .filter(e => e && e.item)
+                .map(e => ({ item: e.item, en: Math.min(15, Math.max(0, Math.round(+e.en || 0))) }));
+            const items = entries.map(e => e.item);
+
+            let enTotal = 0;
+            for (const { item, en } of entries) {
+                enTotal += en;
+                const bonus = GAME_DATA.ENCHANT_MULTIPLIERS[en] || 0;
+                const bases = this.itemBaseStats(item);
+                for (const [k, raw] of Object.entries(bases || {})) {
+                    const v = +raw || 0;
+                    if (!v || !(k in stats)) continue;
+                    const pct = GAME_DATA.XSTAT_KEYS.has(k)
+                        ? bonus * GAME_DATA.ENCHANT_K
+                        : bonus;
+                    stats[k] += Math.round(v * (1 + pct / 100));
+                }
+            }
+
+            // Бонусы открытого созвездия: hp/def — плоско, урон — процентом
+            // от уже собранного пула, вторичные — пунктами.
+            if (skillsBonuses) {
+                stats.hp += Math.round(+skillsBonuses.hp || 0);
+                stats.def += Math.round(+skillsBonuses.def || 0);
+                stats.atk += Math.round(stats.atk * (+skillsBonuses.atkPct || 0) / 100);
+                stats.mag += Math.round(stats.mag * (+skillsBonuses.magPct || 0) / 100);
+                for (const k of ['crit', 'critDmg', 'dodge', 'pierce', 'healPow', 'luck', 'resist']) {
+                    stats[k] += +skillsBonuses[k] || 0;
+                }
+            }
+
+            // Штраф чужой экипировки: у магов режет магию, у остальных физурон.
+            const gp = this.gearPenaltyTotal(role, items);
+            if (gp.pct > 0) {
+                const key = ['mage', 'priest', 'necromancer'].includes(role) ? 'mag' : 'atk';
+                stats[key] = Math.round(stats[key] * (1 - gp.pct / 100));
+            }
+
+            for (const k of Object.keys(stats)) stats[k] = Math.round(stats[k] || 0);
+            for (const [k, cap] of Object.entries(this.FIT_CAPS)) {
+                if (stats[k] > cap) stats[k] = cap;
+            }
+
+            let power = 0;
+            for (const [k, w] of Object.entries(this.FIT_POW)) power += (stats[k] || 0) * w;
+
+            return {
+                stats,
+                power: Math.round(power + 2 * enTotal),
+                penalty: gp.pct,
+                parts: gp.parts,
+                critMul: 1 + (stats.critDmg || 0) / 100,
+                enTotal,
+                skillsUsed: !!skillsBonuses
+            };
+        },
+
+        /**
+         * Выбор примерки -> записи { item, en } для calculateFittingStats().
+         * Предметы ищутся в общем пуле (надетое + сумка + склад): uid
+         * уникален за счёт префиксов eq-/bg-/st- из open().
+         *
+         * @param {Array} pool предметы всех локаций
+         * @returns {Array<{item:object, en:number}>}
+         */
+        fittingEntries(pool) {
+            const out = [];
+            for (const slot of this.FITTING_SLOTS) {
+                const sel = this.fitting.slots[slot.id];
+                if (!sel || !sel.uid) continue;
+                const item = (Array.isArray(pool) ? pool : []).find(x => String(x.uid) === String(sel.uid));
+                if (!item) continue;
+                out.push({ item, en: Math.min(15, Math.max(0, Math.round(+sel.en || 0))) });
+            }
+            return out;
+        },
+
+        /**
+         * Результат примерки для текущего состояния (класс, уровень, слоты,
+         * чекбокс «Учитывать бонусы созвездия навыков»).
+         *
+         * @param {object} h hero из /api/me (фолбэк класса/уровня)
+         * @param {Array} pool предметы всех локаций
+         * @returns {object} результат calculateFittingStats()
+         */
+        fittingResult(h, pool) {
+            const role = this.fitting.role || (h && h.role) || '';
+            const level = this.fitting.level || (h && h.level) || 1;
+            let skills = null;
+            if (this.fitting.useSkills) {
+                try {
+                    if (typeof BuildSim !== 'undefined' && BuildSim && typeof BuildSim.skillBonuses === 'function') {
+                        skills = BuildSim.skillBonuses();
+                    }
+                } catch (e) { skills = null; }
+            }
+            return this.calculateFittingStats(role, level, this.fittingEntries(pool), skills);
         },
 
         /**
@@ -475,30 +730,25 @@
                 const tabsHtml = `
                     <button class="modal-tab active" data-tab="hero-build">🛡️ Билды</button>
                     <button class="modal-tab" data-tab="hero-ench">⚒️ Заточка</button>
+                    <button class="modal-tab" data-tab="hero-fit">👗 Примерка <span class="hp-test-badge">ТЕСТ</span></button>
                 `;
 
-                // .tab-content.active — это display:flex (строка), поэтому обеим
-                // вкладкам задаём колонку: табы и плитка сверху, таблица снизу.
+                // v11.7.0: вкладки «Билды» и «Заточка» занимают 100% ширины
+                // модального окна. Двухколоночная сетка (1fr 320px) с панелью
+                // «Характеристики» рендерится строго внутри вкладки «Примерка».
                 const contentHtml = `
                     <div class="tab-content active" id="tab-hero-build" style="flex-direction:column; gap:0;">
                         <div id="hp-buildsim-container" style="display:flex; flex-direction:column; flex:1; min-height:0; overflow:auto; padding-bottom:20px;"></div>
                     </div>
                     <div class="tab-content" id="tab-hero-ench" style="flex-direction:column; gap:8px;">
-                        <!-- 11.6.5f.1: строка 1 — режимы и цены ресурсов. v11.7.1:
-                             ручной ввод количества звёзд/сфер убран — ресурсы
-                             выбираются кнопками ⭐/🌐 в строках уровней. -->
-                        <div class="hp-ench-topbar">
-                            <div class="hp-mode-switch">
-                                <button class="hp-mode-btn ${this.strategyMode === 'ideal' ? 'active' : ''}" data-mode="ideal" style="border:none; border-radius:5px; font-weight:bold; cursor:pointer; transition:all 0.2s; background:${this.strategyMode === 'ideal' ? '#caa55c' : 'transparent'}; color:${this.strategyMode === 'ideal' ? '#1d1620' : '#aaa'};">📊 Идеально</button>
-                                <button class="hp-mode-btn ${this.strategyMode === 'expected' ? 'active' : ''}" data-mode="expected" style="border:none; border-radius:5px; font-weight:bold; cursor:pointer; transition:all 0.2s; background:${this.strategyMode === 'expected' ? '#caa55c' : 'transparent'}; color:${this.strategyMode === 'expected' ? '#1d1620' : '#aaa'};">🧠 С учётом шансов</button>
-                            </div>
-                            <!-- 11.6.2d: цены ресурсов. 📈 — медиана аука (за 72 часа /
-                                 последние 100 цен), 🏪 — цена кузнеца (фолбэк).
-                                 Содержимое обновляет renderTable после ответа сервера. -->
-                            <div id="hp-mats-price" class="hp-mat-prices">${this.matsPriceHtml()}</div>
-                        </div>
+                        <!-- v11.7.0: верхняя полоса переключателя режимов и
+                             ценники ⭐/🌐 убраны — кукла слотов и таблица
+                             +0…+15 начинаются сразу под шапкой вкладок.
+                             Стоимость попытки сразу считается ожидаемой, а
+                             цены ресурсов и справка живут справа снизу
+                             (см. renderTable). -->
 
-                        <!-- 11.6.5f.1: строка 2 — локации и плитка предметов рядом.
+                        <!-- 11.6.5f.1: локации и плитка предметов рядом.
                              Статус экипировки (бывшая полоса «✓ Снаряжение подходит»)
                              теперь иконка рядом с названием предмета — см. renderTable. -->
                         <div class="hp-ench-subbar">
@@ -517,18 +767,48 @@
                             <div style="color:#888; text-align:center; padding:20px;">Выберите предмет.</div>
                         </div>
                     </div>
+                    <div class="tab-content" id="tab-hero-fit" style="flex-direction:column; gap:10px;">
+                        <div class="hp-fit-layout">
+                            <div class="hp-fit-main">
+                                <div class="hp-fit-head">
+                                    <span class="hp-fit-title">👗 Примерка экипировки <span class="hp-test-badge">ТЕСТ</span></span>
+                                </div>
+                                <!-- v11.7.0: примерка набора экипировки. Класс и уровень
+                                     можно смоделировать, заточка каждого слота — +0…+15. -->
+                                <div class="hp-fit-top">
+                                    <label class="hp-fit-field">Класс
+                                        <select id="hp-fit-role">${Object.entries(GAME_DATA.CLASS_NAMES).map(([id, nm]) => `<option value="${id}">${Utils.escapeHtml(nm)}</option>`).join('')}</select>
+                                    </label>
+                                    <label class="hp-fit-field">Уровень
+                                        <input id="hp-fit-level" type="number" min="1" max="50" step="1">
+                                    </label>
+                                    <label class="hp-fit-chk" title="Прибавить бонусы открытых узлов созвездия из вкладки «Билды»">
+                                        <input id="hp-fit-skills" type="checkbox"> учитывать созвездие
+                                    </label>
+                                    <button type="button" class="hp-arena-btn" id="hp-fit-reset" title="Вернуть текущие вещи героя">↺ К текущим вещам</button>
+                                </div>
+                                <div id="hp-fit-rows" class="hp-fit-rows"></div>
+                                <div id="hp-fit-foot" class="hp-cost-note">Класс и уровень можно моделировать независимо от героя: заточка выбирается для каждого слота, «↺ К текущим вещам» возвращает надетое. Сравнение с текущими характеристиками — в панели справа.</div>
+                            </div>
+                            <!-- v11.7.0: боковая панель характеристик и сравнения «Текущий герой → Примерка». -->
+                            <aside class="hp-side" id="hp-side"></aside>
+                        </div>
+                    </div>
                 `;
 
                 const modal = UI.showModal(`
                     <h2>⚙️ Планировщик Героя (${Utils.escapeHtml(h.name || '')}) <button class="custom-close" id="custom-close-btn">✖</button></h2>
                     <div class="modal-tabs">${tabsHtml}</div>
                     ${contentHtml}
-                `);
+                `, { customClass: 'hp-planner-modal' });
 
                 // Переключение табов. Скоупим на собственный нав-бар HeroPlanner:
                 // после BuildSim.mount() внутри #tab-hero-build появляются свои
                 // .modal-tab/.tab-content, и глобальные селекторы сбросили бы их.
                 const ownTabs = modal?.querySelector('.modal-tabs');
+                // v11.7.0: собственные вкладки HeroPlanner — прямые потомки
+                // модалки с классом .tab-content (вкладки BuildSim внутри
+                // #tab-hero-build не затрагиваются).
                 const ownContents = () => Array.from(modal?.children || []).filter(el => el.classList.contains('tab-content'));
                 // 11.6.2d: при входе на вкладку «Заточка» подтягиваем цены
                 // звёзды/сферы с аукциона. Реальная реализация — ниже, после
@@ -564,12 +844,6 @@
                 const renderTable = () => {
                     if (!outEl) return;
 
-                    // 11.6.2d: после ответа /market/medians цены ресурсов могли
-                    // смениться — обновляем строку под переключателем режимов
-                    // (она живёт вне outEl, поэтому перерисовывается отдельно).
-                    const matsEl = document.getElementById('hp-mats-price');
-                    if (matsEl) matsEl.innerHTML = this.matsPriceHtml();
-
                     const item = selectedItem;
                     if (!item) {
                         outEl.innerHTML = `<div style="color:#888; text-align:center; padding:20px;">В этой локации нет предметов для заточки.</div>`;
@@ -578,21 +852,9 @@
 
                     const curEn = +(item.en ?? item.e ?? item.enchant ?? 0);
 
-                    // ПРИОРИТЕТ: stats0 (точные базы из игры). Если нет — вычисляем обратным вычетом.
-                    let baseStats = {};
-                    const hasStats0 = item.stats0 && Object.keys(item.stats0).length > 0;
-                    if (hasStats0) {
-                        baseStats = item.stats0;
-                    } else {
-                        // Обратный вычет заточки. Для xstat-ов (crit, dodge, pierce…)
-                        // эффективный процент вчетверо меньше (enchK=0.25), поэтому
-                        // считаем через enchantBase, а не общим делителем.
-                        for (const [k, v] of Object.entries(item.stats || {})) {
-                            baseStats[k] = this.enchantBase(v, curEn, k);
-                        }
-                    }
-
-                    const isExpected = this.strategyMode === 'expected';
+                    // ПРИОРИТЕТ: stats0 (точные базы из игры), иначе обратный
+                    // вычет заточки — см. HeroPlanner.itemBaseStats().
+                    const baseStats = this.itemBaseStats(item, curEn);
                     const isExpanded = this.ENCH.max;
                     // v11.7.1: уровень ПРОСМОТРА (0…15) отделён от цели пути.
                     // preview <= curEn означает «шагов нет»: карточка просто
@@ -674,10 +936,11 @@
                     }
 
                     // ── Левая колонка: карточка уровня просмотра ──
-                    // Две суммы: «идеальная» (все попытки удачны с первой) и с
-                    // отмеченными усилителями. В режиме шансов показываем вторую.
+                    // v11.7.0: переключателя режимов больше нет — «Итоговая
+                    // стоимость» сразу считается ОЖИДАЕМОЙ (с учётом шансов и
+                    // отмеченных ⭐/🌐), а минимум без промахов идёт подписью.
                     let costIdeal = 0;
-                    let costStrat = 0;
+                    let costExpected = 0;
                     let starsUsed = 0, spheresUsed = 0;
                     let attempts = 0;
                     // v11.7.1: путь всегда вперёд (curEn+1…preview). Если
@@ -691,13 +954,15 @@
                         // Ресурсы выбранные кнопками ⭐/🌐 в строках таблицы.
                         if (this.allocatedStars[lv]) { stepCost += starPrice; chance += 25; starsUsed++; }
                         if (this.allocatedSpheres[lv]) { stepCost += spherePrice; spheresUsed++; }
-                        costStrat += stepCost;
                         // 100 / chance — ожидаемое число попыток на один шаг
                         // (1/p). Сумма по пути даёт матожидание попыток на всю
                         // цель; при 0% шаг бесконечен, поэтому Infinity.
                         attempts += chance > 0 ? 100 / chance : Infinity;
+                        costExpected += chance > 0 ? stepCost * (100 / chance) : Infinity;
                     }
-                    const costTotal = isExpected ? costStrat : costIdeal;
+                    const costTotalRaw = costExpected;
+                    const costTotal = Number.isFinite(costTotalRaw) ? Utils.formatMoney(costTotalRaw) : '∞';
+                    const costMin = Number.isFinite(costIdeal) ? Utils.formatMoney(costIdeal) : '∞';
                     const costResources = starsUsed * starPrice + spheresUsed * spherePrice;
                     const attemptsStr = hasPath
                         ? (Number.isFinite(attempts) ? Math.ceil(attempts) : '∞')
@@ -794,38 +1059,38 @@
                                     <div class="hp-stat-grid">${statHtml}</div>
                                 </div>
                                 <div class="hp-target-section">
-                                    <div class="hp-target-sub">Итоговая стоимость</div>
-                                    <div class="hp-cost-total">${Utils.formatMoney(costTotal)}</div>
+                                    <div class="hp-target-sub">Итоговая стоимость (ожидаемо)</div>
+                                    <div class="hp-cost-total">${costTotal}</div>
+                                    <div class="hp-cost-min">Минимум без промахов: ${costMin}</div>
                                     <div class="hp-cost-sub">${rangeText} · попыток: ${attemptsStr}</div>
                                     <div class="hp-cost-row">⭐ Звёзды: ${starsUsed} шт. · 🌐 Сферы: ${spheresUsed} шт.${costResources > 0
                                         ? ` — ${Utils.formatMoney(costResources)}`
                                         : ''}</div>
                                 </div>
                             </div>
-                            <div class="hp-ench-right">
-                                <table class="hp-ench-table">
-                                    <thead><tr>
-                                        <th>Уровень</th>
-                                        <th>Шанс</th>
-                                        <th>Бонус</th>
-                                        <th>Попытка</th>
-                                        <th>Усилители</th>
-                                        <th>Статы</th>
-                                    </tr></thead>
-                                    <tbody>${rows}</tbody>
-                                </table>
+                            <div class="hp-ench-rightcol">
+                                <div class="hp-ench-right">
+                                    <table class="hp-ench-table">
+                                        <thead><tr>
+                                            <th>Уровень</th>
+                                            <th>Шанс</th>
+                                            <th>Бонус</th>
+                                            <th>Попытка</th>
+                                            <th>Усилители</th>
+                                            <th>Статы</th>
+                                        </tr></thead>
+                                        <tbody>${rows}</tbody>
+                                    </table>
+                                </div>
+                                <!-- v11.7.0: компактная справка справа снизу под
+                                     таблицей +0…+15 (вместо полосы нотации). -->
+                                <div class="hp-ench-hint">
+                                    <div class="hp-ench-hint-prices">${this.matsPriceHtml()}</div>
+                                    <div>Попытка = <code>max(priceMin, round(v × price% / 100))</code> из живой таблицы <code>LG_GAME_DATA.enchant</code>.</div>
+                                    <div>«Ожидаемо» = стоимость шагов ${rangeText} с ⭐/🌐 × матожидание попыток (100 / шанс).</div>
+                                    <div>Вторичные статы (крит, уклонение, пробивание…) получают ¼ бонуса заточки (enchK = 0.25).</div>
+                                </div>
                             </div>
-                        </div>
-                        <div class="hp-cost-note">
-                            ${isExpected
-                                ? `⭐ Звезда: +25% к шансу, +${Utils.formatMoney(starPrice)} к цене. 🌐 Сфера: защита от поломки, +${Utils.formatMoney(spherePrice)} к цене.<br>
-                            Цены ресурсов: 📈 — медиана аукциона (за 72 часа / последние 100 цен), 🏪 — базовая цена кузнеца (аукцион не отвечает).<br>
-                            <b>«Итоговая стоимость»</b> = стоимость ${rangeText} с выбранными усилителями; «попыток» — матожидание с учётом шансов.<br>
-                            Расширенные статы (крит, уклонение, пробивание и пр.) получают ¼ бонуса заточки (enchK = 0.25).`
-                                : `Стоимость попытки = <code>max(priceMin, round(v × price% / 100))</code> из живой таблицы игры <code>LG_GAME_DATA.enchant</code>. Округление статов — <code>Math.round</code> (подтверждено игрой).<br>
-                            <b>«Итоговая стоимость»</b> = сумма базовых стоимостей ${rangeText} (без шансов и поломок — «идеальная» стоимость).<br>
-                            Ресурсы выбираются кнопками ⭐/🌐 в строках шагов: их цена сразу входит в «Попытку», а в «Итоговую стоимость» — в режиме «🧠 С учётом шансов».<br>
-                            Расширенные статы (крит, уклонение, пробивание и пр.) получают ¼ бонуса заточки (enchK = 0.25).`}
                         </div>
                     `;
                     outEl.scrollTop = keepScroll;
@@ -872,6 +1137,176 @@
                     });
                 };
 
+                // ============================================================
+                // v11.7.0: ВКЛАДКА «👗 ПРИМЕРКА» + ПАНЕЛЬ СТАТОВ
+                //
+                // Пул примерки — надетое, сумка и склад: uid уникальны за счёт
+                // префиксов eq-/bg-/st- из mapItems(), поэтому поиск по строке
+                // безопасен.
+                // ============================================================
+                const fitPool = [];
+                for (const key of ['equipped', 'bag', 'storage']) {
+                    for (const it of locations[key].items) fitPool.push(it);
+                }
+                const sideEl = document.getElementById('hp-side');
+
+                // Примерка стартует с ТЕКУЩИХ вещей героя: игрок сразу видит
+                // нулевую дельту и меняет только то, что хочет примерить.
+                const initFitting = () => {
+                    this.fitting = {
+                        role: h.role || '',
+                        level: Math.min(50, Math.max(1, +h.level || 1)),
+                        useSkills: false,
+                        slots: {}
+                    };
+                    for (const slot of this.FITTING_SLOTS) {
+                        const it = equipped.find(x => x.slot === slot.id) || null;
+                        this.fitting.slots[slot.id] = {
+                            uid: it ? String(it.uid) : '',
+                            en: it ? Math.min(15, Math.max(0, Math.round(+(it.en ?? it.e ?? 0)))) : 0
+                        };
+                    }
+                    const roleSel = document.getElementById('hp-fit-role');
+                    if (roleSel) roleSel.value = this.fitting.role;
+                    const lvlInp = document.getElementById('hp-fit-level');
+                    if (lvlInp) lvlInp.value = String(this.fitting.level);
+                    const chk = document.getElementById('hp-fit-skills');
+                    if (chk) chk.checked = false;
+                };
+
+                // Порядок строк как в нативной карточке героя: сначала основные
+                // характеристики, затем вторичные (третий элемент — единица).
+                const SIDE_ROWS = [
+                    ['hp', 'Макс. HP', ''], ['atk', 'Физ. урон', ''], ['mag', 'Магия', ''], ['def', 'Броня', ''],
+                    ['crit', 'Крит', '%'], ['critDmg', 'Сила крита', '%'], ['dodge', 'Уклонение', '%'],
+                    ['pierce', 'Пробивание', '%'], ['healPow', 'Сила лечения', '%'],
+                    ['luck', 'Удача', '%'], ['resist', 'Сопротивление', '']
+                ];
+
+                /**
+                 * Постоянная правая панель: «Текущий герой → Примерка» по всем
+                 * характеристикам + боевая мощь, штраф экипировки и множитель
+                 * крита (1 + critDmg/100). Δ: +N зелёным, −N красным.
+                 */
+                const renderSide = () => {
+                    if (!sideEl) return;
+                    const cur = this.heroCurrentStats(h);
+                    let fit = null;
+                    try { fit = this.fittingResult(h, fitPool); } catch (e) { fit = null; }
+                    const delta = (before, after) => {
+                        const d = Math.round((after - before) * 10) / 10;
+                        const cls = d > 0 ? 'up' : (d < 0 ? 'down' : 'same');
+                        const txt = d > 0 ? `+${d}` : (d < 0 ? `−${Math.abs(d)}` : '±0');
+                        return `<span class="hp-side-delta ${cls}">${txt}</span>`;
+                    };
+                    const statRow = ([k, label, suf]) => {
+                        const before = +(cur.stats[k] || 0);
+                        const after = fit ? +(fit.stats[k] || 0) : before;
+                        return `<div class="hp-side-row"><span class="hp-side-name">${label}</span>`
+                            + `<span class="hp-side-vals">${before}${suf} → <b>${after}${suf}</b></span>`
+                            + delta(before, after) + '</div>';
+                    };
+                    const pwBefore = cur.power;
+                    const pwAfter = fit ? fit.power : pwBefore;
+                    const pen = fit ? fit.penalty : cur.penalty;
+                    const critMul = fit ? fit.critMul : cur.critMul;
+                    const skillsNote = !this.fitting.useSkills ? ''
+                        : (fit && fit.skillsUsed ? ' · 🌟 созвездие учтено' : ' · 🌟 созвездие недоступно');
+                    sideEl.innerHTML = `<div class="hp-side-head">Характеристики</div>
+                        <div class="hp-side-cols"><span>Параметр</span><span>Сейчас → Примерка</span><span>Δ</span></div>
+                        ${SIDE_ROWS.map(statRow).join('')}
+                        <div class="hp-side-sep"></div>
+                        <div class="hp-side-row strong"><span class="hp-side-name">Боевая мощь</span>`
+                        + `<span class="hp-side-vals">${pwBefore} → <b>${pwAfter}</b></span>${delta(pwBefore, pwAfter)}</div>
+                        <div class="hp-side-row"><span class="hp-side-name">Штраф экипировки</span>`
+                        + `<span class="hp-side-vals">${pen ? '−' + pen + '%' : 'нет'}</span><span class="hp-side-delta same"></span></div>
+                        <div class="hp-side-row"><span class="hp-side-name">Множитель крита</span>`
+                        + `<span class="hp-side-vals">×${critMul.toFixed(2)}</span><span class="hp-side-delta same"></span></div>
+                        <div class="hp-side-foot">Заточка: Σ +${fit ? fit.enTotal : cur.enTotal} ур. · +2 мощи за уровень${skillsNote}</div>`;
+                };
+
+                /**
+                 * Строки примерки: слот -> предмет (optgroup по локациям) и
+                 * уровень заточки +0…+15. Любое изменение сразу обновляет
+                 * боковую панель, таблица заточки не перерисовывается.
+                 */
+                const renderFit = () => {
+                    const rowsEl = document.getElementById('hp-fit-rows');
+                    if (!rowsEl) return;
+                    rowsEl.innerHTML = this.FITTING_SLOTS.map(slot => {
+                        const sel = this.fitting.slots[slot.id] || { uid: '', en: 0 };
+                        const groups = ['equipped', 'bag', 'storage'].map(key => {
+                            const list = locations[key].items.filter(it => it.slot === slot.id);
+                            if (!list.length) return '';
+                            const opts = list.map(it => {
+                                const on = String(it.uid) === String(sel.uid) ? ' selected' : '';
+                                const en = +(it.en ?? it.e ?? 0);
+                                const label = `${it.name || '—'}${en > 0 ? ` +${en}` : ''} · ${Utils.formatMoney(it.v || 0)}`;
+                                return `<option value="${Utils.escapeHtml(String(it.uid))}"${on}>${Utils.escapeHtml(label)}</option>`;
+                            }).join('');
+                            return `<optgroup label="${Utils.escapeHtml(locations[key].name)}">${opts}</optgroup>`;
+                        }).join('');
+                        const enOpts = Array.from({ length: 16 }, (_, i) =>
+                            `<option value="${i}"${i === (+sel.en || 0) ? ' selected' : ''}>+${i}</option>`).join('');
+                        const chosen = fitPool.find(x => String(x.uid) === String(sel.uid));
+                        const gp = chosen ? this.gearPenaltyFor(this.fitting.role, chosen) : null;
+                        const warn = (gp && gp.bad)
+                            ? `<span class="hp-gear-pill bad" title="Не для класса: −${gp.pct}%">⚠</span>`
+                            : '';
+                        return `<div class="hp-fit-row">
+                            <span class="hp-fit-slot">${slot.icon} ${slot.name}${warn}</span>
+                            <select class="hp-fit-item" data-slot="${slot.id}" title="Предмет из надетого, сумки или склада">
+                                <option value="">— пусто —</option>${groups}
+                            </select>
+                            <select class="hp-fit-en" data-slot="${slot.id}" title="Уровень заточки (0…15)">${enOpts}</select>
+                        </div>`;
+                    }).join('');
+
+                    rowsEl.querySelectorAll('.hp-fit-item').forEach(el => {
+                        el.addEventListener('change', () => {
+                            const slot = el.dataset.slot;
+                            if (!this.fitting.slots[slot]) this.fitting.slots[slot] = { uid: '', en: 0 };
+                            this.fitting.slots[slot].uid = el.value;
+                            // Перерисовка нужна ради ⚠ «не для класса» у слота.
+                            renderFit();
+                            renderSide();
+                        });
+                    });
+                    rowsEl.querySelectorAll('.hp-fit-en').forEach(el => {
+                        el.addEventListener('change', () => {
+                            const slot = el.dataset.slot;
+                            if (!this.fitting.slots[slot]) this.fitting.slots[slot] = { uid: '', en: 0 };
+                            this.fitting.slots[slot].en = Math.min(15, Math.max(0, +el.value || 0));
+                            renderSide();
+                        });
+                    });
+                };
+
+                // ── Управление примеркой: класс, уровень, созвездие, сброс ──
+                document.getElementById('hp-fit-role')?.addEventListener('change', (e) => {
+                    this.fitting.role = e.target.value || h.role || '';
+                    renderFit();   // ⚠ «не для класса» зависит от класса
+                    renderSide();
+                });
+                document.getElementById('hp-fit-level')?.addEventListener('input', (e) => {
+                    const lv = Math.min(50, Math.max(1, Math.round(+e.target.value || 1)));
+                    this.fitting.level = lv;
+                    renderSide();
+                });
+                // blur возвращает зажатую границу (1…50), если ввели 0 или 99.
+                document.getElementById('hp-fit-level')?.addEventListener('blur', (e) => {
+                    e.target.value = String(this.fitting.level);
+                });
+                document.getElementById('hp-fit-skills')?.addEventListener('change', (e) => {
+                    this.fitting.useSkills = !!e.target.checked;
+                    renderSide();
+                });
+                document.getElementById('hp-fit-reset')?.addEventListener('click', () => {
+                    initFitting();
+                    renderFit();
+                    renderSide();
+                });
+
                 // 11.6.2d: при входе на вкладку «Заточка» тянем цены звёзды и
                 // сферы с аукциона и перерисовываем таблицу. Пока ответа нет (или
                 // если сервер молчит) в UI стоят базовые цены кузнеца.
@@ -885,9 +1320,10 @@
                     });
                 };
 
-                // initialTab: 'build' (по умолчанию) | 'ench'; 'arena' уже
-                // нормализован в 'build'. «Билды» активны в разметке изначально.
+                // initialTab: 'build' (по умолчанию) | 'fit' | 'ench'; 'arena'
+                // уже нормализован в 'build'. «Билды» активны в разметке сразу.
                 if (wanted === 'ench' || wanted === 'hero-ench') activateTab('hero-ench');
+                else if (wanted === 'fit' || wanted === 'hero-fit') activateTab('hero-fit');
 
                 // Рендер плитки предметов
                 const renderGrid = () => {
@@ -970,27 +1406,13 @@
                     });
                 });
 
-                // Обработка переключателя режимов
-                modal?.querySelectorAll('.hp-mode-btn').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
-                        this.strategyMode = e.currentTarget.dataset.mode;
+                // v11.7.0: переключатель «📊 Идеально / 🧠 С учётом шансов»
+                // удалён — «Итоговая стоимость» всегда ожидаемая (renderTable),
+                // поэтому обработчиков .hp-mode-btn больше нет.
 
-                        // Обновляем визуал кнопок
-                        modal.querySelectorAll('.hp-mode-btn').forEach(b => {
-                            b.classList.remove('active');
-                            b.style.background = 'transparent';
-                            b.style.color = '#aaa';
-                        });
-                        e.currentTarget.classList.add('active');
-                        e.currentTarget.style.background = '#caa55c';
-                        e.currentTarget.style.color = '#1d1620';
-
-                        // v11.7.1: панели ручного ввода ресурсов больше нет —
-                        // режим влияет только на расчёт (см. renderTable).
-                        renderTable();
-                    });
-                });
-
+                initFitting();
+                renderFit();
+                renderSide();
                 renderGrid();
                 renderTable();
 

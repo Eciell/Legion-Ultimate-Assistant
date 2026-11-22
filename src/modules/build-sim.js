@@ -25,7 +25,7 @@
         /* fx-ключи -> подписи в сводке «Что дают открытые навыки».
            v11.7.1: знаки «%» и «+» в подписях НЕ дублируются — суффикс и знак
            значения добавляет statList() (item.sign/item.suf). */
-        fxNames: { melee: 'Физ. урон', magic: 'Магия', hp: 'Макс. HP', def: 'Броня', healPow: 'Сила лечения', healIn: 'Вх. лечение', crit: 'Крит', critDmg: 'Сила крита', skel: 'Урон скелетов', skelT: 'Время скелетов', leech: 'Вампиризм', block: 'Снижение урона', dodge: 'Уклонение', lead: 'Урон по боссам', first: 'Урон 1-й ход', dmg: 'Весь урон', pierce: 'Пробивание', resist: 'Сопротивление', healCrit: 'Крит лечения', regen: 'Регенерация', low: 'Урон при низком HP', ranged: 'Урон луком', poison: 'Отрава', steal: 'Кража', loot: 'Добыча', skelN: 'Скелетов', volley: 'Залп', shieldBlock: 'Щит блок', trapDodge: 'Ловушки', steady: 'Промах→удар', cleave: 'Замах', cleaveBoss: 'Замах по боссу', penBoss: 'Бронебой по боссу', drain: 'Вытягивание', hex: 'Проклятие', holy: 'По нежити', poisonT: 'Время отравы' },
+        fxNames: { melee: 'Физ. урон', magic: 'Магия', hp: 'Макс. HP', def: 'Броня', healPow: 'Сила лечения', healIn: 'Вх. лечение', crit: 'Крит', critDmg: 'Сила крита', skel: 'Урон скелетов', skelT: 'Время скелетов', leech: 'Вампиризм', block: 'Снижение урона', dodge: 'Уклонение', lead: 'Урон по боссам', first: 'Урон 1-й ход', dmg: 'Весь урон', pierce: 'Пробивание', resist: 'Сопротивление', healCrit: 'Крит лечения', regen: 'Регенерация', low: 'Урон при низком HP', ranged: 'Урон луком', poison: 'Отрава', steal: 'Кража', loot: 'Добыча', skelN: 'Скелетов', volley: 'Залп', shieldBlock: 'Щит блок', trapDodge: 'Ловушки', steady: 'Промах→удар', cleave: 'Замах', cleaveBoss: 'Замах по боссу', penBoss: 'Бронебой по боссу', drain: 'Вытягивание', hex: 'Проклятие', holy: 'По нежити', poisonT: 'Время отравы', abNext: 'Удар после умения', angel: 'Ангел-хранитель', backFoe: 'Урон по дальней линии', banner: 'Знамя когорты', breakHeal: 'Лечение при разбитом щите', burnChain: 'Цепной огонь', burnFoe: 'Урон по горящим', chillFoe: 'Урон по ознобу', chillProc: 'Шанс озноба', coverNb: 'Прикрытие соседа', critBleed: 'Кровотечение при крите', critBlind: 'Ослепление при крите', critBurn: 'Поджог при крите', critPierceWard: 'Крит сквозь щиты', dmgHeal: 'Лечение от урона', dodgeNext: 'Выстрел после уклонения', firstTeam: 'Урон команды в 1-й ход', guardAura: 'Аура защиты стойки', healNext: 'Удар после лечения', healRegen: 'Регенерация после лечения', healSplash: 'Всплеск лечения', highFoe: 'Урон по здоровым', highSelf: 'Урон при высоком HP', huntMark: 'Охотничья метка', killHit: 'Добивание врага', lastStand: 'Последний рубеж', lineCut: 'Защита соратников по линии', lowHeal: 'Лечение раненых', multiLow: 'Залп по раненым', overShield: 'Щит избытка лечения', phoenixHeart: 'Сердце феникса', ricochet: 'Рикошет выстрела', sameFoe: 'Пристрелка', shieldDmg: 'Урон под щитом', shieldUp: 'Прочность накладываемых щитов', startShield: 'Стартовый барьер', startWard: 'Стартовый оберег', taunt: 'Провокация', thorns: 'Шипы на щите', trap: 'Капкан', underShield: 'Защита под щитом', weakFoe: 'Урон по ослабленным', winter: 'Вечная зима' },
 
         /* Категории прокачки способностей Арены (как в /api/skmap: ab.br[].next). */
         ARENA_KINDS: [['lv', 'Ступень'], ['pow', 'Мощь'], ['eff', 'Эффект'], ['dur', 'Длительность']],
@@ -193,20 +193,22 @@
                 if (key === 'cleaveBoss') return fmt((fx.cleave || 0) * r * 0.4);
                 if (key === 'penBoss') return fmt((fx.pierce || 0) * r / 20);
                 if (key === 'critX') return fmt(2 + (fx.critDmg || 0) * r / 100);
-                // resist/pierce: сырой fx -> характеристика через fromFx.
-                if (key === 'resist' || key === 'pierce') return fmt((fx[key] || 0) * r * scaleOf(key));
+                // v11.7.0: {resist}/{pierce} в тексте — БАЗОВЫЙ ШАНС срабатывания
+                // умения (например, «10%»), поэтому fx умножается ТОЛЬКО на ранг:
+                // fromFx (0.5) применяется лишь к примечаниям о характеристиках.
                 if (fx[key] !== undefined) return fmt(fx[key] * r);
                 return match;
             });
 
-            // Игра дописывает вторичные статы, даже если в тексте узла нет
-            // плейсхолдера: «Физ. урон +5 · Сопротивление +30».
+            // v11.7.0: примечания добавляются ВСЕГДА, когда в fx есть resist/
+            // pierce: игра дописывает вторичные статы даже без плейсхолдера
+            // в тексте («Физ. урон +5 · характеристика «Сопротивление» +30»).
             const notes = [];
-            if (fx.resist !== undefined && !/\{resist\}/.test(rawText)) {
-                notes.push(`Сопротивление +${fmt(fx.resist * r * scaleOf('resist'))}`);
+            if (fx.resist !== undefined) {
+                notes.push(`характеристика «Сопротивление» +${fmt(fx.resist * r * scaleOf('resist'))}`);
             }
-            if (fx.pierce !== undefined && !/\{pierce\}/.test(rawText)) {
-                notes.push(`Пробивание +${fmt(fx.pierce * r * scaleOf('pierce'))}%`);
+            if (fx.pierce !== undefined) {
+                notes.push(`характеристика «Пробивание» +${fmt(fx.pierce * r * scaleOf('pierce'))}%`);
             }
             if (notes.length) out += ' · ' + notes.join(' · ');
 
@@ -1653,6 +1655,56 @@
                     <b>Что дают открытые навыки</b>
                     <span>${hubOn ? '✅ умение класса открыто' : `до умения класса: ${Math.max(0, need - opened)} узл.`}</span>
                 </div>${body}`;
+        },
+
+        /**
+         * v11.7.0: числовые бонусы открытых узлов созвездия — для вкладки
+         * «👗 Примерка» планировщика героя.
+         *
+         * statList() собирает ТЕКСТОВУЮ сводку («Физ. урон +15%»), а здесь
+         * нужен агрегат в единицах характеристик героя:
+         *   hp / def          — плоские значения (fx узла);
+         *   atkPct / magPct   — проценты к физ./маг. урону (fx melee / magic);
+         *   crit, critDmg, dodge, pierce, healPow, luck, resist — пункты.
+         *
+         * resist/pierce в fx лежат «сырыми», поэтому переводятся через
+         * fromFx (обычно 0.5) — так же, как в игре и в примечаниях
+         * formatNodeText(). Пропускаются служебные ключи (ctl_/act_/cd_).
+         *
+         * @returns {object|null} null — созвездие не загружено или пусто
+         */
+        skillBonuses() {
+            const C = this.clsData();
+            if (!C || !this._cls) return null;
+            const st = this.state();
+            const fromFx = this.xstatFromFx();
+            // fx-ключ -> поле агрегата. Всё остальное (урон по боссам, залпы,
+            // лечение и т.п.) на статы героя напрямую не влияет и опускается.
+            const MAP = {
+                melee: 'atkPct', magic: 'magPct', hp: 'hp', def: 'def',
+                crit: 'crit', critDmg: 'critDmg', dodge: 'dodge', pierce: 'pierce',
+                healPow: 'healPow', luck: 'luck', resist: 'resist'
+            };
+            const out = {
+                hp: 0, def: 0, atkPct: 0, magPct: 0,
+                crit: 0, critDmg: 0, dodge: 0, pierce: 0,
+                healPow: 0, luck: 0, resist: 0
+            };
+            let any = false;
+            (C.branches || []).forEach((B) => {
+                (B.nodes || []).forEach((n) => {
+                    const r = Math.min(Math.max(1, +n.max || 1), +st.nodes[n.id] || 0);
+                    if (!r) return;
+                    for (const [fk, fv] of Object.entries(n.fx || {})) {
+                        const key = MAP[fk];
+                        if (!key || this.isSkipFx(fk) || !isFinite(+fv)) continue;
+                        const scale = isFinite(+fromFx[fk]) ? +fromFx[fk] : 1;
+                        out[key] += (+fv) * r * scale;
+                        any = true;
+                    }
+                });
+            });
+            return any ? out : null;
         },
 
         /* ------------------------------------------------------------

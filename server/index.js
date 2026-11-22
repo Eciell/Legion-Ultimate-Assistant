@@ -173,6 +173,12 @@ const LOG_DEFAULT_LIMIT = 100;
 const LOG_MAX_LIMIT = 200;
 const LOG_MAX_ROWS = 500;
 
+// Чат пати в RAM (v11.7.0): не пишется в SQLite, хранится только в памяти процесса.
+// partyId -> { messages: Array<{ id, login, text, at }>, nextId: number, lastActive: number }
+const partyChatRooms = new Map();
+const CHAT_RING_BUFFER_SIZE = 40;
+const CHAT_MSG_MAX_LENGTH = 300;
+
 /**
  * Ошибка, которую можно безопасно отдать клиенту как JSON.
  *
@@ -257,7 +263,8 @@ const limiters = {
     usersGet: new RateLimiter(10, 60_000),        // 10 /users за минуту на IP
     heartbeat: new RateLimiter(6, 60_000),        // 6 heartbeat за минуту на IP
     partyState: new RateLimiter(60, 60_000),      // 60 обновлений state/мин на IP
-    partyLog: new RateLimiter(20, 60_000)         // 20 записей в лог/мин на IP
+    partyLog: new RateLimiter(20, 60_000),        // 20 записей в лог/мин на IP
+    partyChat: new RateLimiter(30, 60_000)        // 30 сообщений в чат пати/мин на IP
 };
 
 // Чистка лимитеров — раз в минуту, TTL заброшенных пати — раз в 30 минут
@@ -274,6 +281,13 @@ setInterval(() => {
         const now = Date.now();
         for (const [k, v] of activeUserClaims) {
             if (v.expiresAt <= now) activeUserClaims.delete(k);
+        }
+    }
+    // v11.7.0: чистка неактивных комнат чата (без активной пати или Date.now() - lastActive > 2 часа)
+    const now = Date.now();
+    for (const [pId, r] of partyChatRooms) {
+        if (now - r.lastActive > 2 * 60 * 60 * 1000 || !getParty(pId)) {
+            partyChatRooms.delete(pId);
         }
     }
     cleanupTick += 1;
@@ -798,6 +812,7 @@ async function handleLeave(req, partyId) {
     // Владелец уносит пати с собой: каскадное удаление всех сессий и пати
     // одной транзакцией (см. deleteParty в db.js).
     if (session.sessionId === party.ownerSession) {
+        partyChatRooms.delete(party.id);
         deleteParty(party.id);
         return json({ ok: true, deleted: 'party' });
     }
@@ -805,6 +820,81 @@ async function handleLeave(req, partyId) {
     // Обычный участник освобождает только свой ник.
     removeSession(party.id, session.sessionId);
     return json({ ok: true, deleted: 'self' });
+}
+
+/*
+ * POST /party/:id/chat {text} (v11.7.0)
+ *
+ * Чат пати в оперативной памяти (без SQLite). login берётся из сессии,
+ * текст валидируется (1..300 символов) и экранируется (<, >, &).
+ * Хранится кольцевой буфер на 40 сообщений на пати.
+ */
+async function handleChatPost(req, partyId, server) {
+    const ip = server.requestIP(req)?.address || 'unknown';
+    limiters.partyChat.check(ip);
+
+    const session = authenticate(req);
+    const party = requireParty(partyId);
+    requireMember(session, party);
+
+    const body = await readJson(req);
+    const rawText = typeof body.text === 'string' ? body.text.trim() : '';
+    if (!rawText || rawText.length > CHAT_MSG_MAX_LENGTH) {
+        throw new HttpError(400, 'bad_text', `text: от 1 до ${CHAT_MSG_MAX_LENGTH} символов`);
+    }
+
+    const text = rawText
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+    let room = partyChatRooms.get(party.id);
+    if (!room) {
+        room = { messages: [], nextId: 1, lastActive: Date.now() };
+        partyChatRooms.set(party.id, room);
+    }
+
+    const msg = {
+        id: room.nextId++,
+        login: session.login,
+        text,
+        at: Date.now()
+    };
+    room.messages.push(msg);
+    if (room.messages.length > CHAT_RING_BUFFER_SIZE) {
+        room.messages.shift();
+    }
+    room.lastActive = Date.now();
+
+    return json({ ok: true, id: msg.id });
+}
+
+/*
+ * GET /party/:id/chat?since=<id> (v11.7.0)
+ *
+ * Возвращает {messages, nextSince}. Если since > 0, только сообщения с id > since.
+ * Если новых сообщений нет, nextSince = since.
+ */
+async function handleChatGet(req, partyId, url) {
+    const session = authenticate(req);
+    const party = requireParty(partyId);
+    requireMember(session, party);
+
+    const since = Math.max(0, parseInt(url.searchParams.get('since') || '0', 10) || 0);
+
+    const room = partyChatRooms.get(party.id);
+    if (!room || !room.messages.length) {
+        return json({ messages: [], nextSince: since });
+    }
+
+    const messages = since > 0
+        ? room.messages.filter((m) => m.id > since)
+        : [...room.messages];
+    const nextSince = messages.length
+        ? messages[messages.length - 1].id
+        : (room.messages[room.messages.length - 1]?.id || since);
+
+    return json({ messages, nextSince });
 }
 
 /* ------------------------------------------------------------------ */
@@ -1108,6 +1198,16 @@ const server = Bun.serve({
                     return await handleLogGet(req, partyId, url);
                 }
                 throw new HttpError(405, 'method_not_allowed', 'Ожидается GET или POST /party/:id/log');
+            }
+            // Чат пати в RAM (v11.7.0): POST — отправка, GET — получение новых сообщений.
+            if (action === 'chat') {
+                if (req.method === 'POST') {
+                    return await handleChatPost(req, partyId, srv);
+                }
+                if (req.method === 'GET') {
+                    return await handleChatGet(req, partyId, url);
+                }
+                throw new HttpError(405, 'method_not_allowed', 'Ожидается GET или POST /party/:id/chat');
             }
 
             throw new HttpError(404, 'not_found', 'Неизвестный маршрут');

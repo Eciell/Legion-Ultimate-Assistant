@@ -502,24 +502,303 @@
         .party-error { color: #ff8fa3; font-size: 12px; line-height: 1.35; }
         .party-error:empty { display: none; }
 
-        /* HUD пати: HP-панель и журнал в одном контейнере, перетаскивание
-           за заголовки. Контейнер и панели — pointer-events:none, чтобы не
-           перехватывать клики по игре; интерактивные узлы возвращают auto. */
-        .party-hud-container { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; align-items: stretch; box-sizing: border-box; pointer-events: none; }
-        .party-panel, .party-log-panel { display: none; position: relative; box-sizing: border-box; min-width: 150px; max-width: 260px; background: rgba(20, 16, 26, 0.92); border: 1px solid #3a3040; border-radius: 10px; padding: 8px 10px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); font: 12px/1.4 system-ui, "Segoe UI", sans-serif; color: #e8e8ea; pointer-events: none; }
-        .party-drag-handle { pointer-events: auto; cursor: grab; user-select: none; -webkit-user-select: none; touch-action: none; }
-        .party-drag-handle:active, .party-hud-container.party-dragging .party-drag-handle { cursor: grabbing; }
-        .party-panel-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #c9b184; margin-bottom: 6px; }
-        .party-log-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-        .party-log-body { pointer-events: auto; max-height: 150px; overflow-y: auto; margin-top: 6px; }
-        .party-log-body::-webkit-scrollbar { width: 6px; }
-        .party-log-body::-webkit-scrollbar-thumb { background: #44374a; border-radius: 4px; }
+        /* ============================================================
+           HUD ПАТИ (modules/party.js): карточки HP, журнала и чата (v11.7.0)
+           ============================================================ */
+        .party-hud-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: stretch;
+            width: 276px;
+            box-sizing: border-box;
+            pointer-events: none;
+        }
+        .party-panel, .party-log-panel, .party-chat-panel {
+            display: none;
+            position: relative;
+            box-sizing: border-box;
+            width: 276px;
+            background: rgba(18, 15, 24, 0.94);
+            border: 1px solid rgba(202, 165, 92, 0.35);
+            border-radius: 10px;
+            padding: 8px 10px;
+            box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+            font: 12px/1.4 system-ui, "Segoe UI", sans-serif;
+            color: #e8e8ea;
+            pointer-events: none;
+        }
+        .party-drag-handle {
+            pointer-events: auto;
+            cursor: grab;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+        }
+        .party-drag-handle:active,
+        .party-hud-container.party-dragging .party-drag-handle {
+            cursor: grabbing;
+        }
+
+        /* Карточка HP */
+        .party-panel-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 10px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #c9b184;
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+        .party-member-row {
+            padding: 3px 4px;
+            border-radius: 6px;
+            margin-bottom: 4px;
+            transition: background 0.15s ease;
+            border-bottom: 1px dashed rgba(255, 255, 255, 0.06);
+        }
+        .party-member-row:hover {
+            background: rgba(255, 255, 255, 0.04);
+        }
+        .party-member-row:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+        }
+        .party-member-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+        }
+        .party-member-name {
+            color: #ffcf6a;
+            font-weight: bold;
+            font-size: 11.5px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .party-member-hp-val {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            white-space: nowrap;
+        }
+        .party-hp-num {
+            color: #d8c9a8;
+            font-size: 11px;
+            font-variant-numeric: tabular-nums;
+        }
+        .party-hp-track {
+            height: 5px;
+            margin-top: 3px;
+            border-radius: 3px;
+            background: #251d2c;
+            overflow: hidden;
+        }
+        .party-hp-fill {
+            height: 5px;
+            border-radius: 3px;
+            transition: width 0.25s ease, background 0.2s ease;
+        }
+
+        /* Кнопка лечения */
+        .party-heal-btn {
+            pointer-events: auto;
+            flex: none;
+            padding: 1px 6px;
+            background: #1c2b22;
+            border: 1px solid #4ade80;
+            color: #4ade80;
+            border-radius: 4px;
+            font-size: 10.5px;
+            line-height: 14px;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s, transform 0.1s;
+        }
+        .party-heal-btn:hover:not(:disabled) {
+            background: #4ade80;
+            color: #120f18;
+            transform: scale(1.05);
+        }
+        .party-heal-btn.copied {
+            background: #ffcf6a !important;
+            border-color: #ffcf6a !important;
+            color: #120f18 !important;
+            font-weight: bold;
+        }
+        .party-heal-btn:disabled {
+            opacity: 0.5;
+            cursor: default;
+        }
+
+        /* Карточка Журнала */
+        .party-log-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 10px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #c9b184;
+            font-weight: bold;
+        }
+        .party-log-body {
+            pointer-events: auto;
+            max-height: 150px;
+            overflow-y: auto;
+            margin-top: 6px;
+        }
+        .party-log-body::-webkit-scrollbar { width: 4px; }
+        .party-log-body::-webkit-scrollbar-thumb { background: #44374a; border-radius: 3px; }
         .party-log-body::-webkit-scrollbar-thumb:hover { background: #caa55c; }
-        .party-log-toggle { pointer-events: auto; background: none; border: none; padding: 0 2px; color: #ffcf6a; cursor: pointer; font-size: 12px; line-height: 1; }
+        .party-log-toggle {
+            pointer-events: auto;
+            background: none;
+            border: none;
+            padding: 0 4px;
+            color: #ffcf6a;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            line-height: 1;
+        }
         .party-log-toggle:hover { color: #fff; }
-        .party-heal-btn { pointer-events: auto; flex: none; padding: 0 5px; background: #22352a; border: 1px solid #5fd987; color: #5fd987; border-radius: 4px; font-size: 10px; line-height: 15px; cursor: pointer; transition: background 0.15s, color 0.15s; }
-        .party-heal-btn:hover:not(:disabled) { background: #5fd987; color: #16121a; }
-        .party-heal-btn:disabled { opacity: 0.6; cursor: default; }
+
+        /* Карточка Чата пати */
+        .party-chat-panel {
+            flex-direction: column;
+        }
+        .party-chat-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .party-chat-title {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 10px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #c9b184;
+            font-weight: bold;
+        }
+        .party-chat-badge {
+            background: #e03e52;
+            color: #fff;
+            border-radius: 8px;
+            padding: 0 5px;
+            font-size: 9px;
+            font-weight: bold;
+            line-height: 13px;
+        }
+        .party-chat-toggle {
+            pointer-events: auto;
+            background: none;
+            border: none;
+            padding: 0 4px;
+            color: #ffcf6a;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            line-height: 1;
+        }
+        .party-chat-toggle:hover { color: #fff; }
+        .party-chat-content {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-top: 6px;
+        }
+        .party-chat-body {
+            pointer-events: auto;
+            max-height: 140px;
+            min-height: 50px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding-right: 2px;
+        }
+        .party-chat-body::-webkit-scrollbar { width: 4px; }
+        .party-chat-body::-webkit-scrollbar-thumb { background: #44374a; border-radius: 3px; }
+        .party-chat-body::-webkit-scrollbar-thumb:hover { background: #caa55c; }
+        .party-chat-empty {
+            color: #777;
+            font-style: italic;
+            font-size: 11px;
+            text-align: center;
+            padding: 10px 0;
+        }
+        .party-chat-msg {
+            font-size: 11px;
+            line-height: 1.35;
+            word-break: break-word;
+        }
+        .party-chat-time {
+            color: #7f7389;
+            font-size: 9.5px;
+            margin-right: 4px;
+            font-variant-numeric: tabular-nums;
+        }
+        .party-chat-nick {
+            color: #ffcf6a;
+            font-weight: bold;
+            margin-right: 4px;
+        }
+        .party-chat-nick.party-chat-self {
+            color: #8ff2a0;
+        }
+        .party-chat-text {
+            color: #ece5f0;
+        }
+        .party-chat-form {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            pointer-events: auto;
+            margin-top: 2px;
+        }
+        .party-chat-input {
+            flex: 1 1 auto;
+            min-width: 0;
+            background: #120d17;
+            border: 1px solid #3d2f44;
+            border-radius: 5px;
+            padding: 4px 7px;
+            font-size: 11px;
+            color: #fff;
+            outline: none;
+            box-sizing: border-box;
+        }
+        .party-chat-input:focus {
+            border-color: #caa55c;
+        }
+        .party-chat-send {
+            flex: none;
+            background: #caa55c;
+            border: none;
+            color: #120f18;
+            border-radius: 5px;
+            padding: 4px 8px;
+            font-size: 10px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: filter 0.15s;
+        }
+        .party-chat-send:hover {
+            filter: brightness(1.15);
+        }
 
         /* ============================================================
            ПЛАНИРОВЩИК БИЛДОВ — СКРОЛЛ ДЕРЕВА + ГРАНИЦЫ МОДАЛКИ (v11.6.3b)
@@ -783,19 +1062,17 @@
            Плавающее уведомление о чужом открытом сборе (POST /api/citymon/act
            { op: 'elist' }) с кнопкой «Присоединиться» (op: 'ejoin').
            Палитра — как у остальных плашек аддона: тёмная панель, золотая
-           рамка, золотая кнопка. Ставим в левый нижний угол: по центру
-           сверху уже живут подсказки боевого ассистента, а справа — HUD
-           пати/тосты, перекрывать их нельзя.
+           рамка, золотая кнопка. Позиция: правый нижний угол.
            ============================================================ */
         #lg-citymon-gather {
             position: fixed;
-            left: 20px;
-            bottom: 20px;
-            z-index: 10001;
+            right: 16px;
+            bottom: 16px;
+            z-index: 99999 !important;
             display: none;
             pointer-events: none;
         }
-        #lg-citymon-gather.on { display: block; }
+        #lg-citymon-gather.on { display: block !important; }
         .lg-cm-gather {
             background: rgba(29, 22, 32, 0.96);
             border: 2px solid #caa55c;
@@ -819,7 +1096,7 @@
         .lg-cm-gather-row { display: flex; align-items: center; gap: 8px; }
         .lg-cm-gather-join {
             background: #ffcf6a; color: #16121a; border: none; padding: 6px 14px;
-            border-radius: 6px; font-weight: bold; cursor: pointer;
+            border-radius: 6px; font-weight: bold; font-size: 13px; cursor: pointer;
             transition: transform 0.1s, filter 0.15s;
         }
         .lg-cm-gather-join:hover:not(:disabled) { filter: brightness(1.1); }
@@ -831,6 +1108,35 @@
             cursor: pointer; transition: color 0.15s, border-color 0.15s;
         }
         .lg-cm-gather-close:hover { color: #ff8fa3; border-color: #ff8fa3; }
+
+        /* Размер M (~82-85% от L) */
+        #lg-citymon-gather.lg-cm-size-m .lg-cm-gather {
+            padding: 7px 11px;
+            gap: 4px;
+            border-radius: 8px;
+            min-width: 220px;
+            max-width: min(460px, 92vw);
+        }
+        #lg-citymon-gather.lg-cm-size-m .lg-cm-gather-head { font-size: 12.5px; line-height: 1.25; }
+        #lg-citymon-gather.lg-cm-size-m .lg-cm-gather-sub { font-size: 11px; }
+        #lg-citymon-gather.lg-cm-size-m .lg-cm-gather-row { gap: 6px; }
+        #lg-citymon-gather.lg-cm-size-m .lg-cm-gather-join { padding: 4px 11px; font-size: 11.5px; border-radius: 5px; }
+        #lg-citymon-gather.lg-cm-size-m .lg-cm-gather-close { padding: 4px 8px; font-size: 11.5px; border-radius: 5px; }
+
+        /* Размер S (~68-72% от L, мини-плашка) */
+        #lg-citymon-gather.lg-cm-size-s .lg-cm-gather {
+            padding: 5px 8px;
+            gap: 3px;
+            border-radius: 6px;
+            border-width: 1.5px;
+            min-width: 180px;
+            max-width: min(360px, 92vw);
+        }
+        #lg-citymon-gather.lg-cm-size-s .lg-cm-gather-head { font-size: 11px; line-height: 1.2; }
+        #lg-citymon-gather.lg-cm-size-s .lg-cm-gather-sub { font-size: 10px; line-height: 1.2; }
+        #lg-citymon-gather.lg-cm-size-s .lg-cm-gather-row { gap: 4px; }
+        #lg-citymon-gather.lg-cm-size-s .lg-cm-gather-join { padding: 3px 8px; font-size: 10.5px; border-radius: 4px; }
+        #lg-citymon-gather.lg-cm-size-s .lg-cm-gather-close { padding: 3px 6px; font-size: 10px; border-radius: 4px; }
 
         /* ============================================================
            11.6.5c: СПОСОБНОСТИ АРЕНЫ (modules/hero-planner.js)
@@ -1028,25 +1334,36 @@
             background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px;
             padding: 10px 12px;
         }
-        /* Таблица уровней: свой скролл, чтобы 15 строк не растягивали модалку.
-           Отступ 350px — это h2, табы, две компактные строки верха
-           (topbar + суббар), баннер предмета и сноска под сплитом. */
+        /* Таблица уровней: без вертикального скроллбара, чтобы 16 строк помещались в окне. */
         .hp-ench-right {
-            flex: 1 1 60%; min-width: 0;
-            max-height: calc(100vh - 350px);
-            /* v11.7.1: добавилась колонка «Статы» — на узкой модалке таблица
-               скроллится ещё и по горизонтали, а не обрезает значения. */
-            overflow: auto;
+            flex: 1 1 auto; min-width: 0;
+            overflow-x: auto;
+            overflow-y: visible;
         }
         /* Узкая модалка/маленькое окно — таблица уезжает под карточку цели. */
         @media (max-width: 980px) {
             .hp-ench-split { flex-direction: column; }
-            .hp-ench-left, .hp-ench-right { flex: 1 1 auto; width: 100%; min-width: 0; }
+            .hp-ench-left, .hp-ench-right, .hp-ench-rightcol { flex: 1 1 auto; width: 100%; min-width: 0; }
         }
         /* Таблица уровней: компактнее общих правил .custom-modal th/td и без
-           псевдоэлемента сортировки «↕» (здесь сортировки нет). */
+           псевдоэлемента сортировки «↕» (здесь сортировки нет). Запрещаем
+           вертикальное растяжение таблицы и строк (без пустых зазоров). */
+        .custom-modal .hp-ench-table {
+            height: auto !important;
+            align-self: start;
+            border-collapse: collapse;
+        }
+        .hp-ench-table tbody,
+        .hp-ench-table tr {
+            height: auto !important;
+        }
         .custom-modal .hp-ench-table th,
-        .custom-modal .hp-ench-table td { padding: 5px 8px; font-size: 13px; }
+        .custom-modal .hp-ench-table td {
+            padding: 3px 8px !important;
+            line-height: 1.2 !important;
+            height: auto !important;
+            font-size: 12px;
+        }
         .custom-modal .hp-ench-table th { cursor: default; white-space: nowrap; }
         .custom-modal .hp-ench-table th::after { content: ''; }
         /* Строка уровня — кликабельный ВЫБОР уровня просмотра (v11.7.1: все
@@ -1213,6 +1530,180 @@
         }
         .hp-item-head-art > svg { width: 100%; height: 100%; display: block; }
         .hp-item-head-art > img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+
+        /* ============================================================
+           v11.7.0: ПЛАНИРОВЩИК ГЕРОЯ — ОКНО И БОКОВАЯ ПАНЕЛЬ СТАТОВ
+           Модалка — min(1520px, 96vw) и не выше 92vh. Вкладки «Билды»
+           и «Заточка» занимают 100% ширины. Двухколоночная сетка 1fr 320px
+           с панелью характеристик рендерится строго внутри «Примерки».
+           !important обязателен: общее правило некомпактных модалок
+           задаёт width/height с !important.
+           ============================================================ */
+        .custom-modal.hp-planner-modal {
+            width: min(1520px, 96vw) !important;
+            max-height: 92vh !important;
+        }
+        /* v11.7.0: двухколоночная сетка строго внутри вкладки «Примерка» */
+        .hp-fit-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 320px;
+            gap: 12px;
+            flex: 1 1 auto;
+            min-height: 0;
+            width: 100%;
+        }
+        .hp-fit-main {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-height: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        #tab-hero-fit.active {
+            display: flex !important;
+            flex-direction: column !important;
+            flex: 1 1 auto !important;
+            min-height: 0 !important;
+            max-height: 100% !important;
+            overflow: hidden !important;
+        }
+        /* Узкое окно — панель характеристик уезжает под слоты примерки */
+        @media (max-width: 1100px) {
+            .hp-fit-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; overflow-y: auto; }
+            .hp-fit-layout > .hp-side { max-height: 40vh; }
+        }
+
+        /* Бейдж ТЕСТ на кнопке вкладки и внутри вкладки «Примерка» */
+        .hp-test-badge {
+            display: inline-block;
+            padding: 1px 5px;
+            font-size: 10px;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            line-height: 1.2;
+            border-radius: 4px;
+            background: rgba(255, 107, 107, 0.2);
+            color: #ff6b6b;
+            border: 1px solid rgba(255, 107, 107, 0.6);
+            vertical-align: middle;
+            margin-left: 5px;
+            text-transform: uppercase;
+        }
+        .modal-tab.active .hp-test-badge {
+            background: #1d1620;
+            color: #ff6b6b;
+            border-color: #ff6b6b;
+        }
+        .hp-fit-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 2px;
+        }
+        .hp-fit-title {
+            font-size: 14px;
+            font-weight: bold;
+            color: #ffcf6a;
+        }
+
+        /* ── Постоянная панель характеристик ── */
+        .hp-side {
+            display: flex; flex-direction: column; gap: 2px;
+            min-height: 0; overflow-y: auto;
+            background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px;
+            padding: 10px 12px; font-size: 12px;
+        }
+        .hp-side-head {
+            font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px;
+            color: #ffcf6a; font-weight: bold; margin-bottom: 4px;
+        }
+        .hp-side-cols,
+        .hp-side-row {
+            display: grid; grid-template-columns: 1fr auto 46px;
+            align-items: baseline; gap: 6px;
+        }
+        .hp-side-cols {
+            font-size: 10px; color: #7f7389; text-transform: uppercase;
+            letter-spacing: 0.3px; border-bottom: 1px solid #33283d; padding-bottom: 4px;
+        }
+        .hp-side-cols span:nth-child(2),
+        .hp-side-cols span:nth-child(3) { text-align: right; }
+        .hp-side-row {
+            padding: 2px 0; color: #d8c9a8;
+            border-bottom: 1px dashed rgba(255, 255, 255, 0.04);
+        }
+        .hp-side-row.strong { color: #f7eadf; font-weight: bold; }
+        .hp-side-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .hp-side-vals { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .hp-side-vals b { color: #ffcf6a; }
+        .hp-side-delta { text-align: right; font-weight: bold; font-variant-numeric: tabular-nums; }
+        .hp-side-delta.up { color: #8ff2a0; }
+        .hp-side-delta.down { color: #ff9a8a; }
+        .hp-side-delta.same { color: #6f6380; }
+        .hp-side-sep { border-top: 1px solid #44374a; margin: 5px 0 3px; }
+        .hp-side-foot { margin-top: 6px; font-size: 10px; color: #8b7f96; line-height: 1.4; }
+
+        /* ── Вкладка «👗 Примерка» ── */
+        .hp-fit-top {
+            display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap;
+            background: #1e1724; border: 1px solid #3d2f44; border-radius: 8px;
+            padding: 6px 10px;
+        }
+        .hp-fit-field {
+            display: flex; align-items: center; gap: 6px;
+            font-size: 12px; color: #d8c9a8; white-space: nowrap;
+        }
+        .hp-fit-field select,
+        .hp-fit-field input {
+            background: #111; border: 1px solid #555; color: #fff;
+            padding: 3px 6px; border-radius: 4px; font-weight: bold; font-size: 12px;
+        }
+        .hp-fit-field input { width: 58px; text-align: center; }
+        .hp-fit-chk {
+            display: flex; align-items: center; gap: 5px;
+            font-size: 12px; color: #d8c9a8; cursor: pointer;
+        }
+        .hp-fit-rows { display: flex; flex-direction: column; gap: 6px; }
+        .hp-fit-row {
+            display: grid; grid-template-columns: 132px minmax(0, 1fr) 76px;
+            align-items: center; gap: 8px;
+            background: #1e1724; border: 1px solid #3d2f44; border-radius: 6px;
+            padding: 5px 8px;
+        }
+        .hp-fit-slot { font-size: 12px; color: #d8c9a8; white-space: nowrap; }
+        .hp-fit-row select {
+            min-width: 0; width: 100%;
+            background: #241c2b; border: 1px solid #44374a; color: #e8dfd0;
+            border-radius: 4px; padding: 3px 6px; font-size: 12px;
+        }
+        .hp-fit-row select:focus { outline: none; border-color: #caa55c; }
+        .hp-fit-en { font-variant-numeric: tabular-nums; text-align: center; }
+
+        /* ── Компактная «Заточка»: справка справа снизу ── */
+        .hp-cost-min { font-size: 11px; color: #8ff2a0; font-variant-numeric: tabular-nums; }
+        .hp-ench-rightcol {
+            flex: 1 1 60%; min-width: 0; min-height: 0;
+            display: flex; flex-direction: column; gap: 6px;
+            align-self: start;
+        }
+        /* v11.7.0: без вертикального скроллбара — таблица +0…+15 и справка помещаются целиком */
+        .hp-ench-rightcol > .hp-ench-right {
+            flex: 0 0 auto;
+            max-height: none;
+            overflow-x: auto;
+            overflow-y: visible;
+        }
+        .hp-ench-hint {
+            flex: none;
+            background: #1e1724; border: 1px solid #3d2f44; border-radius: 6px;
+            padding: 6px 9px; font-size: 10px; line-height: 1.45; color: #8b7f96;
+        }
+        .hp-ench-hint code { color: #d8c9a8; }
+        .hp-ench-hint-prices {
+            display: flex; flex-wrap: wrap; gap: 4px 14px;
+            margin-bottom: 3px; font-size: 11px; color: #ccc;
+        }
 
         /* 11.6.6c: палитра компактных бейджей участников (уровень, класс,
            роль, онлайн). v11.7: игра нативно показывает уровни, классы, силу
