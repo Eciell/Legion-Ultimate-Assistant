@@ -58,8 +58,11 @@ import {
     bindSession,
     checkpointDb,
     cleanupActiveUsers,
+    cleanupMarketPrices,
     cleanupStaleParties,
+    cleanupUsers,
     closeDb,
+    compactDb,
     createParty,
     deleteParty,
     getActiveUsers,
@@ -1240,6 +1243,62 @@ const server = Bun.serve({
 
 // v11.6.0e: печатаем фактический bind (hostname может быть 0.0.0.0), а не localhost.
 console.log(`[legion-party] слушаю http://${hostname}:${server.port}`);
+
+/* ------------------------------------------------------------------ */
+/* Фоновое обслуживание БД (v11.7.1.1)                                 */
+/* ------------------------------------------------------------------ */
+
+// v11.7.1.1: market_prices и users_stats чистятся отдельным таймером, а не в
+// запросах. Раньше DELETE старше 72 часов висел на каждом POST /market/scan
+// и блокировал вставку; теперь запись не ждёт тяжёлую операцию.
+const DB_CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
+// VACUUM переписывает файл БД целиком и держит блокировку записи, поэтому
+// запускаем его редко: раз в сутки, то есть каждые 96 тиков по 15 минут.
+const DB_VACUUM_EVERY_TICKS = 24 * 60 / 15;
+
+/**
+ * Один проход очистки: market_prices (TTL 72 ч + лимит 120 строк на предмет)
+ * и пользователи (active_users 15 минут, users_stats 35 дней / 14 дней для
+ * устаревшей версии). Каждая функция сама гасит ошибки БД, внешний try/catch
+ * — страховка, чтобы один сбой не убил таймер.
+ */
+function runDbCleanup() {
+    try {
+        const removed = cleanupMarketPrices();
+        if (removed > 0) {
+            console.log(`[legion-party] Очистка market_prices: удалено ${removed} строк`);
+        }
+    } catch (err) {
+        console.error('[legion-party] cleanupMarketPrices:', err);
+    }
+
+    try {
+        // LATEST_VERSION — эталон «актуальной» версии: по нему cleanupUsers
+        // находит заброшенные аккаунты на старых сборках.
+        const removed = cleanupUsers(LATEST_VERSION);
+        if (removed.activeUsers > 0 || removed.usersStats > 0) {
+            console.log(
+                `[legion-party] Очистка пользователей: active_users ${removed.activeUsers},`
+                + ` users_stats ${removed.usersStats}`
+            );
+        }
+    } catch (err) {
+        console.error('[legion-party] cleanupUsers:', err);
+    }
+}
+
+// Старт: сначала вычищаем накопленное, затем сжимаем раздутый прод-файл
+// data.sqlite (TRUNCATE-чекпоинт + VACUUM). Ошибки и время compactDb
+// логирует сам — сервер продолжает работу в любом случае.
+runDbCleanup();
+compactDb();
+
+let dbMaintenanceTick = 0;
+setInterval(() => {
+    runDbCleanup();
+    dbMaintenanceTick += 1;
+    if (dbMaintenanceTick % DB_VACUUM_EVERY_TICKS === 0) compactDb();
+}, DB_CLEANUP_INTERVAL_MS);
 
 // v11.6.1-extra: периодический PASSIVE-чекпоинт WAL (раз в 5 минут).
 // Без него в data.sqlite-wal могут копиться страницы, и скачанный файл

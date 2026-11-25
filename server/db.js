@@ -28,6 +28,13 @@ console.log(`[legion-party] SQLite подключен: ${DB_PATH} (cwd: ${proces
 
 // WAL: чтение members не блокируется записью join/kick.
 db.exec('PRAGMA journal_mode = WAL;');
+// busy_timeout: вместо мгновенного SQLITE_BUSY при кратковременной блокировке
+// (VACUUM, чекпоинт, параллельная запись) SQLite ждёт до 5 секунд.
+db.exec('PRAGMA busy_timeout = 5000;');
+// synchronous = NORMAL: в паре с WAL это безопасный компромисс — транзакция
+// не делает fsync на каждый коммит, но при падении процесса БД не теряет
+// целостность (риск — потеря последних коммитов при отключении питания).
+db.exec('PRAGMA synchronous = NORMAL;');
 // В SQLite внешние ключи по умолчанию выключены — включаем явно,
 // иначе FOREIGN KEY sessions -> parties не проверяется.
 db.exec('PRAGMA foreign_keys = ON;');
@@ -139,9 +146,10 @@ CREATE INDEX IF NOT EXISTS idx_stats_seen ON users_stats(last_seen);
  * Строка = одно наблюдение «предмет стоил N меди в момент created_at».
  * Медиана считается по этим наблюдениям (см. getMedians), поэтому храним
  * сырые цены, а не готовую статистику: так можно менять окно/алгоритм, не
- * теряя данные. Ретеншн — 72 часа (MARKET_LIMITS.retentionMs), старые строки
- * удаляются прямо в addMarketPrices(): отдельный таймер не нужен, сканер и
- * так пишет каждые несколько минут.
+ * теряя данные. Ретеншн — 72 часа (MARKET_LIMITS.retentionMs), а на предмет
+ * хранится не больше MARKET_LIMITS.maxRowsPerItem самых свежих строк.
+ * Обе чистки живут в cleanupMarketPrices(): раньше DELETE висел на каждой
+ * вставке (POST /market/scan), из-за чего запись ждала тяжёлую операцию.
  *
  * id — произвольная строка (id предмета игры, например wood_club).
  *
@@ -199,6 +207,163 @@ db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_session_member ON sessions(member
 // invite_token — первичный ключ входа в пати: дубликат сделал бы join
 // неоднозначным, поэтому уникальность гарантирует сама БД, а не код.
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_party_invite ON parties(invite_token);');
+
+/* ------------------------------------------------------------------ */
+/* Целостность индексов (v11.7.1.1)                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Ошибка, похожая на повреждение индекса/файла БД.
+ *
+ * bun:sqlite кладёт код в err.code (для сломанного индекса это
+ * SQLITE_CORRUPT_INDEX), но текст может прийти и без кода — поэтому
+ * проверяем ещё и сообщение («database disk image is malformed»).
+ */
+function isCorruptIndexError(err) {
+    const code = String(err?.code || '');
+    const message = String(err?.message || '');
+    return code.includes('SQLITE_CORRUPT')
+        || /malformed|corrupt/i.test(message);
+}
+
+/** Сообщение quick_check, которое лечится пересборкой индексов. */
+function isIndexProblemMessage(text) {
+    return /index|malformed|corrupt/i.test(String(text || ''));
+}
+
+/**
+ * Ошибка REINDEX, после которой спасает пересборка users_stats.
+ *
+ * REINDEX строит UNIQUE-индексы заново из таблицы. Если в таблице/индексе
+ * накопились конфликтующие строки (битый UNIQUE-индекс, дубли login), SQLite
+ * падает на `UNIQUE constraint failed: users_stats.login` с кодом
+ * SQLITE_CONSTRAINT_PRIMARYKEY / SQLITE_CONSTRAINT_UNIQUE. Именно этот случай
+ * лечится дедупликацией: копируем таблицу через GROUP BY login и заменяем её.
+ */
+function isUsersStatsRebuildError(err) {
+    const code = String(err?.code || '').toUpperCase();
+    const message = String(err?.message || '');
+    if (code.includes('SQLITE_CONSTRAINT_PRIMARYKEY')
+        || code.includes('SQLITE_CONSTRAINT_UNIQUE')) {
+        return true;
+    }
+    return /users_stats/i.test(message)
+        && /constraint|unique|primary|malformed|corrupt/i.test(message);
+}
+
+/**
+ * Пересборка users_stats с дедупликацией по login — одной транзакцией.
+ *
+ * Схема новой таблицы совпадает с исходной, поэтому HTTP-слой не замечает
+ * подмены. По каждому login берём:
+ *   • first_seen — MIN (когда игрока впервые увидели);
+ *   • last_seen  — MAX (когда видели последний раз);
+ *   • last_version — из самой свежей строки (last_seen DESC, rowid DESC):
+ *     при равном last_seen выигрывает более поздняя запись.
+ * После DROP старой таблицы её индексы удаляются вместе с ней, поэтому
+ * idx_stats_seen пересоздаётся явно в той же транзакции.
+ */
+const rebuildUsersStatsTx = db.transaction(() => {
+    db.exec(`
+        DROP TABLE IF EXISTS users_stats_clean;
+        CREATE TABLE users_stats_clean (
+          login TEXT PRIMARY KEY,
+          first_seen INTEGER NOT NULL,
+          last_seen INTEGER NOT NULL,
+          last_version TEXT
+        );
+        INSERT INTO users_stats_clean (login, first_seen, last_seen, last_version)
+        SELECT login,
+               MIN(first_seen),
+               MAX(last_seen),
+               (
+                   SELECT src.last_version
+                     FROM users_stats src
+                    WHERE src.login = users_stats.login
+                    ORDER BY src.last_seen DESC, src.rowid DESC
+                    LIMIT 1
+               )
+          FROM users_stats
+         GROUP BY login;
+        DROP TABLE users_stats;
+        ALTER TABLE users_stats_clean RENAME TO users_stats;
+        CREATE INDEX IF NOT EXISTS idx_stats_seen ON users_stats(last_seen);
+    `);
+});
+
+/**
+ * Проверка целостности индексов при старте и безопасный авторемонт.
+ *
+ * `PRAGMA quick_check` читает только структуру (быстрее full integrity_check)
+ * и возвращает «ok» либо строки с описанием проблемы. Повреждённый индекс —
+ * это рассинхрон B-дерева индекса с таблицей: данные целы, поэтому `REINDEX;`
+ * пересобирает все индексы из таблиц и чинит базу без потери строк.
+ *
+ * Если REINDEX падает на UNIQUE-конфликте users_stats (битый PRIMARY KEY /
+ * дубли login), вместо отказа пересобираем users_stats с дедупликацией
+ * (см. rebuildUsersStatsTx): данные сохраняются, дубликаты схлопываются.
+ *
+ * Функция ничего не бросает: если проблема не про индексы (или ремонт не
+ * удался), пишем причину в консоль и работаем дальше — сервер не должен
+ * падать на старте из-за диагностики.
+ *
+ * @returns {boolean} true, если индекс/таблица в порядке или успешно починены
+ */
+export function ensureIndexesHealthy() {
+    const problems = [];
+    try {
+        const rows = db.query('PRAGMA quick_check').all();
+        for (const row of rows) {
+            const value = String(Object.values(row)[0] ?? '').trim();
+            if (value && value.toLowerCase() !== 'ok') problems.push(value);
+        }
+    } catch (err) {
+        if (!isCorruptIndexError(err)) {
+            console.error('[legion-party] quick_check завершился ошибкой:', err);
+            return false;
+        }
+        // Сама проверка упала на «malformed» — считаем это повреждением
+        // индекса и пробуем пересборку (REINDEX; ниже).
+        problems.push(String(err?.message || err));
+    }
+
+    if (!problems.length) return true;
+
+    if (!problems.some(isIndexProblemMessage)) {
+        console.error(
+            '[legion-party] quick_check нашёл проблемы, REINDEX не поможет:',
+            problems.join('; ')
+        );
+        return false;
+    }
+
+    console.warn('[legion-party] quick_check обнаружил повреждение индекса:', problems.join('; '));
+    try {
+        db.exec('REINDEX;');
+        console.log('[legion-party] Выполнен REINDEX после обнаружения повреждения индекса');
+        return true;
+    } catch (err) {
+        console.error('[legion-party] REINDEX после повреждения индекса не удался:', err);
+
+        // REINDEX не смог пересобрать UNIQUE-индекс users_stats (дубли login
+        // или битый PK) — чиним таблицу пересборкой с дедупликацией.
+        if (!isUsersStatsRebuildError(err)) return false;
+
+        console.warn('[legion-party] Пересборка users_stats с дедупликацией по login...');
+        try {
+            rebuildUsersStatsTx();
+            console.log('[legion-party] Таблица users_stats пересобрана с дедупликацией');
+            return true;
+        } catch (rebuildErr) {
+            console.error('[legion-party] Пересборка users_stats не удалась:', rebuildErr);
+            return false;
+        }
+    }
+}
+
+// Стартовая диагностика: чиним индексы до первичной очистки и VACUUM,
+// иначе DELETE/чтения из cleanupUsers упадут на сломанном индексе.
+ensureIndexesHealthy();
 
 // Сбрасываем схему таблиц из WAL в основной файл data.sqlite,
 // чтобы при скачивании база не была пустой.
@@ -370,6 +535,19 @@ const upsertUserStatsStmt = db.query(
 // делает COUNT по диапазону дешёвым даже на десятках тысяч строк.
 const countStatsSinceStmt = db.query(
     'SELECT COUNT(*) AS n FROM users_stats WHERE last_seen >= $threshold'
+);
+// Умная чистка заброшенных аккаунтов (см. cleanupUsers):
+//   • last_seen <= $idle     — не заходил 35 дней (30-дневный MAU цел);
+//   • last_version != $version при $outdated — старая версия аддона и
+//     молчание больше 14 дней, то есть аддон точно заброшен.
+// last_version IS NOT NULL обязателен: старые клиенты её не шлют, и NULL != ?
+// в SQL дал бы NULL (условие ложно), но проверка делает намерение явным.
+const deleteStaleUserStatsStmt = db.query(
+    `DELETE FROM users_stats
+      WHERE last_seen <= $idle
+         OR (last_version IS NOT NULL
+             AND last_version != $version
+             AND last_seen <= $outdated)`
 );
 
 /* ------------------------------------------------------------------ */
@@ -780,6 +958,12 @@ export function cleanupActiveUsers() {
 // Окна DAU/MAU. Порог включительный (>=): игрок, отметившийся ровно сутки
 // назад, ещё считается «активным за 24 часа».
 const DAY_MS = 24 * 60 * 60 * 1000;
+// 35 дней, а не 30: строка, удалённая на 30-й день, всё ещё могла бы попасть
+// в MAU (порог включительный), поэтому берём запас и не искажаем /stats.
+const USER_STATS_IDLE_MS = 35 * DAY_MS;
+// 14 дней для устаревшей версии: такой пользователь не обновился и давно не
+// заходил — держать его строку в users_stats смысла нет.
+const USER_STATS_OUTDATED_MS = 14 * DAY_MS;
 
 /**
  * Запись в users_stats: «этот логин видели, версия аддона — такая».
@@ -820,6 +1004,71 @@ export function getStats() {
     };
 }
 
+/**
+ * Чистка неактивных пользователей (v11.7.1.1).
+ *
+ * 1) active_users — отметки старше ACTIVE_WINDOW_MS (15 минут): это лишь
+ *    «кто сейчас онлайн», история визитов живёт в users_stats.
+ * 2) users_stats — заброшенные аккаунты:
+ *    • last_seen <= now - 35 дней (30-дневный MAU в /stats не искажается);
+ *    • last_version задан, не равен LATEST_VERSION и last_seen <= now - 14 дней.
+ *
+ * latestVersion приходит из server/index.js: LATEST_VERSION — единственный
+ * источник правды о текущей версии аддона, дублировать её в db.js нельзя.
+ * Если версия не передана, «устаревшую» ветку не трогаем: без эталона она
+ * удалила бы всех, у кого версия отличается от null.
+ *
+ * @param {string} [latestVersion]
+ * @returns {{activeUsers: number, usersStats: number}} сколько строк удалено
+ */
+export function cleanupUsers(latestVersion) {
+    const now = Date.now();
+    const result = { activeUsers: 0, usersStats: 0 };
+    const version = latestVersion ? String(latestVersion) : null;
+
+    try {
+        result.activeUsers = deleteStaleActiveUsersStmt
+            .run({ $threshold: now - ACTIVE_WINDOW_MS }).changes;
+    } catch (err) {
+        console.error('[legion-party] cleanupUsers(active_users):', err);
+    }
+
+    if (version) {
+        const statsParams = {
+            $idle: now - USER_STATS_IDLE_MS,
+            $outdated: now - USER_STATS_OUTDATED_MS,
+            $version: version
+        };
+        try {
+            result.usersStats = deleteStaleUserStatsStmt.run(statsParams).changes;
+        } catch (err) {
+            if (!isCorruptIndexError(err)) {
+                console.error('[legion-party] cleanupUsers(users_stats):', err);
+            } else {
+                // Повреждён именно индекс users_stats (SQLITE_CORRUPT_INDEX /
+                // malformed). REINDEX таблицы пересобирает её индексы из
+                // данных — строки не теряются, — после чего повторяем DELETE
+                // ровно один раз. Второй сбой гасим логом: фоновая чистка не
+                // должна ронять таймер.
+                console.warn(
+                    '[legion-party] cleanupUsers(users_stats): повреждён индекс, выполняю REINDEX users_stats'
+                );
+                try {
+                    db.run('REINDEX users_stats;');
+                    result.usersStats = deleteStaleUserStatsStmt.run(statsParams).changes;
+                    console.log(
+                        '[legion-party] Выполнен REINDEX users_stats после обнаружения повреждения индекса'
+                    );
+                } catch (retryErr) {
+                    console.error('[legion-party] cleanupUsers(users_stats) после REINDEX:', retryErr);
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
 /* ------------------------------------------------------------------ */
 /* Обслуживание WAL (v11.6.1-extra)                                    */
 /* ------------------------------------------------------------------ */
@@ -836,6 +1085,34 @@ export function getStats() {
 export function checkpointDb() {
     try { db.exec('PRAGMA wal_checkpoint(PASSIVE);'); }
     catch (err) { console.error('[legion-party] Ошибка wal_checkpoint:', err); }
+}
+
+/**
+ * Сжатие БД: TRUNCATE-чекпоинт (переносит весь -wal в основной файл и
+ * обнуляет журнал) + VACUUM (переписывает data.sqlite без пустых страниц).
+ *
+ * Запускается при старте сервера и раз в сутки по таймеру. Оба шага в
+ * try/catch: обслуживание БД не должно ронять процесс, а на живой базе
+ * VACUUM может не получить блокировку — тогда просто повторим в следующий
+ * раз. Время выполнения пишем в консоль: по нему видно, насколько раздута
+ * база и не пора ли менять расписание.
+ *
+ * @returns {number|null} длительность в мс или null при ошибке
+ */
+export function compactDb() {
+    const startedAt = Date.now();
+    try {
+        db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+        // VACUUM нельзя выполнять внутри транзакции; здесь её нет — вызовы
+        // последовательные и вне db.transaction.
+        db.exec('VACUUM;');
+        const elapsed = Date.now() - startedAt;
+        console.log(`[legion-party] VACUUM + wal_checkpoint(TRUNCATE): ${elapsed} мс`);
+        return elapsed;
+    } catch (err) {
+        console.error('[legion-party] Ошибка VACUUM/TRUNCATE-чекпоинта:', err);
+        return null;
+    }
 }
 
 /**
@@ -870,11 +1147,90 @@ export const MARKET_LIMITS = {
     maxPrice: 1_000_000_000,
     // Окно статистики: наблюдения старше 72 часов удаляются (v11.6.5d:
     // было 7 дней — столько истории медиане не нужно, а таблица росла).
-    retentionMs: 72 * 60 * 60 * 1000
+    retentionMs: 72 * 60 * 60 * 1000,
+    // Потолок истории на один предмет (v11.7.1.1). Медиана читает максимум 100
+    // самых свежих строк (recency_rn <= 100 в buildMedianSql), поэтому 120 —
+    // это те же 100 плюс запас: популярные предметы перестают раздувать БД,
+    // а результат медианы не меняется.
+    maxRowsPerItem: 120
 };
+
+// Кэш медиан (v11.6.5.1). Объявлен здесь, а не рядом с getCachedMedians,
+// потому что addMarketPrices обязан сбрасывать его при реальной записи
+// новых цен и не должен сбрасывать при пустом/полностью дедуплицированном
+// батче. cleanupMarketPrices кэш не трогает: он удаляет строки старше окна
+// (их SQL и так отсекает по created_at) или излишки сверх 120, которые в
+// медиану из 100 свежих не попадают.
+const mediansCache = new Map();
+const MEDIAN_CACHE_TTL_MS = 60_000;
+// Верхняя граница карты: после неё выкидываем протухшие записи.
+const MEDIAN_CACHE_MAX_ENTRIES = 2000;
+
+/*
+ * Дедупликация сканов (v11.7.1.1): item_id:price -> timestamp последней записи.
+ *
+ * Один и тот же лот витрины присылают разные игроки (и один и тот же клиент
+ * каждые несколько минут), поэтому без фильтра market_prices наполнялся бы
+ * одинаковыми снимками. Пара, записанная менее 10 минут назад, повторно не
+ * пишется: для медианы это то же наблюдение, а строк в БД в разы меньше.
+ * TTL и лимит держат Map в памяти ограниченной: просроченные ключи
+ * вычищаются при переполнении, самые старые — тоже (Map хранит порядок
+ * вставки).
+ */
+const MARKET_DEDUP_TTL_MS = 10 * 60 * 1000;
+const MARKET_DEDUP_MAX_ENTRIES = 50_000;
+const marketDedup = new Map();
+
+/** Удаляет из marketDedup ключи, записанные раньше now - MARKET_DEDUP_TTL_MS. */
+function pruneMarketDedup(now) {
+    for (const [key, seenAt] of marketDedup) {
+        if (now - seenAt >= MARKET_DEDUP_TTL_MS) marketDedup.delete(key);
+    }
+}
+
+/**
+ * Запоминает ключи успешно вставленного батча.
+ * Если после чистки просроченных Map всё ещё не влезает в лимит, режем самые
+ * старые записи: они истекут раньше всех, потерять их безопасно.
+ */
+function rememberMarketKeys(keys, now) {
+    if (marketDedup.size + keys.length > MARKET_DEDUP_MAX_ENTRIES) {
+        pruneMarketDedup(now);
+    }
+    while (marketDedup.size + keys.length > MARKET_DEDUP_MAX_ENTRIES) {
+        const oldest = marketDedup.keys().next();
+        if (oldest.done) break;
+        marketDedup.delete(oldest.value);
+    }
+    for (const key of keys) marketDedup.set(key, now);
+}
 
 const deleteStaleMarketPricesStmt = db.query(
     'DELETE FROM market_prices WHERE created_at <= $threshold'
+);
+// Лимит истории на предмет: нумеруем строки каждого «переполненного»
+// предмета от свежих к старым (created_at DESC, id DESC — точный порядок,
+// который использует медиана) и удаляем всё, что вышло за maxRowsPerItem.
+// Подзапрос с HAVING COUNT(*) идёт по индексу
+// idx_market_item_created_price и не трогает предметы, у которых строк мало.
+const trimMarketPerItemStmt = db.query(
+    `DELETE FROM market_prices
+      WHERE id IN (
+          SELECT id FROM (
+              SELECT id,
+                     ROW_NUMBER() OVER (
+                         PARTITION BY item_id
+                         ORDER BY created_at DESC, id DESC
+                     ) AS rn
+                FROM market_prices
+               WHERE item_id IN (
+                     SELECT item_id
+                       FROM market_prices
+                      GROUP BY item_id
+                     HAVING COUNT(*) > $max
+               )
+          ) WHERE rn > $max
+      )`
 );
 const insertMarketPriceStmt = db.query(
     'INSERT INTO market_prices (item_id, price, created_at) VALUES ($item, $price, $created)'
@@ -935,22 +1291,54 @@ function getMedianStmt(count) {
     return stmt;
 }
 
-// Очистка старых наблюдений и вставка пачки — одной транзакцией: при сбое
-// посередине пачки не остаётся «полуснимка» витрины.
-const insertMarketBatchTx = db.transaction((rows, threshold) => {
-    deleteStaleMarketPricesStmt.run({ $threshold: threshold });
+// Вставка пачки — одной транзакцией: при сбое посередине не остаётся
+// «полуснимка» витрины. Удаление старых строк здесь больше не выполняется:
+// иначе каждый POST /market/scan ждал бы тяжёлый DELETE (см.
+// cleanupMarketPrices, её зовёт фоновый таймер в server/index.js).
+const insertMarketBatchTx = db.transaction((rows) => {
     for (const row of rows) {
         insertMarketPriceStmt.run({ $item: row.id, $price: row.price, $created: row.createdAt });
     }
 });
 
 /**
- * Массовая запись цен аукциона: одна транзакция + очистка записей старше
- * 72 часов (MARKET_LIMITS.retentionMs, v11.6.5d).
+ * Обслуживание market_prices (v11.7.1.1) — вызывается таймером, а не запросом.
+ *
+ * 1) Удаляет наблюдения старше 72 часов (MARKET_LIMITS.retentionMs).
+ * 2) Для предметов с более чем MARKET_LIMITS.maxRowsPerItem (120) строками
+ *    удаляет старые излишки, оставляя 120 самых свежих (created_at DESC,
+ *    id DESC). Медиана всё равно читает только 100 свежих, так что результат
+ *    не меняется, а популярный предмет больше не растёт бесконечно.
+ *
+ * Ошибки гасим здесь: обслуживание БД не должно ронять процесс, следующий
+ * тик просто попробует снова.
+ *
+ * @returns {number} сколько строк удалено всего
+ */
+export function cleanupMarketPrices() {
+    const now = Date.now();
+    try {
+        const stale = deleteStaleMarketPricesStmt
+            .run({ $threshold: now - MARKET_LIMITS.retentionMs }).changes;
+        const excess = trimMarketPerItemStmt
+            .run({ $max: MARKET_LIMITS.maxRowsPerItem }).changes;
+        return stale + excess;
+    } catch (err) {
+        console.error('[legion-party] cleanupMarketPrices:', err);
+        return 0;
+    }
+}
+
+/**
+ * Массовая запись цен аукциона: валидация + дедупликация + одна транзакция.
  *
  * Мусор внутри пачки пропускаем молча: один битый лот не должен ронять
  * отправку всей пачки (клиент присылает снимок витрины целиком). Цена —
  * целое > 0, id — непустая строка до maxIdLength символов.
+ *
+ * v11.7.1.1: пары (item_id, price), записанные менее 10 минут назад, повторно
+ * не пишутся — разные игроки присылают одни и те же лоты, а для медианы это
+ * одно и то же наблюдение. Повторы внутри самой пачки тоже отсекаются.
  *
  * @param {Array<{id: string, price: number}>} items
  * @returns {number} сколько наблюдений реально записано
@@ -959,6 +1347,8 @@ export function addMarketPrices(items) {
     const list = Array.isArray(items) ? items : [];
     const now = Date.now();
     const rows = [];
+    const keys = [];
+    const seenInBatch = new Set();
 
     for (const item of list) {
         if (rows.length >= MARKET_LIMITS.maxLotsPerScan) break;
@@ -967,11 +1357,28 @@ export function addMarketPrices(items) {
         const price = Math.trunc(Number(item.price));
         if (!id || id.length > MARKET_LIMITS.maxIdLength) continue;
         if (!Number.isFinite(price) || price <= 0 || price > MARKET_LIMITS.maxPrice) continue;
+
+        // Ключ дедупликации: `${item_id}:${price}`. id предмета — слаг без
+        // двоеточий, поэтому склейка не даёт коллизий.
+        const key = `${id}:${price}`;
+        if (seenInBatch.has(key)) continue;
+        const seenAt = marketDedup.get(key);
+        if (seenAt !== undefined && now - seenAt < MARKET_DEDUP_TTL_MS) continue;
+
+        seenInBatch.add(key);
+        keys.push(key);
         rows.push({ id, price, createdAt: now });
     }
 
     if (!rows.length) return 0;
-    insertMarketBatchTx(rows, now - MARKET_LIMITS.retentionMs);
+    insertMarketBatchTx(rows);
+    // Ключи запоминаем только после успешного коммита: если транзакция
+    // упала, повторный скан должен попробовать записать те же цены снова.
+    rememberMarketKeys(keys, now);
+    // Реальная запись меняет медиану — кэш сбрасываем. При пустом батче
+    // (return выше) и полностью дедуплицированном (rows.length === 0) кэш
+    // остаётся: данных не прибавилось, ответ прежний.
+    mediansCache.clear();
     return rows.length;
 }
 
@@ -999,8 +1406,8 @@ export function getMedians(itemIds) {
     if (!ids.length) return out;
 
     // Порог времени передаём в SQL, а не полагаемся на фоновую чистку:
-    // строки старше retentionMs могли ещё не удалиться (DELETE идёт только
-    // при следующем /market/scan), а в медиану попадать не должны.
+    // строки старше retentionMs могли ещё не удалиться (cleanupMarketPrices
+    // идёт по таймеру раз в 15 минут), а в медиану попадать не должны.
     const threshold = Date.now() - MARKET_LIMITS.retentionMs;
     const rows = getMedianStmt(ids.length).all(...ids, threshold);
     for (const row of rows) {
@@ -1018,12 +1425,11 @@ export function getMedians(itemIds) {
 // набором id, а CTE с ROW_NUMBER по market_prices — самый тяжёлый запрос
 // сервера. 60 секунд кэша снимают почти весь повторный трафик: за это время
 // новая цена не успевает стать статистически значимой (окно медианы — 72 ч).
-const mediansCache = new Map();
-const MEDIAN_CACHE_TTL_MS = 60_000;
-// Верхняя граница карты: после неё выкидываем протухшие записи. Жёсткого
-// лимита нет намеренно — за один запрос добавляется не больше
-// MARKET_LIMITS.maxIdsPerQuery (200) ключей.
-const MEDIAN_CACHE_MAX_ENTRIES = 2000;
+// Сама Map, TTL и лимит объявлены выше (секция MARKET_LIMITS): их использует
+// addMarketPrices при сбросе кэша.
+//
+// Жёсткого лимита на число ключей нет намеренно — за один запрос добавляется
+// не больше MARKET_LIMITS.maxIdsPerQuery (200) ключей.
 
 /**
  * Медианы с кэшем в памяти (v11.6.5.1): та же форма ответа, что у getMedians
