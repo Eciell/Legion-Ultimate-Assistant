@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Legion: Ultimate Assistant (Auction, Pocket City, Party)
 // @namespace    http://tampermonkey.net/
-// @version      11.7.2.0
+// @version      11.7.2
 // @description  QoL-аддон для Легиона: Сканер аукциона, Разведка, Планировщик, Карманный город, Пати, Поход.
 // @connect      localhost
 // @connect      127.0.0.1
