@@ -1,20 +1,17 @@
 #!/usr/bin/env node
 /**
- * Сборка userscript'ов Legion.
+ * Сборка userscript Legion Ultimate Assistant.
  *
  * Никаких Webpack/Rollup: файлы из src/ просто склеиваются в один бандл
  * в строго заданном порядке. Шапка (==UserScript==) идёт вне IIFE,
  * всё остальное — внутрь одной функции-обёртки.
  *
- * Две независимые сборки:
- *   --ultimate -> dist/LegionUltimate.user.js (публичная, src/header-ultimate.js)
- *   --personal -> dist/LegionPersonal.user.js (личная,   src/header-personal.js)
+ * Результат: dist/LegionUltimate.user.js
  *
  * Использование:
- *   node build.js --all         -> обе сборки (по умолчанию)
- *   node build.js               -> то же самое, что --all
- *   node build.js --personal    -> только dist/LegionPersonal.user.js - Это я для себя делаю аддон, под мои цели
- *   node build.js --ultimate    -> только dist/LegionUltimate.user.js - Это общий аддон для всех пользователей
+ *   node build.js               -> собрать dist/LegionUltimate.user.js
+ *   node build.js --ultimate    -> то же самое (флаг оставлен для совместимости)
+ *   node build.js --all         -> то же самое (флаг оставлен для совместимости)
  *   node build.js --help        -> справка
  */
 'use strict';
@@ -27,24 +24,9 @@ const ROOT = __dirname;
 const SRC_DIR = path.join(ROOT, 'src');
 const DIST_DIR = path.join(ROOT, 'dist');
 
-// Шапки. Personal собирается без @updateURL/@downloadURL (только локальная сборка),
-// Ultimate — с автообновлением через raw-URL GitHub.
-const HEADER_PERSONAL = 'header-personal.js';
-const HEADER_ULTIMATE = 'header-ultimate.js';
-
+const HEADER_FILE = 'header-ultimate.js';
 const MAIN_FILE = 'main.js';
-
-// 11.7.0: подсистема чата вырезана целиком (src/modules/chat/* и
-// core/utils-chat.js удалены). Нужные другим модулям хелперы
-// (copyText / insertToQuestChat) перенесены в core/utils.js, а сетевой
-// трекер онлайна — туда же (updateOnlinePlayers).
-
-// 11.6.4b: modules/miner.js удалён из репозитория (перехват LGMineBiome.paint /
-// LGMine.open и подмена window.fetch палились античитом шахты). В обеих сборках
-// на его месте стоит заглушка MINER_STUB (см. ниже).
-//
-// Личный модуль: подключается только в Personal и только если файл существует.
-const QUEST_FILE = 'modules/quest.js';
+const OUTPUT_FILE = 'LegionUltimate.user.js';
 
 /**
  * Порядок склейки = порядок исполнения внутри IIFE.
@@ -52,96 +34,62 @@ const QUEST_FILE = 'modules/quest.js';
  * используют (const попадает в temporal dead zone до инициализации).
  */
 const CORE_ORDER = [
-    // v11.6.0: utils.js разбит на модули. Порядок критичен (TDZ):
+    // utils.js разбит на модули. Порядок критичен (TDZ):
     // constants.js объявляет G/DOM_IDS/API_BASE/Utils={}, остальные модули
     // дополняют Utils через Object.assign, поэтому идут строго после него.
     'core/constants.js',
     'core/utils-format.js',
     'core/utils-api.js',
     'core/utils-art.js',
-    // 11.7.0: core/utils-chat.js удалён вместе с чатом. Общие хелперы
-    // (copyText / insertToQuestChat / updateOnlinePlayers) — в core/utils.js.
     'core/utils.js',
     'core/styles.js',
     'core/hooks.js',
-    // v11.6.0: HTML-шаблоны (FAB-меню, модалки, HUD) вынесены из ui.js и
-    // main.js. Идут строго перед ui.js: методы UI зовут UITemplates.
+    // HTML-шаблоны (FAB-меню, модалки, HUD) вынесены из ui.js и main.js.
+    // Идут строго перед ui.js: методы UI зовут UITemplates.
     'core/ui-templates.js',
     'core/ui.js'
 ];
 
-// Модули, которые входят в обе сборки.
-const SHARED_MODULES = [
+/**
+ * Игровые модули. Подключаются после ядра, поэтому G/Utils/DOM_IDS/UI
+ * уже объявлены.
+ */
+const MODULES = [
     'modules/build-sim.js',
     'modules/hero-planner.js',
     'modules/auction.js',
     'modules/players.js',
-    // v11.6.0: логика «Карманного города» вынесена из ui.js в отдельный модуль.
-    // Модули грузятся после core/ui.js, поэтому UI/UITemplates уже объявлены.
+    // Логика «Карманного города» вынесена из ui.js в отдельный модуль.
     'modules/pocket-city.js',
-    // 11.6.2b: «Боевой ассистент» (modules/combat-assistant.js) — подсказки по
-    // механикам боссов в походе. Нужны только G/Utils/UI из core (уже
-    // объявлены) и LGQuest из page-context; main.js вызывает init() в boot().
+    // «Боевой ассистент» — подсказки по механикам боссов в походе.
+    // main.js вызывает init() в boot().
     'modules/combat-assistant.js',
-    // v11.6.0: «Пати» (modules/party.js) — клиент собственного сервера через
-    // GM_xmlhttpRequest. Нужны только Utils/DOM_IDS/UI из core (уже объявлены),
-    // других модулей не касается; main.js вызывает Party.init() последним.
+    // «Пати» — клиент собственного сервера через GM_xmlhttpRequest.
+    // main.js вызывает Party.init() последним.
     'modules/party.js',
-    // 11.7.2: подсветка ников пользователей аддона в нативном чате.
-    // Модуль лёгкий и независимый от удалённой подсистемы чата: ходит в
-    // /heartbeat + /users через Party._request(auth:false), а подсветку
-    // рисует атрибутным CSS (<style id="lg-addon-hl-styles">). Идёт после
-    // party.js, потому что использует его сетевой слой и getBaseUrl().
+    // Подсветка ников пользователей аддона в нативном чате. Ходит в
+    // /heartbeat + /users через Party._request(auth:false) и рисует
+    // подсветку атрибутным CSS. Идёт после party.js, потому что использует
+    // его сетевой слой и getBaseUrl().
     'modules/addon-presence.js',
-    // «Арена» (modules/arena.js) — оценка шанса победы, детект согильдейцев
-    // в отряде противника и вкладка «Согильдейцы» в модалке приглашения.
-    // v11.7: модуль автономен — состав гильдии запрашивает сам
-    // (/api/guilds/guild с кэшем в Map) и работает поверх новой вёрстки
-    // arena2.js (.av-off / .av-fwin / .av-invwin). Хуки — только через
-    // core/hooks.js (LGArena.open), window.fetch не патчится.
+    // «Арена» — оценка шанса победы, детект согильдейцев в отряде
+    // противника и вкладка «Согильдейцы» в модалке приглашения.
+    // Модуль автономен: состав гильдии запрашивает сам, работает поверх
+    // arena2.js, хуки — только через core/hooks.js (LGArena.open).
     'modules/arena.js',
-    // «Статистика гильдии» (modules/guild-summary.js) — четвёртая вкладка
-    // в НАТИВНОМ окне гильдии (guilds2.js: .gl-modal / .gl-tabs1 / .gl-pane).
-    // Модуль автономен: id гильдии берёт из G.ME / G.LGGuilds.index(),
-    // состав — GET /api/guilds/guild с кэшем в Map (TTL 60 c). window.fetch,
-    // LGMine.open/onEvent не патчатся, localStorage не используется.
-    // main.js вызывает init() в boot(), destroy() — в shutdown().
+    // «Статистика гильдии» — четвёртая вкладка в НАТИВНОМ окне гильдии
+    // (guilds2.js: .gl-modal / .gl-tabs1 / .gl-pane). Модуль автономен:
+    // id гильдии берёт из G.ME / G.LGGuilds.index(), состав — через
+    // GET /api/guilds/guild с кэшем в Map. main.js вызывает init() в boot(),
+    // destroy() — в shutdown().
     'modules/guild-summary.js'
 ];
 
 /**
- * Состав сборок — жёсткие списки файлов.
- *
- * В обеих сборках miner.js отсутствует (файл удалён в 11.6.4b), quest.js
- * входит только в Personal и только если файл создан (список проверяется
- * целиком, любой отсутствующий обязательный файл -> фатальная ошибка).
- */
-const TARGETS = {
-    ultimate: {
-        output: 'LegionUltimate.user.js',
-        header: HEADER_ULTIMATE,
-        modules: [...SHARED_MODULES],
-        optionalModules: [],
-        title: 'Ultimate (публичная, без Майнера)'
-    },
-    personal: {
-        output: 'LegionPersonal.user.js',
-        header: HEADER_PERSONAL,
-        // 11.6.4b: miner.js удалён из обеих сборок целиком — вместо него
-        // MINER_STUB (main.js всё ещё зовёт Miner.init/stopMining).
-        modules: [...SHARED_MODULES],
-        optionalModules: [QUEST_FILE],
-        title: 'Personal (личная, без Майнера)'
-    }
-};
-
-/**
- * Заглушка вместо удалённого miner.js — вставляется в ОБЕ сборки.
- *
- * main.js обращается к Miner в boot() и shutdown() — без заглушки сборка
- * падала бы с ReferenceError. Заглушка повторяет публичный контракт
- * (init/stopMining/abortController) и убирает из меню кнопку «Умная Шахта».
- * Кода авто-копания и хуков шахты здесь нет: 11.6.4b снял их ради античита.
+ * Заглушка Miner для main.js: модуль авто-копания удалён, но точка входа
+ * всё ещё обращается к Miner.init()/stopMining()/abortController.
+ * Заглушка повторяет публичный контракт и убирает из меню кнопку
+ * «Умная Шахта»; кода авто-копания и хуков шахты здесь нет.
  */
 const MINER_STUB = [
     '    const Miner = {',
@@ -168,12 +116,11 @@ function banner(relPath, note) {
     return `    // ===== src/${relPath}${note ? ' ' + note : ''} =====`;
 }
 
-function assemble(target) {
+function assemble() {
     const chunks = [];
 
     // 1. Шапка Userscript — всегда вне IIFE, иначе Tampermonkey не увидит метаданные.
-    //    Файл шапки жёстко закреплён за сборкой (см. TARGETS).
-    chunks.push(readSource(target.header), '');
+    chunks.push(readSource(HEADER_FILE), '');
 
     // 2. Общая обёртка.
     chunks.push('(function() {', "    'use strict';", '');
@@ -183,29 +130,18 @@ function assemble(target) {
         chunks.push(banner(relPath), readSource(relPath), '');
     }
 
-    // 4. Заглушка вместо удалённого miner.js: main.js всё ещё зовёт
-    //    Miner.init()/stopMining(), поэтому стаб вставляется в обе сборки
-    //    строго перед первым игровым модулем (11.7.0: якорь — build-sim.js,
-    //    раньше им был первый слой удалённого чата).
-    chunks.push(banner('modules/miner.js', '(удалён в 11.6.4b: античит, используется заглушка)'), MINER_STUB, '');
+    // 4. Заглушка Miner: main.js вызывает его методы при загрузке и остановке.
+    chunks.push(banner('modules/miner.js', '(заглушка)'), MINER_STUB, '');
 
-    // 5. Модули строго по списку сборки. readSource() падает, если файла нет:
-    //    для Ultimate это фатальная ошибка, никаких «мягких» пропусков.
-    for (const relPath of target.modules) {
+    // 5. Игровые модули. readSource() падает, если файла нет.
+    for (const relPath of MODULES) {
         chunks.push(banner(relPath), readSource(relPath), '');
     }
 
-    // 6. Личные необязательные модули (только Personal): подключаются, если файл создан.
-    //    Для Ultimate список optionalModules пуст, existsSync здесь не вызывается.
-    for (const relPath of target.optionalModules) {
-        if (!fs.existsSync(path.join(SRC_DIR, relPath))) continue;
-        chunks.push(banner(relPath), readSource(relPath), '');
-    }
-
-    // 7. Точка входа.
+    // 6. Точка входа.
     chunks.push(banner(MAIN_FILE), readSource(MAIN_FILE), '');
 
-    // 8. Закрытие обёртки.
+    // 7. Закрытие обёртки.
     chunks.push('})();', '');
 
     return chunks.join('\n');
@@ -220,35 +156,34 @@ function validateSyntax(code, filename) {
     }
 }
 
-function build(targetName) {
-    const target = TARGETS[targetName];
-    const filename = `dist/${target.output}`;
-    const code = assemble(target);
+function build() {
+    const filename = `dist/${OUTPUT_FILE}`;
+    const code = assemble();
 
     validateSyntax(code, filename);
 
     fs.mkdirSync(DIST_DIR, { recursive: true });
-    fs.writeFileSync(path.join(DIST_DIR, target.output), code, 'utf8');
+    fs.writeFileSync(path.join(DIST_DIR, OUTPUT_FILE), code, 'utf8');
 
     const lineCount = code.split('\n').length - 1; // без учёта завершающего перевода строки
     const byteCount = Buffer.byteLength(code, 'utf8');
-    console.log(`  ✓ ${filename} — ${lineCount} строк, ${byteCount} байт — ${target.title}`);
+    console.log(`  ✓ ${filename} — ${lineCount} строк, ${byteCount} байт`);
 }
 
 function usage() {
     console.log([
-        'Сборка Legion (склейка src/ -> dist/).',
+        'Сборка Legion Ultimate Assistant (склейка src/ -> dist/).',
         '',
-        '  node build.js --all         собрать обе версии (по умолчанию)',
-        '  node build.js --ultimate    только LegionUltimate.user.js (публичная, без Майнера)',
-        '  node build.js --personal    только LegionPersonal.user.js (личная, без Майнера)',
+        '  node build.js               собрать dist/LegionUltimate.user.js',
+        '  node build.js --ultimate    то же самое (флаг для совместимости)',
+        '  node build.js --all         то же самое (флаг для совместимости)',
         '  node build.js --help        эта справка'
     ].join('\n'));
 }
 
 function main() {
     const args = process.argv.slice(2).filter(arg => arg !== '--');
-    const known = ['--all', '--ultimate', '--personal', '--help', '-h'];
+    const known = ['--all', '--ultimate', '--help', '-h'];
     const unknown = args.filter(arg => !known.includes(arg));
 
     if (unknown.length) {
@@ -263,17 +198,8 @@ function main() {
         return;
     }
 
-    const onlyPersonal = args.includes('--personal');
-    const onlyUltimate = args.includes('--ultimate');
-
-    // Сборки независимы: один флаг -> ровно одна сборка.
-    const targets = [];
-    if (onlyUltimate && !onlyPersonal) targets.push('ultimate');
-    else if (onlyPersonal && !onlyUltimate) targets.push('personal');
-    else targets.push('ultimate', 'personal'); // --all, без аргументов или оба флага
-
-    console.log(`Сборка Legion [${targets.join(', ')}]`);
-    for (const targetName of targets) build(targetName);
+    console.log('Сборка LegionUltimate');
+    build();
     console.log('Готово.');
 }
 

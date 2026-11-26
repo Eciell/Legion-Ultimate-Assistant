@@ -98,16 +98,17 @@ const hostname = '0.0.0.0';
 
 // Ключ доступа к API (v11.6.0g-6): общий секрет аддона, а не аутентификация
 // игрока (её даёт Bearer sessionId у /party). Переопределяется переменной
-// окружения LGU_API_KEY на сервере; клиенты шлют одно и то же значение из
-// chat-net.js / party.js, поэтому при смене ключа их надо пересобрать.
+// окружения LGU_API_KEY на сервере; клиент шлёт одно и то же значение из
+// party.js, поэтому при смене ключа аддон надо пересобрать.
 const API_KEY = process.env.LGU_API_KEY || 'LGU-default-secret-key-change-me';
 
 // Версия аддона для автообновления (v11.6.1c): GET /latest-version отдаёт её
 // вместе со ссылкой на raw-сборку. Клиент сравнивает её с GM_info.script.version
 // и раз в час показывает GM_notification, поэтому при релизе версию надо
-// поднимать и здесь, и в src/header-*.js — иначе уведомление будет приходить
-// даже тем, кто уже обновился (их GM_info всё ещё покажет старую версию).
-const LATEST_VERSION = '11.7.1.1';
+// поднимать синхронно здесь, в src/header-ultimate.js и package.json — иначе
+// уведомление будет приходить даже тем, кто уже обновился (их GM_info всё
+// ещё покажет старую версию).
+const LATEST_VERSION = '11.7.2.0';
 const UPDATE_URL = 'https://raw.githubusercontent.com/Eciell/Legion-Ultimate-Assistant/main/dist/LegionUltimate.user.js';
 
 // Логин хранится и сравнивается ТОЛЬКО в нижнем регистре: игра отдаёт ник
@@ -1021,8 +1022,9 @@ async function handleLatestVersion() {
  * Мусор ВНУТРИ пачки не роняет запрос (addMarketPrices пропускает его
  * молча), но пустой или не-массив lots — 400: это ошибка клиента.
  *
- * v11.6.5.1: 2 скана за 2 минуты на IP (limiters.marketScan) — клиент и так
- * шлёт снимок не чаще раза в 5 минут, лимит отсекает только спам.
+ * Текущие лимиты: 12 запросов за 120 секунд на IP (limiters.marketScan) —
+ * один полный скан шлёт до 10 пачек по 500 лотов, а клиентский кулдаун
+ * повторного скана — 5 минут. Лимит отсекает только спам.
  */
 async function handleMarketScan(req, server) {
     const ip = server.requestIP(req)?.address || 'unknown';

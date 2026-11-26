@@ -19,6 +19,8 @@ const PocketCity = (() => {
         _closeWatch: null,
         // v11.7.1: DOM компактного закреплённого виджета (см. pin()).
         _pinEl: null,
+        // v11.7.2: активный keydown-обработчик хоткея закрепа (см. startKeyBind).
+        _bindKeyHandler: null,
 
         // ---------------- 11.7.0: автоскип боёв с монстрами ----------------
         // Окно `.cm-dlg` — бой с обычным или элитным монстром. Работаем
@@ -364,8 +366,7 @@ const PocketCity = (() => {
             const pageWin = (typeof G !== 'undefined' && G) ? G : window;
 
             if (from.inMine && PocketCity.isMineOpen()) {
-                // 11.7.0: возврат нативного чата шахты (Chat.showForMine())
-                // удалён вместе с подсистемой чата — LGChatOne игра вешает сама.
+                // Нативный чат шахты (LGChatOne) игра открывает сама.
                 const city = pageWin.LGCity;
                 // Гасим городской слой только пока игра всё ещё на вкладке
                 // «Город» (шахта всегда лежит поверх неё). Иначе не мешаем.
@@ -857,6 +858,115 @@ const PocketCity = (() => {
         },
 
         /**
+         * v11.7.2: глобальный keydown «Карманного Города».
+         *
+         * Один обработчик обслуживает закреп виджета (LEGION_POCKET_CITY_BIND)
+         * и горячие клавиши 8 зданий (LEGION_POCKET_CITY_ROOM_BINDS). Оба
+         * ключа читаются при каждом нажатии, поэтому новые бинды из настроек
+         * работают без перезагрузки. Сравнение — keybindMatches() по e.code
+         * (русская и английская раскладки дают одну комбинацию).
+         */
+        startKeyBind() {
+            if (PocketCity._bindKeyHandler) return;
+            PocketCity._bindKeyHandler = (e) => {
+                // Рекордер в настройках сам обрабатывает клавиши — не мешаем.
+                if (typeof UI !== 'undefined' && UI._bindRecording) return;
+
+                const bind = PocketCity.getKeyBind();
+                const roomBinds = PocketCity.getRoomBinds();
+                if (!bind && !Object.keys(roomBinds).length) return;
+                if (e.repeat || e.isComposing) return;
+                if (PocketCity._isTypingTarget(document.activeElement)) return;
+
+                // 1. Закреп/открепление мини-виджета — приоритет у него.
+                if (bind && keybindMatches(e, bind)) {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    const wasPinned = PocketCity.isPinned();
+                    if (wasPinned) {
+                        PocketCity.unpin();
+                    } else {
+                        PocketCity.pin();
+                    }
+                    try {
+                        if (typeof UI !== 'undefined' && UI.showToast) {
+                            UI.showToast(wasPinned
+                                ? `🏰 Город откреплён (${bind})`
+                                : `🏰 Город закреплён (${bind})`);
+                        }
+                    } catch (err) { /* тост не должен ломать переключение */ }
+                    return;
+                }
+
+                // 2. Бинд здания: ищем первое совпадение (UI не даёт дублей).
+                let roomId = '';
+                for (const [id, combo] of Object.entries(roomBinds)) {
+                    if (combo && keybindMatches(e, combo)) { roomId = id; break; }
+                }
+                if (!roomId) return;
+
+                e.preventDefault();
+                e.stopPropagation();
+
+                if (roomId === 'guild' && PocketCity.isGuildLocked()) {
+                    try {
+                        if (typeof UI !== 'undefined' && UI.showToast) {
+                            UI.showToast('Гильдия пока недоступна вашему герою', true);
+                        }
+                    } catch (err) { /* тост не должен ломать обработчик */ }
+                    return;
+                }
+
+                try {
+                    if (typeof UI !== 'undefined' && UI.closeModals) UI.closeModals();
+                } catch (err) { /* модалки могли быть уже закрыты */ }
+                PocketCity.openBuilding(roomId);
+            };
+            document.addEventListener('keydown', PocketCity._bindKeyHandler, true);
+        },
+
+        /** Снять глобальный keydown (destroy / повторный запуск скрипта). */
+        stopKeyBind() {
+            if (!PocketCity._bindKeyHandler) return;
+            document.removeEventListener('keydown', PocketCity._bindKeyHandler, true);
+            PocketCity._bindKeyHandler = null;
+        },
+
+        /** Сохранённая комбинация; ошибка хранилища = «не назначено». */
+        getKeyBind() {
+            try { return String(localStorage.getItem(POCKET_CITY_BIND_KEY) || '').trim(); }
+            catch (e) { return ''; }
+        },
+
+        /**
+         * Бинды зданий: JSON { [roomId]: combo }.
+         * Битые данные, массив или не-строки игнорируются — как и в UI.
+         */
+        getRoomBinds() {
+            try {
+                const raw = localStorage.getItem('LEGION_POCKET_CITY_ROOM_BINDS');
+                if (!raw) return {};
+                const parsed = JSON.parse(raw);
+                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+                const out = {};
+                for (const [roomId, combo] of Object.entries(parsed)) {
+                    if (typeof combo === 'string' && combo.trim()) out[roomId] = combo.trim();
+                }
+                return out;
+            } catch (e) {
+                return {};
+            }
+        },
+
+        /** Фокус в поле ввода — горячая клавиша не должна срабатывать. */
+        _isTypingTarget(el) {
+            if (!el) return false;
+            const tag = String(el.tagName || '').toUpperCase();
+            return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable === true;
+        },
+
+        /**
          * init() из boot() в main.js: поднимаем автоскип, если тумблер был
          * включён в прошлой сессии (настройка хранится в localStorage),
          * и запускаем фоновый мониторинг сборов на элитных монстров (если включено).
@@ -867,6 +977,8 @@ const PocketCity = (() => {
             // v11.7.1: если Карманный Город был закреплён в прошлой сессии —
             // сразу поднимаем компактный виджет.
             if (PocketCity.isPinned()) PocketCity.showPinnedWidget();
+            // v11.7.2: глобальный хоткей закрепа (если назначен в настройках).
+            PocketCity.startKeyBind();
         },
 
         /**
@@ -1040,6 +1152,9 @@ const PocketCity = (() => {
         destroy() {
             PocketCity.stopMonsterAutoSkip();
             PocketCity.stopCityMonWatch();
+            // v11.7.2: снимаем глобальный keydown закрепа, иначе старый
+            // инстанс продолжал бы переключать виджет после перезапуска скрипта.
+            PocketCity.stopKeyBind();
             // Виджет закрепа убираем из DOM, но сохранённый режим не трогаем:
             // после перезапуска скрипта init() вернёт его на место.
             PocketCity.hidePinnedWidget();

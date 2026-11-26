@@ -3,6 +3,10 @@
     // ============================================================
     const UI = {
         _hudTimer: null,
+        // v11.7.2: момент последнего события `me` LGLiveLink. Пока снимок
+        // свежий, HUD предпочитает его G.ME (тот может отставать или быть
+        // недоступен в песочнице).
+        _heroLiveSeenAt: 0,
         _toastTimer: null,
         _toastClickHandler: null,
         // ПАТЧ 11.6.5g: узлы меню аддона + режим входа в него.
@@ -61,6 +65,9 @@
             }, 2500);
         },
         closeModals() {
+            // Запись хоткея не должна пережить закрытие модалки: иначе
+            // следующий keydown молча перехватывался бы «висящим» рекордером.
+            if (typeof this._stopBindRecording === 'function') this._stopBindRecording();
             // Снимаем удержание вкладки «Город»: MutationObserver в
             // PocketCity.openNativeBuilding больше не должен возвращать её на экран.
             window.__POCKET_CITY_OPEN__ = false;
@@ -213,13 +220,17 @@
             return modal;
         },
         // ⚙️ Служебные настройки аддона: уведомления о версиях, боевой
-        // ассистент, подсветка ников аддона и место входа в меню. Настройки
-        // самого чата (7TV, перехват ленты) удалены в 11.7.0.
+        // ассистент, подсветка ников аддона и место входа в меню.
         openSettings() {
             // Разметка модалки — в core/ui-templates.js (UITemplates.settingsModal).
             const modal = this.showModal(UITemplates.settingsModal(), { compact: true });
 
             if (!modal) return;
+
+            // v11.7.2: единый рекордер хоткеев закрепа и 8 зданий Города.
+            // Живёт в замыкании модалки; closeModals() гасит его через
+            // _stopBindRecording(), чтобы keydown не перехватывался после закрытия.
+            this._initPocketCityBindRecorders(modal);
 
             // 11.6.1g: тумблер уведомлений о новых версиях.
             // Дефолт — включено (ключа в localStorage ещё нет). Значение читает
@@ -361,6 +372,241 @@
                     UI.syncNavButton();
                 });
             }
+        },
+
+        // ------------------------------------------------------------
+        // v11.7.2: ЕДИНЫЙ РЕКОРДЕР ХОТКЕЕВ «КАРМАННОГО ГОРОДА»
+        //
+        // Один и тот же механизм обслуживает закреп виджета и 8 зданий.
+        // Клик по кнопке включает запись, Esc отменяет её без закрытия
+        // модалки (capture-обработчик глушит событие до общего Esc ->
+        // closeModals()), одиночные модификаторы игнорируются. Комбинация
+        // нормализуется keybindCombo() по e.code (любая раскладка).
+        //
+        // Бинды зданий — JSON { [roomId]: combo } в localStorage
+        // 'LEGION_POCKET_CITY_ROOM_BINDS'. При сохранении одинаковой
+        // комбинации она снимается с прежнего слота, чтобы хоткей не
+        // срабатывал на два действия.
+        // ------------------------------------------------------------
+        _initPocketCityBindRecorders(modal) {
+            if (!modal) return;
+
+            this._bindRecorders = [];
+            this._bindRecording = false;
+            this._bindRecordingOwner = null;
+            this._bindCleanup = null;
+
+            const pocketBtn = modal.querySelector('#modal-bind-pocket-city');
+            if (pocketBtn) {
+                this._registerBindRecorder({
+                    btn: pocketBtn,
+                    clearBtn: modal.querySelector('#modal-bind-pocket-city-clear'),
+                    target: 'pocket',
+                    labelEmpty: 'Не назначено',
+                    get: () => {
+                        try { return String(localStorage.getItem(POCKET_CITY_BIND_KEY) || '').trim(); }
+                        catch (e) { return ''; }
+                    },
+                    set: (combo) => {
+                        try {
+                            localStorage.setItem(POCKET_CITY_BIND_KEY, combo || '');
+                            return true;
+                        } catch (e) {
+                            dbg('[UI] не удалось сохранить хоткей Карманного Города', e);
+                            return false;
+                        }
+                    }
+                });
+            }
+
+            modal.querySelectorAll('.lg-room-bind-btn').forEach(btn => {
+                const roomId = String(btn.dataset.room || '');
+                if (!roomId) return;
+                this._registerBindRecorder({
+                    btn,
+                    clearBtn: modal.querySelector(`.lg-room-bind-clear[data-room="${roomId}"]`),
+                    target: `room:${roomId}`,
+                    roomId,
+                    labelEmpty: '—',
+                    get: () => this._readRoomBinds()[roomId] || '',
+                    set: (combo) => {
+                        const map = this._readRoomBinds();
+                        if (combo) map[roomId] = combo;
+                        else delete map[roomId];
+                        return this._writeRoomBinds(map);
+                    }
+                });
+            });
+
+            this._refreshBindLabels();
+        },
+
+        /** Один слот бинда: кнопка, сброс, чтение/запись значения и запись клавиши. */
+        _registerBindRecorder(opts) {
+            const self = this;
+            const btn = opts.btn;
+            const clearBtn = opts.clearBtn;
+            const get = opts.get;
+            const set = opts.set;
+            const clear = opts.clear || (() => set(''));
+            const labelEmpty = opts.labelEmpty || '—';
+            let recording = false;
+
+            const applyLabel = () => {
+                const current = get() || '';
+                btn.textContent = recording ? 'Нажмите...' : (current || labelEmpty);
+                btn.classList.toggle('recording', recording);
+                btn.title = recording
+                    ? 'Нажмите комбинацию, Esc — отмена'
+                    : (current ? `Комбинация: ${current}` : 'Назначить клавишу');
+            };
+
+            const onKeyDown = (e) => {
+                if (!recording) return;
+                // Модалку могли убрать мимо closeModals() — тихо снимаем запись.
+                if (!btn.isConnected) { stop(); return; }
+
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    stop();
+                    return;
+                }
+                // Одиночные модификаторы не фиксируем: ждём основную клавишу.
+                if (isKeybindModifier(e)) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
+                const combo = keybindCombo(e);
+                if (!combo) return;
+
+                e.preventDefault();
+                e.stopPropagation();
+                stop();
+                // Сначала снимаем ту же комбинацию с других слотов, затем
+                // записываем её в текущий: один хоткей — одно действие.
+                self._clearBindConflicts(combo, opts.target);
+                const ok = set(combo);
+                self._refreshBindLabels();
+                UI.showToast(ok
+                    ? `⌨️ Хоткей сохранён: ${combo}`
+                    : 'Не удалось сохранить хоткей', !ok);
+            };
+
+            // function-декларация: onKeyDown ссылается на stop, а stop — на
+            // onKeyDown; хойстинг убирает TDZ-вопрос при чтении кода.
+            function stop() {
+                recording = false;
+                self._bindRecording = false;
+                if (self._bindRecordingOwner === btn) self._bindRecordingOwner = null;
+                if (self._bindCleanup === stop) self._bindCleanup = null;
+                document.removeEventListener('keydown', onKeyDown, true);
+                applyLabel();
+            }
+
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (recording) { stop(); return; }
+                // Начать новую запись можно только после остановки прежней.
+                self._stopBindRecording();
+                recording = true;
+                self._bindRecording = true;
+                self._bindRecordingOwner = btn;
+                self._bindCleanup = stop;
+                self._refreshBindLabels();
+                // capture: перехватываем раньше общего Esc -> UI.closeModals().
+                document.addEventListener('keydown', onKeyDown, true);
+            });
+
+            if (clearBtn) {
+                clearBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (recording) stop();
+                    clear();
+                    self._refreshBindLabels();
+                    UI.showToast('⌨️ Хоткей сброшен');
+                });
+            }
+
+            this._bindRecorders.push({ btn, refresh: applyLabel });
+            applyLabel();
+        },
+
+        /** Бинды зданий: JSON { [roomId]: combo }, битые данные = пусто. */
+        _readRoomBinds() {
+            try {
+                const raw = localStorage.getItem('LEGION_POCKET_CITY_ROOM_BINDS');
+                if (!raw) return {};
+                const parsed = JSON.parse(raw);
+                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+                const out = {};
+                for (const [roomId, combo] of Object.entries(parsed)) {
+                    if (typeof combo === 'string' && combo.trim()) out[roomId] = combo.trim();
+                }
+                return out;
+            } catch (e) {
+                return {};
+            }
+        },
+
+        _writeRoomBinds(map) {
+            try {
+                localStorage.setItem('LEGION_POCKET_CITY_ROOM_BINDS', JSON.stringify(map || {}));
+                return true;
+            } catch (e) {
+                dbg('[UI] не удалось сохранить хоткеи зданий Города', e);
+                return false;
+            }
+        },
+
+        /**
+         * Снять комбинацию с других слотов, если она уже занята.
+         * @param {string} combo  нормализованная комбинация
+         * @param {string} target 'pocket' либо 'room:<id>' — текущий слот
+         */
+        _clearBindConflicts(combo, target) {
+            if (!combo) return;
+            let changed = false;
+            const rooms = this._readRoomBinds();
+
+            // Закреп виджета не должен делить клавишу с зданием.
+            if (target !== 'pocket') {
+                try {
+                    if (String(localStorage.getItem(POCKET_CITY_BIND_KEY) || '').trim() === combo) {
+                        localStorage.setItem(POCKET_CITY_BIND_KEY, '');
+                        changed = true;
+                    }
+                } catch (e) {}
+            }
+
+            for (const roomId of Object.keys(rooms)) {
+                if (target === `room:${roomId}`) continue;
+                if (rooms[roomId] === combo) {
+                    delete rooms[roomId];
+                    changed = true;
+                }
+            }
+            if (changed) this._writeRoomBinds(rooms);
+        },
+
+        /** Обновить подписи всех кнопок-рекордеров открытой модалки. */
+        _refreshBindLabels() {
+            if (!Array.isArray(this._bindRecorders)) return;
+            this._bindRecorders.forEach(item => {
+                try { item.refresh(); } catch (e) {}
+            });
+        },
+
+        /** Снять активную запись хоткея (closeModals / повторное открытие). */
+        _stopBindRecording() {
+            this._bindRecording = false;
+            this._bindRecordingOwner = null;
+            const cleanup = this._bindCleanup;
+            this._bindCleanup = null;
+            if (typeof cleanup === 'function') cleanup();
         },
         /**
          * «💛 Благодарность» из футера FAB-меню: титры с никами тех, кто
@@ -952,19 +1198,153 @@
         },
 
         // ------------------------------------------------------------
-        // HUD профиля (v11.5.6): настройки блоков, баффы и статус героя.
+        // HUD профиля: настройки блоков, баффы и статус героя.
         // ------------------------------------------------------------
 
         // Какие блоки показывать в HUD. Ключ LEGION_HUD_SETTINGS общий для
         // всех персонажей. Битый/отсутствующий JSON не должен ломать HUD —
         // в этом случае возвращаем дефолты (всё включено).
         getHudSettings() {
-            const defaults = { showLoc: true, showXp: true, showStats: true, showBuffs: true };
+            const defaults = {
+                showLoc: true,
+                showXp: true,
+                showStats: true,
+                showBuffs: true,
+                // v11.7.2: новые блоки карточки профиля.
+                showSecondary: true,
+                showQuickActions: true
+            };
             try {
                 const raw = localStorage.getItem('LEGION_HUD_SETTINGS');
                 if (raw) return { ...defaults, ...JSON.parse(raw) };
             } catch (e) {}
             return defaults;
+        },
+
+        /**
+         * v11.7.2: подпись длительности для таймера HP (hero.hpFullIn — мс).
+         * Формат игры: часы/минуты, на последней минуте — секунды.
+         */
+        _hudDuration(ms) {
+            const left = Math.max(0, Number(ms) || 0);
+            if (left <= 0) return '';
+            if (left >= 3600000) {
+                const h = Math.floor(left / 3600000);
+                const m = Math.round((left % 3600000) / 60000);
+                return m > 0 ? `${h}ч ${m}м` : `${h}ч`;
+            }
+            if (left >= 60000) return `${Math.ceil(left / 60000)}м`;
+            return `${Math.max(1, Math.ceil(left / 1000))}с`;
+        },
+
+        /**
+         * Актуальный снимок героя для HUD. Если живой канал только что
+         * присылал `me`, его снимок свежее G.ME (и доступен даже в песочнице,
+         * где G.ME может быть undefined). Иначе — штатный G.ME, затем __lgHero.
+         */
+        _currentHeroSnapshot() {
+            const live = window.__lgHero;
+            const gmHero = G.ME?.hero || G.ME?.me || null;
+            if (live && this._heroLiveSeenAt && (Date.now() - this._heroLiveSeenAt) < 5000) {
+                return live;
+            }
+            return gmHero || live || null;
+        },
+
+        /**
+         * HP героя для шаблона: now / max / процент / таймер восстановления.
+         * hero.stats.hp — максимум (docs/API.md), hpMax/maxHp/mhp — фолбэки
+         * старых снимков. hpFullIn — сколько мс осталось до полного HP
+         * (site/app.js: h.hpFullIn), 0/undefined — таймера нет.
+         */
+        _hudHp(hero) {
+            const h = hero || {};
+            const nowRaw = h.hpNow !== undefined ? h.hpNow : (h.hp !== undefined ? h.hp : '—');
+            const maxRaw = h.stats && h.stats.hp !== undefined
+                ? h.stats.hp
+                : (h.hpMax !== undefined ? h.hpMax : (h.maxHp !== undefined ? h.maxHp : h.mhp));
+            const now = Number(nowRaw);
+            const max = Number(maxRaw);
+            const fullIn = Math.max(0, Number(h.hpFullIn) || 0);
+            return {
+                now: Number.isFinite(now) ? now : nowRaw,
+                max: Number.isFinite(max) && max > 0 ? max : null,
+                fullIn,
+                timer: (Number.isFinite(now) && Number.isFinite(max) && max > 0 && now < max && fullIn > 0)
+                    ? this._hudDuration(fullIn)
+                    : ''
+            };
+        },
+
+        /**
+         * Активность героя.
+         *
+         * hero.mn (docs/API.md, app.js mineList) — это СПРАВОЧНИК шахт:
+         * { home: { nm, dist, bi, dg, gem, i, q } }. Поля nm/dist/bi/dg/gem
+         * постоянные, а добыча обозначается индексом забоя i: i >= 0 —
+         * герой реально копает здесь (app.js: busy = m.i >= 0). Поэтому
+         * наличие mn.home.nm само по себе НЕ значит, что игрок в шахте.
+         *
+         * Дополнительно учитываем физический экран шахты (.mn-world /
+         * .mn-screen), а в конце — смерть/призрака, бой и активные баффы.
+         * Если ничего нет — нейтральное «Свободен», без ложной шахты.
+         */
+        _hudActivity(hero) {
+            const h = hero || {};
+
+            const q = h.ql;
+            if (q && typeof q === 'object' && q.on !== false) {
+                const name = q.name || q.rn || q.kind || q.k || '';
+                return { text: name ? `🚩 Поход: ${name}` : '🚩 В походе', color: '#ff9900' };
+            }
+
+            // Активный забой: m.i — индекс камня, который копает герой.
+            const activeMine = Object.values(h.mn || {}).find(m => m && typeof m.i === 'number' && m.i >= 0);
+            if (activeMine) {
+                return { text: `⛏️ ${activeMine.nm || 'Шахта'}`, color: '#4cc95a' };
+            }
+
+            // Игрок физически в шахте, но между забоями/смотрит экран.
+            const onMineScreen = !!document.querySelector('.mn-world') || !!document.querySelector('.mn-screen');
+            if (onMineScreen) return { text: '⛏️ Шахта', color: '#4cc95a' };
+
+            const status = this._hudStatus(h);
+            if (status && /Мертв|Призрак/.test(status.text)) return status;
+
+            if (h.busy) return { text: '⚔️ Занят боем', color: '#ffcf6a' };
+
+            const buffs = this._hudBuffs(h);
+            if (buffs.length) {
+                const names = buffs.map(b => b.title).filter(Boolean).join(', ');
+                return { text: names ? `✨ ${names}` : '✨ Под эффектом', color: '#ffcf6a' };
+            }
+
+            return { text: '🌿 Свободен', color: '#9aa4b2' };
+        },
+
+        /**
+         * Вторичные характеристики hero.xs (docs/API.md). Нули не показываем:
+         * игроку важен только реальный вклад. Иконки — визуальные маркеры.
+         */
+        _hudSecondaryStats(hero) {
+            const xs = (hero && hero.xs) || null;
+            if (!xs || typeof xs !== 'object') return [];
+            const defs = [
+                ['critDmg', '💢', 'Крит. урон', '%'],
+                ['dodge', '🌀', 'Уклонение', '%'],
+                ['pierce', '🗡️', 'Пробивание', ''],
+                ['healPow', '💚', 'Сила лечения', '%'],
+                ['luck', '🍀', 'Удача', ''],
+                ['resist', '🛡️', 'Сопротивление', '%']
+            ];
+            const out = [];
+            for (const [key, icon, label, suffix] of defs) {
+                const val = Number(xs[key]);
+                if (Number.isFinite(val) && val > 0) {
+                    out.push({ icon, label, value: `${val}${suffix}` });
+                }
+            }
+            return out;
         },
 
         // Остаток времени баффа строкой: минуты, а в последнюю минуту — секунды,
@@ -1033,11 +1413,12 @@
             const name = hero?.name || G.ME?.user?.name || G.ME?.user?.login || 'Игрок';
             const rawClass = hero?.class || hero?.c || hero?.sk?.c || 'recruit';
             const className = (typeof BuildSim !== 'undefined' && BuildSim.classNames?.[rawClass]) || rawClass;
+            const classColor = (typeof BuildSim !== 'undefined' && BuildSim.classColors?.[rawClass]) || '#caa55c';
             const lvl = hero?.lvl || hero?.level || hero?.l || 1;
 
-            // Здоровье: hero.hpNow / (hero.stats.hp или hero.hpMax)
-            const hpNow = hero?.hpNow !== undefined ? hero.hpNow : (hero?.hp !== undefined ? hero.hp : '—');
-            const hpMax = hero?.stats?.hp !== undefined ? hero.stats.hp : (hero?.hpMax !== undefined ? hero.hpMax : (hero?.maxHp || hero?.mhp || '—'));
+            // Здоровье: now / max / процент / таймер восстановления (hpFullIn).
+            // Значения нормализует _hudHp(), шаблон только рисует.
+            const hp = this._hudHp(hero);
 
             // Монеты: hero.money
             const moneyVal = hero?.money !== undefined ? hero.money : (hero?.coins !== undefined ? hero.coins : (hero?.gold !== undefined ? hero.gold : 0));
@@ -1046,10 +1427,12 @@
             const { xp, xpNext } = this._heroXp(hero);
             const loc = this._detectHudLocation();
 
-            // Настройки HUD + расширенные данные (v11.5.6).
+            // Настройки HUD + расширенные данные.
             const settings = this.getHudSettings();
             const buffs = this._hudBuffs(hero);
             const status = this._hudStatus(hero);
+            const activity = this._hudActivity(hero);
+            const secondary = this._hudSecondaryStats(hero);
 
             // Статы: atk/mag/def клиент отдаёт в hero.stats, крит — в hero.xs
             // (реже в hero.stats.crit), поэтому набор нормализуем здесь.
@@ -1060,13 +1443,28 @@
                 crit: (hero.stats && hero.stats.crit !== undefined) ? hero.stats.crit : (hero.xs ? hero.xs.crit : undefined)
             } : null;
 
+            // Быстрые переходы: кнопка есть только у существующего модуля.
+            // Почта — нативная функция игры, поэтому достаточно наличия HUD/API.
+            const quick = {
+                city: typeof PocketCity !== 'undefined' && typeof PocketCity.open === 'function',
+                mail: true,
+                players: typeof Players !== 'undefined' && typeof Players.open === 'function'
+            };
+
             // Разметка HUD — в core/ui-templates.js (UITemplates.playerHud):
             // шаблон сам экранирует ник/класс и форматирует монеты.
-            hud.innerHTML = UITemplates.playerHud(name, className, lvl, { now: hpNow, max: hpMax }, moneyVal, loc, xp, xpNext, {
+            hud.innerHTML = UITemplates.playerHud(name, className, lvl, { now: hp.now, max: hp.max }, moneyVal, loc, xp, xpNext, {
                 settings,
                 stats: hudStats,
+                secondary,
                 buffs,
-                status
+                status,
+                activity,
+                classColor,
+                guild: hero?.gt || '',
+                debt: Number(hero?.debt) || 0,
+                hpTimer: hp.timer,
+                quick
             });
 
             // Метки для интервала в togglePlayerHud(): hudReady отличает готовую
@@ -1083,7 +1481,28 @@
                 }
             });
 
-            // ⚙️ Настройки отображаемых блоков профиля (11.5.6).
+            // v11.7.2: быстрые кнопки внизу карточки — Город / Почта / Разведка.
+            hud.querySelector('#player-hud-qcity')?.addEventListener('click', () => {
+                UI.closeFabMenu();
+                try { PocketCity.open(); }
+                catch (err) { dbg('[HUD] не удалось открыть Карманный Город', err); }
+            });
+            hud.querySelector('#player-hud-qmail')?.addEventListener('click', () => {
+                UI.closeFabMenu();
+                UI.openNativeMail();
+            });
+            hud.querySelector('#player-hud-qplayers')?.addEventListener('click', () => {
+                UI.closeFabMenu();
+                try {
+                    if (typeof Players !== 'undefined' && typeof Players.open === 'function') Players.open();
+                    else UI.showToast('Разведка недоступна', true);
+                } catch (err) {
+                    dbg('[HUD] не удалось открыть Разведку', err);
+                    UI.showToast('Разведка недоступна', true);
+                }
+            });
+
+            // ⚙️ Настройки отображаемых блоков профиля.
             hud.querySelector('#player-hud-settings-btn')?.addEventListener('click', () => {
                 const currentSettings = this.getHudSettings();
                 UI.showModal(UITemplates.hudSettingsModal(currentSettings), { compact: true });
@@ -1093,7 +1512,9 @@
                         showLoc: !!document.getElementById('hud-set-loc')?.checked,
                         showXp: !!document.getElementById('hud-set-xp')?.checked,
                         showStats: !!document.getElementById('hud-set-stats')?.checked,
-                        showBuffs: !!document.getElementById('hud-set-buffs')?.checked
+                        showBuffs: !!document.getElementById('hud-set-buffs')?.checked,
+                        showSecondary: !!document.getElementById('hud-set-secondary')?.checked,
+                        showQuickActions: !!document.getElementById('hud-set-quick')?.checked
                     };
                     try {
                         localStorage.setItem('LEGION_HUD_SETTINGS', JSON.stringify(newSettings));
@@ -1103,6 +1524,60 @@
                     this.renderPlayerHudContent(hud, hero);
                 });
             });
+        },
+
+        /**
+         * v11.7.2: нативная почта игры для кнопки «✉️ Почта» в профиле.
+         *
+         * Кнопка HUD: #gu-hud [data-gu="mail"] (app.js guHudHtml). Пока почта
+         * закрыта, игра держит у неё aria-disabled="true" и <span class="gu-soon">;
+         * после события lgmail guMail() снимает блокировку. API — window.LGMail
+         * с методами open()/on() (app.js).
+         *
+         * Порядок: заблокированная кнопка без активного API — тост; иначе
+         * LGMail.open(); если API ещё не загружен — штатный клик по кнопке.
+         * window.fetch/LGMail не патчим.
+         */
+        openNativeMail() {
+            const btn = document.querySelector('#gu-hud [data-gu="mail"]');
+            const mail = G.LGMail || (typeof window !== 'undefined' ? window.LGMail : null);
+            const apiReady = !!mail && typeof mail.open === 'function';
+            const visualLocked = !!btn && (
+                btn.getAttribute('aria-disabled') === 'true'
+                || btn.classList.contains('gu-soon')
+                || !!btn.querySelector('.gu-soon')
+            );
+
+            let mailOn = true;
+            if (apiReady && typeof mail.on === 'function') {
+                try { mailOn = mail.on() !== false; } catch (e) { mailOn = true; }
+            }
+
+            if (visualLocked && !mailOn) {
+                this.showToast('Почта пока недоступна', true);
+                return false;
+            }
+
+            if (apiReady) {
+                try {
+                    mail.open();
+                    return true;
+                } catch (err) {
+                    dbg('[HUD] LGMail.open() не сработал:', err);
+                }
+            }
+
+            if (btn) {
+                try {
+                    btn.click();
+                    return true;
+                } catch (err) {
+                    dbg('[HUD] клик по кнопке почты не сработал:', err);
+                }
+            }
+
+            this.showToast('Почта пока недоступна', true);
+            return false;
         },
 
         setupPlayerHudDrag(hud) {
@@ -1169,7 +1644,7 @@
 
             hud.style.display = 'flex';
 
-            let hero = G.ME?.hero || G.ME?.me || window.__lgHero;
+            let hero = this._currentHeroSnapshot();
             if (hero) {
                 this.renderPlayerHudContent(hud, hero);
             } else {
@@ -1194,7 +1669,9 @@
                 this._hudTimer = null;
             }
 
-            // Живое обновление HUD: локация, HP, монеты и опыт каждые 1000 мс
+            // Живое обновление HUD: локация, HP, монеты и опыт каждые 1000 мс.
+            // Само обновление вынесено в _refreshPlayerHud() — его же зовёт
+            // событие `me` живого канала игры (мгновенно, без ожидания тика).
             this._hudTimer = setInterval(() => {
                 if (!hud || hud.style.display === 'none') {
                     if (this._hudTimer) {
@@ -1203,84 +1680,249 @@
                     }
                     return;
                 }
-
-                const currentHero = G.ME?.hero || G.ME?.me || window.__lgHero;
-
-                // Герой появился позже (HUD ещё показывает заглушку «Загрузка
-                // профиля...») — дорисовываем карточку целиком и выходим.
-                // Проверяем метку готовности, а не #player-hud-xp-text: полосу
-                // опыта можно отключить в настройках, и HUD перерисовывался бы
-                // каждую секунду.
-                if (currentHero && hud.dataset.hudReady !== '1') {
-                    this.renderPlayerHudContent(hud, currentHero);
-                    return;
-                }
-
-                // Изменился набор баффов или статус (поел, выпил свиток, умер,
-                // начался бой) — перерисовываем карточку: состав элементов другой.
-                if (currentHero && hud.dataset.hudSig !== this._hudSignature(currentHero)) {
-                    this.renderPlayerHudContent(hud, currentHero);
-                    return;
-                }
-
-                // Локация: Город / Шахта / Поход
-                const locEl = hud.querySelector('#player-hud-loc');
-                if (locEl) {
-                    const loc = this._detectHudLocation();
-                    locEl.textContent = loc.text;
-                    locEl.style.color = loc.color;
-                }
-
-                if (currentHero) {
-                    // HP: иконка ❤️ живёт в подписи шаблона, значение — только цифры.
-                    const hpEl = hud.querySelector('#player-hud-hp');
-                    if (hpEl) {
-                        const curHp = currentHero.hpNow !== undefined ? currentHero.hpNow : (currentHero.hp !== undefined ? currentHero.hp : '—');
-                        const mHp = currentHero.stats?.hp !== undefined ? currentHero.stats.hp : (currentHero.hpMax !== undefined ? currentHero.hpMax : (currentHero.maxHp || currentHero.mhp || '—'));
-                        hpEl.textContent = (mHp !== null && mHp !== undefined) ? `${curHp} / ${mHp}` : curHp;
-                    }
-                    const moneyEl = hud.querySelector('#player-hud-money');
-                    if (moneyEl) {
-                        const mon = currentHero.money !== undefined ? currentHero.money : (currentHero.coins !== undefined ? currentHero.coins : (currentHero.gold !== undefined ? currentHero.gold : 0));
-                        moneyEl.textContent = Utils.formatMoney(mon);
-                    }
-                    // Опыт: цифры и полоса прогресса уровня
-                    const xpEl = hud.querySelector('#player-hud-xp-text');
-                    const xpBar = hud.querySelector('#player-hud-xp-bar');
-                    if (xpEl && xpBar) {
-                        const { xp, xpNext } = this._heroXp(currentHero);
-                        xpEl.textContent = `${xp} / ${xpNext}`;
-                        // Math.max(1, …) — защита от деления на 0; 100 — потолок полосы.
-                        xpBar.style.width = `${Math.min(100, Math.round((xp / Math.max(1, xpNext)) * 100))}%`;
-                    }
-
-                    // Баффы: пересчитываем подписи по data-until (см. ui-templates.js),
-                    // чтобы таймер тикал без полной перерисовки HUD. Просроченные
-                    // чипы убираем — на следующем тике hudSig перерисует карточку.
-                    const buffsEl = hud.querySelector('#player-hud-buffs');
-                    if (buffsEl) {
-                        buffsEl.querySelectorAll('[data-until]').forEach(el => {
-                            const until = Number(el.dataset.until) || 0;
-                            const left = until - Date.now();
-                            if (left > 0) {
-                                el.textContent = `${el.dataset.icon || ''} ${this._hudTimeLeft(left)}`.trim();
-                            } else {
-                                el.remove();
-                            }
-                        });
-                    }
-                }
+                const currentHero = this._currentHeroSnapshot();
+                this._refreshPlayerHud(hud, currentHero || null);
             }, 1000);
+
+            // v11.7.2: подписка на `me` LGLiveLink — HP/монеты/опыт меняются
+            // мгновенно, даже если G.ME недоступен (снимок кладём в __lgHero).
+            this.ensureHeroLiveUpdates();
 
             try {
                 const res = await Utils.fetchApi('/api/me');
                 const freshHero = res?.hero || res?.body?.hero || res?.me || (res?.hpNow !== undefined ? res : null);
                 if (freshHero) {
                     window.__lgHero = freshHero;
+                    this._heroLiveSeenAt = Date.now();
                     this.renderPlayerHudContent(hud, freshHero);
                 }
             } catch (e) {
                 dbg('[HUD] Ошибка запроса /api/me:', e);
             }
+        },
+
+        /* ------------------------------------------------------------
+         * v11.7.2: ЖИВОЕ ОБНОВЛЕНИЕ ПРОФИЛЯ + ПОДПИСКА НА LGLiveLink
+         *
+         * LGLiveLink хранит инстанс в замыкании site-live.js, поэтому
+         * единственная точка доступа — обёртка его open() (тот же приём,
+         * что _hookLiveLink в modules/party.js). window.fetch, LGMine и
+         * прочие нативные объекты НЕ патчатся: подписываемся только на
+         * штатное SSE-событие `me`. Хук идемпотентен.
+         * ---------------------------------------------------------- */
+
+        /** Перерисовать карточку целиком или обновить значения на месте. */
+        _refreshPlayerHud(hud, hero) {
+            if (!hud || hud.style.display === 'none') return;
+            if (!hero) {
+                // Героя ещё нет — хотя бы локация (Город / Шахта / Поход).
+                const locEl = hud.querySelector('#player-hud-loc');
+                if (locEl) {
+                    const loc = this._detectHudLocation();
+                    locEl.textContent = loc.text;
+                    locEl.style.color = loc.color;
+                }
+                return;
+            }
+            // Герой появился позже («Загрузка профиля...») либо изменился
+            // состав баффов/статус — карточку нужно собрать заново.
+            if (hud.dataset.hudReady !== '1'
+                || hud.dataset.hudSig !== this._hudSignature(hero)) {
+                this.renderPlayerHudContent(hud, hero);
+                return;
+            }
+            this._updatePlayerHudValues(hud, hero);
+        },
+
+        /**
+         * Точечное обновление значений без перерисовки innerHTML:
+         * HP (текст/полоса/таймер), монеты/долг, опыт, локация, активность
+         * и подписи баффов. Полная перерисовка сбивала бы drag и фокус.
+         */
+        _updatePlayerHudValues(hud, hero) {
+            if (!hud || !hero) return;
+
+            const loc = this._detectHudLocation();
+            const locEl = hud.querySelector('#player-hud-loc');
+            if (locEl) {
+                locEl.textContent = loc.text;
+                locEl.style.color = loc.color;
+            }
+            const activity = this._hudActivity(hero);
+            const actEl = hud.querySelector('#player-hud-activity');
+            if (actEl) {
+                actEl.textContent = activity.text;
+                actEl.style.color = activity.color;
+            }
+
+            // HP: текст, процент, градиент (красный/зелёный) и таймер.
+            const hp = this._hudHp(hero);
+            const hpEl = hud.querySelector('#player-hud-hp');
+            if (hpEl) {
+                hpEl.textContent = hp.max !== null ? `${hp.now} / ${hp.max}` : hp.now;
+            }
+            const hpBar = hud.querySelector('#player-hud-hp-bar');
+            if (hpBar) {
+                const pct = (hp.max && Number.isFinite(Number(hp.now)))
+                    ? Math.max(0, Math.min(100, Math.round((Number(hp.now) / hp.max) * 100)))
+                    : 0;
+                hpBar.style.width = `${pct}%`;
+                hpBar.style.background = pct <= 30
+                    ? 'linear-gradient(90deg, #7a1f2c, #ff5a7a)'
+                    : pct <= 60
+                        ? 'linear-gradient(90deg, #7a5a1f, #ffcf6a)'
+                        : 'linear-gradient(90deg, #1f7a3a, #4cc95a)';
+            }
+            const hpTimerEl = hud.querySelector('#player-hud-hp-timer');
+            if (hpTimerEl) {
+                if (hp.timer) {
+                    hpTimerEl.textContent = `⏱ До полного: ${hp.timer}`;
+                    hpTimerEl.style.display = '';
+                } else {
+                    hpTimerEl.textContent = '';
+                    hpTimerEl.style.display = 'none';
+                }
+            }
+
+            // Монеты и долг (строка долга скрыта, пока debt <= 0).
+            const moneyEl = hud.querySelector('#player-hud-money');
+            if (moneyEl) {
+                const mon = hero.money !== undefined ? hero.money : (hero.coins !== undefined ? hero.coins : (hero.gold !== undefined ? hero.gold : 0));
+                moneyEl.textContent = Utils.formatMoney(mon);
+            }
+            const debt = Number(hero.debt) || 0;
+            const debtRow = hud.querySelector('#player-hud-debt-row');
+            if (debtRow) debtRow.style.display = debt > 0 ? 'flex' : 'none';
+            const debtEl = hud.querySelector('#player-hud-debt');
+            if (debtEl) debtEl.textContent = debt > 0 ? Utils.formatMoney(debt) : '';
+
+            // Опыт: цифры, процент и полоса прогресса уровня.
+            const xpEl = hud.querySelector('#player-hud-xp-text');
+            const xpBar = hud.querySelector('#player-hud-xp-bar');
+            const xpPctEl = hud.querySelector('#player-hud-xp-pct');
+            if (xpEl || xpBar) {
+                const { xp, xpNext } = this._heroXp(hero);
+                // Math.max(1, …) — защита от деления на 0; 100 — потолок полосы.
+                const pct = Math.max(0, Math.min(100, Math.floor((xp / Math.max(1, xpNext)) * 100)));
+                if (xpEl) xpEl.textContent = `${xp} / ${xpNext}`;
+                if (xpPctEl) xpPctEl.textContent = `${pct}%`;
+                if (xpBar) xpBar.style.width = `${pct}%`;
+            }
+
+            // Баффы: пересчитываем подписи по data-until (см. ui-templates.js),
+            // чтобы таймер тикал без полной перерисовки HUD. Просроченные
+            // чипы убираем — на следующем тике hudSig перерисует карточку.
+            const buffsEl = hud.querySelector('#player-hud-buffs');
+            if (buffsEl) {
+                buffsEl.querySelectorAll('[data-until]').forEach(el => {
+                    const until = Number(el.dataset.until) || 0;
+                    const left = until - Date.now();
+                    if (left > 0) {
+                        el.textContent = `${el.dataset.icon || ''} ${this._hudTimeLeft(left)}`.trim();
+                    } else {
+                        el.remove();
+                    }
+                });
+            }
+        },
+
+        /** Мгновенное событие `me` живого канала: обновляем __lgHero и HUD. */
+        _onHeroLiveUpdate(hero) {
+            if (this._heroLiveDead) return;
+            if (!hero || typeof hero !== 'object') return;
+            // Даже если G.ME недоступен, свежий снимок героя теперь есть здесь.
+            // В событии `me` нет ql (поход приходит отдельным событием `q`),
+            // поэтому недостающие поля берём из прошлого снимка, а не теряем их.
+            const prev = window.__lgHero;
+            const merged = (prev && typeof prev === 'object')
+                ? Object.assign({}, prev, hero)
+                : hero;
+            window.__lgHero = merged;
+            this._heroLiveSeenAt = Date.now();
+            const hud = document.getElementById(DOM_IDS.playerHud) || document.getElementById('legion-player-hud');
+            if (!hud || hud.style.display === 'none') return;
+            this._refreshPlayerHud(hud, merged);
+        },
+
+        /**
+         * Подписаться на LGLiveLink `me`. Возвращает true, если хук уже стоит.
+         * Обёртка идемпотентна: Party._hookLiveLink может навернуть свой слой
+         * сверху — он вызывает наш open() и наш слушатель остаётся живым.
+         */
+        _hookHeroLiveLink() {
+            if (this._heroLiveHooked) return true;
+            const link = G.LGLiveLink;
+            if (!link || typeof link.open !== 'function') return false;
+
+            const self = this;
+            const origOpen = link.open;
+            const wrapper = function (opts) {
+                const instance = origOpen.apply(this, arguments);
+                try {
+                    if (instance && typeof instance.addEventListener === 'function') {
+                        self._heroLiveInstance = instance;
+                        instance.addEventListener('me', (e) => {
+                            try {
+                                const data = JSON.parse(e.data);
+                                if (data && data.hero) self._onHeroLiveUpdate(data.hero);
+                            } catch (err) {
+                                // Битую строку канала игнорируем: игра делает то же.
+                            }
+                        });
+                    }
+                } catch (err) {
+                    dbg('[UI] LGLiveLink: подписка на `me` не удалась:', err);
+                }
+                return instance;
+            };
+
+            this._heroLiveOrigOpen = origOpen;
+            this._heroLiveWrapper = wrapper;
+            this._heroLiveHooked = true;
+            this._heroLiveDead = false;
+            link.open = wrapper;
+            dbg('[UI] профиль: подписались на LGLiveLink `me`');
+            return true;
+        },
+
+        /** Поднять хук сейчас или подождать LGLiveLink (он грузится лениво). */
+        ensureHeroLiveUpdates() {
+            if (this._heroLiveHooked) return true;
+            if (this._hookHeroLiveLink()) {
+                if (this._heroLiveRetryTimer) {
+                    clearInterval(this._heroLiveRetryTimer);
+                    this._heroLiveRetryTimer = null;
+                }
+                return true;
+            }
+            if (this._heroLiveRetryTimer) return false;
+            let tries = 0;
+            this._heroLiveRetryTimer = setInterval(() => {
+                tries += 1;
+                if (this._hookHeroLiveLink() || tries >= 60) {
+                    clearInterval(this._heroLiveRetryTimer);
+                    this._heroLiveRetryTimer = null;
+                }
+            }, 500);
+            return false;
+        },
+
+        /** Снять обёртку LGLiveLink (shutdown при перезапуске скрипта). */
+        _unhookHeroLiveLink() {
+            if (this._heroLiveRetryTimer) {
+                clearInterval(this._heroLiveRetryTimer);
+                this._heroLiveRetryTimer = null;
+            }
+            const link = G.LGLiveLink;
+            if (link && this._heroLiveWrapper && link.open === this._heroLiveWrapper) {
+                link.open = this._heroLiveOrigOpen;
+            }
+            this._heroLiveWrapper = null;
+            this._heroLiveOrigOpen = null;
+            this._heroLiveInstance = null;
+            this._heroLiveHooked = false;
+            // Слушатель мог остаться в цепочке под чужим слоем (Party) —
+            // помечаем инстанс мёртвым, чтобы он не трогал DOM после shutdown.
+            this._heroLiveDead = true;
         }
     };

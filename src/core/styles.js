@@ -11,7 +11,7 @@
             --br1: #84d4ff; --br2: #ffa982; --br3: #d6b4ff;
         }
         .${DOM_IDS.customModal}, .custom-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(20, 16, 26, 0.98); border: 2px solid #caa55c; border-radius: 12px; padding: 20px; z-index: 10000; color: #f7eadf; width: 1200px; max-width: 98vw; max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,0.85); font-family: 'Nunito', sans-serif; backdrop-filter: blur(4px); }
-        .${DOM_IDS.customModal}.modal-compact, .custom-modal.modal-compact { width: 450px; max-width: 95vw; max-height: 65vh; padding: 16px; }
+        .${DOM_IDS.customModal}.modal-compact, .custom-modal.modal-compact { width: 450px; max-width: 95vw; max-height: 82vh; padding: 16px; box-sizing: border-box; overflow: hidden; }
         .${DOM_IDS.customModal} h2, .custom-modal h2 { margin-top: 0; color: #ffcf6a; border-bottom: 1px solid #555; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; cursor: grab; user-select: none; }
         .${DOM_IDS.customModal} h2:active, .custom-modal h2:active { cursor: grabbing; }
         .${DOM_IDS.customModal} ::-webkit-scrollbar, .custom-modal ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -29,6 +29,123 @@
         .lg-toggle:checked { background: #ffcf6a; }
         .lg-toggle:checked::after { transform: translateX(16px); }
         .lg-toggle:focus-visible { box-shadow: 0 0 0 2px #caa55c; }
+        /* ============================================================
+           НАСТРОЙКИ АДДОНА (v11.7.2): аккуратные секции вместо «простыни».
+           Заголовок модалки зафиксирован сверху (h2 flex:none), тело
+           .lg-settings-body — единственный scrollport внутри рамки.
+           ============================================================ */
+        .custom-modal.modal-compact h2 { flex: none; margin-bottom: 0; }
+        .lg-settings-body {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            padding-right: 4px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 10px;
+            scrollbar-width: thin;
+            scrollbar-color: #44374a transparent;
+        }
+        .lg-settings-body::-webkit-scrollbar { width: 5px; }
+        .lg-settings-body::-webkit-scrollbar-track { background: transparent; }
+        .lg-settings-body::-webkit-scrollbar-thumb { background: #44374a; border-radius: 3px; }
+        .lg-settings-body::-webkit-scrollbar-thumb:hover { background: #caa55c; }
+        .lg-settings-group { display: flex; flex-direction: column; gap: 6px; }
+        .lg-settings-group-title {
+            font-size: 10.5px;
+            font-weight: bold;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #caa55c;
+            padding: 0 2px;
+        }
+        .lg-setting-card {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 8px 10px;
+            background: #1e1724;
+            border: 1px solid #33293c;
+            border-radius: 8px;
+        }
+        .lg-setting-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #eee;
+            min-height: 20px;
+        }
+        .lg-setting-desc {
+            font-size: 10px;
+            line-height: 1.35;
+            color: #8a8090;
+        }
+        /* Рекордер хоткея: обычное состояние — золотая рамка, запись —
+           красная пульсация. Кнопка «✕» сбрасывает бинд. */
+        .lg-bind-wrap { display: flex; align-items: center; gap: 4px; flex: none; }
+        .lg-bind-btn {
+            min-width: 116px;
+            max-width: 170px;
+            padding: 4px 9px;
+            background: #16121a;
+            border: 1px solid #4a3b55;
+            border-radius: 5px;
+            color: #ffcf6a;
+            font-family: inherit;
+            font-size: 11px;
+            font-weight: bold;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: pointer;
+            transition: border-color 0.15s, color 0.15s, background 0.15s;
+        }
+        .lg-bind-btn:hover { border-color: #caa55c; background: #241b2d; }
+        .lg-bind-btn.recording {
+            border-color: #ff5a7a;
+            color: #ff8fa3;
+            background: #2a1620;
+            animation: lg-bind-pulse 1s ease-in-out infinite;
+        }
+        @keyframes lg-bind-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255, 90, 122, 0.35); }
+            50% { box-shadow: 0 0 0 4px rgba(255, 90, 122, 0); }
+        }
+        .lg-bind-clear {
+            width: 22px;
+            height: 22px;
+            flex: none;
+            padding: 0;
+            background: transparent;
+            border: 1px solid #4a3b55;
+            border-radius: 5px;
+            color: #ff8fa3;
+            font-size: 11px;
+            line-height: 1;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .lg-bind-clear:hover { background: rgba(255, 90, 122, 0.16); border-color: #ff5a7a; }
+        /* Хоткеи 8 зданий: компактная 2-колоночная сетка внутри карточки
+           настроек. Название слева, кнопка бинда и «✕» справа. */
+        .lg-room-binds { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; margin-top: 2px; }
+        .lg-room-bind-row { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; padding: 4px 6px; background: #16121a; border: 1px solid #302637; border-radius: 6px; }
+        .lg-room-bind-name { font-size: 10px; color: #d7cfe0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+        .lg-room-bind-controls { display: flex; align-items: center; gap: 3px; flex: none; }
+        .lg-room-bind-btn { min-width: 50px; max-width: 82px; padding: 3px 5px; font-size: 9.5px; }
+        .lg-room-bind-clear { width: 18px; height: 18px; font-size: 9px; border-radius: 4px; }
+        @media (max-width: 430px) {
+            .lg-room-binds { grid-template-columns: 1fr; }
+        }
+        /* Низкие экраны: отдаём модалке больше высоты, отступы ещё компактнее. */
+        @media (max-height: 800px) {
+            .custom-modal.modal-compact { max-height: 94vh; padding: 12px; }
+            .lg-settings-body { gap: 9px; margin-top: 8px; }
+            .lg-setting-card { padding: 6px 9px; }
+        }
         /* Пати: компактный крестик в правом верхнем углу заголовка (v11.6.0a). */
         .party-close { border-radius: 5px; transition: color 0.2s, background 0.2s; }
         .party-close:hover { color: #fff; background: rgba(255, 143, 163, 0.14); }
@@ -310,7 +427,7 @@
         /* 11.6.2c.4: кнопка «📡 Сканировать весь аукцион» в шапке сканера.
            class="btn" — родной класс игры, но у него нет фона/рамки, поэтому
            цвета аддона задаём по id (специфичность выше класса). :disabled —
-           кулдаун 30 минут или идущее сканирование. */
+           кулдаун 5 минут или идущее сканирование. */
         #lg-auction-full-scan {
             min-height: 0;
             padding: 5px 12px;
@@ -527,11 +644,53 @@
             width: 24px;
             height: 24px;
         }
-        #${DOM_IDS.playerHud}, #legion-player-hud { position: fixed; top: 100px; right: 20px; width: 220px; background: #1d1620; border: 2px solid #caa55c; border-radius: 10px; z-index: 10001; box-shadow: 0 8px 24px rgba(0,0,0,0.85); display: flex; flex-direction: column; overflow: hidden; font-family: 'Nunito', sans-serif; }
-        .player-hud-header { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: #2a2030; border-bottom: 1px solid #444; cursor: move; user-select: none; touch-action: none; }
+        /* ============================================================
+           HUD ПРОФИЛЯ (v11.7.2): 260px, прокручиваемое тело и полосы HP/XP.
+           Карточка никогда не вылезает за экран: max-height 82vh, а скролл
+           живёт в .player-hud-body, шапка с кнопками остаётся сверху.
+           ============================================================ */
+        #${DOM_IDS.playerHud}, #legion-player-hud { position: fixed; top: 100px; right: 20px; width: 260px; max-width: 92vw; max-height: 82vh; background: #1d1620; border: 2px solid #caa55c; border-radius: 12px; z-index: 10001; box-shadow: 0 8px 24px rgba(0,0,0,0.85); display: flex; flex-direction: column; overflow: hidden; font-family: 'Nunito', sans-serif; box-sizing: border-box; }
+        .player-hud-header { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 6px 10px; background: #2a2030; border-bottom: 1px solid #444; cursor: move; user-select: none; touch-action: none; flex: none; }
+        .player-hud-title { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 12px; font-weight: bold; color: #ffcf6a; }
+        .player-hud-class-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+        .player-hud-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 108px; }
+        .player-hud-guild { color: #cbb6ff; font-size: 10.5px; font-weight: bold; flex: none; }
+        .player-hud-level { color: #b9ac9c; font-size: 10px; font-weight: normal; white-space: nowrap; flex: none; }
+        .player-hud-actions { display: flex; align-items: center; gap: 5px; flex: none; }
+        .player-hud-status { font-size: 9.5px; padding: 1px 6px; border-radius: 4px; background: rgba(255, 90, 122, 0.12); border: 1px solid #ff5a7a; white-space: nowrap; }
         .player-hud-close { background: none; border: none; color: #ff8fa3; font-size: 14px; cursor: pointer; padding: 0 2px; line-height: 1; }
         .player-hud-close:hover { color: #fff; }
-        .player-hud-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
+        .player-hud-body { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; overflow-y: auto; min-height: 0; scrollbar-width: thin; scrollbar-color: #44374a transparent; }
+        .player-hud-body::-webkit-scrollbar { width: 5px; }
+        .player-hud-body::-webkit-scrollbar-thumb { background: #44374a; border-radius: 3px; }
+        .player-hud-body::-webkit-scrollbar-thumb:hover { background: #caa55c; }
+        .player-hud-classline { display: flex; align-items: center; }
+        .player-hud-class-badge { font-size: 10.5px; font-weight: bold; padding: 1px 7px; border: 1px solid currentColor; border-radius: 999px; background: rgba(255,255,255,0.04); }
+        .player-hud-bar-block { display: flex; flex-direction: column; gap: 3px; }
+        .player-hud-bar-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; color: #cfc4b8; gap: 6px; }
+        .player-hud-bar-head b { color: #ffcf6a; font-size: 10px; }
+        .player-hud-bar-track { height: 9px; background: #111; border: 1px solid #333; border-radius: 5px; overflow: hidden; }
+        .player-hud-bar-fill { height: 100%; border-radius: 4px; transition: width 0.3s ease, background 0.3s ease; }
+        .player-hud-bar-note { font-size: 9.5px; color: #8a8090; line-height: 1.2; }
+        .player-hud-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11.5px; }
+        .player-hud-row-label { color: #aaa; white-space: nowrap; }
+        .player-hud-row > span:last-child { font-weight: bold; text-align: right; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+        .player-hud-debt > span:last-child { color: #ff5a7a; }
+        .player-hud-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: #16121a; border: 1px solid #2b2233; padding: 6px; border-radius: 6px; }
+        .player-hud-stat { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; font-size: 10.5px; white-space: nowrap; }
+        .player-hud-stat b { font-size: 11.5px; color: #fff; font-variant-numeric: tabular-nums; }
+        .player-hud-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+        .player-hud-pill { display: inline-flex; align-items: center; gap: 3px; padding: 2px 6px; background: rgba(159, 208, 255, 0.08); border: 1px solid #3a4a5c; border-radius: 999px; color: #b9c9d8; font-size: 9.5px; white-space: nowrap; }
+        .player-hud-pill b { color: #e6f1ff; font-size: 10px; }
+        .player-hud-pill-ico { font-size: 9px; }
+        .player-hud-buffs { display: flex; gap: 4px; flex-wrap: wrap; }
+        .player-hud-buff { background: rgba(202,165,92,0.2); border: 1px solid #caa55c; color: #ffcf6a; font-size: 10px; padding: 2px 6px; border-radius: 4px; }
+        .player-hud-quick { display: flex; gap: 4px; margin-top: 2px; }
+        .player-hud-quick-btn { flex: 1 1 0; min-width: 0; padding: 5px 2px; background: #241b2d; border: 1px solid #caa55c; border-radius: 6px; color: #ffcf6a; font-family: inherit; font-size: 9.5px; line-height: 1.15; font-weight: bold; letter-spacing: -0.1px; text-align: center; white-space: nowrap; overflow: visible; text-overflow: clip; cursor: pointer; transition: background 0.15s, color 0.15s; }
+        .player-hud-quick-btn:hover { background: #caa55c; color: #1d1620; }
+        @media (max-height: 800px) {
+            #${DOM_IDS.playerHud}, #legion-player-hud { max-height: 88vh; }
+        }
         /* ── Пати (v11.6.0g-2): модалка, HP-панель и журнал ──
            Раньше формы окна «Пати» рисовались инлайном (серые рамки #444) —
            теперь это классы: тёмный фон, золотистые акценты #caa55c/#ffcf6a

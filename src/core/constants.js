@@ -139,6 +139,81 @@
         },
     };
     /*
+     * ------------------------------------------------------------
+     * 0.10. ГОРЯЧАЯ КЛАВИША ЗАКРЕПА «КАРМАННОГО ГОРОДА» (v11.7.2)
+     *
+     * Строка нормализованной комбинации живёт в localStorage под этим
+     * ключом. Пустая строка = бинд не назначен. Значение пишет рекордер
+     * из UI.openSettings(), читает глобальный keydown в modules/pocket-city.js
+     * при каждом нажатии (поэтому новый бинд работает без перезагрузки).
+     *
+     * Формат: модификаторы в фиксированном порядке Ctrl+Alt+Shift+Meta,
+     * затем клавиша. Без модификаторов храним физический код (KeyK, F2),
+     * с модификаторами — символ (Alt+C), чтобы строка читалась человеком.
+     * В любом случае сравнение идёт по e.code, поэтому русская и английская
+     * раскладки дают одну и ту же комбинацию.
+     * ------------------------------------------------------------
+     */
+    const POCKET_CITY_BIND_KEY = 'LEGION_POCKET_CITY_BIND';
+
+    // Одиночные модификаторы не считаются клавишей бинда: пока игрок держит
+    // Ctrl/Shift/Alt/Meta, рекордер продолжает ждать основную клавишу.
+    const isKeybindModifier = (e) => {
+        if (!e) return true;
+        const key = String(e.key || '');
+        const code = String(e.code || '');
+        return /^(Control|Shift|Alt|AltGraph|Meta|OS)$/.test(key)
+            || /^(Control|Shift|Alt|Meta)(Left|Right)$/.test(code);
+    };
+
+    // Основной токен клавиши: буква/цифра из e.code (не зависит от раскладки),
+    // функциональные клавиши и Numpad — как есть.
+    const keybindMainToken = (e) => {
+        const code = String((e && e.code) || '');
+        let m = /^Key([A-Z])$/.exec(code);
+        if (m) return m[1];
+        m = /^Digit([0-9])$/.exec(code);
+        if (m) return m[1];
+        if (/^F\d{1,2}$/.test(code) || /^Numpad\w+$/.test(code)) return code;
+        if (code && code !== 'Unidentified') return code;
+        const key = String((e && e.key) || '');
+        if (!key || key === 'Unidentified') return '';
+        if (key === ' ') return 'Space';
+        return key.length === 1 ? key.toUpperCase() : key;
+    };
+
+    /**
+     * Нормализованная строка комбинации для localStorage и сравнения.
+     * Пустая строка — событие не является клавишей бинда (модификатор,
+     * Unidentified, авто-повтор при записи отсекается отдельно).
+     */
+    const keybindCombo = (e) => {
+        if (!e || isKeybindModifier(e)) return '';
+        const mods = [];
+        if (e.ctrlKey) mods.push('Ctrl');
+        if (e.altKey) mods.push('Alt');
+        if (e.shiftKey) mods.push('Shift');
+        if (e.metaKey) mods.push('Meta');
+        const token = keybindMainToken(e);
+        if (!token) return '';
+        if (!mods.length) {
+            // Без модификаторов оставляем физический код (KeyK / F2 / Slash) —
+            // именно так пример из ТЗ и выглядит в интерфейсе, и раскладка
+            // клавиатуры на сопоставление не влияет.
+            return String(e.code || '') || token;
+        }
+        return `${mods.join('+')}+${token}`;
+    };
+
+    /** Совпадает ли событие с сохранённым биндом (по e.code, любая раскладка). */
+    const keybindMatches = (e, bind) => {
+        const stored = String(bind || '').trim();
+        if (!stored || !e) return false;
+        const combo = keybindCombo(e);
+        return combo !== '' && combo === stored;
+    };
+
+    /*
      * v11.6.1: сетка дерева навыков сжата под 1920x1080 без скролла.
      * Нативные пропорции (reference/LegionFrontSRC/site/skills.js):
      * TH 140 / TOP 40 / BOT 80 -> BH 680.

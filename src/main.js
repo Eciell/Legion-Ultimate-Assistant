@@ -10,13 +10,11 @@
     //   core/utils.js        -> Utils.copyText / insertToQuestChat / updateOnlinePlayers
     //   core/styles.js -> STYLES
     //   core/hooks.js  -> перехватчики LGCity / LGAuction / LGQuest
-    //                     (LGMine снят в 11.6.4b — античит шахты)
     //   core/ui-templates.js -> UITemplates (HTML: FAB-меню, модалки, HUD)
     //   core/ui.js     -> UI
     //   modules/*      -> BuildSim, HeroPlanner, Auction, Players,
     //                     PocketCity, CombatAssistant, Party, AddonPresence,
     //                     Arena, Miner (заглушка)
-    // 11.7.0: подсистема чата (modules/chat/*, core/utils-chat.js) удалена.
     // ============================================================
 
     // 5.3. Защита от повторного запуска (single-instance guard)
@@ -30,7 +28,6 @@
     // ============================================================
     // 5.4. Проверка обновлений аддона
     //
-    // До 11.7.0 жила в modules/chat/chat-net.js и удалилась вместе с чатом.
     // GET /latest-version нашего сервера открытый (без X-Legion-Key), поэтому
     // хватает GM_xmlhttpRequest. Тумблер «🔔 Уведомлять о новых версиях»
     // (localStorage LEGION_UPDATE_NOTIFY) уважается: при 'false' не шлём даже
@@ -251,6 +248,10 @@
         //    гильдии на элитных монстров (elist/ejoin, v11.7.0).
         //    Клики — только нативные, по .cm-dlg.
         PocketCity.init();
+        // 👤 Профиль (v11.7.2): подписка на живой канал игры (`me`) — HP,
+        // монеты и опыт обновляются мгновенно. Если LGLiveLink грузится
+        // позже, ensureHeroLiveUpdates() сам добьётся хука повторами.
+        UI.ensureHeroLiveUpdates();
 
         // 🔔 Проверка обновлений: через 8 с после старта, чтобы не мешать
         // загрузке страницы и первому рендеру аддона.
@@ -287,6 +288,9 @@
                     clearInterval(UI._hudTimer);
                     UI._hudTimer = null;
                 }
+                // v11.7.2: снимаем live-хук профиля (LGLiveLink `me`), чтобы
+                // старый инстанс не обновлял несуществующую карточку.
+                try { UI._unhookHeroLiveLink?.(); } catch (e) {}
                 // ПАТЧ 11.6.5g: снимаем наблюдатель за нативным HUD, отложенный
                 // повтор и ссылки на узлы меню, а из бара игры убираем свою кнопку
                 // (fabWrap удаляется ниже вместе с остальной разметкой).
@@ -302,8 +306,6 @@
                 UI._navMode = '';
                 UI._navRetries = 0;
                 document.querySelectorAll('.lgu-nav-btn').forEach(el => el.remove());
-                // 11.7.0: подсистемы чата больше нет — её окно PiP, лента и
-                // фоновые интервалы удалены вместе с модулем, гасить нечего.
                 // 11.6.2b: гасим интервал боевого ассистента и убираем его контейнер,
                 // иначе после перезапуска скрипта тикали бы два таймера.
                 CombatAssistant.destroy();

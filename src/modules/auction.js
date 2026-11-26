@@ -98,7 +98,7 @@
         // предохранитель «не заваливать сервер»: сервер принимает 500 записей
         // за POST (MARKET_LIMITS.maxLotsPerScan), поэтому снимок уходит пачками.
         FULL_SCAN_KEY: 'lgFullScanAt',
-        FULL_SCAN_COOLDOWN_MS: 30 * 60 * 1000,
+        FULL_SCAN_COOLDOWN_MS: 5 * 60 * 1000,
         FULL_SCAN_MAX_LOTS: 5000,
         FULL_SCAN_MAX_PAGES: 25,
         fullScanPending: false,
@@ -614,7 +614,7 @@
         /**
          * Полное сканирование витрины (ТЗ 11.6.2c.4).
          *
-         * 1. Кулдаун 30 минут (localStorage lgFullScanAt): повторный клик
+         * 1. Кулдаун 5 минут (localStorage lgFullScanAt): повторный клик
          *    только показывает тост и ничего не отправляет.
          * 2. Один снимок /api/auction (в игре нет пагинации), максимум 5000 лотов.
          * 3. Цены уходят пачками по 500; после успеха — отметка кулдауна,
@@ -625,7 +625,7 @@
         async runFullScan(onRendered) {
             if (this.fullScanPending) return;
             if (this.getFullScanCooldownLeft() > 0) {
-                UI.showToast('Сканирование доступно раз в 30 минут', true);
+                UI.showToast('Сканирование доступно раз в 5 минут', true);
                 this.refreshFullScanButton();
                 this.startFullScanTick();
                 return;
@@ -644,13 +644,13 @@
                 const sent = await this.sendFullScanLots(observations);
 
                 // Отметку кулдауна ставим ТОЛЬКО после успешной отправки: если
-                // наш сервер лежит, игрок не должен ждать 30 минут впустую.
+                // наш сервер лежит, игрок не должен ждать 5 минут впустую.
                 this.markFullScanDone();
                 // Полный снимок уже ушёл — обычный флаш этих же цен не нужен.
                 this.marketScanBuffer = [];
                 this.marketScanSentAt = Date.now();
 
-                UI.showToast(`✅ Успешно просканировано ${sent} лотов`, false);
+                UI.showToast(`✅ Просканировано ${observations.length} лотов (новых цен: ${sent})`, false);
 
                 // Медианы ждём не дольше MARKET_WAIT_MS: перерисовка не должна
                 // висеть на медленном сервере — тогда останутся старые медианы.
@@ -1565,7 +1565,7 @@
                 return `<tr style="${border.trim()}"><td style="padding:6px 8px; color:#ffcf6a; font-weight:bold; width:100px;">${title}</td><td style="padding:6px 8px;">${desc}</td></tr>`;
             }).join('');
 
-            // Внутренний блок скроллится сам: у .modal-compact max-height 65vh,
+            // Внутренний блок скроллится сам: у .modal-compact max-height 82vh,
             // поэтому нужен flex:1 + min-height:0, иначе контент вылезает за рамку.
             UI.showModal(`
                 <h2 style="display:flex; align-items:center; gap:10px;">
@@ -1856,7 +1856,7 @@
                     <h2 class="auc-head">
                         <span class="auc-head-title">🔍 Сканер Аукциона</span>
                         <button id="auction-info-btn" class="auc-info-btn" title="Справка по аукциону">i</button>
-                        <button id="lg-auction-full-scan" class="btn auc-scan-btn" title="Снять цены со всех лотов витрины (доступно раз в 30 минут)">📡 Сканировать весь аукцион</button>
+                        <button id="lg-auction-full-scan" class="btn auc-scan-btn" title="Снять цены со всех лотов витрины (доступно раз в 5 минут)">📡 Сканировать весь аукцион</button>
                         <button class="custom-close" id="custom-close-btn" style="margin-left:auto;">✖</button>
                     </h2>
 
@@ -2141,7 +2141,7 @@
                         </tr>`;
                     });
                     tbody.innerHTML = html;
-                    // Обогащаем строки: арт + иконки монет (общий код для Ultimate и Personal)
+                    // Обогащаем строки: арт + иконки монет
                     try {
                         if (Utils && Utils.enhanceAuctionRows) Utils.enhanceAuctionRows(tbody, itemsMap);
                     } catch (e) { dbg('enhanceAuctionRows error:', e); }
@@ -2271,7 +2271,7 @@
                 });
 
                 // 11.6.2c.4: полное сканирование витрины. Кнопка disabled на
-                // время кулдауна (30 минут), тикер раз в секунду обновляет её
+                // время кулдауна (5 минут), тикер раз в секунду обновляет её
                 // текст; update() перерисовывает таблицу, чтобы после скана
                 // показать свежие медианы сети.
                 document.getElementById('lg-auction-full-scan')?.addEventListener('click', (e) => {

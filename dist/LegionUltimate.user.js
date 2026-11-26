@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Legion: Ultimate Assistant (Auction, Pocket City, Party)
 // @namespace    http://tampermonkey.net/
-// @version      11.7.1.1
+// @version      11.7.2.0
 // @description  QoL-аддон для Легиона: Сканер аукциона, Разведка, Планировщик, Карманный город, Пати, Поход.
 // @connect      localhost
 // @connect      127.0.0.1
@@ -165,6 +165,81 @@
             }
         },
     };
+    /*
+     * ------------------------------------------------------------
+     * 0.10. ГОРЯЧАЯ КЛАВИША ЗАКРЕПА «КАРМАННОГО ГОРОДА» (v11.7.2)
+     *
+     * Строка нормализованной комбинации живёт в localStorage под этим
+     * ключом. Пустая строка = бинд не назначен. Значение пишет рекордер
+     * из UI.openSettings(), читает глобальный keydown в modules/pocket-city.js
+     * при каждом нажатии (поэтому новый бинд работает без перезагрузки).
+     *
+     * Формат: модификаторы в фиксированном порядке Ctrl+Alt+Shift+Meta,
+     * затем клавиша. Без модификаторов храним физический код (KeyK, F2),
+     * с модификаторами — символ (Alt+C), чтобы строка читалась человеком.
+     * В любом случае сравнение идёт по e.code, поэтому русская и английская
+     * раскладки дают одну и ту же комбинацию.
+     * ------------------------------------------------------------
+     */
+    const POCKET_CITY_BIND_KEY = 'LEGION_POCKET_CITY_BIND';
+
+    // Одиночные модификаторы не считаются клавишей бинда: пока игрок держит
+    // Ctrl/Shift/Alt/Meta, рекордер продолжает ждать основную клавишу.
+    const isKeybindModifier = (e) => {
+        if (!e) return true;
+        const key = String(e.key || '');
+        const code = String(e.code || '');
+        return /^(Control|Shift|Alt|AltGraph|Meta|OS)$/.test(key)
+            || /^(Control|Shift|Alt|Meta)(Left|Right)$/.test(code);
+    };
+
+    // Основной токен клавиши: буква/цифра из e.code (не зависит от раскладки),
+    // функциональные клавиши и Numpad — как есть.
+    const keybindMainToken = (e) => {
+        const code = String((e && e.code) || '');
+        let m = /^Key([A-Z])$/.exec(code);
+        if (m) return m[1];
+        m = /^Digit([0-9])$/.exec(code);
+        if (m) return m[1];
+        if (/^F\d{1,2}$/.test(code) || /^Numpad\w+$/.test(code)) return code;
+        if (code && code !== 'Unidentified') return code;
+        const key = String((e && e.key) || '');
+        if (!key || key === 'Unidentified') return '';
+        if (key === ' ') return 'Space';
+        return key.length === 1 ? key.toUpperCase() : key;
+    };
+
+    /**
+     * Нормализованная строка комбинации для localStorage и сравнения.
+     * Пустая строка — событие не является клавишей бинда (модификатор,
+     * Unidentified, авто-повтор при записи отсекается отдельно).
+     */
+    const keybindCombo = (e) => {
+        if (!e || isKeybindModifier(e)) return '';
+        const mods = [];
+        if (e.ctrlKey) mods.push('Ctrl');
+        if (e.altKey) mods.push('Alt');
+        if (e.shiftKey) mods.push('Shift');
+        if (e.metaKey) mods.push('Meta');
+        const token = keybindMainToken(e);
+        if (!token) return '';
+        if (!mods.length) {
+            // Без модификаторов оставляем физический код (KeyK / F2 / Slash) —
+            // именно так пример из ТЗ и выглядит в интерфейсе, и раскладка
+            // клавиатуры на сопоставление не влияет.
+            return String(e.code || '') || token;
+        }
+        return `${mods.join('+')}+${token}`;
+    };
+
+    /** Совпадает ли событие с сохранённым биндом (по e.code, любая раскладка). */
+    const keybindMatches = (e, bind) => {
+        const stored = String(bind || '').trim();
+        if (!stored || !e) return false;
+        const combo = keybindCombo(e);
+        return combo !== '' && combo === stored;
+    };
+
     /*
      * v11.6.1: сетка дерева навыков сжата под 1920x1080 без скролла.
      * Нативные пропорции (reference/LegionFrontSRC/site/skills.js):
@@ -1145,7 +1220,7 @@ Object.assign(Utils, UtilsApi);
             --br1: #84d4ff; --br2: #ffa982; --br3: #d6b4ff;
         }
         .${DOM_IDS.customModal}, .custom-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(20, 16, 26, 0.98); border: 2px solid #caa55c; border-radius: 12px; padding: 20px; z-index: 10000; color: #f7eadf; width: 1200px; max-width: 98vw; max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,0.85); font-family: 'Nunito', sans-serif; backdrop-filter: blur(4px); }
-        .${DOM_IDS.customModal}.modal-compact, .custom-modal.modal-compact { width: 450px; max-width: 95vw; max-height: 65vh; padding: 16px; }
+        .${DOM_IDS.customModal}.modal-compact, .custom-modal.modal-compact { width: 450px; max-width: 95vw; max-height: 82vh; padding: 16px; box-sizing: border-box; overflow: hidden; }
         .${DOM_IDS.customModal} h2, .custom-modal h2 { margin-top: 0; color: #ffcf6a; border-bottom: 1px solid #555; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; cursor: grab; user-select: none; }
         .${DOM_IDS.customModal} h2:active, .custom-modal h2:active { cursor: grabbing; }
         .${DOM_IDS.customModal} ::-webkit-scrollbar, .custom-modal ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -1163,6 +1238,123 @@ Object.assign(Utils, UtilsApi);
         .lg-toggle:checked { background: #ffcf6a; }
         .lg-toggle:checked::after { transform: translateX(16px); }
         .lg-toggle:focus-visible { box-shadow: 0 0 0 2px #caa55c; }
+        /* ============================================================
+           НАСТРОЙКИ АДДОНА (v11.7.2): аккуратные секции вместо «простыни».
+           Заголовок модалки зафиксирован сверху (h2 flex:none), тело
+           .lg-settings-body — единственный scrollport внутри рамки.
+           ============================================================ */
+        .custom-modal.modal-compact h2 { flex: none; margin-bottom: 0; }
+        .lg-settings-body {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            padding-right: 4px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 10px;
+            scrollbar-width: thin;
+            scrollbar-color: #44374a transparent;
+        }
+        .lg-settings-body::-webkit-scrollbar { width: 5px; }
+        .lg-settings-body::-webkit-scrollbar-track { background: transparent; }
+        .lg-settings-body::-webkit-scrollbar-thumb { background: #44374a; border-radius: 3px; }
+        .lg-settings-body::-webkit-scrollbar-thumb:hover { background: #caa55c; }
+        .lg-settings-group { display: flex; flex-direction: column; gap: 6px; }
+        .lg-settings-group-title {
+            font-size: 10.5px;
+            font-weight: bold;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #caa55c;
+            padding: 0 2px;
+        }
+        .lg-setting-card {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 8px 10px;
+            background: #1e1724;
+            border: 1px solid #33293c;
+            border-radius: 8px;
+        }
+        .lg-setting-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #eee;
+            min-height: 20px;
+        }
+        .lg-setting-desc {
+            font-size: 10px;
+            line-height: 1.35;
+            color: #8a8090;
+        }
+        /* Рекордер хоткея: обычное состояние — золотая рамка, запись —
+           красная пульсация. Кнопка «✕» сбрасывает бинд. */
+        .lg-bind-wrap { display: flex; align-items: center; gap: 4px; flex: none; }
+        .lg-bind-btn {
+            min-width: 116px;
+            max-width: 170px;
+            padding: 4px 9px;
+            background: #16121a;
+            border: 1px solid #4a3b55;
+            border-radius: 5px;
+            color: #ffcf6a;
+            font-family: inherit;
+            font-size: 11px;
+            font-weight: bold;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: pointer;
+            transition: border-color 0.15s, color 0.15s, background 0.15s;
+        }
+        .lg-bind-btn:hover { border-color: #caa55c; background: #241b2d; }
+        .lg-bind-btn.recording {
+            border-color: #ff5a7a;
+            color: #ff8fa3;
+            background: #2a1620;
+            animation: lg-bind-pulse 1s ease-in-out infinite;
+        }
+        @keyframes lg-bind-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255, 90, 122, 0.35); }
+            50% { box-shadow: 0 0 0 4px rgba(255, 90, 122, 0); }
+        }
+        .lg-bind-clear {
+            width: 22px;
+            height: 22px;
+            flex: none;
+            padding: 0;
+            background: transparent;
+            border: 1px solid #4a3b55;
+            border-radius: 5px;
+            color: #ff8fa3;
+            font-size: 11px;
+            line-height: 1;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .lg-bind-clear:hover { background: rgba(255, 90, 122, 0.16); border-color: #ff5a7a; }
+        /* Хоткеи 8 зданий: компактная 2-колоночная сетка внутри карточки
+           настроек. Название слева, кнопка бинда и «✕» справа. */
+        .lg-room-binds { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; margin-top: 2px; }
+        .lg-room-bind-row { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; padding: 4px 6px; background: #16121a; border: 1px solid #302637; border-radius: 6px; }
+        .lg-room-bind-name { font-size: 10px; color: #d7cfe0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+        .lg-room-bind-controls { display: flex; align-items: center; gap: 3px; flex: none; }
+        .lg-room-bind-btn { min-width: 50px; max-width: 82px; padding: 3px 5px; font-size: 9.5px; }
+        .lg-room-bind-clear { width: 18px; height: 18px; font-size: 9px; border-radius: 4px; }
+        @media (max-width: 430px) {
+            .lg-room-binds { grid-template-columns: 1fr; }
+        }
+        /* Низкие экраны: отдаём модалке больше высоты, отступы ещё компактнее. */
+        @media (max-height: 800px) {
+            .custom-modal.modal-compact { max-height: 94vh; padding: 12px; }
+            .lg-settings-body { gap: 9px; margin-top: 8px; }
+            .lg-setting-card { padding: 6px 9px; }
+        }
         /* Пати: компактный крестик в правом верхнем углу заголовка (v11.6.0a). */
         .party-close { border-radius: 5px; transition: color 0.2s, background 0.2s; }
         .party-close:hover { color: #fff; background: rgba(255, 143, 163, 0.14); }
@@ -1444,7 +1636,7 @@ Object.assign(Utils, UtilsApi);
         /* 11.6.2c.4: кнопка «📡 Сканировать весь аукцион» в шапке сканера.
            class="btn" — родной класс игры, но у него нет фона/рамки, поэтому
            цвета аддона задаём по id (специфичность выше класса). :disabled —
-           кулдаун 30 минут или идущее сканирование. */
+           кулдаун 5 минут или идущее сканирование. */
         #lg-auction-full-scan {
             min-height: 0;
             padding: 5px 12px;
@@ -1661,11 +1853,53 @@ Object.assign(Utils, UtilsApi);
             width: 24px;
             height: 24px;
         }
-        #${DOM_IDS.playerHud}, #legion-player-hud { position: fixed; top: 100px; right: 20px; width: 220px; background: #1d1620; border: 2px solid #caa55c; border-radius: 10px; z-index: 10001; box-shadow: 0 8px 24px rgba(0,0,0,0.85); display: flex; flex-direction: column; overflow: hidden; font-family: 'Nunito', sans-serif; }
-        .player-hud-header { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: #2a2030; border-bottom: 1px solid #444; cursor: move; user-select: none; touch-action: none; }
+        /* ============================================================
+           HUD ПРОФИЛЯ (v11.7.2): 260px, прокручиваемое тело и полосы HP/XP.
+           Карточка никогда не вылезает за экран: max-height 82vh, а скролл
+           живёт в .player-hud-body, шапка с кнопками остаётся сверху.
+           ============================================================ */
+        #${DOM_IDS.playerHud}, #legion-player-hud { position: fixed; top: 100px; right: 20px; width: 260px; max-width: 92vw; max-height: 82vh; background: #1d1620; border: 2px solid #caa55c; border-radius: 12px; z-index: 10001; box-shadow: 0 8px 24px rgba(0,0,0,0.85); display: flex; flex-direction: column; overflow: hidden; font-family: 'Nunito', sans-serif; box-sizing: border-box; }
+        .player-hud-header { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 6px 10px; background: #2a2030; border-bottom: 1px solid #444; cursor: move; user-select: none; touch-action: none; flex: none; }
+        .player-hud-title { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 12px; font-weight: bold; color: #ffcf6a; }
+        .player-hud-class-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+        .player-hud-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 108px; }
+        .player-hud-guild { color: #cbb6ff; font-size: 10.5px; font-weight: bold; flex: none; }
+        .player-hud-level { color: #b9ac9c; font-size: 10px; font-weight: normal; white-space: nowrap; flex: none; }
+        .player-hud-actions { display: flex; align-items: center; gap: 5px; flex: none; }
+        .player-hud-status { font-size: 9.5px; padding: 1px 6px; border-radius: 4px; background: rgba(255, 90, 122, 0.12); border: 1px solid #ff5a7a; white-space: nowrap; }
         .player-hud-close { background: none; border: none; color: #ff8fa3; font-size: 14px; cursor: pointer; padding: 0 2px; line-height: 1; }
         .player-hud-close:hover { color: #fff; }
-        .player-hud-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
+        .player-hud-body { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; overflow-y: auto; min-height: 0; scrollbar-width: thin; scrollbar-color: #44374a transparent; }
+        .player-hud-body::-webkit-scrollbar { width: 5px; }
+        .player-hud-body::-webkit-scrollbar-thumb { background: #44374a; border-radius: 3px; }
+        .player-hud-body::-webkit-scrollbar-thumb:hover { background: #caa55c; }
+        .player-hud-classline { display: flex; align-items: center; }
+        .player-hud-class-badge { font-size: 10.5px; font-weight: bold; padding: 1px 7px; border: 1px solid currentColor; border-radius: 999px; background: rgba(255,255,255,0.04); }
+        .player-hud-bar-block { display: flex; flex-direction: column; gap: 3px; }
+        .player-hud-bar-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; color: #cfc4b8; gap: 6px; }
+        .player-hud-bar-head b { color: #ffcf6a; font-size: 10px; }
+        .player-hud-bar-track { height: 9px; background: #111; border: 1px solid #333; border-radius: 5px; overflow: hidden; }
+        .player-hud-bar-fill { height: 100%; border-radius: 4px; transition: width 0.3s ease, background 0.3s ease; }
+        .player-hud-bar-note { font-size: 9.5px; color: #8a8090; line-height: 1.2; }
+        .player-hud-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11.5px; }
+        .player-hud-row-label { color: #aaa; white-space: nowrap; }
+        .player-hud-row > span:last-child { font-weight: bold; text-align: right; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+        .player-hud-debt > span:last-child { color: #ff5a7a; }
+        .player-hud-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: #16121a; border: 1px solid #2b2233; padding: 6px; border-radius: 6px; }
+        .player-hud-stat { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; font-size: 10.5px; white-space: nowrap; }
+        .player-hud-stat b { font-size: 11.5px; color: #fff; font-variant-numeric: tabular-nums; }
+        .player-hud-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+        .player-hud-pill { display: inline-flex; align-items: center; gap: 3px; padding: 2px 6px; background: rgba(159, 208, 255, 0.08); border: 1px solid #3a4a5c; border-radius: 999px; color: #b9c9d8; font-size: 9.5px; white-space: nowrap; }
+        .player-hud-pill b { color: #e6f1ff; font-size: 10px; }
+        .player-hud-pill-ico { font-size: 9px; }
+        .player-hud-buffs { display: flex; gap: 4px; flex-wrap: wrap; }
+        .player-hud-buff { background: rgba(202,165,92,0.2); border: 1px solid #caa55c; color: #ffcf6a; font-size: 10px; padding: 2px 6px; border-radius: 4px; }
+        .player-hud-quick { display: flex; gap: 4px; margin-top: 2px; }
+        .player-hud-quick-btn { flex: 1 1 0; min-width: 0; padding: 5px 2px; background: #241b2d; border: 1px solid #caa55c; border-radius: 6px; color: #ffcf6a; font-family: inherit; font-size: 9.5px; line-height: 1.15; font-weight: bold; letter-spacing: -0.1px; text-align: center; white-space: nowrap; overflow: visible; text-overflow: clip; cursor: pointer; transition: background 0.15s, color 0.15s; }
+        .player-hud-quick-btn:hover { background: #caa55c; color: #1d1620; }
+        @media (max-height: 800px) {
+            #${DOM_IDS.playerHud}, #legion-player-hud { max-height: 88vh; }
+        }
         /* ── Пати (v11.6.0g-2): модалка, HP-панель и журнал ──
            Раньше формы окна «Пати» рисовались инлайном (серые рамки #444) —
            теперь это классы: тёмный фон, золотистые акценты #caa55c/#ffcf6a
@@ -4084,63 +4318,123 @@ Object.assign(Utils, UtilsApi);
         settingsModal() {
             return `
                 <h2>⚙️ Настройки аддона <button class="custom-close" id="custom-close-btn">✖</button></h2>
-                <div style="display:flex; flex-direction:column; gap:15px; padding:10px;">
-                    <!-- v11.6.1g: тумблер уведомлений о новых версиях.
-                         Состояние ставит и сохраняет UI.openSettings() (localStorage
-                         'LEGION_UPDATE_NOTIFY'); проверка версии при выключенном
-                         тумблере работает молча. -->
-                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
-                        <span>🔔 Уведомлять о новых версиях</span>
-                        <input type="checkbox" class="lg-toggle" id="modal-chk-update-notify">
-                    </label>
-                    <!-- 11.6.2b: боевой ассистент в походах (подсказки по механикам
-                         боссов). Состояние ставит и сохраняет UI.openSettings()
-                         (localStorage 'LEGION_COMBAT_ASSIST'), читает каждую секунду
-                         modules/combat-assistant.js. -->
-                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
-                        <span>⚔️ Боевой ассистент в походах</span>
-                        <input type="checkbox" class="lg-toggle" id="modal-chk-combat-assist">
-                    </label>
-                    <!-- 11.7.2: подсветка ников пользователей аддона в нативном
-                         чате. Состояние хранит Settings.get/set('addonHighlight')
-                         (localStorage 'LEGION_ADDON_HIGHLIGHT'), CSS генерирует
-                         modules/addon-presence.js. -->
-                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
-                        <span>⚡ Подсветка ников Legion</span>
-                        <input type="checkbox" class="lg-toggle" id="modal-chk-addon-hl">
-                    </label>
-                    <!-- 11.7.0: автоскип боёв с монстрами (.cm-dlg). Состояние
-                         ставит и сохраняет UI.openSettings() (Settings,
-                         ключ 'LEGION_AUTO_SKIP_MONSTERS'); наблюдатель живёт
-                         в modules/pocket-city.js и включается сразу. -->
-                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
-                        <span>⏭️ Автоскип боёв с монстрами</span>
-                        <input type="checkbox" class="lg-toggle" id="modal-chk-auto-skip-monsters">
-                    </label>
-                    <div style="font-size:10px; color:#888; line-height:1.3; margin:-2px 2px 0;">Автоматически нажимает «Пропустить» / «Пропустить всё» в окне боя с обычными и элитными монстрами</div>
-                    <!-- 11.7.0: уведомления о сборах гильдии на элитных монстров -->
-                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
-                        <span>📯 Уведомления о сборах на элитных монстров</span>
-                        <input type="checkbox" class="lg-toggle" id="modal-chk-citymon-gather">
-                    </label>
-                    <div style="font-size:10px; color:#888; line-height:1.3; margin:-2px 2px 0;">Плавающее уведомление о чужих сборах гильдии с кнопкой «Присоединиться»</div>
-                    <div style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:8px 10px; border-radius:6px; margin-top: 6px;">
-                        <span style="font-size:12px; color:#ddd;">Размер плашки сбора</span>
-                        <div class="lg-cm-size-picker" style="display:flex; gap:4px;">
-                            <button type="button" class="lg-cm-size-btn" data-size="S" style="background:#2a2035; border:1px solid #4a3b55; color:#bbb; border-radius:4px; padding:3px 10px; font-size:11px; font-weight:bold; cursor:pointer;">S</button>
-                            <button type="button" class="lg-cm-size-btn" data-size="M" style="background:#2a2035; border:1px solid #4a3b55; color:#bbb; border-radius:4px; padding:3px 10px; font-size:11px; font-weight:bold; cursor:pointer;">M</button>
-                            <button type="button" class="lg-cm-size-btn" data-size="L" style="background:#2a2035; border:1px solid #4a3b55; color:#bbb; border-radius:4px; padding:3px 10px; font-size:11px; font-weight:bold; cursor:pointer;">L</button>
+                <div class="lg-settings-body">
+                    <!-- СЕКЦИЯ 1: интерфейс и быстрый доступ -->
+                    <div class="lg-settings-group">
+                        <div class="lg-settings-group-title">🖥️ Интерфейс и быстрый доступ</div>
+                        <!-- ПАТЧ 11.6.5h: куда девать вход в меню — в нативный бар
+                             города или оставить плавающую FAB. Состояние ставит
+                             и сохраняет UI.openSettings() (localStorage
+                             'LEGION_NATIVE_FAB'), читает UI.syncNavButton(). -->
+                        <div class="lg-setting-card">
+                            <label class="lg-setting-row" style="cursor:pointer;">
+                                <span>📌 Кнопка аддона в нижнем меню игры</span>
+                                <input type="checkbox" id="modal-chk-native-fab" class="lg-toggle">
+                            </label>
+                            <div class="lg-setting-desc">Если выключено, кнопка аддона останется плавающей в правом нижнем углу.</div>
+                        </div>
+                        <!-- v11.7.2: горячая клавиша закрепа «Карманного Города».
+                             Запись и сброс — UI.openSettings(); глобальный
+                             keydown — PocketCity.startKeyBind(). -->
+                        <div class="lg-setting-card">
+                            <div class="lg-setting-row">
+                                <span>⌨️ Горячая клавиша закрепа «Карманного Города»</span>
+                                <div class="lg-bind-wrap">
+                                    <button type="button" id="modal-bind-pocket-city" class="lg-bind-btn" title="Нажмите, затем нужную комбинацию">Не назначено</button>
+                                    <button type="button" id="modal-bind-pocket-city-clear" class="lg-bind-clear" title="Сбросить комбинацию">✕</button>
+                                </div>
+                            </div>
+                            <div class="lg-setting-desc">Нажмите на поле и введите комбинацию (например, Alt+C). Работает в любой раскладке; Esc отменяет запись.</div>
+                        </div>
+                        <!-- v11.7.2: горячие клавиши всех зданий Карманного Города.
+                             Бинды живут одним JSON-объектом в localStorage
+                             (LEGION_POCKET_CITY_ROOM_BINDS), запись — общий
+                             рекордер UI.openSettings(), глобальный keydown —
+                             PocketCity.startKeyBind(). -->
+                        <div class="lg-setting-card">
+                            <div class="lg-setting-row">
+                                <span>⌨️ Горячие клавиши зданий Города</span>
+                            </div>
+                            <div class="lg-room-binds">
+                                ${POCKET_CITY_ROOMS.map(r => `
+                                    <div class="lg-room-bind-row">
+                                        <span class="lg-room-bind-name" title="${Utils.escapeHtml(r.name)}">${r.icon} ${Utils.escapeHtml(r.name)}</span>
+                                        <span class="lg-room-bind-controls">
+                                            <button type="button" class="lg-bind-btn lg-room-bind-btn" data-room="${r.room}" title="Назначить клавишу">—</button>
+                                            <button type="button" class="lg-bind-clear lg-room-bind-clear" data-room="${r.room}" title="Сбросить комбинацию">✕</button>
+                                        </span>
+                                    </div>`).join('')}
+                            </div>
+                            <div class="lg-setting-desc">Один хоткей — одно действие: при назначении занятой комбинации она снимается с прежнего здания или закрепа.</div>
                         </div>
                     </div>
-                    <!-- ПАТЧ 11.6.5h: куда девать вход в меню — в нативный бар
-                         города или оставить плавающую FAB. Состояние ставит
-                         и сохраняет UI.openSettings() (localStorage
-                         'LEGION_NATIVE_FAB'), читает UI.syncNavButton(). -->
-                    <label style="display:flex; justify-content:space-between; align-items:center; background:#1e1724; padding:10px; border-radius:6px; cursor:pointer; margin-top: 8px;">
-                        <span>📌 Кнопка аддона в нижнем меню игры</span>
-                        <input type="checkbox" id="modal-chk-native-fab" class="lg-toggle">
-                    </label>
-                    <div style="font-size:10px; color:#888; line-height:1.3; margin:-2px 2px 0;">Если выключено, кнопка аддона останется плавающей в правом нижнем углу.</div>
+
+                    <!-- СЕКЦИЯ 2: бой и уведомления -->
+                    <div class="lg-settings-group">
+                        <div class="lg-settings-group-title">⚔️ Бой и уведомления</div>
+                        <!-- 11.6.2b: боевой ассистент в походах (подсказки по механикам
+                             боссов). Состояние ставит и сохраняет UI.openSettings()
+                             (localStorage 'LEGION_COMBAT_ASSIST'), читает каждую секунду
+                             modules/combat-assistant.js. -->
+                        <div class="lg-setting-card">
+                            <label class="lg-setting-row" style="cursor:pointer;">
+                                <span>⚔️ Боевой ассистент в походах</span>
+                                <input type="checkbox" class="lg-toggle" id="modal-chk-combat-assist">
+                            </label>
+                        </div>
+                        <!-- 11.7.0: автоскип боёв с монстрами (.cm-dlg). Состояние
+                             ставит и сохраняет UI.openSettings() (Settings,
+                             ключ 'LEGION_AUTO_SKIP_MONSTERS'); наблюдатель живёт
+                             в modules/pocket-city.js и включается сразу. -->
+                        <div class="lg-setting-card">
+                            <label class="lg-setting-row" style="cursor:pointer;">
+                                <span>⏭️ Автоскип боёв с монстрами</span>
+                                <input type="checkbox" class="lg-toggle" id="modal-chk-auto-skip-monsters">
+                            </label>
+                            <div class="lg-setting-desc">Автоматически нажимает «Пропустить» / «Пропустить всё» в окне боя с обычными и элитными монстрами.</div>
+                        </div>
+                        <!-- 11.7.0: уведомления о сборах гильдии на элитных монстров -->
+                        <div class="lg-setting-card">
+                            <label class="lg-setting-row" style="cursor:pointer;">
+                                <span>📯 Сборы гильдии на элитных монстров</span>
+                                <input type="checkbox" class="lg-toggle" id="modal-chk-citymon-gather">
+                            </label>
+                            <div class="lg-setting-desc">Плавающее уведомление о чужих сборах гильдии с кнопкой «Присоединиться».</div>
+                            <div class="lg-setting-row">
+                                <span style="color:#bbb; font-size:11px;">Размер плашки</span>
+                                <div class="lg-cm-size-picker" style="display:flex; gap:4px;">
+                                    <button type="button" class="lg-cm-size-btn" data-size="S" style="background:#2a2035; border:1px solid #4a3b55; color:#bbb; border-radius:4px; padding:3px 10px; font-size:11px; font-weight:bold; cursor:pointer;">S</button>
+                                    <button type="button" class="lg-cm-size-btn" data-size="M" style="background:#2a2035; border:1px solid #4a3b55; color:#bbb; border-radius:4px; padding:3px 10px; font-size:11px; font-weight:bold; cursor:pointer;">M</button>
+                                    <button type="button" class="lg-cm-size-btn" data-size="L" style="background:#2a2035; border:1px solid #4a3b55; color:#bbb; border-radius:4px; padding:3px 10px; font-size:11px; font-weight:bold; cursor:pointer;">L</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- СЕКЦИЯ 3: чат и система -->
+                    <div class="lg-settings-group">
+                        <div class="lg-settings-group-title">💬 Чат и система</div>
+                        <!-- 11.7.2: подсветка ников пользователей аддона в нативном
+                             чате. Состояние хранит Settings.get/set('addonHighlight')
+                             (localStorage 'LEGION_ADDON_HIGHLIGHT'), CSS генерирует
+                             modules/addon-presence.js. -->
+                        <div class="lg-setting-card">
+                            <label class="lg-setting-row" style="cursor:pointer;">
+                                <span>⚡ Подсветка ников Legion</span>
+                                <input type="checkbox" class="lg-toggle" id="modal-chk-addon-hl">
+                            </label>
+                        </div>
+                        <!-- v11.6.1g: тумблер уведомлений о новых версиях.
+                             Состояние ставит и сохраняет UI.openSettings() (localStorage
+                             'LEGION_UPDATE_NOTIFY'); проверка версии при выключенном
+                             тумблере работает молча. -->
+                        <div class="lg-setting-card">
+                            <label class="lg-setting-row" style="cursor:pointer;">
+                                <span>🔔 Уведомлять о новых версиях</span>
+                                <input type="checkbox" class="lg-toggle" id="modal-chk-update-notify">
+                            </label>
+                        </div>
+                    </div>
                 </div>
             `;
         },
@@ -4179,8 +4473,9 @@ Object.assign(Utils, UtilsApi);
 
         /**
          * Карточка профиля игрока (HUD «👤 Профиль»).
-         * id элементов (#player-hud-hp / -money / -loc / -xp-text / -xp-bar /
-         * -close-btn) читают интервал обновления и обработчик закрытия в core/ui.js.
+         * id элементов читают живое обновление и обработчики в core/ui.js:
+         *   #player-hud-hp / -hp-bar / -hp-timer / -money / -debt-row / -loc /
+         *   -activity / -xp-text / -xp-bar / -xp-pct / -close-btn.
          *
          * @param {string} name      ник игрока (экранируется)
          * @param {string} className название класса (экранируется)
@@ -4190,15 +4485,24 @@ Object.assign(Utils, UtilsApi);
          * @param {object|string} loc { text, color } либо готовый текст локации
          * @param {number} xp        опыт, набранный в текущем уровне (xpInLevel)
          * @param {number} xpNext    сколько опыта нужно до следующего уровня (xpToNext)
-         * @param {object} extra     дополнительные блоки HUD (v11.5.6):
-         *   settings { showLoc, showXp, showStats, showBuffs } — что показывать;
-         *   stats    { atk, mag, def, crit }                 — базовые статы;
-         *   buffs    [{ icon, title, time, until }]          — еда / свиток;
-         *   status   { text, color } | null                  — мёртв / занят.
+         * @param {object} extra     дополнительные блоки HUD:
+         *   settings { showLoc, showXp, showStats, showBuffs,
+         *              showSecondary, showQuickActions } — что показывать;
+         *   classColor — цвет класса из BuildSim.classColors;
+         *   guild      — тег гильдии hero.gt;
+         *   stats      { atk, mag, def, crit }            — базовые статы;
+         *   secondary  [{ icon, label, value }]           — характеристики из hero.xs;
+         *   buffs      [{ icon, title, time, until }]     — еда / свиток;
+         *   status     { text, color } | null             — мёртв / занят;
+         *   debt       — долг героя (медь), показывается только если > 0;
+         *   hpTimer    — готовая подпись таймера восстановления HP;
+         *   activity   { text, color }                    — поход / шахта;
+         *   quick      { city, mail, players }             — доступность быстрых кнопок.
          */
         playerHud(name, className, level, hp, money, loc, xp = 0, xpNext = 1, extra = {}) {
             const safeName = Utils.escapeHtml(name || 'Игрок');
             const safeClass = Utils.escapeHtml(className || '—');
+            const safeGuild = extra.guild ? Utils.escapeHtml(String(extra.guild)) : '';
 
             // Настройки отображения: без extra (старые вызовы) показываем всё.
             const s = extra.settings || {};
@@ -4206,20 +4510,39 @@ Object.assign(Utils, UtilsApi);
             const showXp = s.showXp !== false;
             const showStats = s.showStats !== false;
             const showBuffs = s.showBuffs !== false;
+            const showSecondary = s.showSecondary !== false;
+            const showQuick = s.showQuickActions !== false;
+
+            // Цвет класса — только безопасный hex из BuildSim.classColors.
+            const classColor = /^#[0-9a-fA-F]{3,8}$/.test(extra.classColor || '') ? extra.classColor : '#caa55c';
 
             // hp приходит либо парой { now, max }, либо готовой строкой/числом.
             const hpNow = (hp && typeof hp === 'object') ? (hp.now ?? '—') : (hp ?? '—');
             const hpMax = (hp && typeof hp === 'object') ? hp.max : null;
             const hpStr = (hpMax !== null && hpMax !== undefined) ? `${hpNow} / ${hpMax}` : hpNow;
 
+            // Прогресс HP: цвет полосы зависит от процента (красный -> золотой -> зелёный).
+            // Number.isFinite отсекает «—» и null: тогда полоса пустая, а не 100%.
+            const hpNowNum = Number(hpNow);
+            const hpMaxNum = Number(hpMax);
+            const hpPct = (Number.isFinite(hpNowNum) && Number.isFinite(hpMaxNum) && hpMaxNum > 0)
+                ? Math.max(0, Math.min(100, Math.round((hpNowNum / hpMaxNum) * 100)))
+                : 0;
+            const hpGradient = hpPct <= 30
+                ? 'linear-gradient(90deg, #7a1f2c, #ff5a7a)'
+                : hpPct <= 60
+                    ? 'linear-gradient(90deg, #7a5a1f, #ffcf6a)'
+                    : 'linear-gradient(90deg, #1f7a3a, #4cc95a)';
+
             const locText = (loc && typeof loc === 'object') ? (loc.text || '🏙️ Город') : (loc || '🏙️ Город');
             const locColor = (loc && typeof loc === 'object' && loc.color) ? loc.color : '#8fd3ff';
             const moneyVal = Utils.formatMoney(money);
+            const debtVal = Number(extra.debt) || 0;
 
             // Прогресс уровня в процентах: xp / xpNext.
             // Math.max(1, …) защищает от деления на ноль (xpToNext бывает 0/undefined),
             // 100 — потолок полосы (на максимуме уровня опыт может «перелиться»).
-            const xpPct = Math.min(100, Math.round((xp / Math.max(1, xpNext)) * 100));
+            const xpPct = Math.max(0, Math.min(100, Math.floor((xp / Math.max(1, xpNext)) * 100)));
 
             // Статус героя (мёртв / в бою / призрак) — бейдж в шапке карточки.
             // Цвет приходит из UI; всё, что не похоже на hex, отбрасываем,
@@ -4227,7 +4550,7 @@ Object.assign(Utils, UtilsApi);
             const status = extra.status || null;
             const statusColor = (status && /^#[0-9a-fA-F]{3,8}$/.test(status.color || '')) ? status.color : '#ff5a7a';
             const statusHtml = (status && status.text)
-                ? `<span id="player-hud-status" style="font-size:10px; padding:1px 6px; border-radius:4px; background:rgba(255,90,122,0.12); border:1px solid ${statusColor}; color:${statusColor}; white-space:nowrap;">${Utils.escapeHtml(status.text)}</span>`
+                ? `<span id="player-hud-status" class="player-hud-status" style="border-color:${statusColor}; color:${statusColor};">${Utils.escapeHtml(status.text)}</span>`
                 : '';
 
             // Базовые статы. Number(...) — безопасный способ вставить числа
@@ -4240,13 +4563,26 @@ Object.assign(Utils, UtilsApi);
                 const def = Number(st.def) || 0;
                 const crit = Number(st.crit) || 0;
                 const cells = [];
-                if (atk) cells.push(`<div style="color:#ffcf6a;">⚔️ Атака: ${atk}</div>`);
-                if (mag) cells.push(`<div style="color:#b06bff;">✨ Магия: ${mag}</div>`);
-                if (def) cells.push(`<div style="color:#4aa3ff;">🛡️ Броня: ${def}</div>`);
-                if (crit) cells.push(`<div style="color:#ff5a7a;">💥 Крит: ${crit}%</div>`);
+                if (atk) cells.push(`<div class="player-hud-stat" style="color:#ffcf6a;">⚔️ Атака<b>${atk}</b></div>`);
+                if (mag) cells.push(`<div class="player-hud-stat" style="color:#b06bff;">✨ Магия<b>${mag}</b></div>`);
+                if (def) cells.push(`<div class="player-hud-stat" style="color:#4aa3ff;">🛡️ Броня<b>${def}</b></div>`);
+                if (crit) cells.push(`<div class="player-hud-stat" style="color:#ff5a7a;">💥 Крит<b>${crit}%</b></div>`);
                 if (cells.length) {
-                    statsHtml = `<div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:11px; background:#16121a; padding:6px; border-radius:4px; margin-top:4px;">${cells.join('')}</div>`;
+                    statsHtml = `<div class="player-hud-stats">${cells.join('')}</div>`;
                 }
+            }
+
+            // Вторичные характеристики hero.xs: показываем только значения > 0
+            // (нули игроку не нужны), подписи и иконки готовит core/ui.js.
+            let secondaryHtml = '';
+            if (showSecondary && Array.isArray(extra.secondary) && extra.secondary.length) {
+                const pills = extra.secondary.map(item => {
+                    const icon = Utils.escapeHtml(item.icon || '✦');
+                    const label = Utils.escapeHtml(item.label || '');
+                    const value = Utils.escapeHtml(String(item.value));
+                    return `<span class="player-hud-pill" title="${label}"><span class="player-hud-pill-ico">${icon}</span>${label}<b>${value}</b></span>`;
+                });
+                secondaryHtml = `<div id="player-hud-secondary" class="player-hud-pills">${pills.join('')}</div>`;
             }
 
             // Активные эффекты (🍗 сытость / 📜 свиток). data-until и data-icon
@@ -4259,61 +4595,96 @@ Object.assign(Utils, UtilsApi);
                     const title = Utils.escapeHtml(b.title || '');
                     const time = Utils.escapeHtml(b.time || '');
                     const until = Number(b.until) || 0;
-                    return `<span data-until="${until}" data-icon="${icon}" style="background:rgba(202,165,92,0.2); border:1px solid #caa55c; color:#ffcf6a; font-size:10px; padding:2px 6px; border-radius:4px;" title="${title}">${icon} ${time}</span>`;
+                    return `<span class="player-hud-buff" data-until="${until}" data-icon="${icon}" title="${title}">${icon} ${time}</span>`;
                 });
-                buffsHtml = `<div id="player-hud-buffs" style="display:flex; gap:4px; flex-wrap:wrap; margin-top:4px;">${chips.join('')}</div>`;
+                buffsHtml = `<div id="player-hud-buffs" class="player-hud-buffs">${chips.join('')}</div>`;
             }
 
-            // Локация и полоса опыта прячутся настройками (v11.5.6).
-            // id #player-hud-loc / -xp-* по-прежнему читает интервал обновления.
+            // Локация и активность (поход ql / шахта mn) прячутся настройками.
+            // id #player-hud-loc / -activity по-прежнему читает живое обновление.
+            const activity = extra.activity || null;
+            const activityColor = (activity && /^#[0-9a-fA-F]{3,8}$/.test(activity.color || '')) ? activity.color : '#bbb';
             const locHtml = showLoc
-                ? `<div style="display:flex; justify-content:space-between; align-items:center; font-size:12px;">
-                        <span style="color:#aaa;">📍 Локация:</span>
-                        <span id="player-hud-loc" style="color:${Utils.escapeHtml(locColor)}; font-weight:bold;">${Utils.escapeHtml(locText)}</span>
+                ? `<div class="player-hud-row">
+                        <span class="player-hud-row-label">📍 Локация</span>
+                        <span id="player-hud-loc" style="color:${Utils.escapeHtml(locColor)};">${Utils.escapeHtml(locText)}</span>
+                    </div>
+                    <div class="player-hud-row">
+                        <span class="player-hud-row-label">🧭 Активность</span>
+                        <span id="player-hud-activity" style="color:${activityColor};">${Utils.escapeHtml((activity && activity.text) || 'Свободен')}</span>
                     </div>`
                 : '';
 
             const xpHtml = showXp
-                ? `<!-- Полоса опыта -->
-                    <div style="margin-top: 4px;">
-                        <div style="display:flex; justify-content:space-between; font-size:10px; color:#aaa; margin-bottom:3px;">
-                            <span>Опыт</span>
-                            <span id="player-hud-xp-text">${xp} / ${xpNext}</span>
+                ? `<div class="player-hud-bar-block">
+                        <div class="player-hud-bar-head">
+                            <span>📊 Опыт</span>
+                            <span><span id="player-hud-xp-text">${xp} / ${xpNext}</span> <b id="player-hud-xp-pct">${xpPct}%</b></span>
                         </div>
-                        <div style="height:8px; background:#111; border-radius:4px; overflow:hidden; border:1px solid #333;">
-                            <div id="player-hud-xp-bar" style="height:100%; width:${xpPct}%; background:linear-gradient(90deg, #caa55c, #ffcf6a); transition: width 0.3s;"></div>
+                        <div class="player-hud-bar-track">
+                            <div id="player-hud-xp-bar" class="player-hud-bar-fill" style="width:${xpPct}%; background:linear-gradient(90deg, #caa55c, #ffcf6a);"></div>
                         </div>
                     </div>`
                 : '';
 
+            const hpTimerText = extra.hpTimer ? Utils.escapeHtml(extra.hpTimer) : '';
+
+            // Быстрые переходы: кнопки рисуем только для существующих модулей,
+            // обработчики вешает core/ui.js (renderPlayerHudContent).
+            const quick = extra.quick || {};
+            const quickBtns = [];
+            if (quick.city) quickBtns.push('<button type="button" class="player-hud-quick-btn" id="player-hud-qcity" title="Открыть Карманный Город">🏰 Город</button>');
+            if (quick.mail) quickBtns.push('<button type="button" class="player-hud-quick-btn" id="player-hud-qmail" title="Открыть игровую почту">✉️ Почта</button>');
+            if (quick.players) quickBtns.push('<button type="button" class="player-hud-quick-btn" id="player-hud-qplayers" title="Открыть разведку игроков">🔍 Разведка</button>');
+            const quickHtml = (showQuick && quickBtns.length)
+                ? `<div class="player-hud-quick">${quickBtns.join('')}</div>`
+                : '';
+
             return `
                 <div class="player-hud-header" id="player-hud-drag-handle">
-                    <span style="font-weight:bold; color:#ffcf6a; font-size:12px; display:flex; align-items:center; gap:4px; min-width:0;">
-                        <span>👤</span> <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safeName}</span>
+                    <span class="player-hud-title">
+                        <span class="player-hud-class-dot" style="background:${classColor}; box-shadow:0 0 6px ${classColor};"></span>
+                        <span class="player-hud-name">${safeName}</span>
+                        ${safeGuild ? `<span class="player-hud-guild">[${safeGuild}]</span>` : ''}
+                        <span class="player-hud-level">ур. ${Number(level) || 1}</span>
                     </span>
-                    <span style="display:flex; align-items:center; gap:6px;">
+                    <span class="player-hud-actions">
                         ${statusHtml}
                         <button class="player-hud-close" id="player-hud-settings-btn" title="Настройки профиля" style="color:#caa55c;">⚙️</button>
                         <button class="player-hud-close" id="player-hud-close-btn" title="Закрыть">✖</button>
                     </span>
                 </div>
-                <div class="player-hud-body" style="padding: 10px; display: flex; flex-direction: column; gap: 8px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px;">
-                        <span style="color:#aaa;">Класс:</span>
-                        <span style="color:#f7d794; font-weight:bold;">${safeClass} (ур. ${level})</span>
+                <div class="player-hud-body">
+                    <div class="player-hud-classline">
+                        <span class="player-hud-class-badge" style="color:${classColor}; border-color:${classColor};">${safeClass}</span>
                     </div>
-                    <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px;">
-                        <span style="color:#aaa;">❤️ HP:</span>
-                        <span id="player-hud-hp" style="color:#ff5a7a; font-weight:bold;">${hpStr}</span>
+
+                    <div class="player-hud-bar-block">
+                        <div class="player-hud-bar-head">
+                            <span>❤️ Здоровье</span>
+                            <span id="player-hud-hp">${hpStr}</span>
+                        </div>
+                        <div class="player-hud-bar-track">
+                            <div id="player-hud-hp-bar" class="player-hud-bar-fill" style="width:${hpPct}%; background:${hpGradient};"></div>
+                        </div>
+                        <div id="player-hud-hp-timer" class="player-hud-bar-note"${hpTimerText ? '' : ' style="display:none;"'}>${hpTimerText ? `⏱ До полного: ${hpTimerText}` : ''}</div>
                     </div>
-                    <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px;">
-                        <span style="color:#aaa;">🪙 Монеты:</span>
-                        <span id="player-hud-money" style="color:#ffcf6a; font-weight:bold;">${moneyVal}</span>
+
+                    <div class="player-hud-row">
+                        <span class="player-hud-row-label">🪙 Монеты</span>
+                        <span id="player-hud-money" style="color:#ffcf6a;">${moneyVal}</span>
                     </div>
+                    <div id="player-hud-debt-row" class="player-hud-row player-hud-debt"${debtVal > 0 ? '' : ' style="display:none;"'}>
+                        <span class="player-hud-row-label">⚠️ Долг</span>
+                        <span id="player-hud-debt">${debtVal > 0 ? Utils.formatMoney(debtVal) : ''}</span>
+                    </div>
+
                     ${locHtml}
                     ${statsHtml}
+                    ${secondaryHtml}
                     ${buffsHtml}
                     ${xpHtml}
+                    ${quickHtml}
                 </div>
             `;
         },
@@ -4386,11 +4757,12 @@ Object.assign(Utils, UtilsApi);
         },
 
         /**
-         * Модалка настроек HUD «👤 Профиль» (v11.5.6): какие блоки показывать.
+         * Модалка настроек HUD «👤 Профиль»: какие блоки показывать.
          * Кнопку «Сохранить» (#hud-set-save) обрабатывает core/ui.js —
          * он же пишет выбор в localStorage (ключ LEGION_HUD_SETTINGS).
          *
-         * @param {object} settings { showLoc, showXp, showStats, showBuffs }
+         * @param {object} settings { showLoc, showXp, showStats, showBuffs,
+         *                            showSecondary, showQuickActions }
          */
         hudSettingsModal(settings) {
             const s = settings || {};
@@ -4398,16 +4770,22 @@ Object.assign(Utils, UtilsApi);
                 <h2>⚙️ Настройки Профиля <button class="custom-close" id="custom-close-btn">✖</button></h2>
                 <div style="padding: 10px; display: flex; flex-direction: column; gap: 12px;">
                     <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:#eee;">
-                        <input type="checkbox" id="hud-set-loc" ${s.showLoc ? 'checked' : ''} style="width:16px; height:16px; accent-color:#caa55c;"> 📍 Локация
+                        <input type="checkbox" id="hud-set-loc" ${s.showLoc ? 'checked' : ''} style="width:16px; height:16px; accent-color:#caa55c;"> 📍 Локация и активность
                     </label>
                     <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:#eee;">
                         <input type="checkbox" id="hud-set-xp" ${s.showXp ? 'checked' : ''} style="width:16px; height:16px; accent-color:#caa55c;"> 📊 Опыт (полоса)
                     </label>
                     <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:#eee;">
-                        <input type="checkbox" id="hud-set-stats" ${s.showStats ? 'checked' : ''} style="width:16px; height:16px; accent-color:#caa55c;"> ⚔️ Базовые статы (Атака, Магия, Броня)
+                        <input type="checkbox" id="hud-set-stats" ${s.showStats ? 'checked' : ''} style="width:16px; height:16px; accent-color:#caa55c;"> ⚔️ Основные статы (Атака, Магия, Броня, Крит)
+                    </label>
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:#eee;">
+                        <input type="checkbox" id="hud-set-secondary" ${s.showSecondary ? 'checked' : ''} style="width:16px; height:16px; accent-color:#caa55c;"> ✦ Вторичные характеристики (hero.xs)
                     </label>
                     <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:#eee;">
                         <input type="checkbox" id="hud-set-buffs" ${s.showBuffs ? 'checked' : ''} style="width:16px; height:16px; accent-color:#caa55c;"> 🍗 Активные эффекты (еда/свитки)
+                    </label>
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:#eee;">
+                        <input type="checkbox" id="hud-set-quick" ${s.showQuickActions ? 'checked' : ''} style="width:16px; height:16px; accent-color:#caa55c;"> 🚀 Быстрые кнопки (Город / Почта / Разведка)
                     </label>
                     <button id="hud-set-save" style="margin-top:10px; background:#caa55c; color:#1d1620; border:none; border-radius:6px; padding:10px; font-weight:bold; cursor:pointer;">Сохранить</button>
                 </div>
@@ -4421,6 +4799,10 @@ Object.assign(Utils, UtilsApi);
     // ============================================================
     const UI = {
         _hudTimer: null,
+        // v11.7.2: момент последнего события `me` LGLiveLink. Пока снимок
+        // свежий, HUD предпочитает его G.ME (тот может отставать или быть
+        // недоступен в песочнице).
+        _heroLiveSeenAt: 0,
         _toastTimer: null,
         _toastClickHandler: null,
         // ПАТЧ 11.6.5g: узлы меню аддона + режим входа в него.
@@ -4479,6 +4861,9 @@ Object.assign(Utils, UtilsApi);
             }, 2500);
         },
         closeModals() {
+            // Запись хоткея не должна пережить закрытие модалки: иначе
+            // следующий keydown молча перехватывался бы «висящим» рекордером.
+            if (typeof this._stopBindRecording === 'function') this._stopBindRecording();
             // Снимаем удержание вкладки «Город»: MutationObserver в
             // PocketCity.openNativeBuilding больше не должен возвращать её на экран.
             window.__POCKET_CITY_OPEN__ = false;
@@ -4631,13 +5016,17 @@ Object.assign(Utils, UtilsApi);
             return modal;
         },
         // ⚙️ Служебные настройки аддона: уведомления о версиях, боевой
-        // ассистент, подсветка ников аддона и место входа в меню. Настройки
-        // самого чата (7TV, перехват ленты) удалены в 11.7.0.
+        // ассистент, подсветка ников аддона и место входа в меню.
         openSettings() {
             // Разметка модалки — в core/ui-templates.js (UITemplates.settingsModal).
             const modal = this.showModal(UITemplates.settingsModal(), { compact: true });
 
             if (!modal) return;
+
+            // v11.7.2: единый рекордер хоткеев закрепа и 8 зданий Города.
+            // Живёт в замыкании модалки; closeModals() гасит его через
+            // _stopBindRecording(), чтобы keydown не перехватывался после закрытия.
+            this._initPocketCityBindRecorders(modal);
 
             // 11.6.1g: тумблер уведомлений о новых версиях.
             // Дефолт — включено (ключа в localStorage ещё нет). Значение читает
@@ -4779,6 +5168,241 @@ Object.assign(Utils, UtilsApi);
                     UI.syncNavButton();
                 });
             }
+        },
+
+        // ------------------------------------------------------------
+        // v11.7.2: ЕДИНЫЙ РЕКОРДЕР ХОТКЕЕВ «КАРМАННОГО ГОРОДА»
+        //
+        // Один и тот же механизм обслуживает закреп виджета и 8 зданий.
+        // Клик по кнопке включает запись, Esc отменяет её без закрытия
+        // модалки (capture-обработчик глушит событие до общего Esc ->
+        // closeModals()), одиночные модификаторы игнорируются. Комбинация
+        // нормализуется keybindCombo() по e.code (любая раскладка).
+        //
+        // Бинды зданий — JSON { [roomId]: combo } в localStorage
+        // 'LEGION_POCKET_CITY_ROOM_BINDS'. При сохранении одинаковой
+        // комбинации она снимается с прежнего слота, чтобы хоткей не
+        // срабатывал на два действия.
+        // ------------------------------------------------------------
+        _initPocketCityBindRecorders(modal) {
+            if (!modal) return;
+
+            this._bindRecorders = [];
+            this._bindRecording = false;
+            this._bindRecordingOwner = null;
+            this._bindCleanup = null;
+
+            const pocketBtn = modal.querySelector('#modal-bind-pocket-city');
+            if (pocketBtn) {
+                this._registerBindRecorder({
+                    btn: pocketBtn,
+                    clearBtn: modal.querySelector('#modal-bind-pocket-city-clear'),
+                    target: 'pocket',
+                    labelEmpty: 'Не назначено',
+                    get: () => {
+                        try { return String(localStorage.getItem(POCKET_CITY_BIND_KEY) || '').trim(); }
+                        catch (e) { return ''; }
+                    },
+                    set: (combo) => {
+                        try {
+                            localStorage.setItem(POCKET_CITY_BIND_KEY, combo || '');
+                            return true;
+                        } catch (e) {
+                            dbg('[UI] не удалось сохранить хоткей Карманного Города', e);
+                            return false;
+                        }
+                    }
+                });
+            }
+
+            modal.querySelectorAll('.lg-room-bind-btn').forEach(btn => {
+                const roomId = String(btn.dataset.room || '');
+                if (!roomId) return;
+                this._registerBindRecorder({
+                    btn,
+                    clearBtn: modal.querySelector(`.lg-room-bind-clear[data-room="${roomId}"]`),
+                    target: `room:${roomId}`,
+                    roomId,
+                    labelEmpty: '—',
+                    get: () => this._readRoomBinds()[roomId] || '',
+                    set: (combo) => {
+                        const map = this._readRoomBinds();
+                        if (combo) map[roomId] = combo;
+                        else delete map[roomId];
+                        return this._writeRoomBinds(map);
+                    }
+                });
+            });
+
+            this._refreshBindLabels();
+        },
+
+        /** Один слот бинда: кнопка, сброс, чтение/запись значения и запись клавиши. */
+        _registerBindRecorder(opts) {
+            const self = this;
+            const btn = opts.btn;
+            const clearBtn = opts.clearBtn;
+            const get = opts.get;
+            const set = opts.set;
+            const clear = opts.clear || (() => set(''));
+            const labelEmpty = opts.labelEmpty || '—';
+            let recording = false;
+
+            const applyLabel = () => {
+                const current = get() || '';
+                btn.textContent = recording ? 'Нажмите...' : (current || labelEmpty);
+                btn.classList.toggle('recording', recording);
+                btn.title = recording
+                    ? 'Нажмите комбинацию, Esc — отмена'
+                    : (current ? `Комбинация: ${current}` : 'Назначить клавишу');
+            };
+
+            const onKeyDown = (e) => {
+                if (!recording) return;
+                // Модалку могли убрать мимо closeModals() — тихо снимаем запись.
+                if (!btn.isConnected) { stop(); return; }
+
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    stop();
+                    return;
+                }
+                // Одиночные модификаторы не фиксируем: ждём основную клавишу.
+                if (isKeybindModifier(e)) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
+                const combo = keybindCombo(e);
+                if (!combo) return;
+
+                e.preventDefault();
+                e.stopPropagation();
+                stop();
+                // Сначала снимаем ту же комбинацию с других слотов, затем
+                // записываем её в текущий: один хоткей — одно действие.
+                self._clearBindConflicts(combo, opts.target);
+                const ok = set(combo);
+                self._refreshBindLabels();
+                UI.showToast(ok
+                    ? `⌨️ Хоткей сохранён: ${combo}`
+                    : 'Не удалось сохранить хоткей', !ok);
+            };
+
+            // function-декларация: onKeyDown ссылается на stop, а stop — на
+            // onKeyDown; хойстинг убирает TDZ-вопрос при чтении кода.
+            function stop() {
+                recording = false;
+                self._bindRecording = false;
+                if (self._bindRecordingOwner === btn) self._bindRecordingOwner = null;
+                if (self._bindCleanup === stop) self._bindCleanup = null;
+                document.removeEventListener('keydown', onKeyDown, true);
+                applyLabel();
+            }
+
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (recording) { stop(); return; }
+                // Начать новую запись можно только после остановки прежней.
+                self._stopBindRecording();
+                recording = true;
+                self._bindRecording = true;
+                self._bindRecordingOwner = btn;
+                self._bindCleanup = stop;
+                self._refreshBindLabels();
+                // capture: перехватываем раньше общего Esc -> UI.closeModals().
+                document.addEventListener('keydown', onKeyDown, true);
+            });
+
+            if (clearBtn) {
+                clearBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (recording) stop();
+                    clear();
+                    self._refreshBindLabels();
+                    UI.showToast('⌨️ Хоткей сброшен');
+                });
+            }
+
+            this._bindRecorders.push({ btn, refresh: applyLabel });
+            applyLabel();
+        },
+
+        /** Бинды зданий: JSON { [roomId]: combo }, битые данные = пусто. */
+        _readRoomBinds() {
+            try {
+                const raw = localStorage.getItem('LEGION_POCKET_CITY_ROOM_BINDS');
+                if (!raw) return {};
+                const parsed = JSON.parse(raw);
+                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+                const out = {};
+                for (const [roomId, combo] of Object.entries(parsed)) {
+                    if (typeof combo === 'string' && combo.trim()) out[roomId] = combo.trim();
+                }
+                return out;
+            } catch (e) {
+                return {};
+            }
+        },
+
+        _writeRoomBinds(map) {
+            try {
+                localStorage.setItem('LEGION_POCKET_CITY_ROOM_BINDS', JSON.stringify(map || {}));
+                return true;
+            } catch (e) {
+                dbg('[UI] не удалось сохранить хоткеи зданий Города', e);
+                return false;
+            }
+        },
+
+        /**
+         * Снять комбинацию с других слотов, если она уже занята.
+         * @param {string} combo  нормализованная комбинация
+         * @param {string} target 'pocket' либо 'room:<id>' — текущий слот
+         */
+        _clearBindConflicts(combo, target) {
+            if (!combo) return;
+            let changed = false;
+            const rooms = this._readRoomBinds();
+
+            // Закреп виджета не должен делить клавишу с зданием.
+            if (target !== 'pocket') {
+                try {
+                    if (String(localStorage.getItem(POCKET_CITY_BIND_KEY) || '').trim() === combo) {
+                        localStorage.setItem(POCKET_CITY_BIND_KEY, '');
+                        changed = true;
+                    }
+                } catch (e) {}
+            }
+
+            for (const roomId of Object.keys(rooms)) {
+                if (target === `room:${roomId}`) continue;
+                if (rooms[roomId] === combo) {
+                    delete rooms[roomId];
+                    changed = true;
+                }
+            }
+            if (changed) this._writeRoomBinds(rooms);
+        },
+
+        /** Обновить подписи всех кнопок-рекордеров открытой модалки. */
+        _refreshBindLabels() {
+            if (!Array.isArray(this._bindRecorders)) return;
+            this._bindRecorders.forEach(item => {
+                try { item.refresh(); } catch (e) {}
+            });
+        },
+
+        /** Снять активную запись хоткея (closeModals / повторное открытие). */
+        _stopBindRecording() {
+            this._bindRecording = false;
+            this._bindRecordingOwner = null;
+            const cleanup = this._bindCleanup;
+            this._bindCleanup = null;
+            if (typeof cleanup === 'function') cleanup();
         },
         /**
          * «💛 Благодарность» из футера FAB-меню: титры с никами тех, кто
@@ -5370,19 +5994,153 @@ Object.assign(Utils, UtilsApi);
         },
 
         // ------------------------------------------------------------
-        // HUD профиля (v11.5.6): настройки блоков, баффы и статус героя.
+        // HUD профиля: настройки блоков, баффы и статус героя.
         // ------------------------------------------------------------
 
         // Какие блоки показывать в HUD. Ключ LEGION_HUD_SETTINGS общий для
         // всех персонажей. Битый/отсутствующий JSON не должен ломать HUD —
         // в этом случае возвращаем дефолты (всё включено).
         getHudSettings() {
-            const defaults = { showLoc: true, showXp: true, showStats: true, showBuffs: true };
+            const defaults = {
+                showLoc: true,
+                showXp: true,
+                showStats: true,
+                showBuffs: true,
+                // v11.7.2: новые блоки карточки профиля.
+                showSecondary: true,
+                showQuickActions: true
+            };
             try {
                 const raw = localStorage.getItem('LEGION_HUD_SETTINGS');
                 if (raw) return { ...defaults, ...JSON.parse(raw) };
             } catch (e) {}
             return defaults;
+        },
+
+        /**
+         * v11.7.2: подпись длительности для таймера HP (hero.hpFullIn — мс).
+         * Формат игры: часы/минуты, на последней минуте — секунды.
+         */
+        _hudDuration(ms) {
+            const left = Math.max(0, Number(ms) || 0);
+            if (left <= 0) return '';
+            if (left >= 3600000) {
+                const h = Math.floor(left / 3600000);
+                const m = Math.round((left % 3600000) / 60000);
+                return m > 0 ? `${h}ч ${m}м` : `${h}ч`;
+            }
+            if (left >= 60000) return `${Math.ceil(left / 60000)}м`;
+            return `${Math.max(1, Math.ceil(left / 1000))}с`;
+        },
+
+        /**
+         * Актуальный снимок героя для HUD. Если живой канал только что
+         * присылал `me`, его снимок свежее G.ME (и доступен даже в песочнице,
+         * где G.ME может быть undefined). Иначе — штатный G.ME, затем __lgHero.
+         */
+        _currentHeroSnapshot() {
+            const live = window.__lgHero;
+            const gmHero = G.ME?.hero || G.ME?.me || null;
+            if (live && this._heroLiveSeenAt && (Date.now() - this._heroLiveSeenAt) < 5000) {
+                return live;
+            }
+            return gmHero || live || null;
+        },
+
+        /**
+         * HP героя для шаблона: now / max / процент / таймер восстановления.
+         * hero.stats.hp — максимум (docs/API.md), hpMax/maxHp/mhp — фолбэки
+         * старых снимков. hpFullIn — сколько мс осталось до полного HP
+         * (site/app.js: h.hpFullIn), 0/undefined — таймера нет.
+         */
+        _hudHp(hero) {
+            const h = hero || {};
+            const nowRaw = h.hpNow !== undefined ? h.hpNow : (h.hp !== undefined ? h.hp : '—');
+            const maxRaw = h.stats && h.stats.hp !== undefined
+                ? h.stats.hp
+                : (h.hpMax !== undefined ? h.hpMax : (h.maxHp !== undefined ? h.maxHp : h.mhp));
+            const now = Number(nowRaw);
+            const max = Number(maxRaw);
+            const fullIn = Math.max(0, Number(h.hpFullIn) || 0);
+            return {
+                now: Number.isFinite(now) ? now : nowRaw,
+                max: Number.isFinite(max) && max > 0 ? max : null,
+                fullIn,
+                timer: (Number.isFinite(now) && Number.isFinite(max) && max > 0 && now < max && fullIn > 0)
+                    ? this._hudDuration(fullIn)
+                    : ''
+            };
+        },
+
+        /**
+         * Активность героя.
+         *
+         * hero.mn (docs/API.md, app.js mineList) — это СПРАВОЧНИК шахт:
+         * { home: { nm, dist, bi, dg, gem, i, q } }. Поля nm/dist/bi/dg/gem
+         * постоянные, а добыча обозначается индексом забоя i: i >= 0 —
+         * герой реально копает здесь (app.js: busy = m.i >= 0). Поэтому
+         * наличие mn.home.nm само по себе НЕ значит, что игрок в шахте.
+         *
+         * Дополнительно учитываем физический экран шахты (.mn-world /
+         * .mn-screen), а в конце — смерть/призрака, бой и активные баффы.
+         * Если ничего нет — нейтральное «Свободен», без ложной шахты.
+         */
+        _hudActivity(hero) {
+            const h = hero || {};
+
+            const q = h.ql;
+            if (q && typeof q === 'object' && q.on !== false) {
+                const name = q.name || q.rn || q.kind || q.k || '';
+                return { text: name ? `🚩 Поход: ${name}` : '🚩 В походе', color: '#ff9900' };
+            }
+
+            // Активный забой: m.i — индекс камня, который копает герой.
+            const activeMine = Object.values(h.mn || {}).find(m => m && typeof m.i === 'number' && m.i >= 0);
+            if (activeMine) {
+                return { text: `⛏️ ${activeMine.nm || 'Шахта'}`, color: '#4cc95a' };
+            }
+
+            // Игрок физически в шахте, но между забоями/смотрит экран.
+            const onMineScreen = !!document.querySelector('.mn-world') || !!document.querySelector('.mn-screen');
+            if (onMineScreen) return { text: '⛏️ Шахта', color: '#4cc95a' };
+
+            const status = this._hudStatus(h);
+            if (status && /Мертв|Призрак/.test(status.text)) return status;
+
+            if (h.busy) return { text: '⚔️ Занят боем', color: '#ffcf6a' };
+
+            const buffs = this._hudBuffs(h);
+            if (buffs.length) {
+                const names = buffs.map(b => b.title).filter(Boolean).join(', ');
+                return { text: names ? `✨ ${names}` : '✨ Под эффектом', color: '#ffcf6a' };
+            }
+
+            return { text: '🌿 Свободен', color: '#9aa4b2' };
+        },
+
+        /**
+         * Вторичные характеристики hero.xs (docs/API.md). Нули не показываем:
+         * игроку важен только реальный вклад. Иконки — визуальные маркеры.
+         */
+        _hudSecondaryStats(hero) {
+            const xs = (hero && hero.xs) || null;
+            if (!xs || typeof xs !== 'object') return [];
+            const defs = [
+                ['critDmg', '💢', 'Крит. урон', '%'],
+                ['dodge', '🌀', 'Уклонение', '%'],
+                ['pierce', '🗡️', 'Пробивание', ''],
+                ['healPow', '💚', 'Сила лечения', '%'],
+                ['luck', '🍀', 'Удача', ''],
+                ['resist', '🛡️', 'Сопротивление', '%']
+            ];
+            const out = [];
+            for (const [key, icon, label, suffix] of defs) {
+                const val = Number(xs[key]);
+                if (Number.isFinite(val) && val > 0) {
+                    out.push({ icon, label, value: `${val}${suffix}` });
+                }
+            }
+            return out;
         },
 
         // Остаток времени баффа строкой: минуты, а в последнюю минуту — секунды,
@@ -5451,11 +6209,12 @@ Object.assign(Utils, UtilsApi);
             const name = hero?.name || G.ME?.user?.name || G.ME?.user?.login || 'Игрок';
             const rawClass = hero?.class || hero?.c || hero?.sk?.c || 'recruit';
             const className = (typeof BuildSim !== 'undefined' && BuildSim.classNames?.[rawClass]) || rawClass;
+            const classColor = (typeof BuildSim !== 'undefined' && BuildSim.classColors?.[rawClass]) || '#caa55c';
             const lvl = hero?.lvl || hero?.level || hero?.l || 1;
 
-            // Здоровье: hero.hpNow / (hero.stats.hp или hero.hpMax)
-            const hpNow = hero?.hpNow !== undefined ? hero.hpNow : (hero?.hp !== undefined ? hero.hp : '—');
-            const hpMax = hero?.stats?.hp !== undefined ? hero.stats.hp : (hero?.hpMax !== undefined ? hero.hpMax : (hero?.maxHp || hero?.mhp || '—'));
+            // Здоровье: now / max / процент / таймер восстановления (hpFullIn).
+            // Значения нормализует _hudHp(), шаблон только рисует.
+            const hp = this._hudHp(hero);
 
             // Монеты: hero.money
             const moneyVal = hero?.money !== undefined ? hero.money : (hero?.coins !== undefined ? hero.coins : (hero?.gold !== undefined ? hero.gold : 0));
@@ -5464,10 +6223,12 @@ Object.assign(Utils, UtilsApi);
             const { xp, xpNext } = this._heroXp(hero);
             const loc = this._detectHudLocation();
 
-            // Настройки HUD + расширенные данные (v11.5.6).
+            // Настройки HUD + расширенные данные.
             const settings = this.getHudSettings();
             const buffs = this._hudBuffs(hero);
             const status = this._hudStatus(hero);
+            const activity = this._hudActivity(hero);
+            const secondary = this._hudSecondaryStats(hero);
 
             // Статы: atk/mag/def клиент отдаёт в hero.stats, крит — в hero.xs
             // (реже в hero.stats.crit), поэтому набор нормализуем здесь.
@@ -5478,13 +6239,28 @@ Object.assign(Utils, UtilsApi);
                 crit: (hero.stats && hero.stats.crit !== undefined) ? hero.stats.crit : (hero.xs ? hero.xs.crit : undefined)
             } : null;
 
+            // Быстрые переходы: кнопка есть только у существующего модуля.
+            // Почта — нативная функция игры, поэтому достаточно наличия HUD/API.
+            const quick = {
+                city: typeof PocketCity !== 'undefined' && typeof PocketCity.open === 'function',
+                mail: true,
+                players: typeof Players !== 'undefined' && typeof Players.open === 'function'
+            };
+
             // Разметка HUD — в core/ui-templates.js (UITemplates.playerHud):
             // шаблон сам экранирует ник/класс и форматирует монеты.
-            hud.innerHTML = UITemplates.playerHud(name, className, lvl, { now: hpNow, max: hpMax }, moneyVal, loc, xp, xpNext, {
+            hud.innerHTML = UITemplates.playerHud(name, className, lvl, { now: hp.now, max: hp.max }, moneyVal, loc, xp, xpNext, {
                 settings,
                 stats: hudStats,
+                secondary,
                 buffs,
-                status
+                status,
+                activity,
+                classColor,
+                guild: hero?.gt || '',
+                debt: Number(hero?.debt) || 0,
+                hpTimer: hp.timer,
+                quick
             });
 
             // Метки для интервала в togglePlayerHud(): hudReady отличает готовую
@@ -5501,7 +6277,28 @@ Object.assign(Utils, UtilsApi);
                 }
             });
 
-            // ⚙️ Настройки отображаемых блоков профиля (11.5.6).
+            // v11.7.2: быстрые кнопки внизу карточки — Город / Почта / Разведка.
+            hud.querySelector('#player-hud-qcity')?.addEventListener('click', () => {
+                UI.closeFabMenu();
+                try { PocketCity.open(); }
+                catch (err) { dbg('[HUD] не удалось открыть Карманный Город', err); }
+            });
+            hud.querySelector('#player-hud-qmail')?.addEventListener('click', () => {
+                UI.closeFabMenu();
+                UI.openNativeMail();
+            });
+            hud.querySelector('#player-hud-qplayers')?.addEventListener('click', () => {
+                UI.closeFabMenu();
+                try {
+                    if (typeof Players !== 'undefined' && typeof Players.open === 'function') Players.open();
+                    else UI.showToast('Разведка недоступна', true);
+                } catch (err) {
+                    dbg('[HUD] не удалось открыть Разведку', err);
+                    UI.showToast('Разведка недоступна', true);
+                }
+            });
+
+            // ⚙️ Настройки отображаемых блоков профиля.
             hud.querySelector('#player-hud-settings-btn')?.addEventListener('click', () => {
                 const currentSettings = this.getHudSettings();
                 UI.showModal(UITemplates.hudSettingsModal(currentSettings), { compact: true });
@@ -5511,7 +6308,9 @@ Object.assign(Utils, UtilsApi);
                         showLoc: !!document.getElementById('hud-set-loc')?.checked,
                         showXp: !!document.getElementById('hud-set-xp')?.checked,
                         showStats: !!document.getElementById('hud-set-stats')?.checked,
-                        showBuffs: !!document.getElementById('hud-set-buffs')?.checked
+                        showBuffs: !!document.getElementById('hud-set-buffs')?.checked,
+                        showSecondary: !!document.getElementById('hud-set-secondary')?.checked,
+                        showQuickActions: !!document.getElementById('hud-set-quick')?.checked
                     };
                     try {
                         localStorage.setItem('LEGION_HUD_SETTINGS', JSON.stringify(newSettings));
@@ -5521,6 +6320,60 @@ Object.assign(Utils, UtilsApi);
                     this.renderPlayerHudContent(hud, hero);
                 });
             });
+        },
+
+        /**
+         * v11.7.2: нативная почта игры для кнопки «✉️ Почта» в профиле.
+         *
+         * Кнопка HUD: #gu-hud [data-gu="mail"] (app.js guHudHtml). Пока почта
+         * закрыта, игра держит у неё aria-disabled="true" и <span class="gu-soon">;
+         * после события lgmail guMail() снимает блокировку. API — window.LGMail
+         * с методами open()/on() (app.js).
+         *
+         * Порядок: заблокированная кнопка без активного API — тост; иначе
+         * LGMail.open(); если API ещё не загружен — штатный клик по кнопке.
+         * window.fetch/LGMail не патчим.
+         */
+        openNativeMail() {
+            const btn = document.querySelector('#gu-hud [data-gu="mail"]');
+            const mail = G.LGMail || (typeof window !== 'undefined' ? window.LGMail : null);
+            const apiReady = !!mail && typeof mail.open === 'function';
+            const visualLocked = !!btn && (
+                btn.getAttribute('aria-disabled') === 'true'
+                || btn.classList.contains('gu-soon')
+                || !!btn.querySelector('.gu-soon')
+            );
+
+            let mailOn = true;
+            if (apiReady && typeof mail.on === 'function') {
+                try { mailOn = mail.on() !== false; } catch (e) { mailOn = true; }
+            }
+
+            if (visualLocked && !mailOn) {
+                this.showToast('Почта пока недоступна', true);
+                return false;
+            }
+
+            if (apiReady) {
+                try {
+                    mail.open();
+                    return true;
+                } catch (err) {
+                    dbg('[HUD] LGMail.open() не сработал:', err);
+                }
+            }
+
+            if (btn) {
+                try {
+                    btn.click();
+                    return true;
+                } catch (err) {
+                    dbg('[HUD] клик по кнопке почты не сработал:', err);
+                }
+            }
+
+            this.showToast('Почта пока недоступна', true);
+            return false;
         },
 
         setupPlayerHudDrag(hud) {
@@ -5587,7 +6440,7 @@ Object.assign(Utils, UtilsApi);
 
             hud.style.display = 'flex';
 
-            let hero = G.ME?.hero || G.ME?.me || window.__lgHero;
+            let hero = this._currentHeroSnapshot();
             if (hero) {
                 this.renderPlayerHudContent(hud, hero);
             } else {
@@ -5612,7 +6465,9 @@ Object.assign(Utils, UtilsApi);
                 this._hudTimer = null;
             }
 
-            // Живое обновление HUD: локация, HP, монеты и опыт каждые 1000 мс
+            // Живое обновление HUD: локация, HP, монеты и опыт каждые 1000 мс.
+            // Само обновление вынесено в _refreshPlayerHud() — его же зовёт
+            // событие `me` живого канала игры (мгновенно, без ожидания тика).
             this._hudTimer = setInterval(() => {
                 if (!hud || hud.style.display === 'none') {
                     if (this._hudTimer) {
@@ -5621,89 +6476,254 @@ Object.assign(Utils, UtilsApi);
                     }
                     return;
                 }
-
-                const currentHero = G.ME?.hero || G.ME?.me || window.__lgHero;
-
-                // Герой появился позже (HUD ещё показывает заглушку «Загрузка
-                // профиля...») — дорисовываем карточку целиком и выходим.
-                // Проверяем метку готовности, а не #player-hud-xp-text: полосу
-                // опыта можно отключить в настройках, и HUD перерисовывался бы
-                // каждую секунду.
-                if (currentHero && hud.dataset.hudReady !== '1') {
-                    this.renderPlayerHudContent(hud, currentHero);
-                    return;
-                }
-
-                // Изменился набор баффов или статус (поел, выпил свиток, умер,
-                // начался бой) — перерисовываем карточку: состав элементов другой.
-                if (currentHero && hud.dataset.hudSig !== this._hudSignature(currentHero)) {
-                    this.renderPlayerHudContent(hud, currentHero);
-                    return;
-                }
-
-                // Локация: Город / Шахта / Поход
-                const locEl = hud.querySelector('#player-hud-loc');
-                if (locEl) {
-                    const loc = this._detectHudLocation();
-                    locEl.textContent = loc.text;
-                    locEl.style.color = loc.color;
-                }
-
-                if (currentHero) {
-                    // HP: иконка ❤️ живёт в подписи шаблона, значение — только цифры.
-                    const hpEl = hud.querySelector('#player-hud-hp');
-                    if (hpEl) {
-                        const curHp = currentHero.hpNow !== undefined ? currentHero.hpNow : (currentHero.hp !== undefined ? currentHero.hp : '—');
-                        const mHp = currentHero.stats?.hp !== undefined ? currentHero.stats.hp : (currentHero.hpMax !== undefined ? currentHero.hpMax : (currentHero.maxHp || currentHero.mhp || '—'));
-                        hpEl.textContent = (mHp !== null && mHp !== undefined) ? `${curHp} / ${mHp}` : curHp;
-                    }
-                    const moneyEl = hud.querySelector('#player-hud-money');
-                    if (moneyEl) {
-                        const mon = currentHero.money !== undefined ? currentHero.money : (currentHero.coins !== undefined ? currentHero.coins : (currentHero.gold !== undefined ? currentHero.gold : 0));
-                        moneyEl.textContent = Utils.formatMoney(mon);
-                    }
-                    // Опыт: цифры и полоса прогресса уровня
-                    const xpEl = hud.querySelector('#player-hud-xp-text');
-                    const xpBar = hud.querySelector('#player-hud-xp-bar');
-                    if (xpEl && xpBar) {
-                        const { xp, xpNext } = this._heroXp(currentHero);
-                        xpEl.textContent = `${xp} / ${xpNext}`;
-                        // Math.max(1, …) — защита от деления на 0; 100 — потолок полосы.
-                        xpBar.style.width = `${Math.min(100, Math.round((xp / Math.max(1, xpNext)) * 100))}%`;
-                    }
-
-                    // Баффы: пересчитываем подписи по data-until (см. ui-templates.js),
-                    // чтобы таймер тикал без полной перерисовки HUD. Просроченные
-                    // чипы убираем — на следующем тике hudSig перерисует карточку.
-                    const buffsEl = hud.querySelector('#player-hud-buffs');
-                    if (buffsEl) {
-                        buffsEl.querySelectorAll('[data-until]').forEach(el => {
-                            const until = Number(el.dataset.until) || 0;
-                            const left = until - Date.now();
-                            if (left > 0) {
-                                el.textContent = `${el.dataset.icon || ''} ${this._hudTimeLeft(left)}`.trim();
-                            } else {
-                                el.remove();
-                            }
-                        });
-                    }
-                }
+                const currentHero = this._currentHeroSnapshot();
+                this._refreshPlayerHud(hud, currentHero || null);
             }, 1000);
+
+            // v11.7.2: подписка на `me` LGLiveLink — HP/монеты/опыт меняются
+            // мгновенно, даже если G.ME недоступен (снимок кладём в __lgHero).
+            this.ensureHeroLiveUpdates();
 
             try {
                 const res = await Utils.fetchApi('/api/me');
                 const freshHero = res?.hero || res?.body?.hero || res?.me || (res?.hpNow !== undefined ? res : null);
                 if (freshHero) {
                     window.__lgHero = freshHero;
+                    this._heroLiveSeenAt = Date.now();
                     this.renderPlayerHudContent(hud, freshHero);
                 }
             } catch (e) {
                 dbg('[HUD] Ошибка запроса /api/me:', e);
             }
+        },
+
+        /* ------------------------------------------------------------
+         * v11.7.2: ЖИВОЕ ОБНОВЛЕНИЕ ПРОФИЛЯ + ПОДПИСКА НА LGLiveLink
+         *
+         * LGLiveLink хранит инстанс в замыкании site-live.js, поэтому
+         * единственная точка доступа — обёртка его open() (тот же приём,
+         * что _hookLiveLink в modules/party.js). window.fetch, LGMine и
+         * прочие нативные объекты НЕ патчатся: подписываемся только на
+         * штатное SSE-событие `me`. Хук идемпотентен.
+         * ---------------------------------------------------------- */
+
+        /** Перерисовать карточку целиком или обновить значения на месте. */
+        _refreshPlayerHud(hud, hero) {
+            if (!hud || hud.style.display === 'none') return;
+            if (!hero) {
+                // Героя ещё нет — хотя бы локация (Город / Шахта / Поход).
+                const locEl = hud.querySelector('#player-hud-loc');
+                if (locEl) {
+                    const loc = this._detectHudLocation();
+                    locEl.textContent = loc.text;
+                    locEl.style.color = loc.color;
+                }
+                return;
+            }
+            // Герой появился позже («Загрузка профиля...») либо изменился
+            // состав баффов/статус — карточку нужно собрать заново.
+            if (hud.dataset.hudReady !== '1'
+                || hud.dataset.hudSig !== this._hudSignature(hero)) {
+                this.renderPlayerHudContent(hud, hero);
+                return;
+            }
+            this._updatePlayerHudValues(hud, hero);
+        },
+
+        /**
+         * Точечное обновление значений без перерисовки innerHTML:
+         * HP (текст/полоса/таймер), монеты/долг, опыт, локация, активность
+         * и подписи баффов. Полная перерисовка сбивала бы drag и фокус.
+         */
+        _updatePlayerHudValues(hud, hero) {
+            if (!hud || !hero) return;
+
+            const loc = this._detectHudLocation();
+            const locEl = hud.querySelector('#player-hud-loc');
+            if (locEl) {
+                locEl.textContent = loc.text;
+                locEl.style.color = loc.color;
+            }
+            const activity = this._hudActivity(hero);
+            const actEl = hud.querySelector('#player-hud-activity');
+            if (actEl) {
+                actEl.textContent = activity.text;
+                actEl.style.color = activity.color;
+            }
+
+            // HP: текст, процент, градиент (красный/зелёный) и таймер.
+            const hp = this._hudHp(hero);
+            const hpEl = hud.querySelector('#player-hud-hp');
+            if (hpEl) {
+                hpEl.textContent = hp.max !== null ? `${hp.now} / ${hp.max}` : hp.now;
+            }
+            const hpBar = hud.querySelector('#player-hud-hp-bar');
+            if (hpBar) {
+                const pct = (hp.max && Number.isFinite(Number(hp.now)))
+                    ? Math.max(0, Math.min(100, Math.round((Number(hp.now) / hp.max) * 100)))
+                    : 0;
+                hpBar.style.width = `${pct}%`;
+                hpBar.style.background = pct <= 30
+                    ? 'linear-gradient(90deg, #7a1f2c, #ff5a7a)'
+                    : pct <= 60
+                        ? 'linear-gradient(90deg, #7a5a1f, #ffcf6a)'
+                        : 'linear-gradient(90deg, #1f7a3a, #4cc95a)';
+            }
+            const hpTimerEl = hud.querySelector('#player-hud-hp-timer');
+            if (hpTimerEl) {
+                if (hp.timer) {
+                    hpTimerEl.textContent = `⏱ До полного: ${hp.timer}`;
+                    hpTimerEl.style.display = '';
+                } else {
+                    hpTimerEl.textContent = '';
+                    hpTimerEl.style.display = 'none';
+                }
+            }
+
+            // Монеты и долг (строка долга скрыта, пока debt <= 0).
+            const moneyEl = hud.querySelector('#player-hud-money');
+            if (moneyEl) {
+                const mon = hero.money !== undefined ? hero.money : (hero.coins !== undefined ? hero.coins : (hero.gold !== undefined ? hero.gold : 0));
+                moneyEl.textContent = Utils.formatMoney(mon);
+            }
+            const debt = Number(hero.debt) || 0;
+            const debtRow = hud.querySelector('#player-hud-debt-row');
+            if (debtRow) debtRow.style.display = debt > 0 ? 'flex' : 'none';
+            const debtEl = hud.querySelector('#player-hud-debt');
+            if (debtEl) debtEl.textContent = debt > 0 ? Utils.formatMoney(debt) : '';
+
+            // Опыт: цифры, процент и полоса прогресса уровня.
+            const xpEl = hud.querySelector('#player-hud-xp-text');
+            const xpBar = hud.querySelector('#player-hud-xp-bar');
+            const xpPctEl = hud.querySelector('#player-hud-xp-pct');
+            if (xpEl || xpBar) {
+                const { xp, xpNext } = this._heroXp(hero);
+                // Math.max(1, …) — защита от деления на 0; 100 — потолок полосы.
+                const pct = Math.max(0, Math.min(100, Math.floor((xp / Math.max(1, xpNext)) * 100)));
+                if (xpEl) xpEl.textContent = `${xp} / ${xpNext}`;
+                if (xpPctEl) xpPctEl.textContent = `${pct}%`;
+                if (xpBar) xpBar.style.width = `${pct}%`;
+            }
+
+            // Баффы: пересчитываем подписи по data-until (см. ui-templates.js),
+            // чтобы таймер тикал без полной перерисовки HUD. Просроченные
+            // чипы убираем — на следующем тике hudSig перерисует карточку.
+            const buffsEl = hud.querySelector('#player-hud-buffs');
+            if (buffsEl) {
+                buffsEl.querySelectorAll('[data-until]').forEach(el => {
+                    const until = Number(el.dataset.until) || 0;
+                    const left = until - Date.now();
+                    if (left > 0) {
+                        el.textContent = `${el.dataset.icon || ''} ${this._hudTimeLeft(left)}`.trim();
+                    } else {
+                        el.remove();
+                    }
+                });
+            }
+        },
+
+        /** Мгновенное событие `me` живого канала: обновляем __lgHero и HUD. */
+        _onHeroLiveUpdate(hero) {
+            if (this._heroLiveDead) return;
+            if (!hero || typeof hero !== 'object') return;
+            // Даже если G.ME недоступен, свежий снимок героя теперь есть здесь.
+            // В событии `me` нет ql (поход приходит отдельным событием `q`),
+            // поэтому недостающие поля берём из прошлого снимка, а не теряем их.
+            const prev = window.__lgHero;
+            const merged = (prev && typeof prev === 'object')
+                ? Object.assign({}, prev, hero)
+                : hero;
+            window.__lgHero = merged;
+            this._heroLiveSeenAt = Date.now();
+            const hud = document.getElementById(DOM_IDS.playerHud) || document.getElementById('legion-player-hud');
+            if (!hud || hud.style.display === 'none') return;
+            this._refreshPlayerHud(hud, merged);
+        },
+
+        /**
+         * Подписаться на LGLiveLink `me`. Возвращает true, если хук уже стоит.
+         * Обёртка идемпотентна: Party._hookLiveLink может навернуть свой слой
+         * сверху — он вызывает наш open() и наш слушатель остаётся живым.
+         */
+        _hookHeroLiveLink() {
+            if (this._heroLiveHooked) return true;
+            const link = G.LGLiveLink;
+            if (!link || typeof link.open !== 'function') return false;
+
+            const self = this;
+            const origOpen = link.open;
+            const wrapper = function (opts) {
+                const instance = origOpen.apply(this, arguments);
+                try {
+                    if (instance && typeof instance.addEventListener === 'function') {
+                        self._heroLiveInstance = instance;
+                        instance.addEventListener('me', (e) => {
+                            try {
+                                const data = JSON.parse(e.data);
+                                if (data && data.hero) self._onHeroLiveUpdate(data.hero);
+                            } catch (err) {
+                                // Битую строку канала игнорируем: игра делает то же.
+                            }
+                        });
+                    }
+                } catch (err) {
+                    dbg('[UI] LGLiveLink: подписка на `me` не удалась:', err);
+                }
+                return instance;
+            };
+
+            this._heroLiveOrigOpen = origOpen;
+            this._heroLiveWrapper = wrapper;
+            this._heroLiveHooked = true;
+            this._heroLiveDead = false;
+            link.open = wrapper;
+            dbg('[UI] профиль: подписались на LGLiveLink `me`');
+            return true;
+        },
+
+        /** Поднять хук сейчас или подождать LGLiveLink (он грузится лениво). */
+        ensureHeroLiveUpdates() {
+            if (this._heroLiveHooked) return true;
+            if (this._hookHeroLiveLink()) {
+                if (this._heroLiveRetryTimer) {
+                    clearInterval(this._heroLiveRetryTimer);
+                    this._heroLiveRetryTimer = null;
+                }
+                return true;
+            }
+            if (this._heroLiveRetryTimer) return false;
+            let tries = 0;
+            this._heroLiveRetryTimer = setInterval(() => {
+                tries += 1;
+                if (this._hookHeroLiveLink() || tries >= 60) {
+                    clearInterval(this._heroLiveRetryTimer);
+                    this._heroLiveRetryTimer = null;
+                }
+            }, 500);
+            return false;
+        },
+
+        /** Снять обёртку LGLiveLink (shutdown при перезапуске скрипта). */
+        _unhookHeroLiveLink() {
+            if (this._heroLiveRetryTimer) {
+                clearInterval(this._heroLiveRetryTimer);
+                this._heroLiveRetryTimer = null;
+            }
+            const link = G.LGLiveLink;
+            if (link && this._heroLiveWrapper && link.open === this._heroLiveWrapper) {
+                link.open = this._heroLiveOrigOpen;
+            }
+            this._heroLiveWrapper = null;
+            this._heroLiveOrigOpen = null;
+            this._heroLiveInstance = null;
+            this._heroLiveHooked = false;
+            // Слушатель мог остаться в цепочке под чужим слоем (Party) —
+            // помечаем инстанс мёртвым, чтобы он не трогал DOM после shutdown.
+            this._heroLiveDead = true;
         }
     };
 
-    // ===== src/modules/miner.js (удалён в 11.6.4b: античит, используется заглушка) =====
+    // ===== src/modules/miner.js (заглушка) =====
     const Miner = {
         abortController: null,
         init() {
@@ -9589,7 +10609,7 @@ Object.assign(Utils, UtilsApi);
         // предохранитель «не заваливать сервер»: сервер принимает 500 записей
         // за POST (MARKET_LIMITS.maxLotsPerScan), поэтому снимок уходит пачками.
         FULL_SCAN_KEY: 'lgFullScanAt',
-        FULL_SCAN_COOLDOWN_MS: 30 * 60 * 1000,
+        FULL_SCAN_COOLDOWN_MS: 5 * 60 * 1000,
         FULL_SCAN_MAX_LOTS: 5000,
         FULL_SCAN_MAX_PAGES: 25,
         fullScanPending: false,
@@ -10105,7 +11125,7 @@ Object.assign(Utils, UtilsApi);
         /**
          * Полное сканирование витрины (ТЗ 11.6.2c.4).
          *
-         * 1. Кулдаун 30 минут (localStorage lgFullScanAt): повторный клик
+         * 1. Кулдаун 5 минут (localStorage lgFullScanAt): повторный клик
          *    только показывает тост и ничего не отправляет.
          * 2. Один снимок /api/auction (в игре нет пагинации), максимум 5000 лотов.
          * 3. Цены уходят пачками по 500; после успеха — отметка кулдауна,
@@ -10116,7 +11136,7 @@ Object.assign(Utils, UtilsApi);
         async runFullScan(onRendered) {
             if (this.fullScanPending) return;
             if (this.getFullScanCooldownLeft() > 0) {
-                UI.showToast('Сканирование доступно раз в 30 минут', true);
+                UI.showToast('Сканирование доступно раз в 5 минут', true);
                 this.refreshFullScanButton();
                 this.startFullScanTick();
                 return;
@@ -10135,13 +11155,13 @@ Object.assign(Utils, UtilsApi);
                 const sent = await this.sendFullScanLots(observations);
 
                 // Отметку кулдауна ставим ТОЛЬКО после успешной отправки: если
-                // наш сервер лежит, игрок не должен ждать 30 минут впустую.
+                // наш сервер лежит, игрок не должен ждать 5 минут впустую.
                 this.markFullScanDone();
                 // Полный снимок уже ушёл — обычный флаш этих же цен не нужен.
                 this.marketScanBuffer = [];
                 this.marketScanSentAt = Date.now();
 
-                UI.showToast(`✅ Успешно просканировано ${sent} лотов`, false);
+                UI.showToast(`✅ Просканировано ${observations.length} лотов (новых цен: ${sent})`, false);
 
                 // Медианы ждём не дольше MARKET_WAIT_MS: перерисовка не должна
                 // висеть на медленном сервере — тогда останутся старые медианы.
@@ -11056,7 +12076,7 @@ Object.assign(Utils, UtilsApi);
                 return `<tr style="${border.trim()}"><td style="padding:6px 8px; color:#ffcf6a; font-weight:bold; width:100px;">${title}</td><td style="padding:6px 8px;">${desc}</td></tr>`;
             }).join('');
 
-            // Внутренний блок скроллится сам: у .modal-compact max-height 65vh,
+            // Внутренний блок скроллится сам: у .modal-compact max-height 82vh,
             // поэтому нужен flex:1 + min-height:0, иначе контент вылезает за рамку.
             UI.showModal(`
                 <h2 style="display:flex; align-items:center; gap:10px;">
@@ -11347,7 +12367,7 @@ Object.assign(Utils, UtilsApi);
                     <h2 class="auc-head">
                         <span class="auc-head-title">🔍 Сканер Аукциона</span>
                         <button id="auction-info-btn" class="auc-info-btn" title="Справка по аукциону">i</button>
-                        <button id="lg-auction-full-scan" class="btn auc-scan-btn" title="Снять цены со всех лотов витрины (доступно раз в 30 минут)">📡 Сканировать весь аукцион</button>
+                        <button id="lg-auction-full-scan" class="btn auc-scan-btn" title="Снять цены со всех лотов витрины (доступно раз в 5 минут)">📡 Сканировать весь аукцион</button>
                         <button class="custom-close" id="custom-close-btn" style="margin-left:auto;">✖</button>
                     </h2>
 
@@ -11632,7 +12652,7 @@ Object.assign(Utils, UtilsApi);
                         </tr>`;
                     });
                     tbody.innerHTML = html;
-                    // Обогащаем строки: арт + иконки монет (общий код для Ultimate и Personal)
+                    // Обогащаем строки: арт + иконки монет
                     try {
                         if (Utils && Utils.enhanceAuctionRows) Utils.enhanceAuctionRows(tbody, itemsMap);
                     } catch (e) { dbg('enhanceAuctionRows error:', e); }
@@ -11762,7 +12782,7 @@ Object.assign(Utils, UtilsApi);
                 });
 
                 // 11.6.2c.4: полное сканирование витрины. Кнопка disabled на
-                // время кулдауна (30 минут), тикер раз в секунду обновляет её
+                // время кулдауна (5 минут), тикер раз в секунду обновляет её
                 // текст; update() перерисовывает таблицу, чтобы после скана
                 // показать свежие медианы сети.
                 document.getElementById('lg-auction-full-scan')?.addEventListener('click', (e) => {
@@ -12667,6 +13687,8 @@ const PocketCity = (() => {
         _closeWatch: null,
         // v11.7.1: DOM компактного закреплённого виджета (см. pin()).
         _pinEl: null,
+        // v11.7.2: активный keydown-обработчик хоткея закрепа (см. startKeyBind).
+        _bindKeyHandler: null,
 
         // ---------------- 11.7.0: автоскип боёв с монстрами ----------------
         // Окно `.cm-dlg` — бой с обычным или элитным монстром. Работаем
@@ -13012,8 +14034,7 @@ const PocketCity = (() => {
             const pageWin = (typeof G !== 'undefined' && G) ? G : window;
 
             if (from.inMine && PocketCity.isMineOpen()) {
-                // 11.7.0: возврат нативного чата шахты (Chat.showForMine())
-                // удалён вместе с подсистемой чата — LGChatOne игра вешает сама.
+                // Нативный чат шахты (LGChatOne) игра открывает сама.
                 const city = pageWin.LGCity;
                 // Гасим городской слой только пока игра всё ещё на вкладке
                 // «Город» (шахта всегда лежит поверх неё). Иначе не мешаем.
@@ -13505,6 +14526,115 @@ const PocketCity = (() => {
         },
 
         /**
+         * v11.7.2: глобальный keydown «Карманного Города».
+         *
+         * Один обработчик обслуживает закреп виджета (LEGION_POCKET_CITY_BIND)
+         * и горячие клавиши 8 зданий (LEGION_POCKET_CITY_ROOM_BINDS). Оба
+         * ключа читаются при каждом нажатии, поэтому новые бинды из настроек
+         * работают без перезагрузки. Сравнение — keybindMatches() по e.code
+         * (русская и английская раскладки дают одну комбинацию).
+         */
+        startKeyBind() {
+            if (PocketCity._bindKeyHandler) return;
+            PocketCity._bindKeyHandler = (e) => {
+                // Рекордер в настройках сам обрабатывает клавиши — не мешаем.
+                if (typeof UI !== 'undefined' && UI._bindRecording) return;
+
+                const bind = PocketCity.getKeyBind();
+                const roomBinds = PocketCity.getRoomBinds();
+                if (!bind && !Object.keys(roomBinds).length) return;
+                if (e.repeat || e.isComposing) return;
+                if (PocketCity._isTypingTarget(document.activeElement)) return;
+
+                // 1. Закреп/открепление мини-виджета — приоритет у него.
+                if (bind && keybindMatches(e, bind)) {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    const wasPinned = PocketCity.isPinned();
+                    if (wasPinned) {
+                        PocketCity.unpin();
+                    } else {
+                        PocketCity.pin();
+                    }
+                    try {
+                        if (typeof UI !== 'undefined' && UI.showToast) {
+                            UI.showToast(wasPinned
+                                ? `🏰 Город откреплён (${bind})`
+                                : `🏰 Город закреплён (${bind})`);
+                        }
+                    } catch (err) { /* тост не должен ломать переключение */ }
+                    return;
+                }
+
+                // 2. Бинд здания: ищем первое совпадение (UI не даёт дублей).
+                let roomId = '';
+                for (const [id, combo] of Object.entries(roomBinds)) {
+                    if (combo && keybindMatches(e, combo)) { roomId = id; break; }
+                }
+                if (!roomId) return;
+
+                e.preventDefault();
+                e.stopPropagation();
+
+                if (roomId === 'guild' && PocketCity.isGuildLocked()) {
+                    try {
+                        if (typeof UI !== 'undefined' && UI.showToast) {
+                            UI.showToast('Гильдия пока недоступна вашему герою', true);
+                        }
+                    } catch (err) { /* тост не должен ломать обработчик */ }
+                    return;
+                }
+
+                try {
+                    if (typeof UI !== 'undefined' && UI.closeModals) UI.closeModals();
+                } catch (err) { /* модалки могли быть уже закрыты */ }
+                PocketCity.openBuilding(roomId);
+            };
+            document.addEventListener('keydown', PocketCity._bindKeyHandler, true);
+        },
+
+        /** Снять глобальный keydown (destroy / повторный запуск скрипта). */
+        stopKeyBind() {
+            if (!PocketCity._bindKeyHandler) return;
+            document.removeEventListener('keydown', PocketCity._bindKeyHandler, true);
+            PocketCity._bindKeyHandler = null;
+        },
+
+        /** Сохранённая комбинация; ошибка хранилища = «не назначено». */
+        getKeyBind() {
+            try { return String(localStorage.getItem(POCKET_CITY_BIND_KEY) || '').trim(); }
+            catch (e) { return ''; }
+        },
+
+        /**
+         * Бинды зданий: JSON { [roomId]: combo }.
+         * Битые данные, массив или не-строки игнорируются — как и в UI.
+         */
+        getRoomBinds() {
+            try {
+                const raw = localStorage.getItem('LEGION_POCKET_CITY_ROOM_BINDS');
+                if (!raw) return {};
+                const parsed = JSON.parse(raw);
+                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+                const out = {};
+                for (const [roomId, combo] of Object.entries(parsed)) {
+                    if (typeof combo === 'string' && combo.trim()) out[roomId] = combo.trim();
+                }
+                return out;
+            } catch (e) {
+                return {};
+            }
+        },
+
+        /** Фокус в поле ввода — горячая клавиша не должна срабатывать. */
+        _isTypingTarget(el) {
+            if (!el) return false;
+            const tag = String(el.tagName || '').toUpperCase();
+            return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable === true;
+        },
+
+        /**
          * init() из boot() в main.js: поднимаем автоскип, если тумблер был
          * включён в прошлой сессии (настройка хранится в localStorage),
          * и запускаем фоновый мониторинг сборов на элитных монстров (если включено).
@@ -13515,6 +14645,8 @@ const PocketCity = (() => {
             // v11.7.1: если Карманный Город был закреплён в прошлой сессии —
             // сразу поднимаем компактный виджет.
             if (PocketCity.isPinned()) PocketCity.showPinnedWidget();
+            // v11.7.2: глобальный хоткей закрепа (если назначен в настройках).
+            PocketCity.startKeyBind();
         },
 
         /**
@@ -13688,6 +14820,9 @@ const PocketCity = (() => {
         destroy() {
             PocketCity.stopMonsterAutoSkip();
             PocketCity.stopCityMonWatch();
+            // v11.7.2: снимаем глобальный keydown закрепа, иначе старый
+            // инстанс продолжал бы переключать виджет после перезапуска скрипта.
+            PocketCity.stopKeyBind();
             // Виджет закрепа убираем из DOM, но сохранённый режим не трогаем:
             // после перезапуска скрипта init() вернёт его на место.
             PocketCity.hidePinnedWidget();
@@ -19969,13 +21104,11 @@ const PocketCity = (() => {
     //   core/utils.js        -> Utils.copyText / insertToQuestChat / updateOnlinePlayers
     //   core/styles.js -> STYLES
     //   core/hooks.js  -> перехватчики LGCity / LGAuction / LGQuest
-    //                     (LGMine снят в 11.6.4b — античит шахты)
     //   core/ui-templates.js -> UITemplates (HTML: FAB-меню, модалки, HUD)
     //   core/ui.js     -> UI
     //   modules/*      -> BuildSim, HeroPlanner, Auction, Players,
     //                     PocketCity, CombatAssistant, Party, AddonPresence,
     //                     Arena, Miner (заглушка)
-    // 11.7.0: подсистема чата (modules/chat/*, core/utils-chat.js) удалена.
     // ============================================================
 
     // 5.3. Защита от повторного запуска (single-instance guard)
@@ -19989,7 +21122,6 @@ const PocketCity = (() => {
     // ============================================================
     // 5.4. Проверка обновлений аддона
     //
-    // До 11.7.0 жила в modules/chat/chat-net.js и удалилась вместе с чатом.
     // GET /latest-version нашего сервера открытый (без X-Legion-Key), поэтому
     // хватает GM_xmlhttpRequest. Тумблер «🔔 Уведомлять о новых версиях»
     // (localStorage LEGION_UPDATE_NOTIFY) уважается: при 'false' не шлём даже
@@ -20210,6 +21342,10 @@ const PocketCity = (() => {
         //    гильдии на элитных монстров (elist/ejoin, v11.7.0).
         //    Клики — только нативные, по .cm-dlg.
         PocketCity.init();
+        // 👤 Профиль (v11.7.2): подписка на живой канал игры (`me`) — HP,
+        // монеты и опыт обновляются мгновенно. Если LGLiveLink грузится
+        // позже, ensureHeroLiveUpdates() сам добьётся хука повторами.
+        UI.ensureHeroLiveUpdates();
 
         // 🔔 Проверка обновлений: через 8 с после старта, чтобы не мешать
         // загрузке страницы и первому рендеру аддона.
@@ -20246,6 +21382,9 @@ const PocketCity = (() => {
                     clearInterval(UI._hudTimer);
                     UI._hudTimer = null;
                 }
+                // v11.7.2: снимаем live-хук профиля (LGLiveLink `me`), чтобы
+                // старый инстанс не обновлял несуществующую карточку.
+                try { UI._unhookHeroLiveLink?.(); } catch (e) {}
                 // ПАТЧ 11.6.5g: снимаем наблюдатель за нативным HUD, отложенный
                 // повтор и ссылки на узлы меню, а из бара игры убираем свою кнопку
                 // (fabWrap удаляется ниже вместе с остальной разметкой).
@@ -20261,8 +21400,6 @@ const PocketCity = (() => {
                 UI._navMode = '';
                 UI._navRetries = 0;
                 document.querySelectorAll('.lgu-nav-btn').forEach(el => el.remove());
-                // 11.7.0: подсистемы чата больше нет — её окно PiP, лента и
-                // фоновые интервалы удалены вместе с модулем, гасить нечего.
                 // 11.6.2b: гасим интервал боевого ассистента и убираем его контейнер,
                 // иначе после перезапуска скрипта тикали бы два таймера.
                 CombatAssistant.destroy();
